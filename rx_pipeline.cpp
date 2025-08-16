@@ -3,21 +3,22 @@
 #include "radio_adapter.h"
 #include "frame_log.h"
 #include <string.h>
+#include <algorithm> // для std::erase_if
 
 RxPipeline::RxPipeline(IEncryptor& enc, PipelineMetrics& m)
 : enc_(enc), metrics_(m) {}
 
 void RxPipeline::gc() {
   const unsigned long now = millis();
-  for (auto it = assemblers_.begin(); it != assemblers_.end();) {
-    if (now - it->second.ts_ms > cfg::RX_ASSEMBLER_TTL_MS) {
-      reasm_bytes_ -= it->second.bytes;
+  // удаляем просроченные сборщики через стандартный алгоритм
+  std::erase_if(assemblers_, [&](auto& item) {
+    bool expired = now - item.second.ts_ms > cfg::RX_ASSEMBLER_TTL_MS;
+    if (expired) {
+      reasm_bytes_ -= item.second.bytes;
       metrics_.rx_assem_drop_ttl++;
-      it = assemblers_.erase(it);
-    } else {
-      ++it;
     }
-  }
+    return expired;
+  });
   while (dup_window_.size() > cfg::RX_DUP_WINDOW) {
     dup_set_.erase(dup_window_.front());
     dup_window_.pop_front();
