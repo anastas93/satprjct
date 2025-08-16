@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <deque>
+#include <unordered_set>
 #include <Arduino.h>
 #include "encryptor.h"
 #include "frame.h"
@@ -37,6 +38,7 @@ private:
   AckCb ack_cb_ = nullptr;
   std::map<uint32_t, AsmState> assemblers_;
   std::deque<uint32_t> dup_window_;
+  std::unordered_set<uint32_t> dup_set_;
   size_t reasm_bytes_ = 0;
 };
 

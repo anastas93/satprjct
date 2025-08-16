@@ -1,7 +1,8 @@
 #pragma once
 #include <vector>
-#include <deque>
+#include <list>
 #include <stdint.h>
+#include <unordered_map>
 
 enum class Qos : uint8_t { High=0, Normal=1, Low=2 };
 enum class QosMode : uint8_t { Strict=0, Weighted421=1 };
@@ -43,10 +44,13 @@ public:
 private:
   bool     pick(OutgoingMessage& out);
 
-  std::deque<OutgoingMessage> qH_, qN_, qL_;
+  std::list<OutgoingMessage> qH_, qN_, qL_;
   uint32_t next_id_;
   size_t   total_bytes_;
   size_t   bytesH_ = 0, bytesN_ = 0, bytesL_ = 0;
+
+  struct MsgRef { Qos qos; std::list<OutgoingMessage>::iterator it; };
+  std::unordered_map<uint32_t, MsgRef> index_;
 
   QosMode  mode_ = QosMode::Strict;
   uint8_t  rr_idx_ = 0;   // для Weighted421

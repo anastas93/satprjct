@@ -20,19 +20,30 @@ uint32_t MessageBuffer::enqueueQos(const uint8_t* data, size_t len, bool ack_req
                                     : cfg::TX_BUF_QOS_CAP_LOW;
   if ((*bucket) + len > cap) return 0;
 
+  uint32_t id = next_id_++;
   OutgoingMessage m;
-  m.id = next_id_++;
+  m.id = id;
   m.ack_required = ack_required;
   m.qos = q;
   m.data.assign(data, data + len);
 
-  if (q==Qos::High)       qH_.push_back(std::move(m));
-  else if (q==Qos::Normal) qN_.push_back(std::move(m));
-  else                    qL_.push_back(std::move(m));
+  if (q==Qos::High) {
+    qH_.push_back(std::move(m));
+    auto it = std::prev(qH_.end());
+    index_[id] = {Qos::High, it};
+  } else if (q==Qos::Normal) {
+    qN_.push_back(std::move(m));
+    auto it = std::prev(qN_.end());
+    index_[id] = {Qos::Normal, it};
+  } else {
+    qL_.push_back(std::move(m));
+    auto it = std::prev(qL_.end());
+    index_[id] = {Qos::Low, it};
+  }
 
   *bucket += len;
   total_bytes_ += len;
-  return (q==Qos::High ? qH_.back().id : (q==Qos::Normal ? qN_.back().id : qL_.back().id));
+  return id;
 }
 
 bool MessageBuffer::hasPending() const {
@@ -71,25 +82,46 @@ bool MessageBuffer::peekNext(OutgoingMessage& out) {
 }
 
 void MessageBuffer::popFront() {
-  if (!qH_.empty()) { total_bytes_ -= qH_.front().data.size(); bytesH_ -= qH_.front().data.size(); qH_.pop_front(); return; }
-  if (!qN_.empty()) { total_bytes_ -= qN_.front().data.size(); bytesN_ -= qN_.front().data.size(); qN_.pop_front(); return; }
-  if (!qL_.empty()) { total_bytes_ -= qL_.front().data.size(); bytesL_ -= qL_.front().data.size(); qL_.pop_front(); return; }
+  if (!qH_.empty()) {
+    index_.erase(qH_.front().id);
+    total_bytes_ -= qH_.front().data.size();
+    bytesH_ -= qH_.front().data.size();
+    qH_.pop_front();
+    return;
+  }
+  if (!qN_.empty()) {
+    index_.erase(qN_.front().id);
+    total_bytes_ -= qN_.front().data.size();
+    bytesN_ -= qN_.front().data.size();
+    qN_.pop_front();
+    return;
+  }
+  if (!qL_.empty()) {
+    index_.erase(qL_.front().id);
+    total_bytes_ -= qL_.front().data.size();
+    bytesL_ -= qL_.front().data.size();
+    qL_.pop_front();
+    return;
+  }
 }
 
 void MessageBuffer::markAcked(uint32_t msg_id) {
-  auto rm = [&](std::deque<OutgoingMessage>& dq, size_t& bucket)->bool{
-    for (auto it = dq.begin(); it != dq.end(); ++it) {
-      if (it->id == msg_id) {
-        total_bytes_ -= it->data.size();
-        bucket -= it->data.size();
-        dq.erase(it);
-        return true;
-      }
-    }
-    return false;
-  };
-  if (rm(qH_, bytesH_) || rm(qN_, bytesN_)) return;
-  rm(qL_, bytesL_);
+  auto it = index_.find(msg_id);
+  if (it == index_.end()) return;
+  auto ref = it->second;
+  size_t sz = ref.it->data.size();
+  total_bytes_ -= sz;
+  if (ref.qos == Qos::High) {
+    bytesH_ -= sz;
+    qH_.erase(ref.it);
+  } else if (ref.qos == Qos::Normal) {
+    bytesN_ -= sz;
+    qN_.erase(ref.it);
+  } else {
+    bytesL_ -= sz;
+    qL_.erase(ref.it);
+  }
+  index_.erase(it);
 }
 
 size_t MessageBuffer::size() const {

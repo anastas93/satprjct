@@ -6,6 +6,7 @@
 #include "frame_log.h"
 #include <Arduino.h>
 #include <string.h>
+#include <array>
 
 TxPipeline::TxPipeline(MessageBuffer& buf, Fragmenter& frag, IEncryptor& enc, PipelineMetrics& m)
 : buf_(buf), frag_(frag), enc_(enc), metrics_(m) {}
@@ -24,14 +25,18 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
   const uint16_t eff_payload_max = (base_payload_max > enc_overhead) ? (uint16_t)(base_payload_max - enc_overhead) : 0;
   auto parts = frag_.split(m.id, m.data.data(), m.data.size(), reqAck, eff_payload_max);
 
+  std::array<uint8_t, sizeof(FrameHeader)> aad{};
+  std::vector<uint8_t> payload; payload.reserve(cfg::LORA_MTU);
+  std::vector<uint8_t> frame; frame.reserve(cfg::LORA_MTU);
+
   for (auto& fr : parts) {
     FrameHeader hdr = fr.hdr;
     hdr.crc16 = 0;
-    std::vector<uint8_t> aad(reinterpret_cast<uint8_t*>(&hdr), reinterpret_cast<uint8_t*>(&hdr)+sizeof(FrameHeader));
-    std::vector<uint8_t> payload;
+    memcpy(aad.data(), &hdr, sizeof(FrameHeader));
     bool ok = true;
+    payload.clear();
     if (willEnc) ok = enc_.encrypt(fr.payload.data(), fr.payload.size(), aad.data(), aad.size(), payload);
-    else payload = fr.payload;
+    else payload.assign(fr.payload.begin(), fr.payload.end());
     if (!ok) { metrics_.enc_fail++; continue; }
 
     FrameHeader final_hdr = fr.hdr;
@@ -43,7 +48,7 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     final_hdr.crc16 = crc;
 
     const size_t frame_len = sizeof(FrameHeader) + payload.size();
-    std::vector<uint8_t> frame(frame_len);
+    frame.resize(frame_len);
     memcpy(frame.data(), &final_hdr, sizeof(FrameHeader));
     memcpy(frame.data()+sizeof(FrameHeader), payload.data(), payload.size());
 
