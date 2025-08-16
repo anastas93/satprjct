@@ -9,21 +9,23 @@ RxPipeline::RxPipeline(IEncryptor& enc, PipelineMetrics& m)
 
 void RxPipeline::gc() {
   const unsigned long now = millis();
-  std::vector<uint32_t> to_erase;
-  for (auto& kv : assemblers_) {
-    if (now - kv.second.ts_ms > cfg::RX_ASSEMBLER_TTL_MS) {
-      reasm_bytes_ -= kv.second.bytes;
-      to_erase.push_back(kv.first);
+  for (auto it = assemblers_.begin(); it != assemblers_.end();) {
+    if (now - it->second.ts_ms > cfg::RX_ASSEMBLER_TTL_MS) {
+      reasm_bytes_ -= it->second.bytes;
       metrics_.rx_assem_drop_ttl++;
+      it = assemblers_.erase(it);
+    } else {
+      ++it;
     }
   }
-  for (auto id : to_erase) assemblers_.erase(id);
-  while (dup_window_.size() > cfg::RX_DUP_WINDOW) dup_window_.pop_front();
+  while (dup_window_.size() > cfg::RX_DUP_WINDOW) {
+    dup_set_.erase(dup_window_.front());
+    dup_window_.pop_front();
+  }
 }
 
 bool RxPipeline::isDup(uint32_t msg_id) {
-  for (auto v : dup_window_) if (v == msg_id) return true;
-  return false;
+  return dup_set_.find(msg_id) != dup_set_.end();
 }
 
 void RxPipeline::sendAck(uint32_t msg_id) {
@@ -71,6 +73,7 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   if (!(hdr.flags & F_FRAG)) {
     if (!isDup(hdr.msg_id)) {
       dup_window_.push_back(hdr.msg_id);
+      dup_set_.insert(hdr.msg_id);
       if (cb_) cb_(hdr.msg_id, plain.data(), plain.size());
       metrics_.rx_msgs_ok++;
       if (hdr.flags & F_ACK_REQ) sendAck(hdr.msg_id);
@@ -105,6 +108,7 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
     for (auto& v : as.frags) full.insert(full.end(), v.begin(), v.end());
     if (!isDup(hdr.msg_id)) {
       dup_window_.push_back(hdr.msg_id);
+      dup_set_.insert(hdr.msg_id);
       if (cb_) cb_(hdr.msg_id, full.data(), full.size());
       metrics_.rx_msgs_ok++;
       if (hdr.flags & F_ACK_REQ) sendAck(hdr.msg_id);
