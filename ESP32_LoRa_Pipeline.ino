@@ -2093,18 +2093,12 @@ void setup() {
   pinMode(PIN_TCXO_DETECT, INPUT_PULLUP);
   float tcxo = (digitalRead(PIN_TCXO_DETECT) == LOW) ? 2.4f : 0.0f;
 
-  int16_t st = radio.begin(433.0, 125.0, 9, 5, 0x12, g_txp, 10, tcxo, false);
+  int16_t st = radio.begin(g_freq_rx_mhz, g_bw_khz, g_sf, g_cr, 0x18, g_txp, 10, tcxo, false);
   if (st != RADIOLIB_ERR_NONE) {
     Serial.printf("Radio begin failed: %d\n", st);
   } else {
     Serial.println(F("Radio OK"));
   }
-
-  applyPreset();
-  Radio_setBandwidth((uint32_t)g_bw_khz);
-  Radio_setSpreadingFactor(g_sf);
-  Radio_setCodingRate(g_cr);
-  Radio_setTxPower(g_txp);
   g_tx.setRetry(g_retryN, g_retryMS);
   g_tx.enableAck(g_ack_on);
   g_ccm.setEnabled(g_enc_on);
