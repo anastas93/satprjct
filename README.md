@@ -46,3 +46,13 @@ ENCTESTBAD wrong-KID dec=FAIL (expected FAIL)
 ## Тестирование
 Подробное руководство по ручной проверке веб‑интерфейса и радиомодуля описано в [TESTS.md](TESTS.md).
 Базовые самотесты шифрования выполняются командами `ENCTEST` и `ENCTEST_BAD`; полный сценарий приведён в `TESTS.md`.
+Дополнительно доступен автономный тест совместимости `compat_ack_test`,
+который проверяет согласованность формата пакетов и обмен ACK,
+откладывая передачу подтверждений для имитации задержки радиоканала.
+Компиляция:
+```
+g++ -std=c++17 compat_ack_test.cpp message_buffer.cpp fragmenter.cpp \
+    tx_pipeline.cpp rx_pipeline.cpp frame_log.cpp test_stubs/Arduino.cpp \
+    -I. -Itest_stubs -o compat_ack_test
+./compat_ack_test
+```
