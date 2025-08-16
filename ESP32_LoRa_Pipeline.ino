@@ -184,6 +184,7 @@ void handleSimple();
 void handleLarge();
 void handleEncTest();
 void handleEncTestBad();
+void handleSelfTest();
 void handleSetMsgId();
 // Append a line to the chat buffer with automatic size limiting
 void chatLine(const String& s);
@@ -220,6 +221,23 @@ void sendKeyRequest();
 void sendKeyResponse();
 
 // End of forward declarations
+
+class SerialChatPrint : public Print {
+  Print& serial;
+  String line;
+public:
+  explicit SerialChatPrint(Print& s) : serial(s) {}
+  size_t write(uint8_t c) override {
+    serial.write(c);
+    if (c == '\n') {
+      chatLine(line);
+      line = "";
+    } else if (c != '\r') {
+      line += (char)c;
+    }
+    return 1;
+  }
+};
 
 static inline void persistMsgId() {
   prefs.begin("lora", false);
@@ -792,6 +810,13 @@ void handleEncTestBad() {
   EncSelfTest_badKid(g_ccm, Serial);
   server.send(200, "text/plain", "enctestbad started");
   serialBuffer += String("*SYS:* ENCTESTBAD started\n");
+}
+
+void handleSelfTest() {
+  SerialChatPrint out(Serial);
+  SelfTest_runAll(g_ccm, out);
+  server.send(200, "text/plain", "selftest started");
+  serialBuffer += String("*SYS:* SELFTEST started\n");
 }
 
 void handleSetMsgId() {
@@ -2123,6 +2148,7 @@ void setup() {
   server.on("/large", handleLarge);
   server.on("/enctest", handleEncTest);
   server.on("/enctestbad", handleEncTestBad);
+  server.on("/selftest", handleSelfTest);
   server.on("/msgid", handleSetMsgId);
   // QoS endpoints
   server.on("/sendq", handleSendQ);
@@ -2138,6 +2164,9 @@ void setup() {
   // Authenticated ECDH key exchange endpoint
   server.on("/keydh", handleKeyDh);
   server.begin();
+
+  // Run self-test at startup, outputting results to the serial console.
+  SelfTest_runAll(g_ccm, Serial);
 
   g_rx.setMessageCallback([](uint32_t id, const uint8_t* d, size_t n) {
     Serial.printf("[RX msg %u] %u bytes\n", id, (unsigned)n);
