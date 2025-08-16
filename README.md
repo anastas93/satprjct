@@ -5,6 +5,11 @@
 - **Персистентный msg_id в NVS** (исключение повторного нонса)
 - **Анти-replay** (окно и порог старых ID)
 
+## Используемые библиотеки
+- [Arduino core for ESP32](https://github.com/espressif/arduino-esp32) — базовые классы (`Arduino.h`, `Preferences`, `WiFi`, `WebServer`)
+- [RadioLib](https://github.com/jgromes/RadioLib) — драйвер SX1262 и функции LoRa
+- [mbedTLS](https://github.com/Mbed-TLS/mbedtls) — криптография (AES‑CCM, ECDH и др.)
+
 ## Установка и запуск
 ### Требования
 - Arduino IDE 1.8+ или PlatformIO
