@@ -1,5 +1,26 @@
 #include "message_buffer.h"
 #include "config.h"
+#include <zlib.h>
+
+// вспомогательные функции сжатия/распаковки через zlib
+static bool zlibCompress(const std::vector<uint8_t>& in, std::vector<uint8_t>& out) {
+  if (in.empty()) return false;
+  uLongf dst_len = compressBound(in.size());
+  out.resize(dst_len);
+  int r = compress2(out.data(), &dst_len, in.data(), in.size(), Z_BEST_SPEED);
+  if (r != Z_OK) return false;
+  out.resize(dst_len);
+  return true;
+}
+
+static bool zlibDecompress(const uint8_t* data, size_t len, std::vector<uint8_t>& out, size_t orig_sz) {
+  if (!data || orig_sz == 0) return false;
+  out.resize(orig_sz);
+  uLongf dst_len = orig_sz;
+  int r = uncompress(out.data(), &dst_len, data, len);
+  if (r != Z_OK || dst_len != orig_sz) return false;
+  return true;
+}
 
 MessageBuffer::MessageBuffer()
   : next_id_(1), total_bytes_(0), mode_(QosMode::Strict), rr_idx_(0) {}
@@ -10,7 +31,10 @@ uint32_t MessageBuffer::enqueue(const uint8_t* data, size_t len, bool ack_requir
 
 uint32_t MessageBuffer::enqueueQos(const uint8_t* data, size_t len, bool ack_required, Qos q) {
   if (!data || len == 0) return 0;
-  if (total_bytes_ + len > cfg::TX_BUF_MAX_BYTES) return 0;
+  // учитываем также объём отложенных сообщений
+  if (total_bytes_ + bytesArch_ + len > cfg::TX_BUF_MAX_BYTES) return 0;
+  // проверяем общий лимит сообщений (включая архив)
+  if (size() + archived_.size() >= cfg::TX_BUF_MAX_MSGS) return 0;
 
   size_t* bucket = (q==Qos::High)   ? &bytesH_
                   : (q==Qos::Normal)? &bytesN_
@@ -122,6 +146,74 @@ void MessageBuffer::markAcked(uint32_t msg_id) {
     qL_.erase(ref.it);
   }
   index_.erase(it);
+}
+
+// перенос сообщения в архив при неудачном ACK
+void MessageBuffer::archive(uint32_t msg_id) {
+  auto it = index_.find(msg_id);
+  if (it == index_.end()) return;
+  auto ref = it->second;
+  OutgoingMessage m = std::move(*ref.it);
+  size_t sz = m.data.size();
+  // удаляем из активной очереди и индекса
+  if (ref.qos == Qos::High) { bytesH_ -= sz; qH_.erase(ref.it); }
+  else if (ref.qos == Qos::Normal) { bytesN_ -= sz; qN_.erase(ref.it); }
+  else { bytesL_ -= sz; qL_.erase(ref.it); }
+  index_.erase(it);
+  total_bytes_ -= sz;
+  // добавляем в архив с попыткой сжатия
+  std::vector<uint8_t> comp, payload;
+  uint32_t header = (uint32_t)sz;
+  if (zlibCompress(m.data, comp) && comp.size() < sz) {
+    header |= 0x80000000u; // флаг "сжато"
+    payload.swap(comp);
+  } else {
+    payload = std::move(m.data); // невыгодно сжимать
+  }
+  m.data.resize(4);
+  m.data[0] = (uint8_t)(header & 0xFF);
+  m.data[1] = (uint8_t)((header >> 8) & 0xFF);
+  m.data[2] = (uint8_t)((header >> 16) & 0xFF);
+  m.data[3] = (uint8_t)((header >> 24) & 0xFF);
+  m.data.insert(m.data.end(), payload.begin(), payload.end());
+  bytesArch_ += m.data.size();
+  archived_.push_back(std::move(m));
+}
+
+// возвращает одно сообщение из архива в соответствующую очередь
+bool MessageBuffer::restoreArchived() {
+  if (archived_.empty()) return false;
+  OutgoingMessage m = std::move(archived_.front());
+  archived_.pop_front();
+  size_t stored = m.data.size();
+  if (stored < 4) return false; // повреждён архив
+  uint32_t header = (uint32_t)m.data[0] | ((uint32_t)m.data[1] << 8) |
+                    ((uint32_t)m.data[2] << 16) | ((uint32_t)m.data[3] << 24);
+  bool compressed = (header & 0x80000000u) != 0;
+  size_t orig_sz = (size_t)(header & 0x7FFFFFFFu);
+  std::vector<uint8_t> payload(m.data.begin() + 4, m.data.end());
+  if (compressed) {
+    if (!zlibDecompress(payload.data(), payload.size(), m.data, orig_sz)) return false;
+  } else {
+    m.data = std::move(payload);
+    if (m.data.size() != orig_sz) return false;
+  }
+  bytesArch_ -= stored;
+  total_bytes_ += m.data.size();
+  if (m.qos == Qos::High) {
+    qH_.push_front(std::move(m));
+    index_[qH_.front().id] = {Qos::High, qH_.begin()};
+    bytesH_ += m.data.size();
+  } else if (m.qos == Qos::Normal) {
+    qN_.push_front(std::move(m));
+    index_[qN_.front().id] = {Qos::Normal, qN_.begin()};
+    bytesN_ += m.data.size();
+  } else {
+    qL_.push_front(std::move(m));
+    index_[qL_.front().id] = {Qos::Low, qL_.begin()};
+    bytesL_ += m.data.size();
+  }
+  return true;
 }
 
 size_t MessageBuffer::size() const {

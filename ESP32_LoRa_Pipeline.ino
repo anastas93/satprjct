@@ -1666,10 +1666,10 @@ void runPing() {
   int state = radio.receive(rx, 5);
   // Record receive timestamp
   uint32_t time2 = micros();
-  // Check if response matches our ping
-  bool err_ping = memcmp(ping, rx, 5);
-  if (state == RADIOLIB_ERR_NONE || err_ping == 0) {
-    // Successful reception: compute RTT and derived metrics
+  // проверяем, совпадает ли ответ с отправленным пингом
+  bool match = (state == RADIOLIB_ERR_NONE) && (memcmp(ping, rx, 5) == 0);
+  if (match) {
+    // успешный приём: считаем время и производные метрики
     uint32_t time3 = time2 - time1;
     float rssi = radio.getRSSI();
     float snr = radio.getSNR();
