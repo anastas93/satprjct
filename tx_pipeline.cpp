@@ -86,7 +86,10 @@ void TxPipeline::loop() {
           waiting_ack_ = false;
         }
       } else {
-        metrics_.ack_fail++; buf_.popFront(); waiting_ack_ = false; waiting_id_ = 0;
+        // сообщение не удаляем, оставляем в буфере при исчерпании попыток
+        metrics_.ack_fail++;
+        waiting_ack_ = false;
+        waiting_id_ = 0;
       }
     }
     return;
