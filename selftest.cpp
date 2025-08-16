@@ -56,3 +56,9 @@ void EncSelfTest_badKid(CcmEncryptor& ccm, Print& out) {
   bool ok = ccm.decrypt(enc.data(), enc.size(), aad.data(), aad.size(), dec);
   out.printf("ENCTESTBAD wrong-KID dec=%s (expected FAIL)\n", ok? "OK":"FAIL");
 }
+
+void SelfTest_runAll(CcmEncryptor& ccm, Print& out) {
+  out.println(F("SELFTEST: begin"));
+  EncSelfTest_battery(ccm, out);
+  out.println(F("SELFTEST: end"));
+}
