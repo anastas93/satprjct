@@ -31,4 +31,8 @@ namespace cfg {
   static constexpr size_t   RX_REASM_PER_MSG_CAP    = 8 * 1024;
 
   static constexpr uint8_t  RX_DUP_WINDOW          = 64;
+
+  // Additional UART used for Radxa Zero 3W command interface
+  // This UART allows bridging of commands and payloads to an external host.
+  static constexpr uint32_t RADXA_UART_BAUD        = 115200;
 }
