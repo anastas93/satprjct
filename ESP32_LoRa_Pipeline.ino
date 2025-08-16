@@ -339,7 +339,10 @@ static void radioPoll() {
 }
 
 // UART
+HardwareSerial SerialRadxa(1); // Additional UART for Radxa Zero 3W
 static String g_line;
+static String g_line_radxa;
+static void handleCommand(const String& line);
 
 static void saveConfig() {
   prefs.begin("lora", false);
@@ -2710,10 +2713,25 @@ void Radio_onReceive(const uint8_t* data, size_t len) {
   g_hasRx = true;
 }
 
+// Poll commands from a serial stream and dispatch complete lines
+static void pollUart(Stream& s, String& line) {
+  while (s.available()) {
+    char c = (char)s.read();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      handleCommand(line);
+      line = "";
+    } else {
+      line += c;
+    }
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   while (!Serial) { delay(10); }
   Serial.println(F("\nESP32 LoRa Pipeline (Track D: ENC+ACK+MSGID) start"));
+  SerialRadxa.begin(cfg::RADXA_UART_BAUD);
 
   pinMode(PIN_TCXO_DETECT, INPUT_PULLUP);
   float tcxo = (digitalRead(PIN_TCXO_DETECT) == LOW) ? 2.4f : 0.0f;
@@ -2791,6 +2809,7 @@ void setup() {
 
   g_rx.setMessageCallback([](uint32_t id, const uint8_t* d, size_t n) {
     Serial.printf("[RX msg %u] %u bytes\n", id, (unsigned)n);
+    SerialRadxa.printf("[RX msg %u] %u bytes\n", id, (unsigned)n);
     // Convert raw bytes to a printable ASCII string.  Non‑printable
     // characters are replaced with '.'.
     String m = "";
@@ -2799,6 +2818,7 @@ void setup() {
       if (c < 32 || c > 126) c = '.';
       m += c;
     }
+    SerialRadxa.println(m);
     // Handle key exchange messages (KEYDH1/KEYDH2).  If processKeyDh
     // returns true then the message was consumed.
     if (m.startsWith("KEYDH1") || m.startsWith("KEYDH2")) {
@@ -2880,16 +2900,8 @@ void setup() {
 }
 
 void loop() {
-  while (Serial.available()) {
-    char c = (char)Serial.read();
-    if (c == '\r') continue;
-    if (c == '\n') {
-      handleCommand(g_line);
-      g_line = "";
-    } else {
-      g_line += c;
-    }
-  }
+  pollUart(Serial, g_line);
+  pollUart(SerialRadxa, g_line_radxa);
   // Handle incoming HTTP clients.
   server.handleClient();
   radioPoll();
