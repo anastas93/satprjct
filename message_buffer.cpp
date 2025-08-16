@@ -10,7 +10,8 @@ uint32_t MessageBuffer::enqueue(const uint8_t* data, size_t len, bool ack_requir
 
 uint32_t MessageBuffer::enqueueQos(const uint8_t* data, size_t len, bool ack_required, Qos q) {
   if (!data || len == 0) return 0;
-  if (total_bytes_ + len > cfg::TX_BUF_MAX_BYTES) return 0;
+  // учитываем также объём отложенных сообщений
+  if (total_bytes_ + bytesArch_ + len > cfg::TX_BUF_MAX_BYTES) return 0;
 
   size_t* bucket = (q==Qos::High)   ? &bytesH_
                   : (q==Qos::Normal)? &bytesN_
@@ -122,6 +123,48 @@ void MessageBuffer::markAcked(uint32_t msg_id) {
     qL_.erase(ref.it);
   }
   index_.erase(it);
+}
+
+// перенос сообщения в архив при неудачном ACK
+void MessageBuffer::archive(uint32_t msg_id) {
+  auto it = index_.find(msg_id);
+  if (it == index_.end()) return;
+  auto ref = it->second;
+  OutgoingMessage m = std::move(*ref.it);
+  size_t sz = m.data.size();
+  // удаляем из активной очереди и индекса
+  if (ref.qos == Qos::High) { bytesH_ -= sz; qH_.erase(ref.it); }
+  else if (ref.qos == Qos::Normal) { bytesN_ -= sz; qN_.erase(ref.it); }
+  else { bytesL_ -= sz; qL_.erase(ref.it); }
+  index_.erase(it);
+  total_bytes_ -= sz;
+  // добавляем в архив
+  archived_.push_back(std::move(m));
+  bytesArch_ += sz;
+}
+
+// возвращает одно сообщение из архива в соответствующую очередь
+bool MessageBuffer::restoreArchived() {
+  if (archived_.empty()) return false;
+  OutgoingMessage m = std::move(archived_.front());
+  archived_.pop_front();
+  size_t sz = m.data.size();
+  total_bytes_ += sz;
+  bytesArch_ -= sz;
+  if (m.qos == Qos::High) {
+    qH_.push_front(std::move(m));
+    index_[qH_.front().id] = {Qos::High, qH_.begin()};
+    bytesH_ += sz;
+  } else if (m.qos == Qos::Normal) {
+    qN_.push_front(std::move(m));
+    index_[qN_.front().id] = {Qos::Normal, qN_.begin()};
+    bytesN_ += sz;
+  } else {
+    qL_.push_front(std::move(m));
+    index_[qL_.front().id] = {Qos::Low, qL_.begin()};
+    bytesL_ += sz;
+  }
+  return true;
 }
 
 size_t MessageBuffer::size() const {
