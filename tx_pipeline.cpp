@@ -72,6 +72,8 @@ void TxPipeline::loop() {
       metrics_.ack_time_ms_avg = (metrics_.ack_time_ms_avg == 0) ? dt : (metrics_.ack_time_ms_avg*3 + dt)/4;
       metrics_.ack_seen++;
       buf_.markAcked(waiting_id_);
+      // после успешного ACK возвращаем одно сообщение из архива
+      buf_.restoreArchived();
       waiting_ack_ = false; waiting_id_ = 0; retries_left_ = 0; ack_received_ = false;
       return;
     }
@@ -86,8 +88,9 @@ void TxPipeline::loop() {
           waiting_ack_ = false;
         }
       } else {
-        // сообщение не удаляем, оставляем в буфере при исчерпании попыток
+        // при провале всех попыток переносим сообщение в архив
         metrics_.ack_fail++;
+        buf_.archive(waiting_id_);
         waiting_ack_ = false;
         waiting_id_ = 0;
       }

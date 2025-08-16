@@ -25,6 +25,10 @@ public:
   bool     peekNext(OutgoingMessage& out);
   void     popFront();
   void     markAcked(uint32_t msg_id);
+  // перемещает сообщение в архив после неудачных попыток ACK
+  void     archive(uint32_t msg_id);
+  // возвращает одно сообщение из архива в очередь
+  bool     restoreArchived();
 
   size_t   size() const;
 
@@ -45,9 +49,11 @@ private:
   bool     pick(OutgoingMessage& out);
 
   std::list<OutgoingMessage> qH_, qN_, qL_;
+  std::list<OutgoingMessage> archived_;   // архив отложенных сообщений
   uint32_t next_id_;
   size_t   total_bytes_;
   size_t   bytesH_ = 0, bytesN_ = 0, bytesL_ = 0;
+  size_t   bytesArch_ = 0;                // объём архива
 
   struct MsgRef { Qos qos; std::list<OutgoingMessage>::iterator it; };
   std::unordered_map<uint32_t, MsgRef> index_;
