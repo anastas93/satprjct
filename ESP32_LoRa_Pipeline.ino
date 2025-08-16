@@ -2084,6 +2084,17 @@ static void pollUart(Stream& s, String& line) {
   }
 }
 
+// Watchdog заглушка для Radxa Zero по второму UART
+static void radxaWatchdog() {
+  // Отправляем периодический ping, чтобы контролировать связь
+  static uint32_t lastPing = 0;
+  uint32_t now = millis();
+  if (now - lastPing >= 1000) {
+    SerialRadxa.println("[WDOG] ping");
+    lastPing = now;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   while (!Serial) { delay(10); }
@@ -2257,6 +2268,7 @@ void setup() {
 void loop() {
   pollUart(Serial, g_line);
   pollUart(SerialRadxa, g_line_radxa);
+  radxaWatchdog();
   // Handle incoming HTTP clients.
   server.handleClient();
   radioPoll();

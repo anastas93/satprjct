@@ -43,6 +43,11 @@ ENCTEST size=32 enc=OK dec=OK time_enc=...us time_dec=...us
 ENCTESTBAD wrong-KID dec=FAIL (expected FAIL)
 ```
 
+## Watchdog для Radxa Zero
+Добавлена заглушка функции `radxaWatchdog()` для обмена ping-сообщениями с Radxa Zero
+по второму UART. Для отправки таких сообщений на стороне Radxa присутствует скрипт
+`uart_stub/watchdog.py`.
+
 ## Тестирование
 Подробное руководство по ручной проверке веб‑интерфейса и радиомодуля описано в [TESTS.md](TESTS.md).
 Базовые самотесты шифрования выполняются командами `ENCTEST` и `ENCTEST_BAD`; полный сценарий приведён в `TESTS.md`.
