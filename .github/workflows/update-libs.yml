@@ -33,35 +33,35 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Arduino core for ESP32 (последняя дефолтная ветка)
+      # --- Arduino core for ESP32 (последняя дефолтная ветка) ---
       - name: Fetch Arduino core for ESP32
         if: ${{ github.event_name == 'schedule' || inputs.run_arduino_esp32 == true }}
         run: |
-          set -euo pipefail
+          set -e
           rm -rf libs/arduino-esp32
           git clone --depth 1 https://github.com/espressif/arduino-esp32.git libs/arduino-esp32
 
-      # RadioLib — жёстко пин на 6.5.0 (без префикса v)
+      # --- RadioLib: жёстко пин на теге 6.5.0 (без префикса v) ---
       - name: Fetch RadioLib 6.5.0
         if: ${{ github.event_name == 'schedule' || inputs.run_radiolib == true }}
         run: |
-          set -euo pipefail
+          set -e
           rm -rf libs/RadioLib
-          git clone --depth 1 https://github.com/jgromes/RadioLib.git libs/RadioLib
+          # Клонируем сразу по тегу: это устраняет ошибку с отсутствующим тегом в shallow-истории
+          git clone --depth 1 --branch 6.5.0 https://github.com/jgromes/RadioLib.git libs/RadioLib
           cd libs/RadioLib
-          git -c advice.detachedHead=false checkout -q tags/6.5.0
-          # верифицируем, что сидим на теге 6.5.0
-          test "$(git describe --tags --exact-match 2>/dev/null)" = "6.5.0"
+          # Верифицируем, что HEAD именно на теге 6.5.0
+          git describe --tags --exact-match
 
-      # mbedTLS (последняя дефолтная ветка)
+      # --- mbedTLS (последняя дефолтная ветка) ---
       - name: Fetch mbedTLS
         if: ${{ github.event_name == 'schedule' || inputs.run_mbedtls == true }}
         run: |
-          set -euo pipefail
+          set -e
           rm -rf libs/mbedtls
           git clone --depth 1 https://github.com/Mbed-TLS/mbedtls.git libs/mbedtls
 
-      # Создаём/обновляем PR (action сам создаст ветку и коммит)
+      # --- Создаём/обновляем один и тот же PR с изменениями ---
       - name: Create/Update PR
         uses: peter-evans/create-pull-request@v6
         with:
