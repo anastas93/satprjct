@@ -19,6 +19,7 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
     <input id="msg" type="text" placeholder="Enter message">
     <button id="sendBtn" title="Send typed message over LoRa">Send</button>
     <span id="sendStatus"></span>
+    <button id="cleanBtn" title="Очистить окно чата">Clean</button>
   </div>
   <!-- Basic and Profile section -->
   <details open>
@@ -176,9 +177,11 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
     <div class="panel-content">
       <div class="row">
         <button id="simpleBtn" title="Send a basic test message 'ping'">Simple</button>
+        <span id="simpleStatus"></span>
         <label for="largeSize">Large size:</label>
         <input id="largeSize" type="number" min="1" max="2048" value="1200" style="width:80px" title="Size of large test message in bytes">
         <button id="largeBtn" title="Enqueue a large test message of given size">Large</button>
+        <span id="largeStatus"></span>
       </div>
       <div class="row">
         <label for="encTestSize">EncTest size:</label>
@@ -241,17 +244,18 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
       </div>
     </div>
   </details>
-  <!-- Help -->
+  <!-- Раздел справки -->
   <details>
     <summary>Help</summary>
     <div class="panel-content">
-      <p>This interface controls the LoRa radio parameters. Profiles quickly set recommended values:</p>
+      <p>Этот интерфейс управляет параметрами радиомодуля LoRa. Профили позволяют быстро установить рекомендованные значения:</p>
       <ul>
-        <li><strong>High Range</strong>: minimal bandwidth, maximal spreading factor and coding rate, moderate power.</li>
-        <li><strong>Fast Data</strong>: maximal bandwidth, minimal spreading factor, minimal coding rate, high power.</li>
-        <li><strong>Balanced</strong>: moderate values for bandwidth, spreading factor and coding rate.</li>
+        <li><strong>High Range</strong> — минимальная полоса, максимальный фактор расширения и кодирование, средняя мощность.</li>
+        <li><strong>Fast Data</strong> — максимальная полоса, минимальный фактор расширения и кодирование, высокая мощность.</li>
+        <li><strong>Balanced</strong> — умеренные параметры полосы, фактора расширения и кодирования.</li>
       </ul>
-      <p><strong>Bank</strong> selects a frequency table; <strong>Preset</strong> selects an entry in that table. Adjust <strong>BW</strong>, <strong>SF</strong> (spreading factor), <strong>CR</strong> (coding rate) and <strong>TXP</strong> for custom configurations. Reliability settings enable acknowledgments and configure retry behaviour. Security enables encryption; KID selects which key to use, and KEY sets the 16‑byte AES key. Storage operations save/load/reset settings. Diagnostics provide ping latency and other metrics.</p>
+      <p><strong>Bank</strong> выбирает таблицу частот, <strong>Preset</strong> — конкретную запись из неё. Параметры <strong>BW</strong>, <strong>SF</strong>, <strong>CR</strong> и <strong>TXP</strong> задают конфигурацию радиоканала. Надёжность включает подтверждения и повторные передачи, безопасность — шифрование; KID выбирает ключ, а поле KEY задаёт 16‑байтовый AES‑ключ. Блок Storage позволяет сохранить, загрузить или сбросить настройки. В разделе Diagnostics доступны пинг и метрики.</p>
+      <p>История чата и выбранные параметры сохраняются в браузере и восстанавливаются после перезагрузки. Кнопка <strong>Clean</strong> очищает окно чата.</p>
     </div>
   </details>
 
