@@ -12,7 +12,7 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
   <h2>ESP32 LoRa Pipeline</h2>
   <div id="statusBar">
     <span id="keyIndicator" class="indicator local"></span>
-    <span id="keyStatusText">Key: local</span>
+    <span id="keyStatusText">Local ----</span>
   </div>
   <div id="chat"></div>
   <div id="inputRow">
