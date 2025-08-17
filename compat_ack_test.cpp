@@ -1,3 +1,6 @@
+#ifndef ARDUINO
+// Этот файл запускает совместимый тест ACK на десктопе
+// и исключается при сборке прошивки в Arduino IDE.
 #include "Arduino.h"
 #include "tx_pipeline.h"
 #include "rx_pipeline.h"
@@ -87,3 +90,4 @@ int main() {
   Serial.println(ok ? "TEST OK" : "TEST FAIL");
   return ok ? 0 : 1;
 }
+#endif // !ARDUINO
