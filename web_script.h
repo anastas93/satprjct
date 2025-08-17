@@ -1,6 +1,6 @@
 // Скрипт веб-интерфейса
 #pragma once
-// Сохранение настроек и истории чата, статус Simple/Large, прочерки вместо хеша ключей
+// Сохранение настроек и истории чата, статус Simple/Large, прочерки вместо хеша ключей, кнопка просмотра хеша
 const char WEB_SCRIPT_JS[] PROGMEM = R"rawliteral(
 function appendChat(t){
   const chat=document.getElementById('chat');
@@ -125,6 +125,7 @@ const keyTestBtn=document.getElementById('keyTestBtn');if(keyTestBtn){keyTestBtn
 const keyReqBtn=document.getElementById('keyReqBtn');if(keyReqBtn){keyReqBtn.addEventListener('click',()=>{fetch('/keyreq');});}
 const keySendBtn=document.getElementById('keySendBtn');if(keySendBtn){keySendBtn.addEventListener('click',()=>{fetch('/keysend');});}
 const keyDhBtn=document.getElementById('keyDhBtn');if(keyDhBtn){keyDhBtn.addEventListener('click',()=>{fetch('/keydh');});}
+const keyHashBtn=document.getElementById('keyHashBtn');if(keyHashBtn){keyHashBtn.addEventListener('click',()=>{fetch('/keystatus').then(r=>r.json()).then(d=>{alert('Hash: '+d.hash);});});} // Кнопка отображения хеша ключа
 
 function updateKeyStatus(){fetch('/keystatus').then(r=>r.json()).then(d=>{const i=document.getElementById('keyIndicator');const t=document.getElementById('keyStatusText');if(!i||!t)return;const h='----';if(d.status==='local'){i.classList.remove('remote');i.classList.add('local');t.textContent='Local '+h;}else{i.classList.remove('local');i.classList.add('remote');t.textContent='Remote '+h;}i.classList.toggle('blink',Number(d.request)===1)}).catch(()=>{});setTimeout(updateKeyStatus,1000)}
 updateKeyStatus();

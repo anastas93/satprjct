@@ -144,6 +144,10 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
         <button id="keyReqBtn" title="Request current encryption key from remote device">Key Req</button>
         <button id="keySendBtn" title="Send current encryption key to remote device">Key Send</button>
       </div>
+      <!-- Кнопка отображения хеша ключа -->
+      <div class="row">
+        <button id="keyHashBtn" title="Показать хеш текущего ключа">Key Hash</button>
+      </div>
     </div>
   </details>
   <!-- Storage -->
