@@ -32,6 +32,10 @@ function applyPrefs(){const th=localStorage.getItem('theme')||'dark';const fs=lo
 applyPrefs();
 themeToggle.addEventListener('change',()=>{const light=themeToggle.checked;document.body.classList.toggle('light',light);localStorage.setItem('theme',light?'light':'dark')});
 fontRange.addEventListener('input',()=>{const v=fontRange.value;document.documentElement.style.setProperty('--base-font',v+'px');localStorage.setItem('font',v)});
+// Обработчик кнопки Ping — запускает асинхронный пинг
+document.getElementById('pingBtn').addEventListener('click',()=>{fetch('/ping')});
+// Обработчик кнопки Metrics — запрашивает текущие счётчики
+document.getElementById('metricsBtn').addEventListener('click',()=>{fetch('/metrics').then(r=>r.text()).then(t=>{document.getElementById('metrics').textContent=t})});
 document.getElementById('simpleBtn').addEventListener('click',()=>{fetch('/simple')});
 document.getElementById('largeBtn').addEventListener('click',()=>{const n=document.getElementById('largeSize').value;fetch('/large?size='+encodeURIComponent(n))});
 document.getElementById('encTestBtn').addEventListener('click',()=>{const n=document.getElementById('encTestSize').value;let url='/enctest';if(n)url+='?size='+encodeURIComponent(n);fetch(url)});
