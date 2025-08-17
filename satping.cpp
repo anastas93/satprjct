@@ -74,3 +74,90 @@ void SatPing() {
   radio.setFrequency(g_freq_rx_mhz);
   radio.startReceive();
 }
+
+// Проверка канала на текущем пресете без вывода подробной информации
+bool ChannelPing() {
+  uint8_t ping[5];
+  uint8_t rx[5];
+
+  ping[1] = radio.randomByte();
+  ping[2] = radio.randomByte();       // случайные байты
+  ping[0] = ping[1] ^ ping[2];        // идентификатор
+  ping[3] = 0;                        // адрес несущественен
+  ping[4] = 0;
+
+  radio.setFrequency(g_freq_tx_mhz);  // передаём на текущей TX
+  radio.transmit(ping, 5);
+
+  radio.setFrequency(g_freq_rx_mhz);  // слушаем на текущей RX
+  int state = radio.receive(rx, 5);
+  bool ok = (state == RADIOLIB_ERR_NONE) || (memcmp(ping, rx, 5) == 0);
+  radio.setFrequency(g_freq_rx_mhz);  // возвращаем приём
+  radio.startReceive();
+  return ok;
+}
+
+// Пинг указанного пресета из заданного банка
+bool PresetPing(Bank bank, int preset) {
+  const FreqPreset* tbl = nullptr;
+  switch (bank) {
+    case Bank::MAIN:    tbl = FREQ_MAIN;    break;
+    case Bank::RESERVE: tbl = FREQ_RESERVE; break;
+    case Bank::TEST:    tbl = FREQ_TEST;    break;
+  }
+  if (!tbl || preset < 0 || preset >= 10) return false;
+
+  uint8_t ping[5];
+  uint8_t rx[5];
+  ping[1] = radio.randomByte();
+  ping[2] = radio.randomByte();
+  ping[0] = ping[1] ^ ping[2];
+  ping[3] = 0;
+  ping[4] = 0;
+
+  radio.setFrequency(tbl[preset].txMHz);
+  radio.transmit(ping, 5);
+  radio.setFrequency(tbl[preset].rxMHz);
+  int state = radio.receive(rx, 5);
+  bool ok = (state == RADIOLIB_ERR_NONE) || (memcmp(ping, rx, 5) == 0);
+  radio.setFrequency(g_freq_rx_mhz);  // возвращаем исходную частоту
+  radio.startReceive();
+  return ok;
+}
+
+// Обход всех пресетов выбранного банка и вывод результата в консоль
+void MassPing(Bank bank) {
+  const FreqPreset* tbl = nullptr;
+  switch (bank) {
+    case Bank::MAIN:    tbl = FREQ_MAIN;    break;
+    case Bank::RESERVE: tbl = FREQ_RESERVE; break;
+    case Bank::TEST:    tbl = FREQ_TEST;    break;
+  }
+  if (!tbl) return;
+
+  int found = 0;
+  for (int i = 0; i < 10; ++i) {
+    Serial.print(F("RX:"));
+    Serial.print(tbl[i].rxMHz, 3);
+    Serial.print(F("/TX:"));
+    Serial.print(tbl[i].txMHz, 3);
+    Serial.print(F(" "));
+
+    bool ok = PresetPing(bank, i);
+    if (ok) {
+      Serial.print(F("OK RSSI:"));
+      Serial.print(radio.getRSSI());
+      Serial.print(F(" dBm/SNR:"));
+      Serial.print(radio.getSNR());
+      Serial.println(F(" dB"));
+      found++;
+    } else {
+      Serial.println(F("Bad"));
+    }
+    delay(150);
+  }
+  Serial.print(F("Found: "));
+  Serial.println(found);
+  radio.setFrequency(g_freq_rx_mhz);  // возвращаемся на рабочую частоту
+  radio.startReceive();
+}
