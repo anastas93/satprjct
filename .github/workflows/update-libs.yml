@@ -1,7 +1,26 @@
 name: Update Arduino libs
+
 on:
-  schedule: [{cron: "0 2 * * *"}] # каждый день в 02:00 UTC
-  workflow_dispatch:             # можно запускать вручную
+  schedule:
+    - cron: "0 2 * * *"   # 02:00 UTC = 08:00 Asia/Almaty
+  workflow_dispatch:
+    inputs:
+      run_arduino_esp32:
+        type: boolean
+        default: true
+        description: "Обновлять arduino-esp32?"
+      run_radiolib:
+        type: boolean
+        default: true
+        description: "Обновлять RadioLib (пин 6.5.0)?"
+      run_mbedtls:
+        type: boolean
+        default: true
+        description: "Обновлять mbedTLS?"
+
+concurrency:
+  group: update-libs
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -11,35 +30,50 @@ jobs:
   sync-libs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
+      # Arduino core for ESP32 (последняя дефолтная ветка)
       - name: Fetch Arduino core for ESP32
+        if: ${{ github.event_name == 'schedule' || inputs.run_arduino_esp32 == true }}
         run: |
+          set -euo pipefail
           rm -rf libs/arduino-esp32
           git clone --depth 1 https://github.com/espressif/arduino-esp32.git libs/arduino-esp32
 
-      - name: Fetch RadioLib v6.5.0
+      # RadioLib — жёстко пин на 6.5.0 (без префикса v)
+      - name: Fetch RadioLib 6.5.0
+        if: ${{ github.event_name == 'schedule' || inputs.run_radiolib == true }}
         run: |
+          set -euo pipefail
           rm -rf libs/RadioLib
-          git clone --branch v6.5.0 --depth 1 https://github.com/jgromes/RadioLib.git libs/RadioLib
+          git clone --depth 1 https://github.com/jgromes/RadioLib.git libs/RadioLib
+          cd libs/RadioLib
+          git -c advice.detachedHead=false checkout -q tags/6.5.0
+          # верифицируем, что сидим на теге 6.5.0
+          test "$(git describe --tags --exact-match 2>/dev/null)" = "6.5.0"
 
+      # mbedTLS (последняя дефолтная ветка)
       - name: Fetch mbedTLS
+        if: ${{ github.event_name == 'schedule' || inputs.run_mbedtls == true }}
         run: |
+          set -euo pipefail
           rm -rf libs/mbedtls
           git clone --depth 1 https://github.com/Mbed-TLS/mbedtls.git libs/mbedtls
 
-      - name: Commit changes if any
-        run: |
-          if git status --porcelain | grep .; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git checkout -b chore/update-libs-$(date +%F)
-            git add -A
-            git commit -m "chore: update Arduino libs [skip ci]"
-          fi
-
-      - uses: peter-evans/create-pull-request@v6
+      # Создаём/обновляем PR (action сам создаст ветку и коммит)
+      - name: Create/Update PR
+        uses: peter-evans/create-pull-request@v6
         with:
           branch: chore/update-libs
           title: "chore: update Arduino libs"
           commit-message: "chore: update Arduino libs [skip ci]"
+          body: |
+            Automated library refresh.
+
+            - arduino-esp32: latest default branch (shallow)
+            - RadioLib: **pinned to 6.5.0**
+            - mbedTLS: latest default branch (shallow)
+          labels: |
+            dependencies
+            automated-pr
