@@ -1,0 +1,45 @@
+name: Update Arduino libs
+on:
+  schedule: [{cron: "0 2 * * *"}] # каждый день в 02:00 UTC
+  workflow_dispatch:             # можно запускать вручную
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-libs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch Arduino core for ESP32
+        run: |
+          rm -rf libs/arduino-esp32
+          git clone --depth 1 https://github.com/espressif/arduino-esp32.git libs/arduino-esp32
+
+      - name: Fetch RadioLib v6.5.0
+        run: |
+          rm -rf libs/RadioLib
+          git clone --branch v6.5.0 --depth 1 https://github.com/jgromes/RadioLib.git libs/RadioLib
+
+      - name: Fetch mbedTLS
+        run: |
+          rm -rf libs/mbedtls
+          git clone --depth 1 https://github.com/Mbed-TLS/mbedtls.git libs/mbedtls
+
+      - name: Commit changes if any
+        run: |
+          if git status --porcelain | grep .; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git checkout -b chore/update-libs-$(date +%F)
+            git add -A
+            git commit -m "chore: update Arduino libs [skip ci]"
+          fi
+
+      - uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/update-libs
+          title: "chore: update Arduino libs"
+          commit-message: "chore: update Arduino libs [skip ci]"
