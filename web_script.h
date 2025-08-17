@@ -1,6 +1,7 @@
 // Минифицированный скрипт веб-интерфейса
 // Переработано окно чата: отдельные блоки для времени, типа и текста
 // и добавлено автопрокручивание
+// Исправлено отображение хеша ключа при нулевом значении
 #pragma once
 const char WEB_SCRIPT_JS[] PROGMEM = R"rawliteral(
 function appendChat(t){const e=document.getElementById('chat'),n=document.createElement('div');let s='',a='',c=t;c.startsWith('*TX:*')?(s='tx',a='TX',c=c.slice(5).trim()):c.startsWith('*RX:*')?(s='rx',a='RX',c=c.slice(5).trim()):c.startsWith('*SYS:*')&&(s='sys',a='SYS',c=c.slice(6).trim());const i=new Date().toLocaleTimeString();n.className='msg-line '+s;n.innerHTML='<span class="msg-time">['+i+']</span> '+(a?'<span class="msg-tag">'+a+':</span> ':'')+'<span class="msg-text">'+c+'</span>';e.appendChild(n);e.scrollTop=e.scrollHeight;for(;e.children.length>100;)e.removeChild(e.lastChild)}
@@ -45,7 +46,7 @@ const keyTestBtn=document.getElementById('keyTestBtn');if(keyTestBtn){keyTestBtn
 const keyReqBtn=document.getElementById('keyReqBtn');if(keyReqBtn){keyReqBtn.addEventListener('click',()=>{fetch('/keyreq')})}
 const keySendBtn=document.getElementById('keySendBtn');if(keySendBtn){keySendBtn.addEventListener('click',()=>{fetch('/keysend')})}
 const keyDhBtn=document.getElementById('keyDhBtn');if(keyDhBtn){keyDhBtn.addEventListener('click',()=>{fetch('/keydh')})}
-function updateKeyStatus(){fetch('/keystatus').then(r=>r.json()).then(d=>{const i=document.getElementById('keyIndicator');const t=document.getElementById('keyStatusText');if(!i||!t)return;const h=d.hash?d.hash:'----';if(d.status==='local'){i.classList.remove('remote');i.classList.add('local');t.textContent='Local '+h}else{i.classList.remove('local');i.classList.add('remote');t.textContent='Remote '+h}parseInt(d.request)===1?i.classList.add('blink'):i.classList.remove('blink')}).catch(()=>{});setTimeout(updateKeyStatus,1000)}
+function updateKeyStatus(){fetch('/keystatus').then(r=>r.json()).then(d=>{const i=document.getElementById('keyIndicator');const t=document.getElementById('keyStatusText');if(!i||!t)return;const h=('hash'in d)?String(d.hash).padStart(4,'0'):'----';if(d.status==='local'){i.classList.remove('remote');i.classList.add('local');t.textContent='Local '+h}else{i.classList.remove('local');i.classList.add('remote');t.textContent='Remote '+h}parseInt(d.request)===1?i.classList.add('blink'):i.classList.remove('blink')}).catch(()=>{});setTimeout(updateKeyStatus,1000)}
 updateKeyStatus();
 document.getElementById('sendQBtn').addEventListener('click',()=>{const msg=document.getElementById('sendQMsg').value;const prio=document.getElementById('sendQPrio').value;if(msg){fetch('/sendq?prio='+encodeURIComponent(prio)+'&msg='+encodeURIComponent(msg));document.getElementById('sendQMsg').value=''}});
 document.getElementById('largeQBtn').addEventListener('click',()=>{const sz=document.getElementById('largeQSize').value;const prio=document.getElementById('largeQPrio').value;fetch('/largeq?prio='+encodeURIComponent(prio)+'&size='+encodeURIComponent(sz))});

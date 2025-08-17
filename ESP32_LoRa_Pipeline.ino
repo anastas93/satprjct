@@ -492,8 +492,8 @@ void handleSend() {
   memcpy(bytes.data(), message.c_str(), n);
   g_buf.enqueue(bytes.data(), bytes.size(), false);
   persistMsgId();
-  // Append to serial buffer for UI
-  serialBuffer += "*TX:* " + message + "\n";
+  // Отправляем строку в чат и сохраняем её в буфер
+  chatLine(String("*TX:* ") + message);
   server.send(200, "text/plain", "ok");
 }
 
