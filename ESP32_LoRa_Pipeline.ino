@@ -252,10 +252,10 @@ static inline void persistMsgId() {
   prefs.end();
 }
 
-// Compute a 16‑bit CRC (CRC‑CCITT) over the current 16‑byte AES key.  The
-// resulting value is returned as a 16‑bit integer.  This is used to
-// generate a 4‑digit hexadecimal identifier that can be displayed in
-// the UI next to "Key: local" to help users verify which key is active.
+// Вычисляет CRC‑16 (CRC‑CCITT) от текущего 16‑байтового AES‑ключа.
+// Полученное 16‑битное значение служит основой для 4‑значного
+// шестнадцатеричного идентификатора, отображаемого рядом с надписью
+// "Local" в веб‑интерфейсе для проверки активного ключа.
 static uint16_t calcKeyHash() {
   const uint8_t* k = g_ccm.key();
   if (!k) return 0;
@@ -906,10 +906,11 @@ void handleKeySend() {
   server.send(200, "text/plain", "keysend queued");
 }
 
-// Handle /keystatus: return JSON with the current key status and request flag.
+// Обработчик /keystatus: возвращает JSON со статусом ключа и флагом запроса.
+// Дополнительно включает 4‑значный хеш активного AES‑ключа в формате HEX.
 void handleKeyStatus() {
   String st = (g_key_status == KeyStatus::Received) ? "remote" : "local";
-  // Compute a 4‑digit hash of the current AES key.  Represent as uppercase hex.
+  // Получаем 4‑значный хеш ключа в виде прописных HEX.
   uint16_t h = calcKeyHash();
   char hbuf[5];
   snprintf(hbuf, sizeof(hbuf), "%04X", (unsigned)h & 0xFFFF);
