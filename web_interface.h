@@ -163,6 +163,8 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
       <div class="row">
         <button id="pingBtn" title="Send ping and measure round‑trip time">Ping</button>
         <button id="metricsBtn" title="Show current metrics">Metrics</button>
+        <!-- Кнопка самотеста -->
+        <button id="selfTestBtn" title="Run built-in self-test">SelfTest</button>
       </div>
       <div id="metrics" style="white-space: pre-wrap;"></div>
       <div id="pingHistory"></div>
