@@ -19,6 +19,8 @@
 #include "selftest.h"
 #include "satping.h"
 #include "web_interface.h"
+#include "web_style.h"
+#include "web_script.h"
 
 #include <string.h> // for memcmp
 #include <ctype.h>   // for toupper when parsing hex strings
@@ -26,6 +28,7 @@
 // --- WiFi and Web server includes ---
 #include <WiFi.h>
 #include <WebServer.h>
+#include <WebSocketsServer.h>
 
 #ifdef ARDUINO_ARCH_ESP32
 #include <mbedtls/ecdh.h>
@@ -143,9 +146,10 @@ static const size_t SERIAL_MAX = 8 * 1024;
 const char* WIFI_SSID = "ESP32-LoRa";
 const char* WIFI_PASSWORD = "12345678";
 
-// WebServer instance listening on port 80.  This server hosts a simple web
-// interface for sending messages and adjusting LoRa parameters.
+// WebServer instance listening on port 80.  Этот сервер отдаёт веб-интерфейс.
 WebServer server(80);
+// WebSocket сервер для мгновенной передачи логов
+WebSocketsServer wsServer(81);
 
 // Buffer used to accumulate messages for the web UI.  Whenever a message is
 // sent or received over LoRa it is appended to this buffer.  The /serial
@@ -156,7 +160,10 @@ String serialBuffer = "";
 void handleRoot();
 void handleSend();
 void handleSerial();
+void handleStyle();
+void handleScript();
 void handleSetBank();
+void onWsEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t len);
 void handleSetPreset();
 void handleSetBw();
 void handleSetSf();
@@ -494,6 +501,21 @@ void handleSend() {
 void handleSerial() {
   server.send(200, "text/plain", serialBuffer);
   serialBuffer = "";
+}
+
+// Отдаёт минифицированный CSS
+void handleStyle() {
+  server.send_P(200, "text/css", WEB_STYLE_CSS);
+}
+
+// Отдаёт минифицированный JS
+void handleScript() {
+  server.send_P(200, "application/javascript", WEB_SCRIPT_JS);
+}
+
+// События WebSocket пока не обрабатываются
+void onWsEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t len) {
+  (void)num; (void)type; (void)payload; (void)len;
 }
 
 void handleSetBank() {
@@ -1365,6 +1387,7 @@ void chatLine(const String& s) {
     // Remove the oldest data to keep within limit
     serialBuffer.remove(0, serialBuffer.length() - SERIAL_MAX);
   }
+  wsServer.broadcastTXT(s.c_str());
 }
 
 // -----------------------------------------------------------------------------
@@ -2118,6 +2141,8 @@ void setup() {
   Serial.println(ipStr.c_str());
   // Register HTTP handlers.
   server.on("/", handleRoot);
+  server.on("/style.css", handleStyle);
+  server.on("/app.js", handleScript);
   server.on("/send", handleSend);
   server.on("/serial", handleSerial);
   server.on("/setbank", handleSetBank);
@@ -2158,6 +2183,8 @@ void setup() {
   // Authenticated ECDH key exchange endpoint
   server.on("/keydh", handleKeyDh);
   server.begin();
+  wsServer.begin();
+  wsServer.onEvent(onWsEvent);
 
   // Run self-test at startup, outputting results to the serial console.
   SelfTest_runAll(g_ccm, Serial);
@@ -2259,6 +2286,7 @@ void loop() {
   pollUart(SerialRadxa, g_line_radxa);
   // Handle incoming HTTP clients.
   server.handleClient();
+  wsServer.loop();
   radioPoll();
   // Progress asynchronous ping state if active
   handlePingAsync();
