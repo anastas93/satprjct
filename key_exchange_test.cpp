@@ -1,3 +1,6 @@
+// Этот файл компилируется только при запуске теста обмена ключами
+#ifdef KEY_EXCHANGE_TEST
+
 #include "Arduino.h"
 #include "encryptor_ccm.h"
 #include "selftest.h"
@@ -128,4 +131,6 @@ int main() {
   EncSelfTest_run(g_ccm, 32, Serial);
   return 0;
 }
+
+#endif  // KEY_EXCHANGE_TEST
 
