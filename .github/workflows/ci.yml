@@ -1,0 +1,26 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получение репозитория
+        uses: actions/checkout@v3
+      - name: Установка зависимостей
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ libmbedtls-dev
+      - name: Тест частотных пресетов
+        run: |
+          g++ -std=c++17 freq_map_test.cpp -o freq_map_test
+          ./freq_map_test
+      - name: Тест обмена ключами
+        run: |
+          chmod +x run_key_exchange_test.sh
+          ./run_key_exchange_test.sh
+      - name: Тест веб-интерфейса
+        run: |
+          g++ -std=c++17 test_web_interface.cpp -o test_web_interface
+          ./test_web_interface
