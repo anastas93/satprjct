@@ -11,6 +11,7 @@
 - Простейший FEC на повторном коде и байтовый интерливинг (`setFecEnabled`, `setInterleaveDepth`)
 - ACK с bitmap последних 32 кадров (`AckBitmap`)
 - Планировщик слотов TDD (`tdd_scheduler`) с окнами `TX`, `ACK` и защитным интервалом
+- EMA‑метрики PER/RTT/goodput/SNR/EbN0 и автоматические профили `P0–P3`
 
 ## Используемые библиотеки
 - [Arduino core for ESP32](https://github.com/espressif/arduino-esp32) — базовые классы (`Arduino.h`, `Preferences`, `WiFi`, `WebServer`)
@@ -125,7 +126,7 @@ ENCTESTBAD wrong-KID dec=FAIL (expected FAIL)
 Скрипт выводит новый `KID` и 16‑байтовый ключ, после чего выполняет короткий тест шифрования.
 
 ### Автоматические тесты
-Скрипты `run_key_exchange_test.sh`, `freq_map_test.cpp` и `test_web_interface.cpp`
+Скрипты `run_key_exchange_test.sh`, `freq_map_test.cpp`, `tx_profile_test.cpp` и `test_web_interface.cpp`
 выполняются в CI при каждом пуше.
 
 ## Дополнительные инструкции
@@ -137,6 +138,18 @@ ENCTESTBAD wrong-KID dec=FAIL (expected FAIL)
 ### Переключение конфигураций
 - В веб‑интерфейсе предусмотрены профили `High Range`, `Fast Data`, `Balanced`.
 - Пользовательский профиль `Custom` позволяет вручную задавать параметры.
+
+### Адаптивные профили P0–P3
+Передатчик автоматически выбирает один из профилей в зависимости от скользящих метрик PER и Eb/N0:
+
+| Профиль | Условие | `payload_len` | `fec_mode` | `interleave_depth` | `repeat_count` |
+|---------|---------|---------------|-----------|--------------------|----------------|
+| P0 | PER ≤ 0.1 и Eb/N0 ≥ 7 дБ | 200 | выкл | 1 | 1 |
+| P1 | PER ≤ 0.2 и Eb/N0 ≥ 5 дБ | 160 | выкл | 1 | 2 |
+| P2 | PER ≤ 0.3 и Eb/N0 ≥ 3 дБ | 120 | повтор | 2 | 3 |
+| P3 | иначе | 80 | повтор | 4 | 4 |
+
+Для доступа к последним измеренным значениям доступны функции `Radio_getSNR`/`Radio_getEbN0` и их сокращённые версии `Radio_readSNR`/`Radio_readEbN0`.
 
 ### TDD расписание
 - Параметры окон `TDD_TX_WINDOW_MS`, `TDD_ACK_WINDOW_MS` и `TDD_GUARD_MS` заданы в `config.h`.

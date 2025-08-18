@@ -14,11 +14,13 @@ public:
   bool ackEnabled() const { return ack_enabled_; }
   void notifyAck(uint32_t highest, uint32_t bitmap);
   void setEncEnabled(bool v) { enc_enabled_ = v; }
-  void setFecEnabled(bool v) { fec_enabled_ = v; }
+  void setFecEnabled(bool v) { fec_enabled_ = v; fec_mode_ = v ? 1 : 0; }
   void setInterleaveDepth(uint8_t d) { interleave_depth_ = d; }
 private:
   void sendMessageFragments(const OutgoingMessage& m);
   bool interFrameGap();
+  void updateProfile();       // обновление профиля по метрикам
+  void applyProfile(uint8_t p);
 
   MessageBuffer& buf_;
   Fragmenter& frag_;
@@ -37,5 +39,10 @@ private:
 
   bool enc_enabled_ = cfg::ENCRYPTION_ENABLED_DEFAULT;
   bool fec_enabled_ = cfg::FEC_ENABLED_DEFAULT;
+  uint8_t fec_mode_ = 0;                       // тип FEC: 0-выкл,1-повтор
   uint8_t interleave_depth_ = cfg::INTERLEAVER_DEPTH_DEFAULT;
+
+  uint16_t payload_len_ = cfg::LORA_MTU - FRAME_HEADER_SIZE; // максимальная полезная нагрузка
+  uint8_t repeat_count_ = 1;                  // повторение кадров
+  uint8_t profile_idx_ = 0;                   // текущий профиль P0..P3
 };

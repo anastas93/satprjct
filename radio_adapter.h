@@ -12,6 +12,9 @@ void Radio_forceRx();
 // Получение качественных метрик канала
 bool Radio_getSNR(float& snr);        // отношение сигнал/шум последнего пакета
 bool Radio_getEbN0(float& ebn0);      // отношение энергии бита к спектральной плотности шума
+// Упрощённые методы получения метрик
+inline float Radio_readSNR()  { float v = 0.0f; Radio_getSNR(v);  return v; }
+inline float Radio_readEbN0() { float v = 0.0f; Radio_getEbN0(v); return v; }
 bool Radio_isSynced();                // есть ли синхронизация по уникальному слову
 
 bool Radio_setFrequency(uint32_t hz);
