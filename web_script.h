@@ -206,8 +206,21 @@ const keyTestBtn=document.getElementById('keyTestBtn');if(keyTestBtn){on('keyTes
 const keyReqBtn=document.getElementById('keyReqBtn');if(keyReqBtn){on('keyReqBtn','click',()=>{fetch('/keyreq');});}
 const keySendBtn=document.getElementById('keySendBtn');if(keySendBtn){on('keySendBtn','click',()=>{fetch('/keysend');});}
 const keyDhBtn=document.getElementById('keyDhBtn');if(keyDhBtn){on('keyDhBtn','click',()=>{fetch('/keydh');});}
-// Кнопка отображения хеша ключа с обработкой ошибок запроса
-const keyHashBtn=document.getElementById('keyHashBtn');if(keyHashBtn){on('keyHashBtn','click',()=>{fetch('/keystatus').then(r=>r.json()).then(d=>{alert('Hash: '+d.hash);}).catch(()=>{alert('Ошибка получения хеша');});});}
+// Кнопка отображения хеша ключа с обработкой всех вариантов ответа
+const keyHashBtn=document.getElementById('keyHashBtn');
+if(keyHashBtn){
+  on('keyHashBtn','click',()=>{
+    fetch('/keyhash').then(r=>{
+      if(r.status===200){
+        return r.text().then(t=>{alert('Hash: '+t.trim());});
+      }else if(r.status===404){
+        return r.text().then(t=>{alert('Ключ не задан');});
+      }else{
+        alert('Нет связи с устройством');
+      }
+    }).catch(()=>{alert('Нет связи с устройством');});
+  });
+}
 
 function updateKeyStatus(){
   fetch('/keystatus').then(r=>r.json()).then(d=>{
