@@ -19,6 +19,8 @@ public:
   enum FecMode : uint8_t { FEC_OFF=0, FEC_RS_VIT=1, FEC_LDPC=2 };
   void setFecMode(FecMode m) { fec_mode_ = m; fec_enabled_ = (m != FEC_OFF); }
   void setInterleaveDepth(uint8_t d) { interleave_depth_ = d; }
+  // Поместить сообщение KEYCHG <kid> в очередь с требованием ACK
+  void queueKeyChange(uint8_t kid);
 private:
   void sendMessageFragments(const OutgoingMessage& m);
   bool interFrameGap();
