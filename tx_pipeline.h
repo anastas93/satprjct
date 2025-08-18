@@ -14,6 +14,8 @@ public:
   bool ackEnabled() const { return ack_enabled_; }
   void notifyAck(uint32_t msg_id);
   void setEncEnabled(bool v) { enc_enabled_ = v; }
+  void setFecEnabled(bool v) { fec_enabled_ = v; }
+  void setInterleaveDepth(uint8_t d) { interleave_depth_ = d; }
 private:
   void sendMessageFragments(const OutgoingMessage& m);
   bool interFrameGap();
@@ -34,4 +36,6 @@ private:
   bool ack_received_ = false;
 
   bool enc_enabled_ = cfg::ENCRYPTION_ENABLED_DEFAULT;
+  bool fec_enabled_ = cfg::FEC_ENABLED_DEFAULT;
+  uint8_t interleave_depth_ = cfg::INTERLEAVER_DEPTH_DEFAULT;
 };

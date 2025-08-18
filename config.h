@@ -20,6 +20,10 @@ namespace cfg {
   static constexpr uint8_t  ENC_META_LEN           = 1; // KID
   static constexpr bool     ENC_MODE_PER_FRAGMENT  = true;
 
+  // FEC и интерливинг
+  static constexpr bool     FEC_ENABLED_DEFAULT    = false;
+  static constexpr uint8_t  INTERLEAVER_DEPTH_DEFAULT = 1;
+
   // Buffers
   static constexpr size_t   TX_BUF_MAX_BYTES        = 48 * 1024;
   static constexpr size_t   TX_BUF_QOS_CAP_HIGH     = 24 * 1024;

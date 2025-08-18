@@ -5,6 +5,8 @@
 #include "radio_adapter.h"
 #include "frame_log.h"
 #include "scrambler.h"
+#include "fec.h"
+#include "interleaver.h"
 #include <Arduino.h>
 #include <string.h>
 #include <array>
@@ -42,6 +44,20 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
 
     // Скремблирование полезной нагрузки для подавления длительных последовательностей
     lfsr_scramble(payload.data(), payload.size(), (uint16_t)hdr.msg_id);
+
+    // Простейший FEC повторным кодом
+    if (fec_enabled_) {
+      std::vector<uint8_t> fec_buf;
+      fec_encode_repeat(payload.data(), payload.size(), fec_buf);
+      payload.swap(fec_buf);
+    }
+
+    // Байтовый интерливинг
+    if (interleave_depth_ > 1) {
+      std::vector<uint8_t> inter_buf;
+      interleave_bytes(payload.data(), payload.size(), interleave_depth_, inter_buf);
+      payload.swap(inter_buf);
+    }
 
     FrameHeader final_hdr = fr.hdr;
     if (willEnc) final_hdr.flags |= F_ENC;

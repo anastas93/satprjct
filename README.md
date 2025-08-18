@@ -6,8 +6,9 @@
 - **Персистентный msg_id в NVS** (исключение повторного нонса)
 - **Анти-replay** (окно и порог старых ID)
 - Модуль `crypto_spec` (в корне проекта) с функциями `setCurrentKey` для хранения ключа и его CRC-16 и `setRootKeyHex` для установки корневого ключа из 32‑символьной hex-строки (по умолчанию загружается встроенное значение)
-- Простейший скремблер на LFSR (`lfsr_scramble`/`lfsr_descramble`) для 
+- Простейший скремблер на LFSR (`lfsr_scramble`/`lfsr_descramble`) для
   избавления от длинных последовательностей бит
+- Простейший FEC на повторном коде и байтовый интерливинг (`setFecEnabled`, `setInterleaveDepth`)
 
 ## Используемые библиотеки
 - [Arduino core for ESP32](https://github.com/espressif/arduino-esp32) — базовые классы (`Arduino.h`, `Preferences`, `WiFi`, `WebServer`)

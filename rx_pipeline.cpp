@@ -3,6 +3,8 @@
 #include "radio_adapter.h"
 #include "frame_log.h"
 #include "scrambler.h"
+#include "fec.h"
+#include "interleaver.h"
 #include <string.h>
 #include <algorithm> // для std::erase_if
 
@@ -76,6 +78,22 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
 
   const uint8_t* p = frame + FRAME_HEADER_SIZE;
   std::vector<uint8_t> data(p, p + hdr.payload_len);
+
+  if (interleave_depth_ > 1) {
+    std::vector<uint8_t> tmp;
+    deinterleave_bytes(data.data(), data.size(), interleave_depth_, tmp);
+    data.swap(tmp);
+  }
+
+  if (fec_enabled_) {
+    std::vector<uint8_t> tmp;
+    if (!fec_decode_repeat(data.data(), data.size(), tmp)) {
+      metrics_.rx_fec_fail++;
+      return;
+    }
+    data.swap(tmp);
+  }
+
   lfsr_descramble(data.data(), data.size(), (uint16_t)hdr.msg_id);
   std::vector<uint8_t> plain;
   if (hdr.flags & F_ENC) {
