@@ -40,7 +40,8 @@ private:
   MsgCb cb_ = nullptr;
   AckCb ack_cb_ = nullptr;
   uint32_t ack_highest_ = 0;       // наибольший подтверждённый кадр
-  uint32_t ack_bitmap_ = 0;        // bitmap последних 32 кадров
+  uint32_t ack_bitmap_ = 0;        // bitmap последних W кадров
+  unsigned long last_ack_sent_ms_ = 0; // время последней отправки ACK
   std::map<uint32_t, AsmState> assemblers_;
   std::deque<uint32_t> dup_window_;
   std::unordered_set<uint32_t> dup_set_;

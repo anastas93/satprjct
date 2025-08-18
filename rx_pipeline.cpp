@@ -49,15 +49,18 @@ bool RxPipeline::isDup(uint32_t msg_id) {
 void RxPipeline::sendAck(uint32_t msg_id) {
   // Отправляем ACK только в соответствующее окно
   if (!tdd::isAckPhase()) return;
-  // обновляем наибольший подтверждённый кадр и bitmap
+  // обновляем наибольший подтверждённый кадр и bitmap для окна W=8
   if (msg_id > ack_highest_) {
     uint32_t shift = msg_id - ack_highest_;
-    if (shift >= 32) ack_bitmap_ = 0;
+    if (shift >= 8) ack_bitmap_ = 0;
     else ack_bitmap_ <<= shift;
     ack_highest_ = msg_id;
   }
   uint32_t off = ack_highest_ - msg_id;
-  if (off > 0 && off <= 32) ack_bitmap_ |= (1u << (off - 1));
+  if (off > 0 && off <= 8) ack_bitmap_ |= (1u << (off - 1));
+
+  // агрегируем ACK по времени
+  if (millis() - last_ack_sent_ms_ < cfg::T_ACK_AGG) return;
 
   FrameHeader ack{};
   ack.ver = cfg::PIPE_VERSION;
@@ -78,6 +81,7 @@ void RxPipeline::sendAck(uint32_t msg_id) {
   ack.encode(buf, FRAME_HEADER_SIZE);
   Radio_sendRaw(buf, FRAME_HEADER_SIZE + 8);
   FrameLog::push('T', buf, FRAME_HEADER_SIZE + 8);
+  last_ack_sent_ms_ = millis();
   // После передачи возвращаемся в режим приёма
   tdd::maintain();
 }
