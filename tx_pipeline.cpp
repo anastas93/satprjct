@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <string.h>
 #include <array>
+#include <algorithm>
 
 TxPipeline::TxPipeline(MessageBuffer& buf, Fragmenter& frag, IEncryptor& enc, PipelineMetrics& m)
 : buf_(buf), frag_(frag), enc_(enc), metrics_(m) {}
@@ -20,24 +21,41 @@ bool TxPipeline::interFrameGap() {
 void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
   bool reqAck = ack_enabled_ || m.ack_required;
   bool willEnc = enc_enabled_ && enc_.isReady();
-  const uint16_t base_payload_max = (uint16_t)(cfg::LORA_MTU - FRAME_HEADER_SIZE);
+  // учитываем дублированный заголовок
+  const uint16_t base_payload_max = (uint16_t)(cfg::LORA_MTU - 2*FRAME_HEADER_SIZE);
   const uint16_t enc_overhead = willEnc ? (1 + cfg::ENC_TAG_LEN) : 0;
-  const uint16_t eff_payload_max = (base_payload_max > enc_overhead) ? (uint16_t)(base_payload_max - enc_overhead) : 0;
+  const uint16_t pilot_overhead = (uint16_t)((base_payload_max / cfg::PILOT_INTERVAL) * cfg::PILOT_SEQ_LEN);
+  const uint16_t eff_payload_max = (base_payload_max > enc_overhead + pilot_overhead) ?
+                                   (uint16_t)(base_payload_max - enc_overhead - pilot_overhead) : 0;
   auto parts = frag_.split(m.id, m.data.data(), m.data.size(), reqAck, eff_payload_max);
 
   std::array<uint8_t, FRAME_HEADER_SIZE> aad{};
-  std::vector<uint8_t> payload; payload.reserve(cfg::LORA_MTU);
-  std::vector<uint8_t> frame; frame.reserve(cfg::LORA_MTU);
+  std::vector<uint8_t> payload_raw; payload_raw.reserve(cfg::LORA_MTU);
+  std::vector<uint8_t> payload;      payload.reserve(cfg::LORA_MTU);
+  std::vector<uint8_t> frame;        frame.reserve(cfg::LORA_MTU);
 
   for (auto& fr : parts) {
     FrameHeader hdr = fr.hdr;
     hdr.crc16 = 0;
     hdr.encode(aad.data(), aad.size());
     bool ok = true;
-    payload.clear();
-    if (willEnc) ok = enc_.encrypt(fr.payload.data(), fr.payload.size(), aad.data(), aad.size(), payload);
-    else payload.assign(fr.payload.begin(), fr.payload.end());
+    payload_raw.clear();
+    // шифруем или копируем полезные данные
+    if (willEnc) ok = enc_.encrypt(fr.payload.data(), fr.payload.size(), aad.data(), aad.size(), payload_raw);
+    else payload_raw.assign(fr.payload.begin(), fr.payload.end());
     if (!ok) { metrics_.enc_fail++; continue; }
+
+    // вставляем пилотные последовательности через фиксированный интервал
+    payload.clear();
+    size_t pos = 0;
+    while (pos < payload_raw.size()) {
+      size_t chunk = std::min((size_t)cfg::PILOT_INTERVAL, payload_raw.size() - pos);
+      payload.insert(payload.end(), payload_raw.begin() + pos, payload_raw.begin() + pos + chunk);
+      pos += chunk;
+      if (pos < payload_raw.size()) {
+        payload.insert(payload.end(), cfg::PILOT_SEQ, cfg::PILOT_SEQ + cfg::PILOT_SEQ_LEN);
+      }
+    }
 
     FrameHeader final_hdr = fr.hdr;
     if (willEnc) final_hdr.flags |= F_ENC;
@@ -50,10 +68,12 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     final_hdr.crc16 = crc;
     final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
 
-    const size_t frame_len = FRAME_HEADER_SIZE + payload.size();
+    // дублируем заголовок для неравномерной защиты
+    const size_t frame_len = 2*FRAME_HEADER_SIZE + payload.size();
     frame.resize(frame_len);
     memcpy(frame.data(), hdr_buf, FRAME_HEADER_SIZE);
-    memcpy(frame.data()+FRAME_HEADER_SIZE, payload.data(), payload.size());
+    memcpy(frame.data()+FRAME_HEADER_SIZE, hdr_buf, FRAME_HEADER_SIZE);
+    memcpy(frame.data()+2*FRAME_HEADER_SIZE, payload.data(), payload.size());
 
     Radio_sendRaw(frame.data(), frame.size());
     FrameLog::push('T', frame.data(), frame.size());

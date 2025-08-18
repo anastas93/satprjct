@@ -14,6 +14,11 @@ namespace cfg {
   static constexpr uint8_t  SEND_RETRY_COUNT_DEFAULT = 3;
   static constexpr uint16_t INTER_FRAME_GAP_MS     = 25;
 
+  // Пилоты: короткая последовательность для коррекции фазы
+  static constexpr uint8_t  PILOT_SEQ[2]           = {0x2C, 0xD3};
+  static constexpr size_t   PILOT_SEQ_LEN          = sizeof(PILOT_SEQ);
+  static constexpr size_t   PILOT_INTERVAL         = 64; // байт между пилотами
+
   // ENC
   static constexpr bool     ENCRYPTION_ENABLED_DEFAULT = false;
   static constexpr uint8_t  ENC_TAG_LEN            = 8;

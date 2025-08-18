@@ -75,4 +75,5 @@ static inline uint16_t crc16_ccitt(const uint8_t* data, size_t len, uint16_t ini
 }
 
 static constexpr uint16_t FRAME_HEADER_SIZE = FrameHeader::ENCODED_SIZE;
-static constexpr uint16_t FRAME_PAYLOAD_MAX = cfg::LORA_MTU - FRAME_HEADER_SIZE;
+// максимально возможная полезная нагрузка с учётом двух заголовков
+static constexpr uint16_t FRAME_PAYLOAD_MAX = cfg::LORA_MTU - 2*FRAME_HEADER_SIZE;

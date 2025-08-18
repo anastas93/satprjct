@@ -45,31 +45,43 @@ void RxPipeline::sendAck(uint32_t msg_id) {
 }
 
 void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
-  if (!frame || len < FRAME_HEADER_SIZE) return;
+  if (!frame || len < 2*FRAME_HEADER_SIZE) return;
+  // извлекаем и объединяем пары заголовков
+  uint8_t hdr1_buf[FRAME_HEADER_SIZE];
+  uint8_t hdr2_buf[FRAME_HEADER_SIZE];
+  memcpy(hdr1_buf, frame, FRAME_HEADER_SIZE);
+  memcpy(hdr2_buf, frame + FRAME_HEADER_SIZE, FRAME_HEADER_SIZE);
+  uint8_t hdr_buf[FRAME_HEADER_SIZE];
+  for (size_t i=0; i<FRAME_HEADER_SIZE; ++i) {
+    // простое soft-combining через OR
+    hdr_buf[i] = hdr1_buf[i] | hdr2_buf[i];
+  }
   FrameHeader hdr;
-  if (!FrameHeader::decode(hdr, frame, len)) return;
+  if (!FrameHeader::decode(hdr, hdr_buf, FRAME_HEADER_SIZE)) return;
   if (hdr.ver != cfg::PIPE_VERSION) return;
-  if (len != FRAME_HEADER_SIZE + hdr.payload_len) { metrics_.rx_drop_len_mismatch++; return; }
+  if (len != 2*FRAME_HEADER_SIZE + hdr.payload_len) { metrics_.rx_drop_len_mismatch++; return; }
 
   uint16_t got_crc = hdr.crc16;
   FrameHeader tmp = hdr; tmp.crc16 = 0;
-  uint8_t hdr_buf[FRAME_HEADER_SIZE];
   tmp.encode(hdr_buf, FRAME_HEADER_SIZE);
   uint16_t crc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
-  crc = crc16_ccitt(frame + FRAME_HEADER_SIZE, hdr.payload_len, crc);
+  crc = crc16_ccitt(frame + 2*FRAME_HEADER_SIZE, hdr.payload_len, crc);
   if (crc != got_crc) { metrics_.rx_crc_fail++; return; }
 
   FrameLog::push('R', frame, len);
 
   if (hdr.flags & F_ACK) { if (ack_cb_) ack_cb_(hdr.msg_id); return; }
 
-  const uint8_t* p = frame + FRAME_HEADER_SIZE;
+  const uint8_t* p = frame + 2*FRAME_HEADER_SIZE;
+  std::vector<uint8_t> data_wo_pilots;
+  stripPilots(p, hdr.payload_len, data_wo_pilots);
+
   std::vector<uint8_t> plain;
   if (hdr.flags & F_ENC) {
     std::vector<uint8_t> aad(hdr_buf, hdr_buf + FRAME_HEADER_SIZE);
-    if (!enc_.decrypt(p, hdr.payload_len, aad.data(), aad.size(), plain)) { metrics_.dec_fail_tag++; return; }
+    if (!enc_.decrypt(data_wo_pilots.data(), data_wo_pilots.size(), aad.data(), aad.size(), plain)) { metrics_.dec_fail_tag++; return; }
   } else {
-    plain.assign(p, p + hdr.payload_len);
+    plain = std::move(data_wo_pilots);
   }
 
   metrics_.rx_frames_ok++; metrics_.rx_bytes += len;
@@ -120,4 +132,27 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
     reasm_bytes_ -= as.bytes; assemblers_.erase(hdr.msg_id);
   }
   gc();
+}
+
+// удаление пилотов и обновление оценки фазы
+void RxPipeline::stripPilots(const uint8_t* src, size_t len, std::vector<uint8_t>& dst) {
+  dst.clear();
+  size_t pos = 0;
+  while (pos < len) {
+    size_t chunk = std::min((size_t)cfg::PILOT_INTERVAL, len - pos);
+    dst.insert(dst.end(), src + pos, src + pos + chunk);
+    pos += chunk;
+    if (pos < len) {
+      if (len - pos < cfg::PILOT_SEQ_LEN) break;
+      if (memcmp(src + pos, cfg::PILOT_SEQ, cfg::PILOT_SEQ_LEN) == 0) {
+        updatePhase(src + pos, cfg::PILOT_SEQ_LEN);
+      }
+      pos += cfg::PILOT_SEQ_LEN;
+    }
+  }
+}
+
+void RxPipeline::updatePhase(const uint8_t* pilot, size_t len) {
+  // заглушка: в реальном коде здесь будет оценка фазы по пилотам
+  (void)pilot; (void)len;
 }

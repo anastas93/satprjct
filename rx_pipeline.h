@@ -35,11 +35,15 @@ private:
   IEncryptor& enc_;
   PipelineMetrics& metrics_;
   MsgCb cb_ = nullptr;
-  AckCb ack_cb_ = nullptr;
-  std::map<uint32_t, AsmState> assemblers_;
-  std::deque<uint32_t> dup_window_;
-  std::unordered_set<uint32_t> dup_set_;
-  size_t reasm_bytes_ = 0;
+    AckCb ack_cb_ = nullptr;
+    std::map<uint32_t, AsmState> assemblers_;
+    std::deque<uint32_t> dup_window_;
+    std::unordered_set<uint32_t> dup_set_;
+    size_t reasm_bytes_ = 0;
+
+    // обработка пилотов
+    void stripPilots(const uint8_t* src, size_t len, std::vector<uint8_t>& dst);
+    void updatePhase(const uint8_t* pilot, size_t len);
 };
 
 void Radio_onReceive(const uint8_t* data, size_t len);
