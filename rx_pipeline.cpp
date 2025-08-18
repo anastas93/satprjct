@@ -2,6 +2,10 @@
 #include "rx_pipeline.h"
 #include "radio_adapter.h"
 #include "frame_log.h"
+#include "scrambler.h"
+#include "fec.h"
+#include "interleaver.h"
+#include "ack_bitmap.h"
 #include <string.h>
 #include <algorithm> // для std::erase_if
 
@@ -30,18 +34,35 @@ bool RxPipeline::isDup(uint32_t msg_id) {
 }
 
 void RxPipeline::sendAck(uint32_t msg_id) {
+  // обновляем наибольший подтверждённый кадр и bitmap
+  if (msg_id > ack_highest_) {
+    uint32_t shift = msg_id - ack_highest_;
+    if (shift >= 32) ack_bitmap_ = 0;
+    else ack_bitmap_ <<= shift;
+    ack_highest_ = msg_id;
+  }
+  uint32_t off = ack_highest_ - msg_id;
+  if (off > 0 && off <= 32) ack_bitmap_ |= (1u << (off - 1));
+
   FrameHeader ack{};
   ack.ver = cfg::PIPE_VERSION;
   ack.flags = F_ACK;
-  ack.msg_id = msg_id;
-  ack.frag_idx = 0; ack.frag_cnt = 0; ack.payload_len = 0; ack.crc16 = 0;
-  uint8_t buf[FRAME_HEADER_SIZE];
+  ack.msg_id = 0; // поле не используется
+  ack.frag_idx = 0; ack.frag_cnt = 0; ack.payload_len = 8;
+  ack.hdr_crc = 0; ack.frame_crc = 0;
+  uint8_t buf[FRAME_HEADER_SIZE + 8];
   ack.encode(buf, FRAME_HEADER_SIZE);
-  uint16_t crc = crc16_ccitt(buf, FRAME_HEADER_SIZE, 0xFFFF);
-  ack.crc16 = crc;
+  AckBitmap pl{ack_highest_, ack_bitmap_};
+  ack_encode(pl, buf + FRAME_HEADER_SIZE);
+  uint16_t hcrc = crc16_ccitt(buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
+  ack.hdr_crc = hcrc;
   ack.encode(buf, FRAME_HEADER_SIZE);
-  Radio_sendRaw(buf, FRAME_HEADER_SIZE);
-  FrameLog::push('T', buf, FRAME_HEADER_SIZE);
+  uint16_t fcrc = crc16_ccitt(buf, FRAME_HEADER_SIZE, 0xFFFF);
+  fcrc = crc16_ccitt(buf + FRAME_HEADER_SIZE, 8, fcrc);
+  ack.frame_crc = fcrc;
+  ack.encode(buf, FRAME_HEADER_SIZE);
+  Radio_sendRaw(buf, FRAME_HEADER_SIZE + 8);
+  FrameLog::push('T', buf, FRAME_HEADER_SIZE + 8);
 }
 
 void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
@@ -51,25 +72,56 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   if (hdr.ver != cfg::PIPE_VERSION) return;
   if (len != FRAME_HEADER_SIZE + hdr.payload_len) { metrics_.rx_drop_len_mismatch++; return; }
 
-  uint16_t got_crc = hdr.crc16;
-  FrameHeader tmp = hdr; tmp.crc16 = 0;
+  // Проверяем CRC заголовка
+  FrameHeader tmp = hdr; tmp.hdr_crc = 0; tmp.frame_crc = 0;
   uint8_t hdr_buf[FRAME_HEADER_SIZE];
   tmp.encode(hdr_buf, FRAME_HEADER_SIZE);
-  uint16_t crc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
-  crc = crc16_ccitt(frame + FRAME_HEADER_SIZE, hdr.payload_len, crc);
-  if (crc != got_crc) { metrics_.rx_crc_fail++; return; }
+  uint16_t hcrc2 = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
+  if (hcrc2 != hdr.hdr_crc) { metrics_.rx_crc_fail++; return; }
+
+  // Проверяем общий CRC кадра
+  tmp.hdr_crc = hdr.hdr_crc; tmp.frame_crc = 0;
+  tmp.encode(hdr_buf, FRAME_HEADER_SIZE);
+  uint16_t fcrc2 = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
+  fcrc2 = crc16_ccitt(frame + FRAME_HEADER_SIZE, hdr.payload_len, fcrc2);
+  if (fcrc2 != hdr.frame_crc) { metrics_.rx_crc_fail++; return; }
 
   FrameLog::push('R', frame, len);
 
-  if (hdr.flags & F_ACK) { if (ack_cb_) ack_cb_(hdr.msg_id); return; }
+  if (hdr.flags & F_ACK) {
+    if (hdr.payload_len == 8) {
+      AckBitmap a{}; ack_decode(a, frame + FRAME_HEADER_SIZE);
+      if (ack_cb_) ack_cb_(a.highest, a.bitmap);
+    }
+    return;
+  }
 
   const uint8_t* p = frame + FRAME_HEADER_SIZE;
+  std::vector<uint8_t> data(p, p + hdr.payload_len);
+
+  if (interleave_depth_ > 1) {
+    std::vector<uint8_t> tmp;
+    deinterleave_bytes(data.data(), data.size(), interleave_depth_, tmp);
+    data.swap(tmp);
+  }
+
+  if (fec_enabled_) {
+    std::vector<uint8_t> tmp;
+    if (!fec_decode_repeat(data.data(), data.size(), tmp)) {
+      metrics_.rx_fec_fail++;
+      return;
+    }
+    data.swap(tmp);
+  }
+
+  lfsr_descramble(data.data(), data.size(), (uint16_t)hdr.msg_id);
   std::vector<uint8_t> plain;
   if (hdr.flags & F_ENC) {
+    hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
     std::vector<uint8_t> aad(hdr_buf, hdr_buf + FRAME_HEADER_SIZE);
-    if (!enc_.decrypt(p, hdr.payload_len, aad.data(), aad.size(), plain)) { metrics_.dec_fail_tag++; return; }
+    if (!enc_.decrypt(data.data(), data.size(), aad.data(), aad.size(), plain)) { metrics_.dec_fail_tag++; return; }
   } else {
-    plain.assign(p, p + hdr.payload_len);
+    plain = std::move(data);
   }
 
   metrics_.rx_frames_ok++; metrics_.rx_bytes += len;

@@ -14,12 +14,14 @@
 class RxPipeline {
 public:
   using MsgCb = std::function<void(uint32_t, const uint8_t*, size_t)>;
-  using AckCb = std::function<void(uint32_t)>;
+  using AckCb = std::function<void(uint32_t, uint32_t)>; // highest, bitmap
 
   RxPipeline(IEncryptor& enc, PipelineMetrics& m);
   void onReceive(const uint8_t* frame, size_t len);
   void setMessageCallback(MsgCb cb) { cb_ = cb; }
   void setAckCallback(AckCb cb) { ack_cb_ = cb; }
+  void setFecEnabled(bool v) { fec_enabled_ = v; }
+  void setInterleaveDepth(uint8_t d) { interleave_depth_ = d; }
 private:
   struct AsmState {
     uint32_t msg_id;
@@ -36,10 +38,14 @@ private:
   PipelineMetrics& metrics_;
   MsgCb cb_ = nullptr;
   AckCb ack_cb_ = nullptr;
+  uint32_t ack_highest_ = 0;       // наибольший подтверждённый кадр
+  uint32_t ack_bitmap_ = 0;        // bitmap последних 32 кадров
   std::map<uint32_t, AsmState> assemblers_;
   std::deque<uint32_t> dup_window_;
   std::unordered_set<uint32_t> dup_set_;
   size_t reasm_bytes_ = 0;
+  bool fec_enabled_ = cfg::FEC_ENABLED_DEFAULT;
+  uint8_t interleave_depth_ = cfg::INTERLEAVER_DEPTH_DEFAULT;
 };
 
 void Radio_onReceive(const uint8_t* data, size_t len);

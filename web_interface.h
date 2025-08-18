@@ -1,6 +1,6 @@
 #pragma once
-const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
+// Встроенный HTML для веб-интерфейса устройства
+const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">

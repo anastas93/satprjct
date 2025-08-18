@@ -4,6 +4,9 @@
 #include "config.h"
 #include "radio_adapter.h"
 #include "frame_log.h"
+#include "scrambler.h"
+#include "fec.h"
+#include "interleaver.h"
 #include <Arduino.h>
 #include <string.h>
 #include <array>
@@ -31,7 +34,7 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
 
   for (auto& fr : parts) {
     FrameHeader hdr = fr.hdr;
-    hdr.crc16 = 0;
+    hdr.hdr_crc = 0; hdr.frame_crc = 0;
     hdr.encode(aad.data(), aad.size());
     bool ok = true;
     payload.clear();
@@ -39,15 +42,35 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     else payload.assign(fr.payload.begin(), fr.payload.end());
     if (!ok) { metrics_.enc_fail++; continue; }
 
+    // Скремблирование полезной нагрузки для подавления длительных последовательностей
+    lfsr_scramble(payload.data(), payload.size(), (uint16_t)hdr.msg_id);
+
+    // Простейший FEC повторным кодом
+    if (fec_enabled_) {
+      std::vector<uint8_t> fec_buf;
+      fec_encode_repeat(payload.data(), payload.size(), fec_buf);
+      payload.swap(fec_buf);
+    }
+
+    // Байтовый интерливинг
+    if (interleave_depth_ > 1) {
+      std::vector<uint8_t> inter_buf;
+      interleave_bytes(payload.data(), payload.size(), interleave_depth_, inter_buf);
+      payload.swap(inter_buf);
+    }
+
     FrameHeader final_hdr = fr.hdr;
     if (willEnc) final_hdr.flags |= F_ENC;
     final_hdr.payload_len = (uint16_t)payload.size();
-    final_hdr.crc16 = 0;
+    final_hdr.hdr_crc = 0; final_hdr.frame_crc = 0;
     uint8_t hdr_buf[FRAME_HEADER_SIZE];
     final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
-    uint16_t crc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
-    crc = crc16_ccitt(payload.data(), payload.size(), crc);
-    final_hdr.crc16 = crc;
+    uint16_t hcrc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
+    final_hdr.hdr_crc = hcrc;
+    final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
+    uint16_t fcrc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
+    fcrc = crc16_ccitt(payload.data(), payload.size(), fcrc);
+    final_hdr.frame_crc = fcrc;
     final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
 
     const size_t frame_len = FRAME_HEADER_SIZE + payload.size();
@@ -64,8 +87,11 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
   metrics_.tx_msgs++;
 }
 
-void TxPipeline::notifyAck(uint32_t msg_id) {
-  if (waiting_ack_ && msg_id == waiting_id_) ack_received_ = true;
+void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
+  if (!waiting_ack_) return;
+  if (waiting_id_ <= highest) { ack_received_ = true; return; }
+  uint32_t diff = waiting_id_ - highest - 1;
+  if (diff < 32 && (bitmap & (1u << diff))) ack_received_ = true;
 }
 
 void TxPipeline::loop() {

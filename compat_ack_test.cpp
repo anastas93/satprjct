@@ -35,6 +35,9 @@ bool Radio_setSpreadingFactor(uint8_t) { return true; }
 bool Radio_setCodingRate(uint8_t) { return true; }
 bool Radio_setTxPower(int8_t) { return true; }
 void Radio_forceRx() {}
+bool Radio_getSNR(float& snr) { snr = 0.0f; return true; }
+bool Radio_getEbN0(float& ebn0) { ebn0 = 0.0f; return true; }
+bool Radio_isSynced() { return true; }
 bool Radio_setFrequency(uint32_t) { return true; }
 void Radio_onReceive(const uint8_t*, size_t) {}
 
@@ -63,9 +66,9 @@ int main() {
   rx_remote.setMessageCallback([&](uint32_t, const uint8_t* d, size_t n) {
     received.assign(d, d + n);
   });
-  rx_local.setAckCallback([&](uint32_t id) {
+  rx_local.setAckCallback([&](uint32_t hi, uint32_t bm) {
     ack_ok = true;
-    tx.notifyAck(id);
+    tx.notifyAck(hi, bm);
   });
 
   // Отправляем сообщение с запросом ACK
