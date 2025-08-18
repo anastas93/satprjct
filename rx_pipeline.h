@@ -23,6 +23,14 @@ public:
   enum FecMode : uint8_t { FEC_OFF=0, FEC_RS_VIT=1, FEC_LDPC=2 };
   void setFecMode(FecMode m) { fec_mode_ = m; fec_enabled_ = (m != FEC_OFF); }
   void setInterleaveDepth(uint8_t d) { interleave_depth_ = d; }
+  // Установка интервала между пилотами (0 = выключить)
+  void setPilotInterval(uint16_t b) { pilot_interval_bytes_ = b; }
+  // Управление дублированием заголовка
+  void setHeaderDup(bool v) { hdr_dup_enabled_ = v; }
+  // Настройка окна SR-ARQ
+  void setWindowSize(uint8_t w) { window_size_ = w; }
+  // Установка интервала агрегирования ACK
+  void setAckAgg(uint16_t ms) { ack_agg_ms_ = ms; }
 private:
   struct AsmState {
     uint32_t msg_id;
@@ -50,6 +58,10 @@ private:
   bool fec_enabled_ = cfg::FEC_ENABLED_DEFAULT;
   FecMode fec_mode_ = (FecMode)cfg::FEC_MODE_DEFAULT;
   uint8_t interleave_depth_ = cfg::INTERLEAVER_DEPTH_DEFAULT;
+  uint16_t pilot_interval_bytes_ = cfg::PILOT_INTERVAL_BYTES_DEFAULT;
+  bool hdr_dup_enabled_ = cfg::HEADER_DUP_DEFAULT;
+  uint8_t window_size_ = cfg::SR_WINDOW_DEFAULT;
+  uint16_t ack_agg_ms_ = cfg::T_ACK_AGG_DEFAULT;
   float phase_est_ = 0.0f; // текущая оценка фазы
 };
 

@@ -14,8 +14,8 @@ namespace cfg {
   static constexpr uint16_t ACK_TIMEOUT   = 1200;   // мс
   // максимальное число повторов при отсутствии ACK
   static constexpr uint8_t  MAX_RETRIES   = 3;
-  // агрегирование ACK в один кадр в течение заданного времени
-  static constexpr uint16_t T_ACK_AGG     = 50;     // мс
+  // интервал агрегирования ACK (значение по умолчанию)
+  static constexpr uint16_t T_ACK_AGG_DEFAULT = 50;     // мс
   // совместимость со старым API
   static constexpr uint16_t SEND_RETRY_MS_DEFAULT  = ACK_TIMEOUT;
   static constexpr uint8_t  SEND_RETRY_COUNT_DEFAULT = MAX_RETRIES;
@@ -44,15 +44,20 @@ namespace cfg {
 
   static constexpr uint8_t  RX_DUP_WINDOW          = 64;
 
+  // SR-ARQ окно и дублирование заголовка
+  static constexpr uint8_t  SR_WINDOW_DEFAULT      = 8;
+  static constexpr bool     HEADER_DUP_DEFAULT     = true;
+
   // Настройка временных слотов TDD (мс)
   static constexpr uint16_t TDD_TX_WINDOW_MS  = 1000; // окно передачи
   static constexpr uint16_t TDD_ACK_WINDOW_MS = 300;  // окно ожидания подтверждений
   static constexpr uint16_t TDD_GUARD_MS      = 50;   // защитный интервал
 
-  // Пилотные вставки и неравномерная защита
-  static constexpr size_t   PILOT_INTERVAL_BYTES = 64;    // интервал между пилотами
-  static constexpr uint8_t  PILOT_SEQ[2]        = {0x55, 0x2D}; // короткий пилот
-  static constexpr size_t   PILOT_LEN           = sizeof(PILOT_SEQ);
+    // Пилотные вставки и неравномерная защита
+    // значение по умолчанию, может изменяться через веб-интерфейс
+    static constexpr size_t   PILOT_INTERVAL_BYTES_DEFAULT = 64; // интервал между пилотами
+    static constexpr uint8_t  PILOT_SEQ[2]        = {0x55, 0x2D}; // короткий пилот
+    static constexpr size_t   PILOT_LEN           = sizeof(PILOT_SEQ);
 
   // Additional UART used for Radxa Zero 3W command interface
   // This UART allows bridging of commands and payloads to an external host.

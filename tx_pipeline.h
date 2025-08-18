@@ -19,6 +19,14 @@ public:
   enum FecMode : uint8_t { FEC_OFF=0, FEC_RS_VIT=1, FEC_LDPC=2 };
   void setFecMode(FecMode m) { fec_mode_ = m; fec_enabled_ = (m != FEC_OFF); }
   void setInterleaveDepth(uint8_t d) { interleave_depth_ = d; }
+  // Установка максимального размера полезной нагрузки в байтах
+  void setPayloadLen(uint16_t len) { payload_len_ = len; }
+  // Установка интервала пилотных вставок (0 = выключить)
+  void setPilotInterval(uint16_t b) { pilot_interval_bytes_ = b; }
+  // Управление дублированием заголовка
+  void setHeaderDup(bool v) { hdr_dup_enabled_ = v; }
+  // Установка размера окна SR-ARQ
+  void setWindowSize(uint8_t w) { window_size_ = w; }
   // Поместить сообщение KEYCHG <kid> в очередь с требованием ACK
   void queueKeyChange(uint8_t kid);
 private:
@@ -33,8 +41,12 @@ private:
   PipelineMetrics& metrics_;
 
   bool ack_enabled_ = cfg::ACK_ENABLED_DEFAULT;
-  // окно нен подтверждённых сообщений
-  static constexpr size_t WINDOW_SIZE = 8;
+  // интервал вставки пилотов в байтах
+  uint16_t pilot_interval_bytes_ = cfg::PILOT_INTERVAL_BYTES_DEFAULT;
+  // флаг дублирования заголовка
+  bool hdr_dup_enabled_ = cfg::HEADER_DUP_DEFAULT;
+  // окно неподтверждённых сообщений
+  uint8_t window_size_ = cfg::SR_WINDOW_DEFAULT;
   struct Pending {
     OutgoingMessage msg;          // сохранённое сообщение
     uint8_t retries_left;         // сколько повторов осталось

@@ -8,6 +8,7 @@
 #include "ack_bitmap.h"
 #include "tdd_scheduler.h"
 #include <string.h>
+#include <vector>
 #include <algorithm> // для std::erase_if
 #include <stdlib.h>
 #include "encryptor_ccm.h"
@@ -51,18 +52,18 @@ bool RxPipeline::isDup(uint32_t msg_id) {
 void RxPipeline::sendAck(uint32_t msg_id) {
   // Отправляем ACK только в соответствующее окно
   if (!tdd::isAckPhase()) return;
-  // обновляем наибольший подтверждённый кадр и bitmap для окна W=8
+  // обновляем наибольший подтверждённый кадр и bitmap для окна W
   if (msg_id > ack_highest_) {
     uint32_t shift = msg_id - ack_highest_;
-    if (shift >= 8) ack_bitmap_ = 0;
+    if (shift >= window_size_) ack_bitmap_ = 0;
     else ack_bitmap_ <<= shift;
     ack_highest_ = msg_id;
   }
   uint32_t off = ack_highest_ - msg_id;
-  if (off > 0 && off <= 8) ack_bitmap_ |= (1u << (off - 1));
+  if (off > 0 && off <= window_size_) ack_bitmap_ |= (1u << (off - 1));
 
   // агрегируем ACK по времени
-  if (millis() - last_ack_sent_ms_ < cfg::T_ACK_AGG) return;
+  if (millis() - last_ack_sent_ms_ < ack_agg_ms_) return;
 
   FrameHeader ack{};
   ack.ver = cfg::PIPE_VERSION;
@@ -70,20 +71,33 @@ void RxPipeline::sendAck(uint32_t msg_id) {
   ack.msg_id = 0; // поле не используется
   ack.frag_idx = 0; ack.frag_cnt = 0; ack.payload_len = 8;
   ack.hdr_crc = 0; ack.frame_crc = 0;
-  uint8_t buf[FRAME_HEADER_SIZE + 8];
-  ack.encode(buf, FRAME_HEADER_SIZE);
+  uint8_t hdr_buf[FRAME_HEADER_SIZE];
+  ack.encode(hdr_buf, FRAME_HEADER_SIZE);
   AckBitmap pl{ack_highest_, ack_bitmap_};
-  ack_encode(pl, buf + FRAME_HEADER_SIZE);
-  uint16_t hcrc = crc16_ccitt(buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
+  uint8_t payload[8];
+  ack_encode(pl, payload);
+  uint16_t hcrc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
   ack.hdr_crc = hcrc;
-  ack.encode(buf, FRAME_HEADER_SIZE);
-  uint16_t fcrc = crc16_ccitt(buf, FRAME_HEADER_SIZE, 0xFFFF);
-  fcrc = crc16_ccitt(buf + FRAME_HEADER_SIZE, 8, fcrc);
+  ack.encode(hdr_buf, FRAME_HEADER_SIZE);
+  uint16_t fcrc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
+  fcrc = crc16_ccitt(payload, 8, fcrc);
   ack.frame_crc = fcrc;
-  ack.encode(buf, FRAME_HEADER_SIZE);
-  Radio_sendRaw(buf, FRAME_HEADER_SIZE + 8);
+  ack.encode(hdr_buf, FRAME_HEADER_SIZE);
+
+  size_t frame_len = FRAME_HEADER_SIZE + 8;
+  if (hdr_dup_enabled_) frame_len += FRAME_HEADER_SIZE;
+  std::vector<uint8_t> frame(frame_len);
+  memcpy(frame.data(), hdr_buf, FRAME_HEADER_SIZE);
+  size_t off2 = FRAME_HEADER_SIZE;
+  if (hdr_dup_enabled_) {
+    memcpy(frame.data()+off2, hdr_buf, FRAME_HEADER_SIZE);
+    off2 += FRAME_HEADER_SIZE;
+  }
+  memcpy(frame.data()+off2, payload, 8);
+
+  Radio_sendRaw(frame.data(), frame.size());
   // логируем отправленный ACK
-  FrameLog::push('T', buf, FRAME_HEADER_SIZE + 8,
+  FrameLog::push('T', frame.data(), frame.size(),
                  0, 0, 0, 0.0f, 0, 0, 0, 0);
   last_ack_sent_ms_ = millis();
   // После передачи возвращаемся в режим приёма
@@ -93,13 +107,15 @@ void RxPipeline::sendAck(uint32_t msg_id) {
 void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   // Держим радио в нужном состоянии
   tdd::maintain();
-  if (!frame || len < FRAME_HEADER_SIZE*2) return;
+  size_t hdr_len = hdr_dup_enabled_ ? FRAME_HEADER_SIZE*2 : FRAME_HEADER_SIZE;
+  if (!frame || len < hdr_len) return;
   std::vector<uint8_t> hdr_buf;
-  softCombinePairs(frame, FRAME_HEADER_SIZE*2, hdr_buf);
+  if (hdr_dup_enabled_) softCombinePairs(frame, FRAME_HEADER_SIZE*2, hdr_buf);
+  else hdr_buf.assign(frame, frame + FRAME_HEADER_SIZE);
   FrameHeader hdr;
   if (!FrameHeader::decode(hdr, hdr_buf.data(), hdr_buf.size())) return;
   if (hdr.ver != cfg::PIPE_VERSION) return;
-  if (len != FRAME_HEADER_SIZE*2 + hdr.payload_len) { metrics_.rx_drop_len_mismatch++; return; }
+  if (len != hdr_len + hdr.payload_len) { metrics_.rx_drop_len_mismatch++; return; }
 
   // Проверяем CRC заголовка
   FrameHeader tmp = hdr; tmp.hdr_crc = 0; tmp.frame_crc = 0;
@@ -111,7 +127,7 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   tmp.hdr_crc = hdr.hdr_crc; tmp.frame_crc = 0;
   tmp.encode(hdr_buf.data(), FRAME_HEADER_SIZE);
   uint16_t fcrc2 = crc16_ccitt(hdr_buf.data(), FRAME_HEADER_SIZE, 0xFFFF);
-  fcrc2 = crc16_ccitt(frame + FRAME_HEADER_SIZE*2, hdr.payload_len, fcrc2);
+  fcrc2 = crc16_ccitt(frame + hdr_len, hdr.payload_len, fcrc2);
   if (fcrc2 != hdr.frame_crc) { metrics_.rx_crc_fail++; return; }
 
   float snr = 0.0f;
@@ -122,22 +138,23 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
     FrameLog::push('R', frame, len, hdr.msg_id, fec_mode_, interleave_depth_,
                    snr, 0, 0, 0, 0);
     if (hdr.payload_len == 8) {
-      AckBitmap a{}; ack_decode(a, frame + FRAME_HEADER_SIZE);
+      const uint8_t* pl = frame + hdr_len;
+      AckBitmap a{}; ack_decode(a, pl);
       if (ack_cb_) ack_cb_(a.highest, a.bitmap);
     }
     return;
   }
 
-  const uint8_t* p = frame + FRAME_HEADER_SIZE*2;
+  const uint8_t* p = frame + hdr_len;
   std::vector<uint8_t> data(p, p + hdr.payload_len);
 
   // Удаляем пилоты и обновляем фазу
-  if (!data.empty()) {
-    size_t pos = cfg::PILOT_INTERVAL_BYTES;
+  if (pilot_interval_bytes_ > 0 && !data.empty()) {
+    size_t pos = pilot_interval_bytes_;
     while (pos + cfg::PILOT_LEN <= data.size()) {
       updatePhaseFromPilot(data.data() + pos, cfg::PILOT_LEN);
       data.erase(data.begin() + pos, data.begin() + pos + cfg::PILOT_LEN);
-      pos += cfg::PILOT_INTERVAL_BYTES;
+      pos += pilot_interval_bytes_;
     }
   }
 

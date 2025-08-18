@@ -118,8 +118,33 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         <label for="retryMSInput">RetryMS:</label>
         <input id="retryMSInput" type="number" min="100" max="10000" step="100" value="" title="Delay between retries (ms)">
       </div>
-    </div>
-  </details>
+      <!-- Дополнительные параметры надёжности -->
+      <div class="row">
+        <label for="fecSelect">FEC:</label>
+        <select id="fecSelect" title="Режим коррекции ошибок">
+          <option value="off">off</option>
+          <option value="rs_vit">rs_vit</option>
+          <option value="ldpc">ldpc</option>
+        </select>
+        <label for="interSelect">Interleave:</label>
+        <select id="interSelect" title="Глубина интерливера">
+          <option value="1">1</option>
+          <option value="4">4</option>
+          <option value="8">8</option>
+          <option value="16">16</option>
+        </select>
+          <label for="payloadInput">Payload:</label>
+          <input id="payloadInput" type="number" min="1" max="241" step="1" value="" title="Размер полезной нагрузки (байт)">
+          <label for="pilotInput">Pilot:</label>
+          <input id="pilotInput" type="number" min="0" max="512" step="1" value="" title="Интервал пилотов, 0=выкл (байт)">
+          <label><input type="checkbox" id="dupChk" %DUP% title="Дублировать заголовок (UEP)"> Dup</label>
+          <label for="winInput">Win:</label>
+          <input id="winInput" type="number" min="1" max="32" step="1" value="8" title="Размер окна SR-ARQ">
+          <label for="ackAggInput">AckAgg:</label>
+          <input id="ackAggInput" type="number" min="0" max="1000" step="10" value="50" title="Интервал агрегации ACK (мс)">
+        </div>
+      </div>
+    </details>
   <!-- Security -->
   <details>
     <summary>Security</summary>
