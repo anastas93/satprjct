@@ -181,6 +181,8 @@ void handleSetAck();
 void handleToggleEnc();
 void handleMetrics();
 void handlePing();
+void handleLinkDiag(); // выдача метрик канала
+void handleSatPingAdv(); // расширенный satping
 void handleSetRetryN();
 void handleSetRetryMS();
 void handleSetKid();
@@ -749,6 +751,48 @@ void handleMetrics() {
            g_metrics.rx_dup_msgs, g_metrics.rx_crc_fail, g_metrics.rx_drop_len_mismatch,
            g_metrics.rx_assem_drop_ttl, g_metrics.rx_assem_drop_overflow, g_metrics.dec_fail_tag, g_metrics.dec_fail_other);
   server.send(200, "text/plain", buf);
+}
+
+// Обработчик /linkdiag: отдаёт короткие метрики канала в JSON
+void handleLinkDiag() {
+  String json = "{";
+  json += "\"per\":" + String(g_metrics.per_ema.value, 3);
+  json += ",\"rtt_p50\":" + String(g_metrics.rtt_ema_ms.value, 2);
+  json += ",\"rtt_p95\":" + String(g_metrics.rtt_ema_ms.value, 2);
+  json += ",\"goodput\":" + String(g_metrics.goodput_ema.value, 2);
+  json += ",\"profile\":\"" + String((int)g_bank) + ":" + String(g_preset) + "\"";
+  json += ",\"bitmap\":\"\"";
+  json += ",\"tx_frames\":" + String(g_metrics.tx_frames);
+  json += ",\"rx_frames\":" + String(g_metrics.rx_frames_ok);
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+// Обработчик расширенного пинга SatPingRun
+void handleSatPingAdv() {
+  PingOptions opts; // значения по умолчанию уже заданы
+  if (server.hasArg("count")) opts.count = server.arg("count").toInt();
+  if (server.hasArg("interval")) opts.interval_ms = server.arg("interval").toInt();
+  if (server.hasArg("timeout")) opts.timeout_ms = server.arg("timeout").toInt();
+  if (server.hasArg("size")) opts.frag_size = server.arg("size").toInt();
+  if (server.hasArg("duration")) opts.duration_min = server.arg("duration").toInt();
+  if (server.hasArg("fec")) {
+    String f = server.arg("fec");
+    if (f == "rs_vit") opts.fec_mode = PingFecMode::FEC_RS_VIT;
+    else if (f == "ldpc") opts.fec_mode = PingFecMode::FEC_LDPC;
+    else if (f == "rep2") opts.fec_mode = PingFecMode::FEC_REPEAT2;
+  }
+  if (server.hasArg("retries")) opts.retries = server.arg("retries").toInt();
+  PingStats st; // сюда соберём статистику
+  SatPingRun(opts, st);
+  String json = String("{\"sent\":") + st.sent +
+                ",\"received\":" + st.received +
+                ",\"crc_fail\":" + st.crc_fail +
+                ",\"fec_fail\":" + st.fec_fail +
+                ",\"no_ack\":" + st.no_ack +
+                ",\"timeout\":" + st.timeout +
+                ",\"retrans\":" + st.retransmits + "}";
+  server.send(200, "application/json", json);
 }
 
 void handlePing() {
@@ -2284,7 +2328,9 @@ void setup() {
     server.on("/setack", handleSetAck);
     server.on("/toggleenc", handleToggleEnc);
   server.on("/metrics", handleMetrics);
+  server.on("/linkdiag", handleLinkDiag);
   server.on("/ping", handlePing);
+  server.on("/satping", handleSatPingAdv);
   server.on("/setretryn", handleSetRetryN);
   server.on("/setretryms", handleSetRetryMS);
   server.on("/setkid", handleSetKid);
