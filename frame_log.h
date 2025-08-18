@@ -13,4 +13,6 @@ namespace FrameLog {
             uint16_t rtt_estimate = 0);
   // Выводим последние N записей на переданный поток
   void dump(Print& out, unsigned int count);
+  // вернуть последние записи в виде JSON массива
+  String json(unsigned int count, int drop_filter = -1);
 }

@@ -70,3 +70,33 @@ void FrameLog::dump(Print& out, unsigned int count) {
     out.println();
   }
 }
+
+// Формирует JSON с последними записями, опционально фильтруя по drop_reason
+String FrameLog::json(unsigned int count, int drop_filter) {
+  String s = "[";
+  if (stored == 0) { s += ']'; return s; }
+  if (count == 0 || count > stored) count = stored;
+  size_t idx = (head + CAP - stored) % CAP;
+  size_t to_print = stored;
+  if (to_print > count) { idx = (idx + (to_print - count)) % CAP; to_print = count; }
+  bool first = true;
+  for (size_t i = 0; i < to_print; ++i) {
+    const Item& it = ring[(idx + i) % CAP];
+    if (drop_filter >= 0 && it.drop_reason != drop_filter) continue;
+    if (!first) s += ','; first = false;
+    s += '{';
+    s += "\"dir\":\""; s += it.dir; s += "\",";
+    s += "\"seq\":"; s += String((unsigned long)it.seq); s += ',';
+    s += "\"len\":"; s += String((unsigned)it.len); s += ',';
+    s += "\"fec\":"; s += String((unsigned)it.fec_mode); s += ',';
+    s += "\"inter\":"; s += String((unsigned)it.interleave); s += ',';
+    s += "\"snr\":"; s += String(it.snr_ebn0, 1); s += ',';
+    s += "\"rs\":"; s += String((unsigned)it.rs_corr); s += ',';
+    s += "\"vit\":"; s += String((unsigned)it.viterbi); s += ',';
+    s += "\"drop\":"; s += String((unsigned)it.drop_reason); s += ',';
+    s += "\"rtt\":"; s += String((unsigned)it.rtt);
+    s += '}';
+  }
+  s += ']';
+  return s;
+}

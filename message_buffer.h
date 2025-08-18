@@ -29,6 +29,8 @@ public:
   void     archive(uint32_t msg_id);
   // возвращает одно сообщение из архива в очередь
   bool     restoreArchived();
+  // получить список идентификаторов в архиве
+  void     listArchived(std::vector<uint32_t>& out) const;
 
   size_t   size() const;
 

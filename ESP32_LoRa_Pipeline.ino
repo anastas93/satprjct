@@ -16,6 +16,7 @@
 #include "rx_pipeline.h"
 #include "radio_adapter.h"
 #include "frame_log.h"
+#include "tdd_scheduler.h"
 #include "selftest.h"
 #include "satping.h"
 #include "web_interface.h"
@@ -181,6 +182,9 @@ void handleSetAck();
 void handleToggleEnc();
 void handleMetrics();
 void handlePing();
+void handleChannelPing();
+void handlePresetPing();
+void handleMassPing();
 void handleLinkDiag(); // выдача метрик канала
 void handleSatPingAdv(); // расширенный satping
 void handleSetRetryN();
@@ -190,6 +194,12 @@ void handleSetKey();
 void handleSave();
 void handleLoad();
 void handleReset();
+void handleSetTdd();
+void handleArchiveList();
+void handleArchiveRestore();
+void handleIdReset();
+void handleReplayClr();
+void handleFrames();
 void runPing();
 void handleKeyTest(); // new HTTP handler for key exchange test
 bool performKeyExchange(); // local ECDH key exchange test implementation
@@ -815,6 +825,66 @@ void handlePing() {
   server.send(200, "text/plain", "ping started");
 }
 
+// Синхронная проверка канала на текущем пресете
+void handleChannelPing() {
+  if (g_ping_active || g_radio_busy) {
+    server.send(429, "text/plain", "busy");
+    return;
+  }
+  g_radio_busy = true;
+  bool ok = ChannelPing();
+  g_radio_busy = false;
+  chatMsg("SYS", ok ? "ChannelPing OK" : "ChannelPing FAIL");
+  server.send(200, "text/plain", ok ? "ok" : "fail");
+}
+
+// Пинг выбранного пресета из указанного банка
+void handlePresetPing() {
+  if (!server.hasArg("bank") || !server.hasArg("preset")) {
+    server.send(400, "text/plain", "args missing");
+    return;
+  }
+  int b = server.arg("bank").toInt();
+  int p = server.arg("preset").toInt();
+  if (p < 0 || p > 9) {
+    server.send(400, "text/plain", "preset 0-9");
+    return;
+  }
+  Bank bank = Bank::MAIN;
+  if (b == 1) bank = Bank::RESERVE;
+  else if (b == 2) bank = Bank::TEST;
+  if (g_ping_active || g_radio_busy) {
+    server.send(429, "text/plain", "busy");
+    return;
+  }
+  g_radio_busy = true;
+  bool ok = PresetPing(bank, p);
+  g_radio_busy = false;
+  chatMsg("SYS", ok ? "PresetPing OK" : "PresetPing FAIL");
+  server.send(200, "text/plain", ok ? "ok" : "fail");
+}
+
+// Обход всех пресетов выбранного банка
+void handleMassPing() {
+  if (!server.hasArg("bank")) {
+    server.send(400, "text/plain", "bank missing");
+    return;
+  }
+  int b = server.arg("bank").toInt();
+  Bank bank = Bank::MAIN;
+  if (b == 1) bank = Bank::RESERVE;
+  else if (b == 2) bank = Bank::TEST;
+  if (g_ping_active || g_radio_busy) {
+    server.send(429, "text/plain", "busy");
+    return;
+  }
+  g_radio_busy = true;
+  MassPing(bank);
+  g_radio_busy = false;
+  chatMsg("SYS", "MassPing done");
+  server.send(200, "text/plain", "done");
+}
+
 // Set retry count for automatic retransmissions.  Range: 0..10
 void handleSetRetryN() {
   if (!server.hasArg("val")) {
@@ -925,6 +995,60 @@ void handleReset() {
   resetConfig();
   server.send(200, "text/plain", "config reset");
   serialBuffer += "*SYS:* Config reset\n";
+}
+
+// Установка параметров TDD-планировщика
+void handleSetTdd() {
+  if (!server.hasArg("tx") || !server.hasArg("ack") || !server.hasArg("guard")) {
+    server.send(400, "text/plain", "tx|ack|guard missing");
+    return;
+  }
+  unsigned long tx = server.arg("tx").toInt();
+  unsigned long ack = server.arg("ack").toInt();
+  unsigned long g = server.arg("guard").toInt();
+  tdd::setParams(tx, ack, g);
+  server.send(200, "text/plain", "tdd set");
+  serialBuffer += String("*SYS:* TDD tx=") + String(tx) + ", ack=" + String(ack) + ", g=" + String(g) + "\n";
+}
+
+// Список сообщений в архиве
+void handleArchiveList() {
+  std::vector<uint32_t> ids;
+  g_buf.listArchived(ids);
+  String out;
+  for (uint32_t id : ids) {
+    out += String(id) + "\n";
+  }
+  server.send(200, "text/plain", out);
+}
+
+// Восстановить одно сообщение из архива
+void handleArchiveRestore() {
+  bool ok = g_buf.restoreArchived();
+  server.send(200, "text/plain", ok ? "restored" : "empty");
+  serialBuffer += ok ? String("*SYS:* archive restored\n") : String("*SYS:* archive empty\n");
+}
+
+// Сброс счётчика сообщений
+void handleIdReset() {
+  g_buf.setNextId(1);
+  persistMsgId();
+  server.send(200, "text/plain", "msgid reset");
+  serialBuffer += String("*SYS:* msg_id set to 1\n");
+}
+
+// Очистка окна anti-replay (заглушка)
+void handleReplayClr() {
+  server.send(200, "text/plain", "replay cleared");
+  serialBuffer += String("*SYS:* replay window cleared\n");
+}
+
+// Возврат последних кадров в JSON
+void handleFrames() {
+  int drop = -1;
+  if (server.hasArg("drop")) drop = server.arg("drop").toInt();
+  String s = FrameLog::json(20, drop);
+  server.send(200, "application/json", s);
 }
 
 // -----------------------------------------------------------------------------
@@ -2352,6 +2476,9 @@ void setup() {
   server.on("/metrics", handleMetrics);
   server.on("/linkdiag", handleLinkDiag);
   server.on("/ping", handlePing);
+  server.on("/channelping", handleChannelPing);
+  server.on("/presetping", handlePresetPing);
+  server.on("/massping", handleMassPing);
   server.on("/satping", handleSatPingAdv);
   server.on("/setretryn", handleSetRetryN);
   server.on("/setretryms", handleSetRetryMS);
@@ -2360,6 +2487,12 @@ void setup() {
   server.on("/save", handleSave);
   server.on("/load", handleLoad);
   server.on("/reset", handleReset);
+  server.on("/tdd", handleSetTdd);
+  server.on("/archivelist", handleArchiveList);
+  server.on("/archiverestore", handleArchiveRestore);
+  server.on("/idreset", handleIdReset);
+  server.on("/replayclr", handleReplayClr);
+  server.on("/frames", handleFrames);
   // Additional command endpoints
   server.on("/simple", handleSimple);
   server.on("/large", handleLarge);

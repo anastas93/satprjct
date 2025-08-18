@@ -4,9 +4,9 @@
 
 namespace tdd {
   // Константы временных окон (мс)
-  static constexpr unsigned long TX_WINDOW = cfg::TDD_TX_WINDOW_MS;  // окно передачи
-  static constexpr unsigned long ACK_WINDOW = cfg::TDD_ACK_WINDOW_MS; // окно ожидания подтверждений
-  static constexpr unsigned long GUARD = cfg::TDD_GUARD_MS;           // защитный интервал между окнами
+  extern unsigned long txWindowMs;  // окно передачи
+  extern unsigned long ackWindowMs; // окно ожидания подтверждений
+  extern unsigned long guardMs;     // защитный интервал между окнами
 
   enum class Phase { TX, GUARD1, ACK, GUARD2 };
 
@@ -24,4 +24,7 @@ namespace tdd {
 
   // Принудительное переключение в RX вне фазы TX
   void maintain();
+
+  // Установка параметров окон в мс
+  void setParams(unsigned long tx, unsigned long ack, unsigned long guard);
 }
