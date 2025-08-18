@@ -5,6 +5,12 @@
 #include <stddef.h>
 
 namespace FrameLog {
-  void push(char dir, const uint8_t* data, size_t len);
+  // Записываем сведения о кадре вместе с полезными метриками канала
+  void push(char dir, const uint8_t* data, size_t len,
+            uint32_t seq = 0, uint8_t fec_mode = 0, uint8_t interleave = 0,
+            float snr_ebn0 = 0.0f, uint8_t rs_corrections = 0,
+            uint16_t viterbi_metric = 0, uint8_t drop_reason = 0,
+            uint16_t rtt_estimate = 0);
+  // Выводим последние N записей на переданный поток
   void dump(Print& out, unsigned int count);
 }

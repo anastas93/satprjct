@@ -16,6 +16,12 @@
 - Планировщик слотов TDD (`tdd_scheduler`) с окнами `TX`, `ACK` и защитным интервалом
 - EMA‑метрики PER/RTT/goodput/SNR/EbN0 и автоматические профили `P0–P3`
 
+## Телеметрия канала
+- Вкладка **Link Diagnostics** веб‑интерфейса показывает графики PER, RTT p50/p95 и goodput.
+- Отображаются текущие настройки профиля и bitmap долгов неподтверждённых кадров.
+- `FrameLog` фиксирует поля `seq`, `fec_mode`, `interleave`, `snr/ebn0`,
+  `rs_corrections`, `viterbi_metric`, `drop_reason`, `rtt_estimate` для каждого кадра.
+
 ## Используемые библиотеки
 - [Arduino core for ESP32](https://github.com/espressif/arduino-esp32) — базовые классы (`Arduino.h`, `Preferences`, `WiFi`, `WebServer`)
 - [RadioLib](https://github.com/jgromes/RadioLib) — драйвер SX1262 и функции LoRa

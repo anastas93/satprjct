@@ -30,6 +30,31 @@ function updatePingHistory(rssi,snr,dist,time){
   ph.textContent=pingHistory.map((p,i)=>(i+1)+'. RSSI:'+p.rssi+' dBm, SNR:'+p.snr+' dB, dist:'+p.dist+' km, time:'+p.time+' ms').join('\n');
 }
 
+// простые массивы для графиков диагностики канала
+const perData=[],rtt50Data=[],rtt95Data=[],goodputData=[];
+function drawGraph(id,data,color){
+  const c=document.getElementById(id);if(!c)return;const ctx=c.getContext('2d');
+  ctx.clearRect(0,0,c.width,c.height);if(data.length<2)return;
+  const max=Math.max(...data),min=Math.min(...data),k=max-min||1;
+  ctx.beginPath();data.forEach((v,i)=>{const x=i*(c.width/(data.length-1));const y=c.height-((v-min)/k*c.height);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.strokeStyle=color;ctx.stroke();
+}
+function updateLinkDiag(){
+  fetch('/linkdiag').then(r=>r.json()).then(d=>{
+    perData.push(d.per);if(perData.length>50)perData.shift();
+    rtt50Data.push(d.rtt_p50);if(rtt50Data.length>50)rtt50Data.shift();
+    rtt95Data.push(d.rtt_p95);if(rtt95Data.length>50)rtt95Data.shift();
+    goodputData.push(d.goodput);if(goodputData.length>50)goodputData.shift();
+    drawGraph('perGraph',perData,'#66bb6a');
+    drawGraph('rtt50Graph',rtt50Data,'#3f51b5');
+    drawGraph('rtt95Graph',rtt95Data,'#e53935');
+    drawGraph('goodputGraph',goodputData,'#ffb74d');
+    const lp=document.getElementById('linkProfile');if(lp)lp.textContent='Профиль: '+d.profile;
+    const ab=document.getElementById('ackBitmap');if(ab)ab.textContent='Bitmap долгов: '+d.bitmap;
+  }).catch(()=>{});
+}
+setInterval(updateLinkDiag,1000);
+
 const ws=new WebSocket('ws://'+location.hostname+':81/');
 ws.onmessage=e=>{
   const t=e.data.trim();

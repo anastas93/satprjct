@@ -41,6 +41,7 @@ details[open] summary{background-color:var(--panel-bg-open)}
 .msg-time{font-family:monospace;margin-right:4px}
 .msg-tag{margin-right:4px;font-weight:700}
 .msg-text{flex:1}
+canvas.graph{background-color:#111;border:1px solid #555}
 @media(max-width:600px){#inputRow{flex-direction:column}#msg{width:100%}}
 )rawliteral";
 

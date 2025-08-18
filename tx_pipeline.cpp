@@ -118,7 +118,11 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     // Повторяем отправку кадра согласно профилю
     for (uint8_t r = 0; r < repeat_count_; ++r) {
       Radio_sendRaw(frame.data(), frame.size());
-      FrameLog::push('T', frame.data(), frame.size());
+      // фиксируем факт передачи кадра и параметры профиля
+      FrameLog::push('T', frame.data(), frame.size(),
+                     final_hdr.msg_id, (uint8_t)fec_mode_, interleave_depth_,
+                     0.0f, 0, 0, 0,
+                     (uint16_t)metrics_.rtt_ema_ms.value);
       metrics_.tx_frames++; metrics_.tx_bytes += frame.size();
       last_tx_ms_ = millis();
       while (!interFrameGap()) { delay(1); }

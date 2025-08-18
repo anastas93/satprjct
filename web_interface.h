@@ -176,6 +176,22 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       <div id="pingHistory"></div>
     </div>
   </details>
+  <!-- Link Diagnostics -->
+  <details>
+    <summary>Link Diagnostics</summary>
+    <div class="panel-content">
+      <div class="row">
+        <canvas id="perGraph" width="300" height="100" class="graph"></canvas>
+        <canvas id="rtt50Graph" width="300" height="100" class="graph"></canvas>
+        <canvas id="rtt95Graph" width="300" height="100" class="graph"></canvas>
+        <canvas id="goodputGraph" width="300" height="100" class="graph"></canvas>
+      </div>
+      <div class="row">
+        <div id="linkProfile"></div>
+        <div id="ackBitmap"></div>
+      </div>
+    </div>
+  </details>
   <!-- Commands -->
   <details>
     <summary>Commands</summary>
