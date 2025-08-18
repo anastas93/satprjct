@@ -78,6 +78,10 @@ bool g_dup_on = cfg::HEADER_DUP_DEFAULT;
 uint8_t g_window = cfg::SR_WINDOW_DEFAULT;
 uint16_t g_ackAgg = cfg::T_ACK_AGG_DEFAULT;
 
+// Таймстампы для простейшего rate-limit HTTP запросов
+unsigned long g_last_send_ms = 0;   // последний /send
+unsigned long g_last_ping_ms = 0;   // последний /ping
+
 // ----------------------------------------------------------------------------
 // Asynchronous ping state and radio busy flag.  When g_radio_busy is true the
 // Tx pipeline will not transmit frames.  g_ping_active indicates an ongoing
@@ -248,6 +252,14 @@ void sendKeyRequest();
 void sendKeyResponse();
 
 // End of forward declarations
+
+// Проверка простого rate-limit: запрещает обращения чаще указанного интервала
+static bool rateLimit(unsigned long &last, unsigned long interval_ms) {
+  unsigned long now = millis();
+  if (now - last < interval_ms) return false;
+  last = now;
+  return true;
+}
 
 class SerialChatPrint : public Print {
   Print& serial;
@@ -494,6 +506,11 @@ void handleRoot() {
 // Handler that enqueues a message into the transmit buffer.  The message is
 // appended to the UI buffer and a new message ID persisted.
 void handleSend() {
+  // Проверяем rate-limit: не чаще одного запроса в 200 мс
+  if (!rateLimit(g_last_send_ms, 200)) {
+    server.send(429, "text/plain", "rate");
+    return;
+  }
   if (!server.hasArg("msg")) {
     server.send(400, "text/plain", "msg missing");
     return;
@@ -806,10 +823,12 @@ void handleSatPingAdv() {
 }
 
 void handlePing() {
-  // Start an asynchronous ping.  If a ping or another radio operation is
-  // already active, report busy.  Otherwise initialise the ping state
-  // machine and return immediately.  The actual work will be performed
-  // incrementally in handlePingAsync() during loop() iterations.
+  // Start an asynchronous ping. Проверяем rate-limit: не чаще одного запроса в секунду
+  if (!rateLimit(g_last_ping_ms, 1000)) {
+    server.send(429, "text/plain", "rate");
+    return;
+  }
+  // Если пинг или другая операция уже выполняются, сообщаем о занятости.
   if (g_ping_active || g_radio_busy) {
     server.send(429, "text/plain", "busy");
     return;

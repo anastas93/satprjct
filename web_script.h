@@ -65,27 +65,38 @@ function updateLinkDiag(){
 }
 setInterval(updateLinkDiag,1000);
 
-const ws=new WebSocket('ws://'+location.hostname+':81/');
-ws.onmessage=e=>{
-  const t=e.data.trim();
-  if(!t)return;
-  t.split('\n').forEach(l=>{
-    if(!l)return;
-    appendChat(l);
-    if(l.indexOf('Ping>OK')!==-1){
-      try{
-        const m=/RSSI:([\-\d\.]+) dBm\/SNR:([\-\d\.]+) dB distance:~([\d\.]+) km time:([\d\.]+) ms/.exec(l);
-        if(m){
-          const rssi=parseFloat(m[1]).toFixed(1);
-          const snr=parseFloat(m[2]).toFixed(1);
-          const dist=parseFloat(m[3]).toFixed(3);
-          const time=parseFloat(m[4]).toFixed(2);
-          updatePingHistory(rssi,snr,dist,time);
-        }
-      }catch(e){}
-    }
-  });
-};
+// WebSocket с авто‑переподключением
+let ws;
+let wsDelay=1000; // начальная задержка между попытками (мс)
+function connectWs(){
+  ws=new WebSocket('ws://'+location.hostname+':81/');
+  ws.onmessage=e=>{
+    const t=e.data.trim();
+    if(!t)return;
+    t.split('\n').forEach(l=>{
+      if(!l)return;
+      appendChat(l);
+      if(l.indexOf('Ping>OK')!==-1){
+        try{
+          const m=/RSSI:([\-\d\.]+) dBm\/SNR:([\-\d\.]+) dB distance:~([\d\.]+) km time:([\d\.]+) ms/.exec(l);
+          if(m){
+            const rssi=parseFloat(m[1]).toFixed(1);
+            const snr=parseFloat(m[2]).toFixed(1);
+            const dist=parseFloat(m[3]).toFixed(3);
+            const time=parseFloat(m[4]).toFixed(2);
+            updatePingHistory(rssi,snr,dist,time);
+          }
+        }catch(e){}
+      }
+    });
+  };
+  ws.onclose=()=>{ // при разрыве соединения переподключаемся с ростом задержки
+    setTimeout(connectWs,wsDelay);
+    wsDelay=Math.min(wsDelay*2,10000);
+  };
+  ws.onopen=()=>{wsDelay=1000;};
+}
+connectWs();
 
 function applyProfile(name){
   if(name==='range'){
