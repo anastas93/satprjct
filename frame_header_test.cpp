@@ -1,3 +1,5 @@
+#ifndef ARDUINO
+// Этот файл содержит юнит‑тест заголовка кадра и не компилируется для прошивки
 #include "frame.h"
 #include <vector>
 #include <iostream>
@@ -35,3 +37,4 @@ int main() {
   std::cout << "frame_header_test ok\n";
   return 0;
 }
+#endif // !ARDUINO

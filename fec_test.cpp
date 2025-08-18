@@ -1,3 +1,5 @@
+#ifndef ARDUINO
+// Юнит‑тест простейшего FEC, не участвует в прошивке
 #include "fec.h"
 #include <vector>
 #include <cassert>
@@ -16,3 +18,4 @@ int main() {
   std::cout << "fec_ok\n";
   return 0;
 }
+#endif // !ARDUINO
