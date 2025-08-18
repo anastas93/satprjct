@@ -81,7 +81,7 @@ bool performKeyExchange() {
   if (newKid == 0) newKid = 1;
   g_kid = newKid;
   ok = g_ccm.setKey(g_kid, newKey, 16);
-  g_ccm.setKid(g_kid);
+  g_ccm.setActiveKid(g_kid);
   g_ccm.setEnabled(true);
   g_tx.setEncEnabled(true);
   snprintf(nameBuf, sizeof(nameBuf), "k%03u", (unsigned)g_kid);
@@ -109,7 +109,7 @@ finish:
   if (newKid == 0) newKid = 1;
   g_kid = newKid;
   bool ok = g_ccm.setKey(g_kid, newKey, 16);
-  g_ccm.setKid(g_kid);
+  g_ccm.setActiveKid(g_kid);
   g_ccm.setEnabled(true);
   g_tx.setEncEnabled(true);
   g_key_status = KeyStatus::Local;
@@ -124,7 +124,7 @@ int main() {
     return 1;
   }
   printf("KID=%u ключ=", g_kid);
-  const uint8_t* key = g_ccm.key();
+  const uint8_t* key = g_ccm.key(g_ccm.activeKid());
   for (int i = 0; i < 16; ++i) printf("%02X", key[i]);
   printf("\n");
   // Минимальный тест шифрования

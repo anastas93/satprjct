@@ -9,6 +9,8 @@
 #include "tdd_scheduler.h"
 #include <string.h>
 #include <algorithm> // для std::erase_if
+#include <stdlib.h>
+#include "encryptor_ccm.h"
 
 // Простая функция soft-combining для повторов байтов
 static void softCombinePairs(const uint8_t* in, size_t len, std::vector<uint8_t>& out) {
@@ -167,6 +169,15 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   metrics_.rx_frames_ok++; metrics_.rx_bytes += len;
 
   if (!(hdr.flags & F_FRAG)) {
+    // Проверяем служебное сообщение смены ключа
+    if (plain.size() >= 7 && memcmp(plain.data(), "KEYCHG ", 7) == 0) {
+      uint8_t kid = (uint8_t)strtoul((const char*)plain.data() + 7, nullptr, 10);
+      if (auto ccm = dynamic_cast<CcmEncryptor*>(&enc_)) ccm->setActiveKid(kid);
+      metrics_.rx_msgs_ok++;
+      if (hdr.flags & F_ACK_REQ) sendAck(hdr.msg_id);
+      gc();
+      return;
+    }
     if (!isDup(hdr.msg_id)) {
       dup_window_.push_back(hdr.msg_id);
       dup_set_.insert(hdr.msg_id);

@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include <string.h>
 #include <array>
+#include <stdio.h>
 
 // Параметры профилей передачи
 struct TxProfile { uint16_t payload; TxPipeline::FecMode fec; uint8_t inter; uint8_t repeat; };
@@ -26,6 +27,13 @@ static const float EBN0_THR[3] = {7.0f, 5.0f, 3.0f};
 
 TxPipeline::TxPipeline(MessageBuffer& buf, Fragmenter& frag, IEncryptor& enc, PipelineMetrics& m)
 : buf_(buf), frag_(frag), enc_(enc), metrics_(m) {}
+
+// Помещает служебное сообщение смены ключа в очередь с требованием ACK
+void TxPipeline::queueKeyChange(uint8_t kid) {
+  char tmp[16];
+  int n = snprintf(tmp, sizeof(tmp), "KEYCHG %u", kid);
+  buf_.enqueue(reinterpret_cast<uint8_t*>(tmp), n, true);
+}
 
 bool TxPipeline::interFrameGap() {
   unsigned long now = millis();

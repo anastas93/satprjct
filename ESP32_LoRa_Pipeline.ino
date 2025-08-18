@@ -419,7 +419,7 @@ static void loadConfig() {
   g_tx.setRetry(g_retryN, g_retryMS);
   loadKeyFromNVS();
   g_ccm.setEnabled(g_enc_on);
-  g_ccm.setKid(g_kid);
+  g_ccm.setActiveKid(g_kid);
   g_tx.setEncEnabled(g_enc_on);
   Radio_forceRx();
   Serial.println(F("Loaded."));
@@ -691,7 +691,7 @@ void handleSetKid() {
     return;
   }
   g_kid = (uint8_t)kid;
-  g_ccm.setKid(g_kid);
+  g_ccm.setActiveKid(g_kid);
   loadKeyFromNVS();
   server.send(200, "text/plain", "kid changed");
   serialBuffer += String("*SYS:* KID set to ") + String(kid) + "\n";
@@ -1101,7 +1101,7 @@ bool processKeyDh(const String& m) {
       if (newKid == 0) newKid = 1;
       g_kid = newKid;
       bool okSet = g_ccm.setKey(g_kid, newKey, 16);
-      g_ccm.setKid(g_kid);
+      g_ccm.setActiveKid(g_kid);
       g_ccm.setEnabled(true);
       g_tx.setEncEnabled(true);
       g_key_status = KeyStatus::Received;
@@ -1236,7 +1236,7 @@ bool processKeyDh(const String& m) {
       if (newKid == 0) newKid = 1;
       g_kid = newKid;
       bool okSet = g_ccm.setKey(g_kid, newKey, 16);
-      g_ccm.setKid(g_kid);
+      g_ccm.setActiveKid(g_kid);
       g_ccm.setEnabled(true);
       g_tx.setEncEnabled(true);
       g_key_status = KeyStatus::Local;
@@ -1488,7 +1488,7 @@ bool performKeyExchange() {
   if (newKid == 0) newKid = 1;
   g_kid = newKid;
   ok = g_ccm.setKey(g_kid, newKey, 16);
-  g_ccm.setKid(g_kid);
+  g_ccm.setActiveKid(g_kid);
   g_ccm.setEnabled(true);
   g_tx.setEncEnabled(true);
   // Persist key into NVS for next boot
@@ -1525,7 +1525,7 @@ finish:
   if (newKid == 0) newKid = 1;
   g_kid = newKid;
   ok = g_ccm.setKey(g_kid, newKey, 16);
-  g_ccm.setKid(g_kid);
+  g_ccm.setActiveKid(g_kid);
   g_ccm.setEnabled(true);
   g_tx.setEncEnabled(true);
   // Mark key as locally generated in stub environment
@@ -1927,7 +1927,7 @@ static void handleCommand(const String& line) {
       return;
     }
     g_kid = (uint8_t)kid;
-    g_ccm.setKid(g_kid);
+    g_ccm.setActiveKid(g_kid);
     loadKeyFromNVS();
     Serial.printf("KID=%u\n", (unsigned)g_kid);
     return;
@@ -2117,7 +2117,7 @@ void setup() {
   g_tx.setRetry(g_retryN, g_retryMS);
   g_tx.enableAck(g_ack_on);
   g_ccm.setEnabled(g_enc_on);
-  g_ccm.setKid(g_kid);
+  g_ccm.setActiveKid(g_kid);
   loadKeyFromNVS();
   g_tx.setEncEnabled(g_enc_on);
   Radio_forceRx();
@@ -2240,7 +2240,7 @@ void setup() {
           g_kid = newKid;
           g_enc_on = true;
           g_ccm.setKey(g_kid, keyBytes, 16);
-          g_ccm.setKid(g_kid);
+          g_ccm.setActiveKid(g_kid);
           g_ccm.setEnabled(true);
           g_tx.setEncEnabled(true);
           g_key_status = KeyStatus::Received;
