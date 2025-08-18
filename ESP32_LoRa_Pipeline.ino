@@ -1079,6 +1079,23 @@ void handleKeyStatus() {
   server.send(200, "application/json", json);
 }
 
+// Обработчик /keyhash: отдаёт 4‑значный хеш активного AES‑ключа или сообщает об его отсутствии.
+void handleKeyHash() {
+  try {
+    if (crypto_spec::CURRENT_KEY_CRC == 0) {
+      // Ключ не задан — возвращаем 404 и текстовое пояснение
+      server.send(404, "text/plain", "no-key");
+      return;
+    }
+    char hbuf[5];
+    snprintf(hbuf, sizeof(hbuf), "%04X", (unsigned)crypto_spec::CURRENT_KEY_CRC & 0xFFFF);
+    server.send(200, "text/plain", hbuf);
+  } catch (...) {
+    // Любая неожиданная ошибка — лаконичный ответ 500
+    server.send(500, "text/plain", "error");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // ECDH key exchange helpers and HTTP handler.
 
@@ -2361,6 +2378,7 @@ void setup() {
   server.on("/keyreq", handleKeyReq);
   server.on("/keysend", handleKeySend);
   server.on("/keystatus", handleKeyStatus);
+  server.on("/keyhash", handleKeyHash);
   // Authenticated ECDH key exchange endpoint
   server.on("/keydh", handleKeyDh);
   server.begin();
