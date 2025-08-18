@@ -10,6 +10,7 @@
   избавления от длинных последовательностей бит
 - Простейший FEC на повторном коде и байтовый интерливинг (`setFecEnabled`, `setInterleaveDepth`)
 - ACK с bitmap последних 32 кадров (`AckBitmap`)
+- Планировщик слотов TDD (`tdd_scheduler`) с окнами `TX`, `ACK` и защитным интервалом
 
 ## Используемые библиотеки
 - [Arduino core for ESP32](https://github.com/espressif/arduino-esp32) — базовые классы (`Arduino.h`, `Preferences`, `WiFi`, `WebServer`)
@@ -136,6 +137,10 @@ ENCTESTBAD wrong-KID dec=FAIL (expected FAIL)
 ### Переключение конфигураций
 - В веб‑интерфейсе предусмотрены профили `High Range`, `Fast Data`, `Balanced`.
 - Пользовательский профиль `Custom` позволяет вручную задавать параметры.
+
+### TDD расписание
+- Параметры окон `TDD_TX_WINDOW_MS`, `TDD_ACK_WINDOW_MS` и `TDD_GUARD_MS` заданы в `config.h`.
+- Модуль `tdd_scheduler` использует их для переключения передачи и приёма.
 
 ### Отладка
 - Команда `SelfTest` выполняет внутренние проверки радиоканала и шифрования.

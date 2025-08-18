@@ -6,6 +6,7 @@
 #include "fec.h"
 #include "interleaver.h"
 #include "ack_bitmap.h"
+#include "tdd_scheduler.h"
 #include <string.h>
 #include <algorithm> // для std::erase_if
 
@@ -34,6 +35,8 @@ bool RxPipeline::isDup(uint32_t msg_id) {
 }
 
 void RxPipeline::sendAck(uint32_t msg_id) {
+  // Отправляем ACK только в соответствующее окно
+  if (!tdd::isAckPhase()) return;
   // обновляем наибольший подтверждённый кадр и bitmap
   if (msg_id > ack_highest_) {
     uint32_t shift = msg_id - ack_highest_;
@@ -63,9 +66,13 @@ void RxPipeline::sendAck(uint32_t msg_id) {
   ack.encode(buf, FRAME_HEADER_SIZE);
   Radio_sendRaw(buf, FRAME_HEADER_SIZE + 8);
   FrameLog::push('T', buf, FRAME_HEADER_SIZE + 8);
+  // После передачи возвращаемся в режим приёма
+  tdd::maintain();
 }
 
 void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
+  // Держим радио в нужном состоянии
+  tdd::maintain();
   if (!frame || len < FRAME_HEADER_SIZE) return;
   FrameHeader hdr;
   if (!FrameHeader::decode(hdr, frame, len)) return;

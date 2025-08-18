@@ -7,6 +7,7 @@
 #include "scrambler.h"
 #include "fec.h"
 #include "interleaver.h"
+#include "tdd_scheduler.h"
 #include <Arduino.h>
 #include <string.h>
 #include <array>
@@ -95,6 +96,8 @@ void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
 }
 
 void TxPipeline::loop() {
+  // Поддерживаем расписание и переключаем радио при необходимости
+  tdd::maintain();
   if (waiting_ack_) {
     if (ack_received_) {
       unsigned long dt = millis() - ack_start_ms_;
@@ -127,6 +130,8 @@ void TxPipeline::loop() {
     return;
   }
 
+  // Если сейчас не окно передачи, выходим
+  if (!tdd::isTxPhase()) return;
   if (!buf_.hasPending()) return;
   if (!interFrameGap()) return;
   OutgoingMessage m;

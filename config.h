@@ -36,6 +36,11 @@ namespace cfg {
 
   static constexpr uint8_t  RX_DUP_WINDOW          = 64;
 
+  // Настройка временных слотов TDD (мс)
+  static constexpr uint16_t TDD_TX_WINDOW_MS  = 1000; // окно передачи
+  static constexpr uint16_t TDD_ACK_WINDOW_MS = 300;  // окно ожидания подтверждений
+  static constexpr uint16_t TDD_GUARD_MS      = 50;   // защитный интервал
+
   // Additional UART used for Radxa Zero 3W command interface
   // This UART allows bridging of commands and payloads to an external host.
   static constexpr uint32_t RADXA_UART_BAUD        = 115200;
