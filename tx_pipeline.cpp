@@ -20,19 +20,19 @@ bool TxPipeline::interFrameGap() {
 void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
   bool reqAck = ack_enabled_ || m.ack_required;
   bool willEnc = enc_enabled_ && enc_.isReady();
-  const uint16_t base_payload_max = (uint16_t)(cfg::LORA_MTU - sizeof(FrameHeader));
+  const uint16_t base_payload_max = (uint16_t)(cfg::LORA_MTU - FRAME_HEADER_SIZE);
   const uint16_t enc_overhead = willEnc ? (1 + cfg::ENC_TAG_LEN) : 0;
   const uint16_t eff_payload_max = (base_payload_max > enc_overhead) ? (uint16_t)(base_payload_max - enc_overhead) : 0;
   auto parts = frag_.split(m.id, m.data.data(), m.data.size(), reqAck, eff_payload_max);
 
-  std::array<uint8_t, sizeof(FrameHeader)> aad{};
+  std::array<uint8_t, FRAME_HEADER_SIZE> aad{};
   std::vector<uint8_t> payload; payload.reserve(cfg::LORA_MTU);
   std::vector<uint8_t> frame; frame.reserve(cfg::LORA_MTU);
 
   for (auto& fr : parts) {
     FrameHeader hdr = fr.hdr;
     hdr.crc16 = 0;
-    memcpy(aad.data(), &hdr, sizeof(FrameHeader));
+    hdr.encode(aad.data(), aad.size());
     bool ok = true;
     payload.clear();
     if (willEnc) ok = enc_.encrypt(fr.payload.data(), fr.payload.size(), aad.data(), aad.size(), payload);
@@ -43,14 +43,17 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     if (willEnc) final_hdr.flags |= F_ENC;
     final_hdr.payload_len = (uint16_t)payload.size();
     final_hdr.crc16 = 0;
-    uint16_t crc = crc16_ccitt(reinterpret_cast<const uint8_t*>(&final_hdr), sizeof(FrameHeader), 0xFFFF);
+    uint8_t hdr_buf[FRAME_HEADER_SIZE];
+    final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
+    uint16_t crc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
     crc = crc16_ccitt(payload.data(), payload.size(), crc);
     final_hdr.crc16 = crc;
+    final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
 
-    const size_t frame_len = sizeof(FrameHeader) + payload.size();
+    const size_t frame_len = FRAME_HEADER_SIZE + payload.size();
     frame.resize(frame_len);
-    memcpy(frame.data(), &final_hdr, sizeof(FrameHeader));
-    memcpy(frame.data()+sizeof(FrameHeader), payload.data(), payload.size());
+    memcpy(frame.data(), hdr_buf, FRAME_HEADER_SIZE);
+    memcpy(frame.data()+FRAME_HEADER_SIZE, payload.data(), payload.size());
 
     Radio_sendRaw(frame.data(), frame.size());
     FrameLog::push('T', frame.data(), frame.size());
