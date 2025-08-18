@@ -12,6 +12,18 @@
 #include <string.h>
 #include <array>
 
+// Параметры профилей передачи
+struct TxProfile { uint16_t payload; uint8_t fec; uint8_t inter; uint8_t repeat; };
+static const TxProfile PROFILES[4] = {
+  {200, 0, 1, 1}, // P0: лучший канал
+  {160, 0, 1, 2}, // P1
+  {120, 1, 2, 3}, // P2
+  { 80, 1, 4, 4}  // P3: худший канал
+};
+
+static const float PER_THR[3]  = {0.1f, 0.2f, 0.3f};
+static const float EBN0_THR[3] = {7.0f, 5.0f, 3.0f};
+
 TxPipeline::TxPipeline(MessageBuffer& buf, Fragmenter& frag, IEncryptor& enc, PipelineMetrics& m)
 : buf_(buf), frag_(frag), enc_(enc), metrics_(m) {}
 
@@ -24,7 +36,9 @@ bool TxPipeline::interFrameGap() {
 void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
   bool reqAck = ack_enabled_ || m.ack_required;
   bool willEnc = enc_enabled_ && enc_.isReady();
-  const uint16_t base_payload_max = (uint16_t)(cfg::LORA_MTU - FRAME_HEADER_SIZE);
+  // Ограничение полезной нагрузки согласно выбранному профилю
+  const uint16_t base_payload_max =
+      (payload_len_ < (cfg::LORA_MTU - FRAME_HEADER_SIZE)) ? payload_len_ : (cfg::LORA_MTU - FRAME_HEADER_SIZE);
   const uint16_t enc_overhead = willEnc ? (1 + cfg::ENC_TAG_LEN) : 0;
   const uint16_t eff_payload_max = (base_payload_max > enc_overhead) ? (uint16_t)(base_payload_max - enc_overhead) : 0;
   auto parts = frag_.split(m.id, m.data.data(), m.data.size(), reqAck, eff_payload_max);
@@ -79,11 +93,14 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     memcpy(frame.data(), hdr_buf, FRAME_HEADER_SIZE);
     memcpy(frame.data()+FRAME_HEADER_SIZE, payload.data(), payload.size());
 
-    Radio_sendRaw(frame.data(), frame.size());
-    FrameLog::push('T', frame.data(), frame.size());
-    metrics_.tx_frames++; metrics_.tx_bytes += frame.size();
-    last_tx_ms_ = millis();
-    while (!interFrameGap()) { delay(1); }
+    // Повторяем отправку кадра согласно профилю
+    for (uint8_t r = 0; r < repeat_count_; ++r) {
+      Radio_sendRaw(frame.data(), frame.size());
+      FrameLog::push('T', frame.data(), frame.size());
+      metrics_.tx_frames++; metrics_.tx_bytes += frame.size();
+      last_tx_ms_ = millis();
+      while (!interFrameGap()) { delay(1); }
+    }
   }
   metrics_.tx_msgs++;
 }
@@ -98,6 +115,7 @@ void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
 void TxPipeline::loop() {
   // Поддерживаем расписание и переключаем радио при необходимости
   tdd::maintain();
+  updateProfile();
   if (waiting_ack_) {
     if (ack_received_) {
       unsigned long dt = millis() - ack_start_ms_;
@@ -141,4 +159,27 @@ void TxPipeline::loop() {
   sendMessageFragments(m);
   if (reqAck) { waiting_ack_ = true; waiting_id_ = m.id; retries_left_ = retry_count_; ack_start_ms_ = millis(); ack_received_ = false; }
   else { buf_.popFront(); }
+}
+
+// Определение профиля по метрикам PER и Eb/N0
+void TxPipeline::updateProfile() {
+  float per = metrics_.per_ema.value;
+  float ebn0 = metrics_.ebn0_ema.value;
+  uint8_t idx = 0;
+  if (per > PER_THR[0] || ebn0 < EBN0_THR[0]) idx = 1;
+  if (per > PER_THR[1] || ebn0 < EBN0_THR[1]) idx = 2;
+  if (per > PER_THR[2] || ebn0 < EBN0_THR[2]) idx = 3;
+  if (idx != profile_idx_) applyProfile(idx);
+}
+
+// Применение конкретного профиля P0..P3
+void TxPipeline::applyProfile(uint8_t p) {
+  if (p > 3) p = 3;
+  profile_idx_ = p;
+  const TxProfile& pr = PROFILES[p];
+  payload_len_ = pr.payload;
+  fec_mode_ = pr.fec;
+  fec_enabled_ = (fec_mode_ != 0);
+  interleave_depth_ = pr.inter;
+  repeat_count_ = pr.repeat;
 }
