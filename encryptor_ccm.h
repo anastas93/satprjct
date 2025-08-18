@@ -3,7 +3,7 @@
 #include "encryptor.h"
 #include "config.h"
 #include "frame.h"
-#include "libs/crypto_spec.h"
+#include "crypto_spec.h"
 #include <mbedtls/ccm.h>
 #include <string.h>
 

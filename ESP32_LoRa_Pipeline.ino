@@ -21,7 +21,7 @@
 #include "web_interface.h"
 #include "web_style.h"
 #include "web_script.h"
-#include "libs/crypto_spec.h"
+#include "crypto_spec.h"
 
 #include <string.h> // for memcmp
 #include <ctype.h>   // for toupper when parsing hex strings
