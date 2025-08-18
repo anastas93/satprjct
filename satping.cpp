@@ -1,8 +1,12 @@
 
 #include <Arduino.h>
 #include <string.h>
+#include <algorithm>
+#include <vector>
 #include "RadioLib.h"
 #include "freq_map.h"
+#include "fec.h"
+#include "radio_adapter.h"
 
 #if defined(ESP32) || defined(ESP_PLATFORM)
 #include <esp_system.h>
@@ -163,3 +167,150 @@ void MassPing(Bank bank) {
   radio.setFrequency(g_freq_rx_mhz);  // возвращаемся на рабочую частоту
   radio.startReceive();
 }
+
+// Пакетный пинг с расширенной статистикой
+void SatPingRun(const PingOptions& opts, PingStats& stats) {
+  uint32_t seq = 0;                  // порядковый номер пакета
+  uint32_t start_ms = millis();      // время начала теста
+
+  while ((opts.count == 0 || seq < opts.count) &&
+         (opts.duration_min == 0 || (millis() - start_ms) < opts.duration_min * 60000UL)) {
+
+    // формируем полезную нагрузку
+    std::vector<uint8_t> payload(opts.frag_size);
+    for (uint32_t i = 0; i < opts.frag_size; ++i) payload[i] = radio.randomByte();
+    if (opts.frag_size >= 3) payload[0] = payload[1] ^ payload[2]; // простой идентификатор
+
+    bool success = false;
+    const char* drop_reason = "timeout"; // причина отказа
+    uint8_t attempt = 0;
+    while (!success && attempt <= opts.retries) {
+      std::vector<uint8_t> txbuf;     // буфер для передачи (с учётом FEC)
+      int corrected = 0;              // число исправленных символов
+
+      // кодирование по выбранному режиму
+      if (opts.fec_mode == PingFecMode::FEC_RS_VIT) {
+        fec_encode_rs_viterbi(payload.data(), payload.size(), txbuf);
+      } else if (opts.fec_mode == PingFecMode::FEC_LDPC) {
+        fec_encode_ldpc(payload.data(), payload.size(), txbuf);
+      } else if (opts.fec_mode == PingFecMode::FEC_REPEAT2) {
+        fec_encode_repeat(payload.data(), payload.size(), txbuf);
+      } else {
+        txbuf = payload;
+      }
+
+      // передача
+      radio.setFrequency(g_freq_tx_mhz);
+      radio.transmit(txbuf.data(), txbuf.size());
+      stats.sent++;
+      if (attempt > 0) stats.retransmits++;
+      stats.tx_bytes += txbuf.size();
+
+      // ожидание ответа
+      std::vector<uint8_t> rxbuf(txbuf.size());
+      uint32_t t1 = micros();
+      radio.setFrequency(g_freq_rx_mhz);
+      int state = radio.receive(rxbuf.data(), rxbuf.size(), opts.timeout_ms);
+      uint32_t t2 = micros();
+
+      if (state == RADIOLIB_ERR_NONE) {
+        bool ok = false;
+        const uint8_t* cmp = rxbuf.data();
+        size_t cmp_len = rxbuf.size();
+        std::vector<uint8_t> decoded;
+        if (opts.fec_mode == PingFecMode::FEC_RS_VIT) {
+          ok = fec_decode_rs_viterbi(rxbuf.data(), rxbuf.size(), decoded, corrected);
+          cmp = decoded.data();
+          cmp_len = decoded.size();
+        } else if (opts.fec_mode == PingFecMode::FEC_LDPC) {
+          ok = fec_decode_ldpc(rxbuf.data(), rxbuf.size(), decoded, corrected);
+          cmp = decoded.data();
+          cmp_len = decoded.size();
+        } else if (opts.fec_mode == PingFecMode::FEC_REPEAT2) {
+          ok = fec_decode_repeat(rxbuf.data(), rxbuf.size(), decoded);
+          cmp = decoded.data();
+          cmp_len = decoded.size();
+        } else {
+          ok = true;
+        }
+        if (ok && cmp_len == payload.size() && memcmp(payload.data(), cmp, payload.size()) == 0) {
+          // получен корректный ответ
+          uint32_t rtt = (t2 - t1) / 1000;
+          stats.received++;
+          stats.payload_bytes += payload.size();
+          stats.rtt.push_back(rtt);
+          float ebn0 = Radio_readEbN0();
+          Serial.print(F("seq=")); Serial.print(seq);
+          Serial.print(F(" rtt=")); Serial.print(rtt); Serial.print(F("ms snr="));
+          Serial.print(radio.getSNR()); Serial.print(F("dB ebn0=")); Serial.print(ebn0);
+          Serial.print(F("dB fec_corr="));
+          Serial.print(corrected); Serial.println(F(" drop_reason=ok"));
+          success = true;
+        } else {
+          stats.fec_fail++;
+          drop_reason = "fec_fail";
+        }
+      } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
+        stats.crc_fail++;
+        drop_reason = "crc_fail";
+      } else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
+        stats.timeout++;
+        drop_reason = "timeout";
+      } else {
+        stats.no_ack++;
+        drop_reason = "no_ack";
+      }
+
+      attempt++;
+    }
+
+    if (!success) {
+      Serial.print(F("seq=")); Serial.print(seq); Serial.print(F(" drop_reason="));
+      Serial.println(drop_reason);
+    }
+
+    seq++;
+    delay(opts.interval_ms);
+  }
+
+  // итоги
+  Serial.println(F("--- satlink ping statistics ---"));
+  Serial.print(stats.sent); Serial.print(F(" packets transmitted, "));
+  Serial.print(stats.received); Serial.print(F(" received, "));
+  uint32_t lost = stats.sent - stats.received;
+  Serial.print(lost); Serial.print(F(" lost ("));
+  if (stats.sent) Serial.print((lost * 100) / stats.sent); else Serial.print(0);
+  Serial.println(F("% loss)"));
+
+  if (!stats.rtt.empty()) {
+    std::sort(stats.rtt.begin(), stats.rtt.end());
+    uint32_t rtt_min = stats.rtt.front();
+    uint32_t rtt_max = stats.rtt.back();
+    uint32_t rtt_p50 = stats.rtt[stats.rtt.size() / 2];
+    uint32_t rtt_p95 = stats.rtt[stats.rtt.size() * 95 / 100];
+    uint64_t sum = 0; for (uint32_t v : stats.rtt) sum += v;
+    uint32_t rtt_avg = sum / stats.rtt.size();
+    Serial.print(F("rtt min/avg/p50/p95/max = "));
+    Serial.print(rtt_min); Serial.print('/');
+    Serial.print(rtt_avg); Serial.print('/');
+    Serial.print(rtt_p50); Serial.print('/');
+    Serial.print(rtt_p95); Serial.print('/');
+    Serial.print(rtt_max); Serial.println(F(" ms"));
+  }
+
+  double duration_ms = millis() - start_ms;
+  double goodput = 0;
+  if (duration_ms > 0) goodput = (stats.payload_bytes * 8.0) / duration_ms; // kbps
+  double overhead = 0;
+  if (stats.tx_bytes > 0) overhead = (double)(stats.tx_bytes - stats.payload_bytes) * 100.0 / stats.tx_bytes;
+
+  Serial.print(F("Goodput: ")); Serial.print(goodput, 1); Serial.print(F(" kbps (payload), Overhead: "));
+  Serial.print(overhead, 1); Serial.println(F("%"));
+  Serial.println(F("Errors:"));
+  Serial.print(F("  CRC-fail: ")); Serial.println(stats.crc_fail);
+  Serial.print(F("  FEC-fail: ")); Serial.println(stats.fec_fail);
+  Serial.print(F("  Timeout: ")); Serial.println(stats.timeout);
+  Serial.print(F("  No-ack: ")); Serial.println(stats.no_ack);
+  Serial.print(F("  Retransmits: ")); Serial.println(stats.retransmits);
+}
+
