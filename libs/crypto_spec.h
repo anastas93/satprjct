@@ -5,7 +5,12 @@
 // Спецификация статических криптографических параметров
 namespace crypto_spec {
   // Корневой ключ для проверки HMAC при ECDH
-  extern const uint8_t KEYDH_ROOT_KEY[16];
+  // Значение задаётся hex-строкой и преобразуется в массив байтов
+  extern uint8_t KEYDH_ROOT_KEY[16];
+
+  // Установка корневого ключа из 32-символьной hex-строки
+  // Возвращает true при успешном разборе
+  bool setRootKeyHex(const char* hex);
 
   // Текущий AES-ключ и его CRC-16 для быстрого доступа
   extern uint8_t CURRENT_KEY[16];

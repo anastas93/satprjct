@@ -6,6 +6,7 @@
 - **Персистентный msg_id в NVS** (исключение повторного нонса)
 - **Анти-replay** (окно и порог старых ID)
 - Модуль `crypto_spec` с функцией `setCurrentKey` для хранения ключа и его CRC-16
+- В том же модуле добавлена `setRootKeyHex`, принимающая корневой ключ в виде hex-строки
 
 ## Используемые библиотеки
 - [Arduino core for ESP32](https://github.com/espressif/arduino-esp32) — базовые классы (`Arduino.h`, `Preferences`, `WiFi`, `WebServer`)
