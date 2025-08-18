@@ -9,10 +9,17 @@ namespace cfg {
   static constexpr uint16_t RX_ASSEMBLER_TTL_MS    = 15000;
 
   // ACK
-  static constexpr bool     ACK_ENABLED_DEFAULT    = false;
-  static constexpr uint16_t SEND_RETRY_MS_DEFAULT  = 1200;
-  static constexpr uint8_t  SEND_RETRY_COUNT_DEFAULT = 3;
-  static constexpr uint16_t INTER_FRAME_GAP_MS     = 25;
+  static constexpr bool     ACK_ENABLED_DEFAULT = false;
+  // базовый таймаут ожидания подтверждения
+  static constexpr uint16_t ACK_TIMEOUT   = 1200;   // мс
+  // максимальное число повторов при отсутствии ACK
+  static constexpr uint8_t  MAX_RETRIES   = 3;
+  // агрегирование ACK в один кадр в течение заданного времени
+  static constexpr uint16_t T_ACK_AGG     = 50;     // мс
+  // совместимость со старым API
+  static constexpr uint16_t SEND_RETRY_MS_DEFAULT  = ACK_TIMEOUT;
+  static constexpr uint8_t  SEND_RETRY_COUNT_DEFAULT = MAX_RETRIES;
+  static constexpr uint16_t INTER_FRAME_GAP_MS = 25;
 
   // ENC
   static constexpr bool     ENCRYPTION_ENABLED_DEFAULT = false;

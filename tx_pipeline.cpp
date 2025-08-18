@@ -117,59 +117,65 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
 }
 
 void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
-  if (!waiting_ack_) return;
-  if (waiting_id_ <= highest) { ack_received_ = true; return; }
-  uint32_t diff = waiting_id_ - highest - 1;
-  if (diff < 32 && (bitmap & (1u << diff))) ack_received_ = true;
+  // отмечаем подтверждённые сообщения в окне
+  for (auto it = pending_.begin(); it != pending_.end(); ) {
+    uint32_t id = it->msg.id;
+    bool ok = false;
+    if (id <= highest) ok = true;
+    else {
+      uint32_t diff = id - highest - 1;
+      if (diff < WINDOW_SIZE && (bitmap & (1u << diff))) ok = true;
+    }
+    if (ok) {
+      unsigned long dt = millis() - it->start_ms;
+      metrics_.ack_time_ms_avg = (metrics_.ack_time_ms_avg == 0) ? dt : (metrics_.ack_time_ms_avg*3 + dt)/4;
+      metrics_.ack_seen++;
+      it = pending_.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 void TxPipeline::loop() {
   // Поддерживаем расписание и переключаем радио при необходимости
   tdd::maintain();
   updateProfile();
-  if (waiting_ack_) {
-    if (ack_received_) {
-      unsigned long dt = millis() - ack_start_ms_;
-      metrics_.ack_time_ms_avg = (metrics_.ack_time_ms_avg == 0) ? dt : (metrics_.ack_time_ms_avg*3 + dt)/4;
-      metrics_.ack_seen++;
-      buf_.markAcked(waiting_id_);
-      // после успешного ACK возвращаем одно сообщение из архива
-      buf_.restoreArchived();
-      waiting_ack_ = false; waiting_id_ = 0; retries_left_ = 0; ack_received_ = false;
-      return;
-    }
-    unsigned long now = millis();
-    if ((now - last_tx_ms_) >= retry_ms_) {
-      if (retries_left_ > 0) {
-        OutgoingMessage m;
-        if (buf_.peekNext(m) && m.id == waiting_id_) {
-          sendMessageFragments(m);
-          retries_left_--; metrics_.tx_retries++;
-        } else {
-          waiting_ack_ = false;
-        }
+  // Проверяем таймеры повторов для уже отправленных сообщений
+  unsigned long now = millis();
+  for (auto it = pending_.begin(); it != pending_.end(); ) {
+    if (now - it->last_tx_ms >= it->timeout_ms) {
+      if (it->retries_left > 0) {
+        sendMessageFragments(it->msg);
+        it->retries_left--; metrics_.tx_retries++;
+        it->last_tx_ms = now;
+        it->timeout_ms *= 2; // экспоненциальный бэкофф
+        ++it;
       } else {
-        // при провале всех попыток переносим сообщение в архив
         metrics_.ack_fail++;
-        buf_.archive(waiting_id_);
-        waiting_ack_ = false;
-        waiting_id_ = 0;
+        it = pending_.erase(it);
       }
+    } else {
+      ++it;
     }
-    return;
   }
 
   // Если сейчас не окно передачи, выходим
   if (!tdd::isTxPhase()) return;
-  if (!buf_.hasPending()) return;
-  if (!interFrameGap()) return;
-  OutgoingMessage m;
-  if (!buf_.peekNext(m)) return;
 
-  bool reqAck = ack_enabled_ || m.ack_required;
-  sendMessageFragments(m);
-  if (reqAck) { waiting_ack_ = true; waiting_id_ = m.id; retries_left_ = retry_count_; ack_start_ms_ = millis(); ack_received_ = false; }
-  else { buf_.popFront(); }
+  // Заполняем окно новыми сообщениями
+  while (pending_.size() < WINDOW_SIZE && buf_.hasPending()) {
+    if (!interFrameGap()) break;
+    OutgoingMessage m;
+    if (!buf_.peekNext(m)) break;
+    buf_.popFront();
+    bool reqAck = ack_enabled_ || m.ack_required;
+    sendMessageFragments(m);
+    if (reqAck) {
+      Pending p{m, max_retries_, millis(), millis(), ack_timeout_};
+      pending_.push_back(std::move(p));
+    }
+  }
 }
 
 // Определение профиля по метрикам PER и Eb/N0
