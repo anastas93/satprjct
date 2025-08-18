@@ -21,6 +21,7 @@
 #include "web_interface.h"
 #include "web_style.h"
 #include "web_script.h"
+#include "libs/crypto_spec.h"
 
 #include <string.h> // for memcmp
 #include <ctype.h>   // for toupper when parsing hex strings
@@ -122,10 +123,6 @@ static bool g_key_request_active = false;
 // The g_key_request_active flag is reused to blink the UI indicator while a
 // handshake is in progress.
 
-static const uint8_t g_keydh_root_key[16] = {
-  0x73, 0xF2, 0xBC, 0x91, 0x0D, 0x4A, 0x52, 0xE6,
-  0x8C, 0x47, 0x3B, 0x19, 0x5D, 0xA8, 0x61, 0x24
-};
 static bool g_keydh_in_progress = false;
 static bool g_keydh_initiator = false;
 #if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
@@ -256,23 +253,6 @@ static inline void persistMsgId() {
 // Полученное 16‑битное значение служит основой для 4‑значного
 // шестнадцатеричного идентификатора, отображаемого рядом с надписью
 // "Local" в веб‑интерфейсе для проверки активного ключа.
-static uint16_t calcKeyHash() {
-  const uint8_t* k = g_ccm.key();
-  if (!k) return 0;
-  uint16_t crc = 0xFFFF;
-  for (int i = 0; i < 16; i++) {
-    crc ^= (uint16_t)k[i] << 8;
-    for (int j = 0; j < 8; j++) {
-      if (crc & 0x8000) {
-        crc = (crc << 1) ^ 0x1021;
-      } else {
-        crc <<= 1;
-      }
-    }
-  }
-  return crc & 0xFFFF;
-}
-
 static void applyPreset() {
   const FreqPreset* tbl = nullptr;
   switch (g_bank) {
@@ -877,8 +857,8 @@ void sendKeyRequest() {
 void sendKeyResponse() {
   // Build key response string.  Format: KEYRES <kid> <32‑hex>.
   char buf[64];
-  // Convert AES key to hex
-  const uint8_t* k = g_ccm.key();
+  // Берём AES-ключ из общего хранилища
+  const uint8_t* k = crypto_spec::CURRENT_KEY;
   char hexstr[33];
   for (int i = 0; i < 16; i++) {
     static const char* hexdig = "0123456789ABCDEF";
@@ -910,10 +890,9 @@ void handleKeySend() {
 // Дополнительно включает 4‑значный хеш активного AES‑ключа в формате HEX.
 void handleKeyStatus() {
   String st = (g_key_status == KeyStatus::Received) ? "remote" : "local";
-  // Получаем 4‑значный хеш ключа в виде прописных HEX.
-  uint16_t h = calcKeyHash();
+  // Хеш берём из заранее вычисленного CRC-16
   char hbuf[5];
-  snprintf(hbuf, sizeof(hbuf), "%04X", (unsigned)h & 0xFFFF);
+  snprintf(hbuf, sizeof(hbuf), "%04X", (unsigned)crypto_spec::CURRENT_KEY_CRC & 0xFFFF);
   String json = String("{\"status\":\"") + st + String("\",\"request\":") + (g_key_request_active ? "1" : "0") + String("\",\"hash\":\"") + hbuf + String("\"}");
   server.send(200, "application/json", json);
 }
@@ -969,7 +948,7 @@ void startKeyDh() {
   mbedtls_md_init(&md);
   ret = mbedtls_md_setup(&md, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
   if (ret == 0) {
-    ret = mbedtls_md_hmac_starts(&md, g_keydh_root_key, sizeof(g_keydh_root_key));
+    ret = mbedtls_md_hmac_starts(&md, crypto_spec::KEYDH_ROOT_KEY, sizeof(crypto_spec::KEYDH_ROOT_KEY));
     if (ret == 0) ret = mbedtls_md_hmac_update(&md, g_keydh_pub, g_keydh_pub_len);
     if (ret == 0) ret = mbedtls_md_hmac_finish(&md, hmac);
   }
@@ -1055,7 +1034,7 @@ bool processKeyDh(const String& m) {
     mbedtls_md_init(&md);
     int ret = mbedtls_md_setup(&md, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
     if (ret == 0) {
-      ret = mbedtls_md_hmac_starts(&md, g_keydh_root_key, sizeof(g_keydh_root_key));
+      ret = mbedtls_md_hmac_starts(&md, crypto_spec::KEYDH_ROOT_KEY, sizeof(crypto_spec::KEYDH_ROOT_KEY));
       if (ret == 0) ret = mbedtls_md_hmac_update(&md, remotePub, remotePubLen);
       if (ret == 0) ret = mbedtls_md_hmac_finish(&md, calcHmac);
     }
@@ -1129,7 +1108,7 @@ bool processKeyDh(const String& m) {
       mbedtls_md_init(&md2);
       int ret2 = mbedtls_md_setup(&md2, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
       if (ret2 == 0) {
-        ret2 = mbedtls_md_hmac_starts(&md2, g_keydh_root_key, sizeof(g_keydh_root_key));
+        ret2 = mbedtls_md_hmac_starts(&md2, crypto_spec::KEYDH_ROOT_KEY, sizeof(crypto_spec::KEYDH_ROOT_KEY));
         if (ret2 == 0) ret2 = mbedtls_md_hmac_update(&md2, pub, pubLen);
         if (ret2 == 0) ret2 = mbedtls_md_hmac_finish(&md2, respHmac);
       }
@@ -1208,7 +1187,7 @@ bool processKeyDh(const String& m) {
     mbedtls_md_init(&md3);
     int ret = mbedtls_md_setup(&md3, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
     if (ret == 0) {
-      ret = mbedtls_md_hmac_starts(&md3, g_keydh_root_key, sizeof(g_keydh_root_key));
+      ret = mbedtls_md_hmac_starts(&md3, crypto_spec::KEYDH_ROOT_KEY, sizeof(crypto_spec::KEYDH_ROOT_KEY));
       if (ret == 0) ret = mbedtls_md_hmac_update(&md3, remotePub, remotePubLen);
       if (ret == 0) ret = mbedtls_md_hmac_finish(&md3, calcHmac);
     }

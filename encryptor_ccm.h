@@ -3,6 +3,7 @@
 #include "encryptor.h"
 #include "config.h"
 #include "frame.h"
+#include "libs/crypto_spec.h"
 #include <mbedtls/ccm.h>
 #include <string.h>
 
@@ -14,6 +15,8 @@ public:
     if (!key || len != 16) return false;
     kid_ = kid;
     memcpy(key_, key, 16);
+    // Сохраняем ключ и его CRC-16 в глобальном хранилище
+    crypto_spec::setCurrentKey(key_);
     if (mbedtls_ccm_setkey(&ccm_, MBEDTLS_CIPHER_ID_AES, key_, 128) != 0) { key_set_ = false; return false; }
     key_set_ = true; return true;
   }
