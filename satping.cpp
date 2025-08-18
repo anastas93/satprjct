@@ -7,6 +7,7 @@
 #include "freq_map.h"
 #include "fec.h"
 #include "radio_adapter.h"
+#include "satping.h"  // описание структур PingOptions и PingStats
 
 #if defined(ESP32) || defined(ESP_PLATFORM)
 #include <esp_system.h>

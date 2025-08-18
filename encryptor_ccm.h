@@ -19,7 +19,7 @@ public:
   void setEnabled(bool en);
 
   // Установить активный KID для шифрования исходящих кадров
-  void setActiveKid(uint8_t kid);
+  void setActiveKid(uint8_t kid) override;
   uint8_t activeKid() const { return active_kid_; }
 
   // Получить указатель на ключ для KID (или nullptr)

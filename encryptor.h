@@ -14,6 +14,8 @@ public:
                        const uint8_t* aad, size_t aad_len,
                        std::vector<uint8_t>& out) = 0;
   virtual bool isReady() const = 0;
+  // Смена активного ключа по идентификатору; по умолчанию ничего не делаем
+  virtual void setActiveKid(uint8_t) {}
 };
 
 class NoEncryptor : public IEncryptor {
@@ -27,4 +29,6 @@ public:
     out.assign(cipher, cipher+len); return true;
   }
   bool isReady() const override { return false; }
+  // Для заглушки смена ключа не требуется
+  void setActiveKid(uint8_t) override {}
 };
