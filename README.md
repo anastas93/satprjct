@@ -5,7 +5,7 @@
 - Локальные тесты `ENCTEST`, `ENCTEST_BAD`
 - **Персистентный msg_id в NVS** (исключение повторного нонса)
 - **Анти-replay** (окно и порог старых ID)
-- Модуль `crypto_spec` (в корне проекта) с функцией `setCurrentKey` для хранения ключа и его CRC-16
+- Модуль `crypto_spec` (в корне проекта) с функциями `setCurrentKey` для хранения ключа и его CRC-16 и `setRootKeyHex` для установки корневого ключа из 32‑символьной hex-строки (по умолчанию загружается встроенное значение)
 
 ## Используемые библиотеки
 - [Arduino core for ESP32](https://github.com/espressif/arduino-esp32) — базовые классы (`Arduino.h`, `Preferences`, `WiFi`, `WebServer`)
