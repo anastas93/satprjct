@@ -37,7 +37,7 @@ function updatePingHistory(rssi,snr,dist,time){
 }
 
 // простые массивы для графиков диагностики канала
-const perData=[],rtt50Data=[],rtt95Data=[],goodputData[];
+const perData=[],rtt50Data=[],rtt95Data=[],goodputData=[];
 // последние значения счётчиков TX/RX для индикации активности
 let lastTx=0,lastRx=0;
 function drawGraph(id,data,color){
