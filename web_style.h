@@ -44,5 +44,7 @@ details[open] summary{background-color:var(--panel-bg-open)}
 .msg-text{flex:1}
 canvas.graph{background-color:#111;border:1px solid #555}
 @media(max-width:600px){#inputRow{flex-direction:column}#msg{width:100%}}
+table.log-table{width:100%;border-collapse:collapse;font-family:monospace;font-size:.9em}
+.log-table th,.log-table td{border:1px solid #555;padding:2px}
 )rawliteral";
 

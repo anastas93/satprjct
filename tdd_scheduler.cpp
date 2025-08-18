@@ -2,17 +2,24 @@
 #include "radio_adapter.h"
 
 namespace tdd {
+  // Текущие значения окон в мс
+  unsigned long txWindowMs = cfg::TDD_TX_WINDOW_MS;
+  unsigned long ackWindowMs = cfg::TDD_ACK_WINDOW_MS;
+  unsigned long guardMs     = cfg::TDD_GUARD_MS;
+
+  // Полная длина цикла
   unsigned long cycleLen() {
-    return TX_WINDOW + ACK_WINDOW + 2 * GUARD;
+    return txWindowMs + ackWindowMs + 2 * guardMs;
   }
 
+  // Определение текущей фазы
   Phase currentPhase(unsigned long ms) {
     unsigned long t = ms % cycleLen();
-    if (t < TX_WINDOW) return Phase::TX;
-    t -= TX_WINDOW;
-    if (t < GUARD) return Phase::GUARD1;
-    t -= GUARD;
-    if (t < ACK_WINDOW) return Phase::ACK;
+    if (t < txWindowMs) return Phase::TX;
+    t -= txWindowMs;
+    if (t < guardMs) return Phase::GUARD1;
+    t -= guardMs;
+    if (t < ackWindowMs) return Phase::ACK;
     return Phase::GUARD2;
   }
 
@@ -31,4 +38,12 @@ namespace tdd {
       Radio_forceRx();
     }
   }
+
+  // Установка параметров окон
+  void setParams(unsigned long tx, unsigned long ack, unsigned long guard) {
+    txWindowMs = tx;
+    ackWindowMs = ack;
+    guardMs = guard;
+  }
 }
+

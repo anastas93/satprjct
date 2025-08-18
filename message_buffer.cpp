@@ -167,6 +167,12 @@ bool MessageBuffer::restoreArchived() {
   return true;
 }
 
+// заполняет вектор идентификаторами сообщений из архива
+void MessageBuffer::listArchived(std::vector<uint32_t>& out) const {
+  out.clear();
+  for (const auto& m : archived_) out.push_back(m.id);
+}
+
 size_t MessageBuffer::size() const {
   return qH_.size() + qN_.size() + qL_.size();
 }

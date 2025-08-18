@@ -48,6 +48,15 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
           <option value="1">1</option>
           <option value="2">2</option>
         </select>
+      </div>
+    </div>
+  </details>
+
+  <!-- Радиопараметры -->
+  <details>
+    <summary>Radio</summary>
+    <div class="panel-content">
+      <div class="row">
         <label for="presetSelect">Preset:</label>
         <select id="presetSelect" title="Выбор пресета внутри банка">
           <option value="0">0</option>
@@ -61,14 +70,20 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
           <option value="8">8</option>
           <option value="9">9</option>
         </select>
+        <label for="fecSelect">FEC:</label>
+        <select id="fecSelect" title="Режим исправления ошибок">
+          <option value="off">off</option>
+          <option value="rs_vit">rs_vit</option>
+          <option value="ldpc">ldpc</option>
+        </select>
+        <label for="interSelect">Interleave:</label>
+        <select id="interSelect" title="Глубина интерливера">
+          <option value="1">1</option>
+          <option value="4">4</option>
+          <option value="8">8</option>
+          <option value="16">16</option>
+        </select>
       </div>
-    </div>
-  </details>
-
-  <!-- Радиопараметры -->
-  <details>
-    <summary>Radio</summary>
-    <div class="panel-content">
       <div class="row">
         <label for="bwSelect">BW (kHz):</label>
         <select id="bwSelect" title="Полоса приёма">
@@ -129,19 +144,6 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
         <input id="retryMSInput" type="number" min="100" max="10000" step="100" title="Пауза между повторами (мс)">
       </div>
       <div class="row">
-        <label for="fecSelect">FEC:</label>
-        <select id="fecSelect" title="Режим исправления ошибок">
-          <option value="off">off</option>
-          <option value="rs_vit">rs_vit</option>
-          <option value="ldpc">ldpc</option>
-        </select>
-        <label for="interSelect">Interleave:</label>
-        <select id="interSelect" title="Глубина интерливера">
-          <option value="1">1</option>
-          <option value="4">4</option>
-          <option value="8">8</option>
-          <option value="16">16</option>
-        </select>
         <label for="payloadInput">Payload:</label>
         <input id="payloadInput" type="number" min="1" max="241" step="1" title="Размер полезной нагрузки">
         <label for="pilotInput">Pilot:</label>
@@ -151,6 +153,22 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
         <input id="winInput" type="number" min="1" max="32" step="1" value="8" title="Размер окна SR-ARQ">
         <label for="ackAggInput">AckAgg:</label>
         <input id="ackAggInput" type="number" min="0" max="1000" step="10" value="50" title="Интервал агрегации ACK (мс)">
+      </div>
+    </div>
+  </details>
+
+  <!-- Планировщик -->
+  <details>
+    <summary>Scheduler</summary>
+    <div class="panel-content">
+      <div class="row">
+        <label for="tddTxInput">TDD TX:</label>
+        <input id="tddTxInput" type="number" min="0" max="10000" step="10" title="Длительность окна передачи (мс)">
+        <label for="tddAckInput">ACK:</label>
+        <input id="tddAckInput" type="number" min="0" max="10000" step="10" title="Окно ожидания ACK (мс)">
+        <label for="tddGuardInput">Guard:</label>
+        <input id="tddGuardInput" type="number" min="0" max="1000" step="10" title="Защитный интервал (мс)">
+        <button id="tddApplyBtn" class="btn-secondary" title="Применить параметры TDD">Apply</button>
       </div>
     </div>
   </details>
@@ -183,6 +201,24 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
     </div>
   </details>
 
+  <!-- Безопасность для разработчика -->
+  <details>
+    <summary>Security (Dev)</summary>
+    <div class="panel-content">
+      <div class="row">
+        <input id="devKeyFile" type="file" title="Файл с 16‑байтовым ключом в hex">
+        <button id="uploadKeyBtn" class="btn-secondary" title="Загрузить ключ из файла">Upload Key</button>
+        <label for="kidActInput">KID:</label>
+        <input id="kidActInput" type="number" min="0" max="255" title="Активировать KID">
+        <button id="kidActBtn" class="btn-secondary" title="Активировать выбранный KID">Activate</button>
+      </div>
+      <div class="row">
+        <button id="idResetBtn" class="btn-danger" title="Сбросить счётчик сообщений">IDRESET</button>
+        <button id="replayClrBtn" class="btn-danger" title="Очистить окно anti-replay">REPLAYCLR</button>
+      </div>
+    </div>
+  </details>
+
   <!-- Работа с NVS -->
   <details>
     <summary>Storage</summary>
@@ -201,6 +237,11 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
     <div class="panel-content">
       <div class="row">
         <button id="pingBtn" class="btn-secondary" title="Отправить ping">Ping</button>
+        <button id="chanPingBtn" class="btn-secondary" title="Проверка канала на текущем пресете">ChannelPing</button>
+        <button id="presetPingBtn" class="btn-secondary" title="Пинг выбранного пресета">PresetPing</button>
+        <button id="massPingBtn" class="btn-secondary" title="Пинг всех пресетов банка">MassPing</button>
+      </div>
+      <div class="row">
         <button id="metricsBtn" class="btn-secondary" title="Показать метрики">Metrics</button>
         <button id="selfTestBtn" class="btn-danger" title="Запустить самотест">SelfTest</button>
       </div>
@@ -225,6 +266,31 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
         <button id="satRunBtn" class="btn-secondary" title="Запустить расширенный SatPing">SatPing+</button>
       </div>
       <div id="satPingResult" style="white-space: pre-wrap;"></div>
+    </div>
+  </details>
+
+  <!-- Архив и очередь -->
+  <details>
+    <summary>Archive/Queue</summary>
+    <div class="panel-content">
+      <div class="row">
+        <button id="archListBtn" class="btn-secondary" title="Показать архив">List</button>
+        <button id="archRestoreBtn" class="btn-secondary" title="Вернуть сообщение из архива">Restore</button>
+      </div>
+      <div id="archiveList" style="white-space: pre-wrap;"></div>
+    </div>
+  </details>
+
+  <!-- Последние кадры -->
+  <details>
+    <summary>Frames</summary>
+    <div class="panel-content">
+      <div class="row">
+        <label for="frameDrop">drop_reason:</label>
+        <input id="frameDrop" type="number" min="0" max="255" style="width:80px" title="Фильтр по drop_reason, пусто=все">
+        <button id="frameRefreshBtn" class="btn-secondary" title="Обновить список кадров">Refresh</button>
+      </div>
+      <table id="frameTable" class="log-table"></table>
     </div>
   </details>
 

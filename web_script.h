@@ -167,7 +167,8 @@ function applySettings(){
       ['bwSelect','bw'],['sfSelect','sf'],['crSelect','cr'],['txpSelect','txp'],
       ['retryNInput','retryN'],['retryMSInput','retryMS'],['kidInput','kid'],
       ['fecSelect','fec'],['interSelect','inter'],['payloadInput','payload'],
-      ['pilotInput','pilot'],['winInput','win'],['ackAggInput','ackAgg']
+      ['pilotInput','pilot'],['winInput','win'],['ackAggInput','ackAgg'],
+      ['tddTxInput','tddTx'],['tddAckInput','tddAck'],['tddGuardInput','tddGuard']
     ];
   m.forEach(([id,key])=>{
     const el=document.getElementById(id);
@@ -181,6 +182,17 @@ function applySettings(){
 applySettings();
 
 on('pingBtn','click',()=>{fetch('/ping');});
+// Дополнительные режимы пинга
+on('chanPingBtn','click',()=>{fetch('/channelping');});
+on('presetPingBtn','click',()=>{
+  const bank=document.getElementById('bankSelect').value;
+  const preset=document.getElementById('presetSelect').value;
+  fetch('/presetping?bank='+encodeURIComponent(bank)+'&preset='+encodeURIComponent(preset));
+});
+on('massPingBtn','click',()=>{
+  const bank=document.getElementById('bankSelect').value;
+  fetch('/massping?bank='+encodeURIComponent(bank));
+});
 // Запуск расширенного SatPing с параметрами
 on('satRunBtn','click',()=>{
   const p=new URLSearchParams();
@@ -243,5 +255,45 @@ on('sendQBtn','click',()=>{const msg=document.getElementById('sendQMsg').value;c
 on('largeQBtn','click',()=>{const sz=document.getElementById('largeQSize').value;const prio=document.getElementById('largeQPrio').value;fetch('/largeq?prio='+encodeURIComponent(prio)+'&size='+encodeURIComponent(sz));});
 on('qosModeBtn','click',()=>{const mode=document.getElementById('qosModeSelect').value;fetch('/qosmode?val='+encodeURIComponent(mode));});
 on('qosBtn','click',()=>{fetch('/qos').then(r=>r.text()).then(t=>{document.getElementById('qosStats').textContent=t;});});
+
+// Настройка TDD-планировщика
+on('tddApplyBtn','click',()=>{
+  const tx=document.getElementById('tddTxInput').value;
+  const ack=document.getElementById('tddAckInput').value;
+  const g=document.getElementById('tddGuardInput').value;
+  localStorage.setItem('tddTx',tx);
+  localStorage.setItem('tddAck',ack);
+  localStorage.setItem('tddGuard',g);
+  fetch('/tdd?tx='+encodeURIComponent(tx)+'&ack='+encodeURIComponent(ack)+'&guard='+encodeURIComponent(g));
+});
+
+// Разработческие функции безопасности
+on('uploadKeyBtn','click',()=>{
+  const f=document.getElementById('devKeyFile').files[0];
+  if(!f)return;const r=new FileReader();
+  r.onload=e=>{fetch('/setkey?val='+encodeURIComponent(e.target.result.trim()));};
+  r.readAsText(f);
+});
+on('kidActBtn','click',()=>{const k=document.getElementById('kidActInput').value;fetch('/setkid?val='+encodeURIComponent(k));});
+on('idResetBtn','click',()=>{fetch('/idreset');});
+on('replayClrBtn','click',()=>{fetch('/replayclr');});
+
+// Работа с архивом сообщений
+on('archListBtn','click',()=>{fetch('/archivelist').then(r=>r.text()).then(t=>{document.getElementById('archiveList').textContent=t;});});
+on('archRestoreBtn','click',()=>{fetch('/archiverestore');});
+
+// Отображение последних кадров
+function loadFrames(){
+  const dr=document.getElementById('frameDrop').value;
+  let url='/frames';
+  if(dr)url+='?drop='+encodeURIComponent(dr);
+  fetch(url).then(r=>r.json()).then(data=>{
+    const tbl=document.getElementById('frameTable');
+    tbl.innerHTML='<tr><th>Dir</th><th>Seq</th><th>Len</th><th>FEC</th><th>Inter</th><th>SNR</th><th>RS</th><th>Vit</th><th>Drop</th><th>RTT</th></tr>'+
+      data.map(e=>`<tr><td>${e.dir}</td><td>${e.seq}</td><td>${e.len}</td><td>${e.fec}</td><td>${e.inter}</td><td>${e.snr.toFixed(1)}</td><td>${e.rs}</td><td>${e.vit}</td><td>${e.drop}</td><td>${e.rtt}</td></tr>`).join('');
+  });
+}
+on('frameRefreshBtn','click',loadFrames);
+on('frameDrop','change',loadFrames);
 )rawliteral";
 
