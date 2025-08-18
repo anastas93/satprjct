@@ -101,8 +101,10 @@ function applyProfile(name){
 }
 function setSelect(id,val){const el=document.getElementById(id);if(el)el.value=val;}
 function sendParam(path,val){fetch('/'+path+'?val='+encodeURIComponent(val));}
+// Безопасно добавляет обработчики событий и пропускает отсутствующие элементы
+function on(id,ev,fn){const el=document.getElementById(id);if(el)el.addEventListener(ev,fn);}
 
-document.getElementById('sendBtn').addEventListener('click',()=>{
+on('sendBtn','click',()=>{
   const m=document.getElementById('msg').value;
   const st=document.getElementById('sendStatus');
   if(m){
@@ -114,43 +116,43 @@ document.getElementById('sendBtn').addEventListener('click',()=>{
   }
 });
 
-document.getElementById('cleanBtn').addEventListener('click',()=>{
+on('cleanBtn','click',()=>{
   const c=document.getElementById('chat');
   c.innerHTML='';
   localStorage.removeItem('chatLog');
 });
 
-document.getElementById('bankSelect').addEventListener('change',e=>{localStorage.setItem('bank',e.target.value);sendParam('setbank',e.target.value);});
-document.getElementById('presetSelect').addEventListener('change',e=>{localStorage.setItem('preset',e.target.value);sendParam('setpreset',e.target.value);});
-document.getElementById('bwSelect').addEventListener('change',e=>{localStorage.setItem('bw',e.target.value);sendParam('setbw',e.target.value);});
-document.getElementById('sfSelect').addEventListener('change',e=>{localStorage.setItem('sf',e.target.value);sendParam('setsf',e.target.value);});
-document.getElementById('crSelect').addEventListener('change',e=>{localStorage.setItem('cr',e.target.value);sendParam('setcr',e.target.value);});
-document.getElementById('txpSelect').addEventListener('change',e=>{localStorage.setItem('txp',e.target.value);sendParam('settxp',e.target.value);});
+on('bankSelect','change',e=>{localStorage.setItem('bank',e.target.value);sendParam('setbank',e.target.value);});
+on('presetSelect','change',e=>{localStorage.setItem('preset',e.target.value);sendParam('setpreset',e.target.value);});
+on('bwSelect','change',e=>{localStorage.setItem('bw',e.target.value);sendParam('setbw',e.target.value);});
+on('sfSelect','change',e=>{localStorage.setItem('sf',e.target.value);sendParam('setsf',e.target.value);});
+on('crSelect','change',e=>{localStorage.setItem('cr',e.target.value);sendParam('setcr',e.target.value);});
+on('txpSelect','change',e=>{localStorage.setItem('txp',e.target.value);sendParam('settxp',e.target.value);});
 // Явная установка ACK вместо неопределённого переключения
-document.getElementById('ackChk').addEventListener('change',e=>{
+on('ackChk','change',e=>{
   const v=e.target.checked?'1':'0';
   localStorage.setItem('ack',v);
   fetch('/setack?val='+v);
 });
-document.getElementById('retryNInput').addEventListener('change',e=>{localStorage.setItem('retryN',e.target.value);sendParam('setretryn',e.target.value);});
-document.getElementById('retryMSInput').addEventListener('change',e=>{localStorage.setItem('retryMS',e.target.value);sendParam('setretryms',e.target.value);});
+on('retryNInput','change',e=>{localStorage.setItem('retryN',e.target.value);sendParam('setretryn',e.target.value);});
+on('retryMSInput','change',e=>{localStorage.setItem('retryMS',e.target.value);sendParam('setretryms',e.target.value);});
 // Выбор режима FEC
-document.getElementById('fecSelect').addEventListener('change',e=>{localStorage.setItem('fec',e.target.value);sendParam('setfec',e.target.value);});
+on('fecSelect','change',e=>{localStorage.setItem('fec',e.target.value);sendParam('setfec',e.target.value);});
 // Глубина интерливера
-document.getElementById('interSelect').addEventListener('change',e=>{localStorage.setItem('inter',e.target.value);sendParam('setinter',e.target.value);});
-  document.getElementById('payloadInput').addEventListener('change',e=>{localStorage.setItem('payload',e.target.value);sendParam('setpayload',e.target.value);});
-  document.getElementById('pilotInput').addEventListener('change',e=>{localStorage.setItem('pilot',e.target.value);sendParam('setpilot',e.target.value);});
-  document.getElementById('dupChk').addEventListener('change',e=>{const v=e.target.checked?'1':'0';localStorage.setItem('dup',v);fetch('/setdup?val='+v);});
-  document.getElementById('winInput').addEventListener('change',e=>{localStorage.setItem('win',e.target.value);sendParam('setwin',e.target.value);});
-  document.getElementById('ackAggInput').addEventListener('change',e=>{localStorage.setItem('ackAgg',e.target.value);sendParam('setackagg',e.target.value);});
-  document.getElementById('encChk').addEventListener('change',e=>{localStorage.setItem('enc',e.target.checked?'1':'0');fetch('/toggleenc');});
-document.getElementById('kidInput').addEventListener('change',e=>{localStorage.setItem('kid',e.target.value);sendParam('setkid',e.target.value);});
+on('interSelect','change',e=>{localStorage.setItem('inter',e.target.value);sendParam('setinter',e.target.value);});
+on('payloadInput','change',e=>{localStorage.setItem('payload',e.target.value);sendParam('setpayload',e.target.value);});
+on('pilotInput','change',e=>{localStorage.setItem('pilot',e.target.value);sendParam('setpilot',e.target.value);});
+on('dupChk','change',e=>{const v=e.target.checked?'1':'0';localStorage.setItem('dup',v);fetch('/setdup?val='+v);});
+on('winInput','change',e=>{localStorage.setItem('win',e.target.value);sendParam('setwin',e.target.value);});
+on('ackAggInput','change',e=>{localStorage.setItem('ackAgg',e.target.value);sendParam('setackagg',e.target.value);});
+on('encChk','change',e=>{localStorage.setItem('enc',e.target.checked?'1':'0');fetch('/toggleenc');});
+on('kidInput','change',e=>{localStorage.setItem('kid',e.target.value);sendParam('setkid',e.target.value);});
 
-document.getElementById('keyBtn').addEventListener('click',()=>{const k=document.getElementById('keyInput').value;fetch('/setkey?val='+encodeURIComponent(k));});
-document.getElementById('saveBtn').addEventListener('click',()=>{fetch('/save');});
-document.getElementById('loadBtn').addEventListener('click',()=>{fetch('/load');});
-document.getElementById('resetBtn').addEventListener('click',()=>{fetch('/reset');});
-document.getElementById('profileSelect').addEventListener('change',e=>{localStorage.setItem('profile',e.target.value);applyProfile(e.target.value);});
+on('keyBtn','click',()=>{const k=document.getElementById('keyInput').value;fetch('/setkey?val='+encodeURIComponent(k));});
+on('saveBtn','click',()=>{fetch('/save');});
+on('loadBtn','click',()=>{fetch('/load');});
+on('resetBtn','click',()=>{fetch('/reset');});
+on('profileSelect','change',e=>{localStorage.setItem('profile',e.target.value);applyProfile(e.target.value);});
 
 const themeToggle=document.getElementById('themeToggle');
 const fontRange=document.getElementById('fontRange');
@@ -178,9 +180,9 @@ function applySettings(){
   }
 applySettings();
 
-document.getElementById('pingBtn').addEventListener('click',()=>{fetch('/ping');});
+on('pingBtn','click',()=>{fetch('/ping');});
 // Запуск расширенного SatPing с параметрами
-document.getElementById('satRunBtn').addEventListener('click',()=>{
+on('satRunBtn','click',()=>{
   const p=new URLSearchParams();
   const c=document.getElementById('satCount').value;if(c)p.append('count',c);
   const i=document.getElementById('satInterval').value;if(i)p.append('interval',i);
@@ -191,21 +193,21 @@ document.getElementById('satRunBtn').addEventListener('click',()=>{
     document.getElementById('satPingResult').textContent='sent:'+d.sent+' recv:'+d.received+' timeout:'+d.timeout;
   });
 });
-document.getElementById('metricsBtn').addEventListener('click',()=>{fetch('/metrics').then(r=>r.text()).then(t=>{document.getElementById('metrics').textContent=t;});});
-document.getElementById('selfTestBtn').addEventListener('click',()=>{fetch('/selftest');});
+on('metricsBtn','click',()=>{fetch('/metrics').then(r=>r.text()).then(t=>{document.getElementById('metrics').textContent=t;});});
+on('selfTestBtn','click',()=>{fetch('/selftest');});
 
-document.getElementById('simpleBtn').addEventListener('click',()=>{const st=document.getElementById('simpleStatus');fetch('/simple').then(r=>{st.textContent=r.ok?'\u2714':'\u2716';st.style.color=r.ok?'var(--sys-color)':'red';}).catch(()=>{st.textContent='\u2716';st.style.color='red';});setTimeout(()=>{st.textContent=''},2000);});
-document.getElementById('largeBtn').addEventListener('click',()=>{const n=document.getElementById('largeSize').value;const st=document.getElementById('largeStatus');fetch('/large?size='+encodeURIComponent(n)).then(r=>{st.textContent=r.ok?'\u2714':'\u2716';st.style.color=r.ok?'var(--sys-color)':'red';}).catch(()=>{st.textContent='\u2716';st.style.color='red';});setTimeout(()=>{st.textContent=''},2000);});
-document.getElementById('encTestBtn').addEventListener('click',()=>{const n=document.getElementById('encTestSize').value;let url='/enctest';if(n)url+='?size='+encodeURIComponent(n);fetch(url);});
-document.getElementById('encTestBadBtn').addEventListener('click',()=>{fetch('/enctestbad');});
-document.getElementById('msgIdBtn').addEventListener('click',()=>{const n=document.getElementById('msgIdVal').value;let url='/msgid';if(n)url+='?val='+encodeURIComponent(n);fetch(url);});
+on('simpleBtn','click',()=>{const st=document.getElementById('simpleStatus');fetch('/simple').then(r=>{st.textContent=r.ok?'\u2714':'\u2716';st.style.color=r.ok?'var(--sys-color)':'red';}).catch(()=>{st.textContent='\u2716';st.style.color='red';});setTimeout(()=>{st.textContent=''},2000);});
+on('largeBtn','click',()=>{const n=document.getElementById('largeSize').value;const st=document.getElementById('largeStatus');fetch('/large?size='+encodeURIComponent(n)).then(r=>{st.textContent=r.ok?'\u2714':'\u2716';st.style.color=r.ok?'var(--sys-color)':'red';}).catch(()=>{st.textContent='\u2716';st.style.color='red';});setTimeout(()=>{st.textContent=''},2000);});
+on('encTestBtn','click',()=>{const n=document.getElementById('encTestSize').value;let url='/enctest';if(n)url+='?size='+encodeURIComponent(n);fetch(url);});
+on('encTestBadBtn','click',()=>{fetch('/enctestbad');});
+on('msgIdBtn','click',()=>{const n=document.getElementById('msgIdVal').value;let url='/msgid';if(n)url+='?val='+encodeURIComponent(n);fetch(url);});
 
-const keyTestBtn=document.getElementById('keyTestBtn');if(keyTestBtn){keyTestBtn.addEventListener('click',()=>{fetch('/keytest');});}
-const keyReqBtn=document.getElementById('keyReqBtn');if(keyReqBtn){keyReqBtn.addEventListener('click',()=>{fetch('/keyreq');});}
-const keySendBtn=document.getElementById('keySendBtn');if(keySendBtn){keySendBtn.addEventListener('click',()=>{fetch('/keysend');});}
-const keyDhBtn=document.getElementById('keyDhBtn');if(keyDhBtn){keyDhBtn.addEventListener('click',()=>{fetch('/keydh');});}
+const keyTestBtn=document.getElementById('keyTestBtn');if(keyTestBtn){on('keyTestBtn','click',()=>{fetch('/keytest');});}
+const keyReqBtn=document.getElementById('keyReqBtn');if(keyReqBtn){on('keyReqBtn','click',()=>{fetch('/keyreq');});}
+const keySendBtn=document.getElementById('keySendBtn');if(keySendBtn){on('keySendBtn','click',()=>{fetch('/keysend');});}
+const keyDhBtn=document.getElementById('keyDhBtn');if(keyDhBtn){on('keyDhBtn','click',()=>{fetch('/keydh');});}
 // Кнопка отображения хеша ключа с обработкой ошибок запроса
-const keyHashBtn=document.getElementById('keyHashBtn');if(keyHashBtn){keyHashBtn.addEventListener('click',()=>{fetch('/keystatus').then(r=>r.json()).then(d=>{alert('Hash: '+d.hash);}).catch(()=>{alert('Ошибка получения хеша');});});}
+const keyHashBtn=document.getElementById('keyHashBtn');if(keyHashBtn){on('keyHashBtn','click',()=>{fetch('/keystatus').then(r=>r.json()).then(d=>{alert('Hash: '+d.hash);}).catch(()=>{alert('Ошибка получения хеша');});});}
 
 function updateKeyStatus(){
   fetch('/keystatus').then(r=>r.json()).then(d=>{
@@ -224,9 +226,9 @@ function updateKeyStatus(){
 }
 updateKeyStatus();
 
-document.getElementById('sendQBtn').addEventListener('click',()=>{const msg=document.getElementById('sendQMsg').value;const prio=document.getElementById('sendQPrio').value;if(msg){fetch('/sendq?prio='+encodeURIComponent(prio)+'&msg='+encodeURIComponent(msg));document.getElementById('sendQMsg').value='';}});
-document.getElementById('largeQBtn').addEventListener('click',()=>{const sz=document.getElementById('largeQSize').value;const prio=document.getElementById('largeQPrio').value;fetch('/largeq?prio='+encodeURIComponent(prio)+'&size='+encodeURIComponent(sz));});
-document.getElementById('qosModeBtn').addEventListener('click',()=>{const mode=document.getElementById('qosModeSelect').value;fetch('/qosmode?val='+encodeURIComponent(mode));});
-document.getElementById('qosBtn').addEventListener('click',()=>{fetch('/qos').then(r=>r.text()).then(t=>{document.getElementById('qosStats').textContent=t;});});
+on('sendQBtn','click',()=>{const msg=document.getElementById('sendQMsg').value;const prio=document.getElementById('sendQPrio').value;if(msg){fetch('/sendq?prio='+encodeURIComponent(prio)+'&msg='+encodeURIComponent(msg));document.getElementById('sendQMsg').value='';}});
+on('largeQBtn','click',()=>{const sz=document.getElementById('largeQSize').value;const prio=document.getElementById('largeQPrio').value;fetch('/largeq?prio='+encodeURIComponent(prio)+'&size='+encodeURIComponent(sz));});
+on('qosModeBtn','click',()=>{const mode=document.getElementById('qosModeSelect').value;fetch('/qosmode?val='+encodeURIComponent(mode));});
+on('qosBtn','click',()=>{fetch('/qos').then(r=>r.text()).then(t=>{document.getElementById('qosStats').textContent=t;});});
 )rawliteral";
 
