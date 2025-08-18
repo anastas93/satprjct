@@ -4,6 +4,7 @@
 #include <vector>
 #include "libs/rs/rs.h"
 #include "libs/viterbi/viterbi.h"
+#include "libs/ldpc/ldpc.h"
 
 // Простейший повторный код R=1/2
 inline void fec_encode_repeat(const uint8_t* in, size_t len, std::vector<uint8_t>& out) {
@@ -41,4 +42,13 @@ inline bool fec_decode_rs_viterbi(const uint8_t* in, size_t len, std::vector<uin
   if (!vit::decode(in, len, tmp)) return false;
   bool ok = rs255::decode(tmp.data(), tmp.size(), out, corrected);
   return ok;
+}
+
+// Заглушка LDPC: пока просто копирует входные данные
+inline void fec_encode_ldpc(const uint8_t* in, size_t len, std::vector<uint8_t>& out) {
+  ldpc::encode(in, len, out);
+}
+
+inline bool fec_decode_ldpc(const uint8_t* in, size_t len, std::vector<uint8_t>& out, int& corrected) {
+  return ldpc::decode(in, len, out, corrected);
 }
