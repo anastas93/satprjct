@@ -72,6 +72,9 @@ bool g_enc_on = cfg::ENCRYPTION_ENABLED_DEFAULT;
 uint8_t g_kid = 1;
 uint8_t g_retryN = cfg::SEND_RETRY_COUNT_DEFAULT;
 uint16_t g_retryMS = cfg::SEND_RETRY_MS_DEFAULT;
+bool g_dup_on = cfg::HEADER_DUP_DEFAULT;
+uint8_t g_window = cfg::SR_WINDOW_DEFAULT;
+uint16_t g_ackAgg = cfg::T_ACK_AGG_DEFAULT;
 
 // ----------------------------------------------------------------------------
 // Asynchronous ping state and radio busy flag.  When g_radio_busy is true the
@@ -166,6 +169,13 @@ void handleSetBw();
 void handleSetSf();
 void handleSetCr();
 void handleSetTxp();
+void handleSetFec();
+void handleSetInter();
+void handleSetPayload();
+void handleSetPilot();
+void handleSetDup();
+void handleSetWin();
+void handleSetAckAgg();
 void handleSetAck();
 void handleToggleEnc();
 void handleMetrics();
@@ -450,6 +460,7 @@ void handleRoot() {
   String page = FPSTR(WEB_INTERFACE_HTML);
   page.replace("%ACK%", g_ack_on ? "checked" : "");
   page.replace("%ENC%", g_enc_on ? "checked" : "");
+  page.replace("%DUP%", g_dup_on ? "checked" : "");
   server.send(200, "text/html", page);
 }
 
@@ -592,6 +603,106 @@ void handleSetTxp() {
   Radio_setTxPower(g_txp);
   server.send(200, "text/plain", "txp changed");
   serialBuffer += String("*SYS:* TXP set to ") + String(txp) + " dBm\n";
+}
+
+// Установка режима FEC: off/rs_vit/ldpc
+void handleSetFec() {
+  if (!server.hasArg("val")) {
+    server.send(400, "text/plain", "val missing");
+    return;
+  }
+  String v = server.arg("val");
+  TxPipeline::FecMode m;
+  if (v == "off") m = TxPipeline::FEC_OFF;
+  else if (v == "rs_vit") m = TxPipeline::FEC_RS_VIT;
+  else if (v == "ldpc") m = TxPipeline::FEC_LDPC;
+  else {
+    server.send(400, "text/plain", "off|rs_vit|ldpc");
+    return;
+  }
+  g_tx.setFecMode(m);
+  g_rx.setFecMode((RxPipeline::FecMode)m);
+  server.send(200, "text/plain", "fec changed");
+  serialBuffer += String("*SYS:* FEC=") + v + "\n";
+}
+
+// Установка глубины интерливера: 1/4/8/16 байт
+void handleSetInter() {
+  if (!server.hasArg("val")) {
+    server.send(400, "text/plain", "val missing");
+    return;
+  }
+  int d = server.arg("val").toInt();
+  if (!(d == 1 || d == 4 || d == 8 || d == 16)) {
+    server.send(400, "text/plain", "1|4|8|16");
+    return;
+  }
+  g_tx.setInterleaveDepth((uint8_t)d);
+  g_rx.setInterleaveDepth((uint8_t)d);
+  server.send(200, "text/plain", "inter changed");
+  serialBuffer += String("*SYS:* INTER=") + String(d) + "\n";
+}
+
+// Установка размера полезной нагрузки
+void handleSetPayload() {
+  if (!server.hasArg("val")) {
+    server.send(400, "text/plain", "val missing");
+    return;
+  }
+  int p = server.arg("val").toInt();
+  int maxp = cfg::LORA_MTU - FRAME_HEADER_SIZE;
+  if (p < 1 || p > maxp) {
+    server.send(400, "text/plain", "range 1.." + String(maxp));
+    return;
+  }
+  g_tx.setPayloadLen((uint16_t)p);
+  server.send(200, "text/plain", "payload changed");
+  serialBuffer += String("*SYS:* PAYLOAD=") + String(p) + "\n";
+}
+
+// Установка интервала пилотных вставок (0=выкл)
+void handleSetPilot() {
+  if (!server.hasArg("val")) {
+    server.send(400, "text/plain", "val missing");
+    return;
+  }
+  int iv = server.arg("val").toInt();
+  if (iv < 0 || iv > 512) {
+    server.send(400, "text/plain", "range 0..512");
+    return;
+  }
+  g_tx.setPilotInterval((uint16_t)iv);
+  g_rx.setPilotInterval((uint16_t)iv);
+  server.send(200, "text/plain", "pilot changed");
+  serialBuffer += String("*SYS:* PILOT=") + String(iv) + "\n";
+}
+
+void handleSetDup() {
+  bool on = server.arg("val") == "1";
+  g_dup_on = on;
+  g_tx.setHeaderDup(on);
+  g_rx.setHeaderDup(on);
+  server.send(200, "text/plain", on ? "dup on" : "dup off");
+  serialBuffer += String("*SYS:* HDRDUP=") + (on ? "ON" : "OFF") + "\n";
+}
+
+void handleSetWin() {
+  int w = server.arg("val").toInt();
+  if (w < 1 || w > 32) { server.send(400, "text/plain", "range 1..32"); return; }
+  g_window = (uint8_t)w;
+  g_tx.setWindowSize(g_window);
+  g_rx.setWindowSize(g_window);
+  server.send(200, "text/plain", "win set");
+  serialBuffer += String("*SYS:* WIN=") + String(w) + "\n";
+}
+
+void handleSetAckAgg() {
+  int ms = server.arg("val").toInt();
+  if (ms < 0 || ms > 1000) { server.send(400, "text/plain", "range 0..1000"); return; }
+  g_ackAgg = (uint16_t)ms;
+  g_rx.setAckAgg(g_ackAgg);
+  server.send(200, "text/plain", "ackagg set");
+  serialBuffer += String("*SYS:* ACKAGG=") + String(ms) + "\n";
 }
 
 // Обработчик явного включения/выключения ACK
@@ -2114,12 +2225,17 @@ void setup() {
   } else {
     Serial.println(F("Radio OK"));
   }
-  g_tx.setRetry(g_retryN, g_retryMS);
-  g_tx.enableAck(g_ack_on);
-  g_ccm.setEnabled(g_enc_on);
-  g_ccm.setActiveKid(g_kid);
-  loadKeyFromNVS();
-  g_tx.setEncEnabled(g_enc_on);
+    g_tx.setRetry(g_retryN, g_retryMS);
+    g_tx.enableAck(g_ack_on);
+    g_tx.setHeaderDup(g_dup_on);
+    g_tx.setWindowSize(g_window);
+    g_rx.setHeaderDup(g_dup_on);
+    g_rx.setWindowSize(g_window);
+    g_rx.setAckAgg(g_ackAgg);
+    g_ccm.setEnabled(g_enc_on);
+    g_ccm.setActiveKid(g_kid);
+    loadKeyFromNVS();
+    g_tx.setEncEnabled(g_enc_on);
   Radio_forceRx();
 
   // Start Wi‑Fi access point and HTTP server.  The device will create an
@@ -2143,8 +2259,15 @@ void setup() {
   server.on("/setsf", handleSetSf);
   server.on("/setcr", handleSetCr);
   server.on("/settxp", handleSetTxp);
-  server.on("/setack", handleSetAck);
-  server.on("/toggleenc", handleToggleEnc);
+  server.on("/setfec", handleSetFec);       // установка режима FEC
+  server.on("/setinter", handleSetInter);   // глубина интерливера
+    server.on("/setpayload", handleSetPayload); // размер полезной нагрузки
+    server.on("/setpilot", handleSetPilot);     // интервал пилотов
+    server.on("/setdup", handleSetDup);         // дублирование заголовка
+    server.on("/setwin", handleSetWin);         // размер окна SR-ARQ
+    server.on("/setackagg", handleSetAckAgg);   // интервал агрегации ACK
+    server.on("/setack", handleSetAck);
+    server.on("/toggleenc", handleToggleEnc);
   server.on("/metrics", handleMetrics);
   server.on("/ping", handlePing);
   server.on("/setretryn", handleSetRetryN);

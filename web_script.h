@@ -124,7 +124,16 @@ document.getElementById('ackChk').addEventListener('change',e=>{
 });
 document.getElementById('retryNInput').addEventListener('change',e=>{localStorage.setItem('retryN',e.target.value);sendParam('setretryn',e.target.value);});
 document.getElementById('retryMSInput').addEventListener('change',e=>{localStorage.setItem('retryMS',e.target.value);sendParam('setretryms',e.target.value);});
-document.getElementById('encChk').addEventListener('change',e=>{localStorage.setItem('enc',e.target.checked?'1':'0');fetch('/toggleenc');});
+// Выбор режима FEC
+document.getElementById('fecSelect').addEventListener('change',e=>{localStorage.setItem('fec',e.target.value);sendParam('setfec',e.target.value);});
+// Глубина интерливера
+document.getElementById('interSelect').addEventListener('change',e=>{localStorage.setItem('inter',e.target.value);sendParam('setinter',e.target.value);});
+  document.getElementById('payloadInput').addEventListener('change',e=>{localStorage.setItem('payload',e.target.value);sendParam('setpayload',e.target.value);});
+  document.getElementById('pilotInput').addEventListener('change',e=>{localStorage.setItem('pilot',e.target.value);sendParam('setpilot',e.target.value);});
+  document.getElementById('dupChk').addEventListener('change',e=>{const v=e.target.checked?'1':'0';localStorage.setItem('dup',v);fetch('/setdup?val='+v);});
+  document.getElementById('winInput').addEventListener('change',e=>{localStorage.setItem('win',e.target.value);sendParam('setwin',e.target.value);});
+  document.getElementById('ackAggInput').addEventListener('change',e=>{localStorage.setItem('ackAgg',e.target.value);sendParam('setackagg',e.target.value);});
+  document.getElementById('encChk').addEventListener('change',e=>{localStorage.setItem('enc',e.target.checked?'1':'0');fetch('/toggleenc');});
 document.getElementById('kidInput').addEventListener('change',e=>{localStorage.setItem('kid',e.target.value);sendParam('setkid',e.target.value);});
 
 document.getElementById('keyBtn').addEventListener('click',()=>{const k=document.getElementById('keyInput').value;fetch('/setkey?val='+encodeURIComponent(k));});
@@ -140,7 +149,23 @@ applyPrefs();
 themeToggle.addEventListener('change',()=>{const light=themeToggle.checked;document.body.classList.toggle('light',light);localStorage.setItem('theme',light?'light':'dark');});
 fontRange.addEventListener('input',()=>{const v=fontRange.value;document.documentElement.style.setProperty('--base-font',v+'px');localStorage.setItem('font',v);});
 
-function applySettings(){const m=[['profileSelect','profile'],['bankSelect','bank'],['presetSelect','preset'],['bwSelect','bw'],['sfSelect','sf'],['crSelect','cr'],['txpSelect','txp'],['retryNInput','retryN'],['retryMSInput','retryMS'],['kidInput','kid']];m.forEach(([id,key])=>{const el=document.getElementById(id);const val=localStorage.getItem(key);if(el&&val!==null)el.value=val;});document.getElementById('ackChk').checked=localStorage.getItem('ack')==='1';document.getElementById('encChk').checked=localStorage.getItem('enc')==='1';}
+function applySettings(){
+  const m=[
+    ['profileSelect','profile'],['bankSelect','bank'],['presetSelect','preset'],
+      ['bwSelect','bw'],['sfSelect','sf'],['crSelect','cr'],['txpSelect','txp'],
+      ['retryNInput','retryN'],['retryMSInput','retryMS'],['kidInput','kid'],
+      ['fecSelect','fec'],['interSelect','inter'],['payloadInput','payload'],
+      ['pilotInput','pilot'],['winInput','win'],['ackAggInput','ackAgg']
+    ];
+  m.forEach(([id,key])=>{
+    const el=document.getElementById(id);
+    const val=localStorage.getItem(key);
+    if(el&&val!==null) el.value=val;
+  });
+    document.getElementById('ackChk').checked=localStorage.getItem('ack')==='1';
+    document.getElementById('encChk').checked=localStorage.getItem('enc')==='1';
+    document.getElementById('dupChk').checked=localStorage.getItem('dup')==='1';
+  }
 applySettings();
 
 document.getElementById('pingBtn').addEventListener('click',()=>{fetch('/ping');});

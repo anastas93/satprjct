@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include <string.h>
 #include <array>
+#include <vector>
 #include <stdio.h>
 
 // Параметры профилей передачи
@@ -85,12 +86,12 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
       payload.swap(inter_buf);
     }
 
-    // Вставляем пилотные последовательности каждые PILOT_INTERVAL_BYTES
-    if (!payload.empty()) {
-      size_t pos = cfg::PILOT_INTERVAL_BYTES;
+    // Вставляем пилотные последовательности через заданный интервал
+    if (pilot_interval_bytes_ > 0 && !payload.empty()) {
+      size_t pos = pilot_interval_bytes_;
       while (pos < payload.size()) {
         payload.insert(payload.begin() + pos, cfg::PILOT_SEQ, cfg::PILOT_SEQ + cfg::PILOT_LEN);
-        pos += cfg::PILOT_INTERVAL_BYTES + cfg::PILOT_LEN;
+        pos += pilot_interval_bytes_ + cfg::PILOT_LEN;
       }
     }
 
@@ -108,12 +109,17 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     final_hdr.frame_crc = fcrc;
     final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
 
-    // Дублируем заголовок для UEP
-    const size_t frame_len = FRAME_HEADER_SIZE*2 + payload.size();
+    // Формируем окончательный кадр, при необходимости дублируя заголовок
+    size_t frame_len = FRAME_HEADER_SIZE + payload.size();
+    if (hdr_dup_enabled_) frame_len += FRAME_HEADER_SIZE;
     frame.resize(frame_len);
     memcpy(frame.data(), hdr_buf, FRAME_HEADER_SIZE);
-    memcpy(frame.data()+FRAME_HEADER_SIZE, hdr_buf, FRAME_HEADER_SIZE);
-    memcpy(frame.data()+FRAME_HEADER_SIZE*2, payload.data(), payload.size());
+    size_t off = FRAME_HEADER_SIZE;
+    if (hdr_dup_enabled_) {
+      memcpy(frame.data()+off, hdr_buf, FRAME_HEADER_SIZE);
+      off += FRAME_HEADER_SIZE;
+    }
+    memcpy(frame.data()+off, payload.data(), payload.size());
 
     // Повторяем отправку кадра согласно профилю
     for (uint8_t r = 0; r < repeat_count_; ++r) {
@@ -139,7 +145,7 @@ void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
     if (id <= highest) ok = true;
     else {
       uint32_t diff = id - highest - 1;
-      if (diff < WINDOW_SIZE && (bitmap & (1u << diff))) ok = true;
+      if (diff < window_size_ && (bitmap & (1u << diff))) ok = true;
     }
     if (ok) {
       unsigned long dt = millis() - it->start_ms;
@@ -179,7 +185,7 @@ void TxPipeline::loop() {
   if (!tdd::isTxPhase()) return;
 
   // Заполняем окно новыми сообщениями
-  while (pending_.size() < WINDOW_SIZE && buf_.hasPending()) {
+  while (pending_.size() < window_size_ && buf_.hasPending()) {
     if (!interFrameGap()) break;
     OutgoingMessage m;
     if (!buf_.peekNext(m)) break;
