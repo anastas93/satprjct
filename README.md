@@ -65,6 +65,7 @@ flowchart TD
 2. Подключитесь к Wi‑Fi и откройте в браузере `http://192.168.4.1/` для доступа к веб‑интерфейсу.
 
 ### Веб‑интерфейс
+- HTML-страница интерфейса переписана с нуля и сгруппирована по разделам (Basic, Radio, Reliability, Security, Storage, Diagnostics, Link Diagnostics, Commands, QoS, Appearance, Help).
 - Логи приходят по WebSocket без периодического опроса `/serial`.
 - Выбор темы и размер шрифта сохраняются в `localStorage`.
 - При отправке сообщений отображается успех или ошибка.
