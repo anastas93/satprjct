@@ -6,9 +6,14 @@ function appendChat(t){
   const chat=document.getElementById('chat');
   const n=document.createElement('div');
   let cls='',tag='',txt=t;
-  if(txt.startsWith('*TX:*')){cls='tx';tag='TX';txt=txt.slice(5).trim();blinkIndicator('txIndicator');}
-  else if(txt.startsWith('*RX:*')){cls='rx';tag='RX';txt=txt.slice(5).trim();blinkIndicator('rxIndicator');}
-  else if(txt.startsWith('*SYS:*')){cls='sys';tag='SYS';txt=txt.slice(6).trim();}
+  const m=/^\*([A-Z]+):\*\s*(.*)$/.exec(txt);
+  if(m){
+    tag=m[1];
+    txt=m[2];
+    if(tag==='TX'){cls='tx';blinkIndicator('txIndicator');}
+    else if(tag==='RX'){cls='rx';blinkIndicator('rxIndicator');}
+    else cls='sys';
+  }
   const tm=new Date().toLocaleTimeString();
   n.className='msg-line '+cls;
   n.innerHTML='<span class="msg-time">['+tm+']</span> '+(tag?'<span class="msg-tag">'+tag+':</span> ':'')+'<span class="msg-text">'+txt+'</span>';
@@ -17,6 +22,7 @@ function appendChat(t){
   while(chat.children.length>100)chat.removeChild(chat.lastChild);
   localStorage.setItem('chatLog',chat.innerHTML);
 }
+
 // Мигает выбранный индикатор активности TX/RX
 function blinkIndicator(id){const e=document.getElementById(id);if(!e)return;e.classList.add('blink');setTimeout(()=>e.classList.remove('blink'),500);}
 const savedChat=localStorage.getItem('chatLog');

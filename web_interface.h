@@ -16,11 +16,13 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <span id="txIndicator" class="indicator tx" title="Передача"></span>
     <span id="rxIndicator" class="indicator rx" title="Приём"></span>
   </div>
-  <div id="chat"></div>
-  <div id="inputRow">
-    <input id="msg" type="text" placeholder="Enter message">
-    <button id="sendBtn" class="btn-primary" title="Send typed message over LoRa">Send</button>
-    <span id="sendStatus"></span>
+  <div id="chatPanel">
+    <div id="chat"></div>
+    <div id="inputRow">
+      <input id="msg" type="text" placeholder="Enter message">
+      <button id="sendBtn" class="btn-primary" title="Send typed message over LoRa">Send</button>
+      <span id="sendStatus"></span>
+    </div>
   </div>
   <!-- Basic and Profile section -->
   <details open>

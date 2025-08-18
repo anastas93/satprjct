@@ -501,7 +501,7 @@ void handleSend() {
   g_buf.enqueue(bytes.data(), bytes.size(), false);
   persistMsgId();
   // Отправляем строку в чат и сохраняем её в буфер
-  chatLine(String("*TX:* ") + message);
+  chatMsg("TX", message);
   server.send(200, "text/plain", "ok");
 }
 
@@ -811,7 +811,7 @@ void handlePing() {
   // Clear any pending receive flag so we start fresh
   g_hasRx = false;
   // Announce start to chat and respond to HTTP client
-  chatLine(String("*SYS:* Ping started"));
+  chatMsg("SYS", "Ping started");
   server.send(200, "text/plain", "ping started");
 }
 
@@ -1550,6 +1550,11 @@ void chatLine(const String& s) {
     serialBuffer.remove(0, serialBuffer.length() - SERIAL_MAX);
   }
   wsServer.broadcastTXT(s.c_str());
+}
+
+// Формирует строку с тегом и единым форматом "*TAG:* текст" и выводит в чат
+void chatMsg(const String& tag, const String& text) {
+  chatLine(String("*") + tag + String(":* ") + text);
 }
 
 // -----------------------------------------------------------------------------
