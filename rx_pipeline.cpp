@@ -82,7 +82,9 @@ void RxPipeline::sendAck(uint32_t msg_id) {
   ack.frame_crc = fcrc;
   ack.encode(buf, FRAME_HEADER_SIZE);
   Radio_sendRaw(buf, FRAME_HEADER_SIZE + 8);
-  FrameLog::push('T', buf, FRAME_HEADER_SIZE + 8);
+  // логируем отправленный ACK
+  FrameLog::push('T', buf, FRAME_HEADER_SIZE + 8,
+                 0, 0, 0, 0.0f, 0, 0, 0, 0);
   last_ack_sent_ms_ = millis();
   // После передачи возвращаемся в режим приёма
   tdd::maintain();
@@ -112,9 +114,13 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   fcrc2 = crc16_ccitt(frame + FRAME_HEADER_SIZE*2, hdr.payload_len, fcrc2);
   if (fcrc2 != hdr.frame_crc) { metrics_.rx_crc_fail++; return; }
 
-  FrameLog::push('R', frame, len);
+  float snr = 0.0f;
+  Radio_getSNR(snr); // измеряем качество канала
 
   if (hdr.flags & F_ACK) {
+    // фиксируем входящий ACK без дополнительной обработки
+    FrameLog::push('R', frame, len, hdr.msg_id, fec_mode_, interleave_depth_,
+                   snr, 0, 0, 0, 0);
     if (hdr.payload_len == 8) {
       AckBitmap a{}; ack_decode(a, frame + FRAME_HEADER_SIZE);
       if (ack_cb_) ack_cb_(a.highest, a.bitmap);
@@ -141,12 +147,15 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
     data.swap(tmp);
   }
 
+  int corrected = 0;
   if (fec_enabled_) {
     std::vector<uint8_t> tmp;
-    int corrected = 0;
     if (fec_mode_ == FEC_RS_VIT) {
       if (!fec_decode_rs_viterbi(data.data(), data.size(), tmp, corrected)) {
         metrics_.rx_fec_fail++;
+        // логируем неудачное декодирование
+        FrameLog::push('R', frame, len, hdr.msg_id, fec_mode_, interleave_depth_,
+                       snr, corrected, 0, 1, 0);
         return;
       }
       metrics_.rx_fec_corrected += corrected;
@@ -156,6 +165,10 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   }
 
   lfsr_descramble(data.data(), data.size(), (uint16_t)hdr.msg_id);
+
+  // фиксируем успешно принятый кадр
+  FrameLog::push('R', frame, len, hdr.msg_id, fec_mode_, interleave_depth_,
+                 snr, corrected, 0, 0, 0);
   std::vector<uint8_t> plain;
   if (hdr.flags & F_ENC) {
     uint8_t hb[FRAME_HEADER_SIZE];
