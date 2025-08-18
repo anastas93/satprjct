@@ -14,7 +14,7 @@
 class RxPipeline {
 public:
   using MsgCb = std::function<void(uint32_t, const uint8_t*, size_t)>;
-  using AckCb = std::function<void(uint32_t)>;
+  using AckCb = std::function<void(uint32_t, uint32_t)>; // highest, bitmap
 
   RxPipeline(IEncryptor& enc, PipelineMetrics& m);
   void onReceive(const uint8_t* frame, size_t len);
@@ -38,6 +38,8 @@ private:
   PipelineMetrics& metrics_;
   MsgCb cb_ = nullptr;
   AckCb ack_cb_ = nullptr;
+  uint32_t ack_highest_ = 0;       // наибольший подтверждённый кадр
+  uint32_t ack_bitmap_ = 0;        // bitmap последних 32 кадров
   std::map<uint32_t, AsmState> assemblers_;
   std::deque<uint32_t> dup_window_;
   std::unordered_set<uint32_t> dup_set_;

@@ -5,6 +5,7 @@
 #include "scrambler.h"
 #include "fec.h"
 #include "interleaver.h"
+#include "ack_bitmap.h"
 #include <string.h>
 #include <algorithm> // для std::erase_if
 
@@ -33,22 +34,35 @@ bool RxPipeline::isDup(uint32_t msg_id) {
 }
 
 void RxPipeline::sendAck(uint32_t msg_id) {
+  // обновляем наибольший подтверждённый кадр и bitmap
+  if (msg_id > ack_highest_) {
+    uint32_t shift = msg_id - ack_highest_;
+    if (shift >= 32) ack_bitmap_ = 0;
+    else ack_bitmap_ <<= shift;
+    ack_highest_ = msg_id;
+  }
+  uint32_t off = ack_highest_ - msg_id;
+  if (off > 0 && off <= 32) ack_bitmap_ |= (1u << (off - 1));
+
   FrameHeader ack{};
   ack.ver = cfg::PIPE_VERSION;
   ack.flags = F_ACK;
-  ack.msg_id = msg_id;
-  ack.frag_idx = 0; ack.frag_cnt = 0; ack.payload_len = 0;
+  ack.msg_id = 0; // поле не используется
+  ack.frag_idx = 0; ack.frag_cnt = 0; ack.payload_len = 8;
   ack.hdr_crc = 0; ack.frame_crc = 0;
-  uint8_t buf[FRAME_HEADER_SIZE];
+  uint8_t buf[FRAME_HEADER_SIZE + 8];
   ack.encode(buf, FRAME_HEADER_SIZE);
+  AckBitmap pl{ack_highest_, ack_bitmap_};
+  ack_encode(pl, buf + FRAME_HEADER_SIZE);
   uint16_t hcrc = crc16_ccitt(buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
   ack.hdr_crc = hcrc;
   ack.encode(buf, FRAME_HEADER_SIZE);
   uint16_t fcrc = crc16_ccitt(buf, FRAME_HEADER_SIZE, 0xFFFF);
+  fcrc = crc16_ccitt(buf + FRAME_HEADER_SIZE, 8, fcrc);
   ack.frame_crc = fcrc;
   ack.encode(buf, FRAME_HEADER_SIZE);
-  Radio_sendRaw(buf, FRAME_HEADER_SIZE);
-  FrameLog::push('T', buf, FRAME_HEADER_SIZE);
+  Radio_sendRaw(buf, FRAME_HEADER_SIZE + 8);
+  FrameLog::push('T', buf, FRAME_HEADER_SIZE + 8);
 }
 
 void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
@@ -74,7 +88,13 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
 
   FrameLog::push('R', frame, len);
 
-  if (hdr.flags & F_ACK) { if (ack_cb_) ack_cb_(hdr.msg_id); return; }
+  if (hdr.flags & F_ACK) {
+    if (hdr.payload_len == 8) {
+      AckBitmap a{}; ack_decode(a, frame + FRAME_HEADER_SIZE);
+      if (ack_cb_) ack_cb_(a.highest, a.bitmap);
+    }
+    return;
+  }
 
   const uint8_t* p = frame + FRAME_HEADER_SIZE;
   std::vector<uint8_t> data(p, p + hdr.payload_len);

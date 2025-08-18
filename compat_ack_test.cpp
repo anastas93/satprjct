@@ -66,9 +66,9 @@ int main() {
   rx_remote.setMessageCallback([&](uint32_t, const uint8_t* d, size_t n) {
     received.assign(d, d + n);
   });
-  rx_local.setAckCallback([&](uint32_t id) {
+  rx_local.setAckCallback([&](uint32_t hi, uint32_t bm) {
     ack_ok = true;
-    tx.notifyAck(id);
+    tx.notifyAck(hi, bm);
   });
 
   // Отправляем сообщение с запросом ACK

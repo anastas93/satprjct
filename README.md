@@ -9,6 +9,7 @@
 - Простейший скремблер на LFSR (`lfsr_scramble`/`lfsr_descramble`) для
   избавления от длинных последовательностей бит
 - Простейший FEC на повторном коде и байтовый интерливинг (`setFecEnabled`, `setInterleaveDepth`)
+- ACK с bitmap последних 32 кадров (`AckBitmap`)
 
 ## Используемые библиотеки
 - [Arduino core for ESP32](https://github.com/espressif/arduino-esp32) — базовые классы (`Arduino.h`, `Preferences`, `WiFi`, `WebServer`)

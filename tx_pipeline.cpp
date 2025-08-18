@@ -87,8 +87,11 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
   metrics_.tx_msgs++;
 }
 
-void TxPipeline::notifyAck(uint32_t msg_id) {
-  if (waiting_ack_ && msg_id == waiting_id_) ack_received_ = true;
+void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
+  if (!waiting_ack_) return;
+  if (waiting_id_ <= highest) { ack_received_ = true; return; }
+  uint32_t diff = waiting_id_ - highest - 1;
+  if (diff < 32 && (bitmap & (1u << diff))) ack_received_ = true;
 }
 
 void TxPipeline::loop() {

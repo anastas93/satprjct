@@ -2266,8 +2266,8 @@ void setup() {
     // Not a key management message: append to chat buffer normally
     serialBuffer += String("*RX:* ") + m + String("\n");
   });
-  g_rx.setAckCallback([&](uint32_t id) {
-    g_tx.notifyAck(id);
+  g_rx.setAckCallback([&](uint32_t hi, uint32_t bm) {
+    g_tx.notifyAck(hi, bm);
   });
 
   loadConfig();
