@@ -202,7 +202,8 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
     // Проверяем служебное сообщение смены ключа
     if (plain.size() >= 7 && memcmp(plain.data(), "KEYCHG ", 7) == 0) {
       uint8_t kid = (uint8_t)strtoul((const char*)plain.data() + 7, nullptr, 10);
-      if (auto ccm = dynamic_cast<CcmEncryptor*>(&enc_)) ccm->setActiveKid(kid);
+      // Смена активного ключа (для других реализаций шифрования это no-op)
+      enc_.setActiveKid(kid);
       metrics_.rx_msgs_ok++;
       if (hdr.flags & F_ACK_REQ) sendAck(hdr.msg_id);
       gc();
