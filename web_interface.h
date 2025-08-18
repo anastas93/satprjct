@@ -13,6 +13,8 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
   <div id="statusBar">
     <span id="keyIndicator" class="indicator local"></span>
     <span id="keyStatusText">Local ----</span>
+    <span id="txIndicator" class="indicator tx" title="Передача"></span>
+    <span id="rxIndicator" class="indicator rx" title="Приём"></span>
   </div>
   <div id="chat"></div>
   <div id="inputRow">
