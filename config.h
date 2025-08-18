@@ -41,6 +41,11 @@ namespace cfg {
   static constexpr uint16_t TDD_ACK_WINDOW_MS = 300;  // окно ожидания подтверждений
   static constexpr uint16_t TDD_GUARD_MS      = 50;   // защитный интервал
 
+  // Пилотные вставки и неравномерная защита
+  static constexpr size_t   PILOT_INTERVAL_BYTES = 64;    // интервал между пилотами
+  static constexpr uint8_t  PILOT_SEQ[2]        = {0x55, 0x2D}; // короткий пилот
+  static constexpr size_t   PILOT_LEN           = sizeof(PILOT_SEQ);
+
   // Additional UART used for Radxa Zero 3W command interface
   // This UART allows bridging of commands and payloads to an external host.
   static constexpr uint32_t RADXA_UART_BAUD        = 115200;
