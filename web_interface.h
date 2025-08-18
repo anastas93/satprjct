@@ -17,9 +17,8 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
   <div id="chat"></div>
   <div id="inputRow">
     <input id="msg" type="text" placeholder="Enter message">
-    <button id="sendBtn" title="Send typed message over LoRa">Send</button>
+    <button id="sendBtn" class="btn-primary" title="Send typed message over LoRa">Send</button>
     <span id="sendStatus"></span>
-    <button id="cleanBtn" title="Очистить окно чата">Clean</button>
   </div>
   <!-- Basic and Profile section -->
   <details open>
@@ -129,24 +128,24 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
         <input id="kidInput" type="number" min="0" max="255" value="" title="Encryption key identifier (0‑255)">
         <label for="keyInput">KEY:</label>
         <input id="keyInput" type="text" placeholder="32 hex chars" title="Enter 16‑byte key as 32 hex characters">
-        <button id="keyBtn" title="Load key for current KID">Load Key</button>
+        <button id="keyBtn" class="btn-secondary" title="Load key for current KID">Load Key</button>
       </div>
       <!-- Key exchange test row -->
       <div class="row">
-        <button id="keyTestBtn" title="Perform ECDH key exchange on this device and set new key">KeyX</button>
+        <button id="keyTestBtn" class="btn-secondary" title="Perform ECDH key exchange on this device and set new key">KeyX</button>
       </div>
       <!-- Authenticated ECDH row -->
       <div class="row">
-        <button id="keyDhBtn" title="Initiate authenticated ECDH key exchange with remote device">Key DH</button>
+        <button id="keyDhBtn" class="btn-secondary" title="Initiate authenticated ECDH key exchange with remote device">Key DH</button>
       </div>
       <!-- Key request/response row -->
       <div class="row">
-        <button id="keyReqBtn" title="Request current encryption key from remote device">Key Req</button>
-        <button id="keySendBtn" title="Send current encryption key to remote device">Key Send</button>
+        <button id="keyReqBtn" class="btn-secondary" title="Request current encryption key from remote device">Key Req</button>
+        <button id="keySendBtn" class="btn-danger" title="Send current encryption key to remote device">Key Send</button>
       </div>
       <!-- Кнопка отображения хеша ключа -->
       <div class="row">
-        <button id="keyHashBtn" title="Показать хеш текущего ключа">Key Hash</button>
+        <button id="keyHashBtn" class="btn-secondary" title="Показать хеш текущего ключа">Key Hash</button>
       </div>
     </div>
   </details>
@@ -155,9 +154,9 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
     <summary>Storage</summary>
     <div class="panel-content">
       <div class="row">
-        <button id="saveBtn" title="Save current settings to non‑volatile storage">Save</button>
-        <button id="loadBtn" title="Load settings from non‑volatile storage">Load</button>
-        <button id="resetBtn" title="Clear settings in non‑volatile storage">Reset</button>
+        <button id="saveBtn" class="btn-secondary" title="Save current settings to non‑volatile storage">Save</button>
+        <button id="loadBtn" class="btn-secondary" title="Load settings from non‑volatile storage">Load</button>
+        <button id="resetBtn" class="btn-danger" title="Clear settings in non‑volatile storage">Reset</button>
       </div>
     </div>
   </details>
@@ -166,10 +165,10 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
     <summary>Diagnostics</summary>
     <div class="panel-content">
       <div class="row">
-        <button id="pingBtn" title="Send ping and measure round‑trip time">Ping</button>
-        <button id="metricsBtn" title="Show current metrics">Metrics</button>
+        <button id="pingBtn" class="btn-secondary" title="Send ping and measure round‑trip time">Ping</button>
+        <button id="metricsBtn" class="btn-secondary" title="Show current metrics">Metrics</button>
         <!-- Кнопка самотеста -->
-        <button id="selfTestBtn" title="Run built-in self-test">SelfTest</button>
+        <button id="selfTestBtn" class="btn-danger" title="Run built-in self-test">SelfTest</button>
       </div>
       <div id="metrics" style="white-space: pre-wrap;"></div>
       <div id="pingHistory"></div>
@@ -180,23 +179,23 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
     <summary>Commands</summary>
     <div class="panel-content">
       <div class="row">
-        <button id="simpleBtn" title="Send a basic test message 'ping'">Simple</button>
+        <button id="simpleBtn" class="btn-primary" title="Send a basic test message 'ping'">Simple</button>
         <span id="simpleStatus"></span>
         <label for="largeSize">Large size:</label>
         <input id="largeSize" type="number" min="1" max="2048" value="1200" style="width:80px" title="Size of large test message in bytes">
-        <button id="largeBtn" title="Enqueue a large test message of given size">Large</button>
+        <button id="largeBtn" class="btn-secondary" title="Enqueue a large test message of given size">Large</button>
         <span id="largeStatus"></span>
       </div>
       <div class="row">
         <label for="encTestSize">EncTest size:</label>
         <input id="encTestSize" type="number" min="1" max="2048" value="" style="width:80px" title="Optional size for encryption self‑test">
-        <button id="encTestBtn" title="Run encryption self‑test">EncTest</button>
-        <button id="encTestBadBtn" title="Run encryption test with bad KID">EncTestBad</button>
+        <button id="encTestBtn" class="btn-secondary" title="Run encryption self‑test">EncTest</button>
+        <button id="encTestBadBtn" class="btn-danger" title="Run encryption test with bad KID">EncTestBad</button>
       </div>
       <div class="row">
         <label for="msgIdVal">MSGID next:</label>
         <input id="msgIdVal" type="number" min="1" max="4294967295" value="" style="width:120px" title="Set next message ID">
-        <button id="msgIdBtn" title="Set next message ID">Set MsgID</button>
+        <button id="msgIdBtn" class="btn-secondary" title="Set next message ID">Set MsgID</button>
       </div>
     </div>
   </details>
@@ -212,7 +211,7 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
           <option value="H">High</option>
           <option value="L">Low</option>
         </select>
-        <button id="sendQBtn" title="Send message with selected priority">SendQ</button>
+        <button id="sendQBtn" class="btn-primary" title="Send message with selected priority">SendQ</button>
       </div>
       <div class="row">
         <label for="largeQSize">LargeQ size:</label>
@@ -223,7 +222,7 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
           <option value="H">High</option>
           <option value="L">Low</option>
         </select>
-        <button id="largeQBtn" title="Enqueue large test message with priority">LargeQ</button>
+        <button id="largeQBtn" class="btn-secondary" title="Enqueue large test message with priority">LargeQ</button>
       </div>
       <div class="row">
         <label for="qosModeSelect">Mode:</label>
@@ -231,8 +230,8 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
           <option value="STRICT">Strict</option>
           <option value="W421">Weighted 4‑2‑1</option>
         </select>
-        <button id="qosModeBtn" title="Set scheduling mode">Set Mode</button>
-        <button id="qosBtn" title="Show current QoS queue usage">Show QoS</button>
+        <button id="qosModeBtn" class="btn-secondary" title="Set scheduling mode">Set Mode</button>
+        <button id="qosBtn" class="btn-secondary" title="Show current QoS queue usage">Show QoS</button>
       </div>
       <div id="qosStats" style="white-space: pre-wrap;"></div>
     </div>
@@ -245,6 +244,7 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
         <label><input type="checkbox" id="themeToggle" title="Toggle light/dark theme"> Light theme</label>
         <label for="fontRange">Font size:</label>
         <input id="fontRange" type="range" min="12" max="24" value="16" title="Adjust UI base font size">
+        <button id="cleanBtn" class="btn-secondary" title="Очистить окно чата">Clean</button>
       </div>
     </div>
   </details>
