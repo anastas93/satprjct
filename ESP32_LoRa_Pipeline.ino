@@ -25,6 +25,7 @@
 
 #include <string.h> // for memcmp
 #include <ctype.h>   // for toupper when parsing hex strings
+#include <math.h>    // для вычисления Eb/N0
 
 // --- WiFi and Web server includes ---
 #include <WiFi.h>
@@ -343,6 +344,20 @@ bool Radio_setTxPower(int8_t dBm) {
 }
 void Radio_forceRx() {
   radio.startReceive();
+}
+
+// Получаем SNR последнего пакета из драйвера
+bool Radio_getSNR(float& snr) {
+  snr = radio.getSNR();
+  return true;
+}
+
+// Расчёт Eb/N0 на основе текущего SNR и параметров модуляции
+bool Radio_getEbN0(float& ebn0) {
+  float snr = radio.getSNR();
+  float efficiency = ((float)g_sf * 4.0f / (float)g_cr) / (1 << g_sf); // бит/Гц
+  ebn0 = snr - 10.0f * log10f(efficiency);
+  return true;
 }
 
 static void radioPoll() {
