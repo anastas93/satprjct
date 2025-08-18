@@ -89,7 +89,12 @@ document.getElementById('bwSelect').addEventListener('change',e=>{localStorage.s
 document.getElementById('sfSelect').addEventListener('change',e=>{localStorage.setItem('sf',e.target.value);sendParam('setsf',e.target.value);});
 document.getElementById('crSelect').addEventListener('change',e=>{localStorage.setItem('cr',e.target.value);sendParam('setcr',e.target.value);});
 document.getElementById('txpSelect').addEventListener('change',e=>{localStorage.setItem('txp',e.target.value);sendParam('settxp',e.target.value);});
-document.getElementById('ackChk').addEventListener('change',e=>{localStorage.setItem('ack',e.target.checked?'1':'0');fetch('/toggleack');});
+// Явная установка ACK вместо неопределённого переключения
+document.getElementById('ackChk').addEventListener('change',e=>{
+  const v=e.target.checked?'1':'0';
+  localStorage.setItem('ack',v);
+  fetch('/setack?val='+v);
+});
 document.getElementById('retryNInput').addEventListener('change',e=>{localStorage.setItem('retryN',e.target.value);sendParam('setretryn',e.target.value);});
 document.getElementById('retryMSInput').addEventListener('change',e=>{localStorage.setItem('retryMS',e.target.value);sendParam('setretryms',e.target.value);});
 document.getElementById('encChk').addEventListener('change',e=>{localStorage.setItem('enc',e.target.checked?'1':'0');fetch('/toggleenc');});

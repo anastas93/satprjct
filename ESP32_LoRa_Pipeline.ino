@@ -166,7 +166,7 @@ void handleSetBw();
 void handleSetSf();
 void handleSetCr();
 void handleSetTxp();
-void handleToggleAck();
+void handleSetAck();
 void handleToggleEnc();
 void handleMetrics();
 void handlePing();
@@ -594,8 +594,10 @@ void handleSetTxp() {
   serialBuffer += String("*SYS:* TXP set to ") + String(txp) + " dBm\n";
 }
 
-void handleToggleAck() {
-  g_ack_on = !g_ack_on;
+// Обработчик явного включения/выключения ACK
+void handleSetAck() {
+  bool on = server.arg("val") == "1";
+  g_ack_on = on;
   g_tx.enableAck(g_ack_on);
   server.send(200, "text/plain", g_ack_on ? "ack on" : "ack off");
   serialBuffer += String("*SYS:* ACK=") + (g_ack_on ? "ON" : "OFF") + "\n";
@@ -798,10 +800,12 @@ void handleEncTest() {
       n = (size_t)val;
     }
   }
+  // Используем вывод и в UART, и в окно чата
+  SerialChatPrint out(Serial);
   if (n > 0) {
-    EncSelfTest_run(g_ccm, n, Serial);
+    EncSelfTest_run(g_ccm, n, out);
   } else {
-    EncSelfTest_battery(g_ccm, Serial);
+    EncSelfTest_battery(g_ccm, out);
   }
   server.send(200, "text/plain", "enctest started");
   serialBuffer += String("*SYS:* ENCTEST started\n");
@@ -809,16 +813,20 @@ void handleEncTest() {
 
 void handleEncTestBad() {
   // Run an encryption test with an invalid KID to verify failure handling.
-  EncSelfTest_badKid(g_ccm, Serial);
+  // Сообщаем результат теста также в чат
+  SerialChatPrint out(Serial);
+  EncSelfTest_badKid(g_ccm, out);
   server.send(200, "text/plain", "enctestbad started");
   serialBuffer += String("*SYS:* ENCTESTBAD started\n");
 }
 
+// Выполняем полный самотест и передаём статус в чат
 void handleSelfTest() {
+  serialBuffer += String("*SYS:* SELFTEST started\n");
   SerialChatPrint out(Serial);
   SelfTest_runAll(g_ccm, out);
-  server.send(200, "text/plain", "selftest started");
-  serialBuffer += String("*SYS:* SELFTEST started\n");
+  serialBuffer += String("*SYS:* SELFTEST finished\n");
+  server.send(200, "text/plain", "selftest done");
 }
 
 void handleSetMsgId() {
@@ -890,9 +898,13 @@ void handleKeySend() {
 // Дополнительно включает 4‑значный хеш активного AES‑ключа в формате HEX.
 void handleKeyStatus() {
   String st = (g_key_status == KeyStatus::Received) ? "remote" : "local";
-  // Хеш берём из заранее вычисленного CRC-16
+  // Хеш берём из заранее вычисленного CRC-16; если ключ не задан, выводим прочерки
   char hbuf[5];
-  snprintf(hbuf, sizeof(hbuf), "%04X", (unsigned)crypto_spec::CURRENT_KEY_CRC & 0xFFFF);
+  if (crypto_spec::CURRENT_KEY_CRC == 0) {
+    strcpy(hbuf, "----");
+  } else {
+    snprintf(hbuf, sizeof(hbuf), "%04X", (unsigned)crypto_spec::CURRENT_KEY_CRC & 0xFFFF);
+  }
   String json = String("{\"status\":\"") + st + String("\",\"request\":") + (g_key_request_active ? "1" : "0") + String("\",\"hash\":\"") + hbuf + String("\"}");
   server.send(200, "application/json", json);
 }
@@ -2131,7 +2143,7 @@ void setup() {
   server.on("/setsf", handleSetSf);
   server.on("/setcr", handleSetCr);
   server.on("/settxp", handleSetTxp);
-  server.on("/toggleack", handleToggleAck);
+  server.on("/setack", handleSetAck);
   server.on("/toggleenc", handleToggleEnc);
   server.on("/metrics", handleMetrics);
   server.on("/ping", handlePing);

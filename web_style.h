@@ -15,8 +15,13 @@ h2{margin-top:0}
 #chat{height:35vh;width:100%;background-color:var(--panel-bg);border:1px solid #555;padding:10px;box-sizing:border-box;overflow-y:auto;display:flex;flex-direction:column;justify-content:flex-end;margin-bottom:10px}
 #inputRow{display:flex;margin-bottom:10px;flex-wrap:wrap;gap:6px}
 #msg{flex:1;padding:8px;border:1px solid #555;background-color:var(--panel-bg);color:var(--fg-color)}
-button{padding:8px 12px;border:none;color:#fff;background-color:var(--primary);cursor:pointer;border-radius:3px}
-button:hover{background-color:var(--primary-hover)}
+button{padding:8px 12px;border:none;color:#fff;cursor:pointer;border-radius:3px}
+.btn-primary{background-color:var(--primary)}
+.btn-primary:hover{background-color:var(--primary-hover)}
+.btn-secondary{background-color:#607d8b}
+.btn-secondary:hover{background-color:#78909c}
+.btn-danger{background-color:#e53935}
+.btn-danger:hover{background-color:#ef5350}
 #sendBtn{padding:4px 8px}
 select,input[type=number],input[type=text]{padding:4px;background-color:var(--panel-bg);color:var(--fg-color);border:1px solid #555;border-radius:3px}
 label{margin-right:4px}
