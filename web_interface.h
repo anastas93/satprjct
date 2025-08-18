@@ -199,6 +199,26 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       </div>
       <div id="metrics" style="white-space: pre-wrap;"></div>
       <div id="pingHistory"></div>
+      <!-- Расширенные настройки SatPing -->
+      <div class="row">
+        <label for="satCount">Cnt:</label>
+        <input id="satCount" type="number" min="0" value="0" style="width:80px" title="число пакетов, 0=бесконечно">
+        <label for="satInterval">Int(ms):</label>
+        <input id="satInterval" type="number" min="10" value="1000" style="width:80px" title="интервал между пакетами">
+        <label for="satSize">Size:</label>
+        <input id="satSize" type="number" min="1" max="241" value="5" style="width:60px" title="размер полезной нагрузки">
+        <label for="satFec">FEC:</label>
+        <select id="satFec" title="режим FEC">
+          <option value="off">off</option>
+          <option value="rs_vit">rs_vit</option>
+          <option value="ldpc">ldpc</option>
+          <option value="rep2">repeat2</option>
+        </select>
+        <label for="satRetries">Ret:</label>
+        <input id="satRetries" type="number" min="0" max="10" value="0" style="width:60px" title="повторы при потере">
+        <button id="satRunBtn" class="btn-secondary" title="Запустить расширенный sat ping">SatPing+</button>
+      </div>
+      <div id="satPingResult" style="white-space: pre-wrap;"></div>
     </div>
   </details>
   <!-- Link Diagnostics -->

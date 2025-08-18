@@ -31,7 +31,9 @@ function updatePingHistory(rssi,snr,dist,time){
 }
 
 // простые массивы для графиков диагностики канала
-const perData=[],rtt50Data=[],rtt95Data=[],goodputData=[];
+const perData=[],rtt50Data=[],rtt95Data=[],goodputData[];
+// последние значения счётчиков TX/RX для индикации активности
+let lastTx=0,lastRx=0;
 function drawGraph(id,data,color){
   const c=document.getElementById(id);if(!c)return;const ctx=c.getContext('2d');
   ctx.clearRect(0,0,c.width,c.height);if(data.length<2)return;
@@ -51,6 +53,8 @@ function updateLinkDiag(){
     drawGraph('goodputGraph',goodputData,'#ffb74d');
     const lp=document.getElementById('linkProfile');if(lp)lp.textContent='Профиль: '+d.profile;
     const ab=document.getElementById('ackBitmap');if(ab)ab.textContent='Bitmap долгов: '+d.bitmap;
+    if(typeof d.tx_frames==='number' && d.tx_frames>lastTx){blinkIndicator('txIndicator');lastTx=d.tx_frames;}
+    if(typeof d.rx_frames==='number' && d.rx_frames>lastRx){blinkIndicator('rxIndicator');lastRx=d.rx_frames;}
   }).catch(()=>{});
 }
 setInterval(updateLinkDiag,1000);
@@ -169,6 +173,18 @@ function applySettings(){
 applySettings();
 
 document.getElementById('pingBtn').addEventListener('click',()=>{fetch('/ping');});
+// Запуск расширенного SatPing с параметрами
+document.getElementById('satRunBtn').addEventListener('click',()=>{
+  const p=new URLSearchParams();
+  const c=document.getElementById('satCount').value;if(c)p.append('count',c);
+  const i=document.getElementById('satInterval').value;if(i)p.append('interval',i);
+  const s=document.getElementById('satSize').value;if(s)p.append('size',s);
+  const f=document.getElementById('satFec').value;if(f)p.append('fec',f);
+  const r=document.getElementById('satRetries').value;if(r)p.append('retries',r);
+  fetch('/satping?'+p.toString()).then(r=>r.json()).then(d=>{
+    document.getElementById('satPingResult').textContent='sent:'+d.sent+' recv:'+d.received+' timeout:'+d.timeout;
+  });
+});
 document.getElementById('metricsBtn').addEventListener('click',()=>{fetch('/metrics').then(r=>r.text()).then(t=>{document.getElementById('metrics').textContent=t;});});
 document.getElementById('selfTestBtn').addEventListener('click',()=>{fetch('/selftest');});
 
@@ -185,7 +201,21 @@ const keyDhBtn=document.getElementById('keyDhBtn');if(keyDhBtn){keyDhBtn.addEven
 // Кнопка отображения хеша ключа с обработкой ошибок запроса
 const keyHashBtn=document.getElementById('keyHashBtn');if(keyHashBtn){keyHashBtn.addEventListener('click',()=>{fetch('/keystatus').then(r=>r.json()).then(d=>{alert('Hash: '+d.hash);}).catch(()=>{alert('Ошибка получения хеша');});});}
 
-function updateKeyStatus(){fetch('/keystatus').then(r=>r.json()).then(d=>{const i=document.getElementById('keyIndicator');const t=document.getElementById('keyStatusText');if(!i||!t)return;const h='----';if(d.status==='local'){i.classList.remove('remote');i.classList.add('local');t.textContent='Local '+h;}else{i.classList.remove('local');i.classList.add('remote');t.textContent='Remote '+h;}i.classList.toggle('blink',Number(d.request)===1)}).catch(()=>{});setTimeout(updateKeyStatus,1000)}
+function updateKeyStatus(){
+  fetch('/keystatus').then(r=>r.json()).then(d=>{
+    const i=document.getElementById('keyIndicator');
+    const t=document.getElementById('keyStatusText');
+    if(!i||!t)return;
+    const h=d.hash||'----';
+    if(d.status==='local'){
+      i.classList.remove('remote');i.classList.add('local');t.textContent='Local '+h;
+    }else{
+      i.classList.remove('local');i.classList.add('remote');t.textContent='Remote '+h;
+    }
+    i.classList.toggle('blink',Number(d.request)===1);
+  }).catch(()=>{});
+  setTimeout(updateKeyStatus,1000);
+}
 updateKeyStatus();
 
 document.getElementById('sendQBtn').addEventListener('click',()=>{const msg=document.getElementById('sendQMsg').value;const prio=document.getElementById('sendQPrio').value;if(msg){fetch('/sendq?prio='+encodeURIComponent(prio)+'&msg='+encodeURIComponent(msg));document.getElementById('sendQMsg').value='';}});
