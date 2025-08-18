@@ -16,7 +16,8 @@ public:
   bool ackEnabled() const { return ack_enabled_; }
   void notifyAck(uint32_t highest, uint32_t bitmap);
   void setEncEnabled(bool v) { enc_enabled_ = v; }
-  void setFecEnabled(bool v) { fec_enabled_ = v; fec_mode_ = v ? 1 : 0; }
+  enum FecMode : uint8_t { FEC_OFF=0, FEC_RS_VIT=1, FEC_LDPC=2 };
+  void setFecMode(FecMode m) { fec_mode_ = m; fec_enabled_ = (m != FEC_OFF); }
   void setInterleaveDepth(uint8_t d) { interleave_depth_ = d; }
 private:
   void sendMessageFragments(const OutgoingMessage& m);
@@ -46,7 +47,7 @@ private:
 
   bool enc_enabled_ = cfg::ENCRYPTION_ENABLED_DEFAULT;
   bool fec_enabled_ = cfg::FEC_ENABLED_DEFAULT;
-  uint8_t fec_mode_ = 0;                       // тип FEC: 0-выкл,1-повтор
+  FecMode fec_mode_ = (FecMode)cfg::FEC_MODE_DEFAULT; // текущий режим FEC
   uint8_t interleave_depth_ = cfg::INTERLEAVER_DEPTH_DEFAULT;
 
   uint16_t payload_len_ = cfg::LORA_MTU - FRAME_HEADER_SIZE; // максимальная полезная нагрузка

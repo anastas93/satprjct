@@ -35,7 +35,8 @@ struct PipelineMetrics {
   uint32_t dec_fail_tag = 0, dec_fail_other = 0, enc_fail = 0;
 
   // FEC
-  uint32_t rx_fec_fail = 0;
+  uint32_t rx_fec_fail = 0;      // число неудачных декодирований
+  uint32_t rx_fec_corrected = 0; // сколько байт исправлено
 
   // Канальные параметры
   float last_snr = 0.0f;   // последний измеренный SNR

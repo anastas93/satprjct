@@ -141,11 +141,16 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
 
   if (fec_enabled_) {
     std::vector<uint8_t> tmp;
-    if (!fec_decode_repeat(data.data(), data.size(), tmp)) {
-      metrics_.rx_fec_fail++;
-      return;
+    int corrected = 0;
+    if (fec_mode_ == FEC_RS_VIT) {
+      if (!fec_decode_rs_viterbi(data.data(), data.size(), tmp, corrected)) {
+        metrics_.rx_fec_fail++;
+        return;
+      }
+      metrics_.rx_fec_corrected += corrected;
+      data.swap(tmp);
     }
-    data.swap(tmp);
+    // LDPC не реализован
   }
 
   lfsr_descramble(data.data(), data.size(), (uint16_t)hdr.msg_id);

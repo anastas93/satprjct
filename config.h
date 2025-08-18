@@ -28,8 +28,9 @@ namespace cfg {
   static constexpr bool     ENC_MODE_PER_FRAGMENT  = true;
 
   // FEC и интерливинг
-  static constexpr bool     FEC_ENABLED_DEFAULT    = false;
-  static constexpr uint8_t  INTERLEAVER_DEPTH_DEFAULT = 1;
+  static constexpr uint8_t  FEC_MODE_DEFAULT       = 0; // 0-off,1-rs_vit,2-ldpc
+  static constexpr bool     FEC_ENABLED_DEFAULT    = (FEC_MODE_DEFAULT!=0);
+  static constexpr uint8_t  INTERLEAVER_DEPTH_DEFAULT = 1; // 1/4/8/16
 
   // Buffers
   static constexpr size_t   TX_BUF_MAX_BYTES        = 48 * 1024;
