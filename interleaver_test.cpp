@@ -1,3 +1,5 @@
+#ifndef ARDUINO
+// Тест чередователя байтов, исключается из сборки прошивки
 #include "interleaver.h"
 #include <vector>
 #include <cassert>
@@ -13,3 +15,4 @@ int main() {
   std::cout << "interleave_ok\n";
   return 0;
 }
+#endif // !ARDUINO
