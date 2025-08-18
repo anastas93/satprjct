@@ -74,6 +74,15 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
       payload.swap(inter_buf);
     }
 
+    // Вставляем пилотные последовательности каждые PILOT_INTERVAL_BYTES
+    if (!payload.empty()) {
+      size_t pos = cfg::PILOT_INTERVAL_BYTES;
+      while (pos < payload.size()) {
+        payload.insert(payload.begin() + pos, cfg::PILOT_SEQ, cfg::PILOT_SEQ + cfg::PILOT_LEN);
+        pos += cfg::PILOT_INTERVAL_BYTES + cfg::PILOT_LEN;
+      }
+    }
+
     FrameHeader final_hdr = fr.hdr;
     if (willEnc) final_hdr.flags |= F_ENC;
     final_hdr.payload_len = (uint16_t)payload.size();
@@ -88,10 +97,12 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     final_hdr.frame_crc = fcrc;
     final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
 
-    const size_t frame_len = FRAME_HEADER_SIZE + payload.size();
+    // Дублируем заголовок для UEP
+    const size_t frame_len = FRAME_HEADER_SIZE*2 + payload.size();
     frame.resize(frame_len);
     memcpy(frame.data(), hdr_buf, FRAME_HEADER_SIZE);
-    memcpy(frame.data()+FRAME_HEADER_SIZE, payload.data(), payload.size());
+    memcpy(frame.data()+FRAME_HEADER_SIZE, hdr_buf, FRAME_HEADER_SIZE);
+    memcpy(frame.data()+FRAME_HEADER_SIZE*2, payload.data(), payload.size());
 
     // Повторяем отправку кадра согласно профилю
     for (uint8_t r = 0; r < repeat_count_; ++r) {

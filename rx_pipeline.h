@@ -33,6 +33,7 @@ private:
   void gc();
   bool isDup(uint32_t msg_id);
   void sendAck(uint32_t msg_id);
+  void updatePhaseFromPilot(const uint8_t* pilot, size_t len); // обновление оценки фазы
 
   IEncryptor& enc_;
   PipelineMetrics& metrics_;
@@ -46,6 +47,7 @@ private:
   size_t reasm_bytes_ = 0;
   bool fec_enabled_ = cfg::FEC_ENABLED_DEFAULT;
   uint8_t interleave_depth_ = cfg::INTERLEAVER_DEPTH_DEFAULT;
+  float phase_est_ = 0.0f; // текущая оценка фазы
 };
 
 void Radio_onReceive(const uint8_t* data, size_t len);

@@ -10,6 +10,18 @@
 #include <string.h>
 #include <algorithm> // для std::erase_if
 
+// Простая функция soft-combining для повторов байтов
+static void softCombinePairs(const uint8_t* in, size_t len, std::vector<uint8_t>& out) {
+  if (len % 2 != 0) return;
+  size_t out_len = len / 2;
+  out.resize(out_len);
+  for (size_t i = 0; i < out_len; ++i) {
+    uint8_t a = in[2*i];
+    uint8_t b = in[2*i + 1];
+    out[i] = a & b; // берём биты, совпавшие в обеих копиях
+  }
+}
+
 RxPipeline::RxPipeline(IEncryptor& enc, PipelineMetrics& m)
 : enc_(enc), metrics_(m) {}
 
@@ -73,24 +85,25 @@ void RxPipeline::sendAck(uint32_t msg_id) {
 void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   // Держим радио в нужном состоянии
   tdd::maintain();
-  if (!frame || len < FRAME_HEADER_SIZE) return;
+  if (!frame || len < FRAME_HEADER_SIZE*2) return;
+  std::vector<uint8_t> hdr_buf;
+  softCombinePairs(frame, FRAME_HEADER_SIZE*2, hdr_buf);
   FrameHeader hdr;
-  if (!FrameHeader::decode(hdr, frame, len)) return;
+  if (!FrameHeader::decode(hdr, hdr_buf.data(), hdr_buf.size())) return;
   if (hdr.ver != cfg::PIPE_VERSION) return;
-  if (len != FRAME_HEADER_SIZE + hdr.payload_len) { metrics_.rx_drop_len_mismatch++; return; }
+  if (len != FRAME_HEADER_SIZE*2 + hdr.payload_len) { metrics_.rx_drop_len_mismatch++; return; }
 
   // Проверяем CRC заголовка
   FrameHeader tmp = hdr; tmp.hdr_crc = 0; tmp.frame_crc = 0;
-  uint8_t hdr_buf[FRAME_HEADER_SIZE];
-  tmp.encode(hdr_buf, FRAME_HEADER_SIZE);
-  uint16_t hcrc2 = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
+  tmp.encode(hdr_buf.data(), FRAME_HEADER_SIZE);
+  uint16_t hcrc2 = crc16_ccitt(hdr_buf.data(), FRAME_HEADER_SIZE - 4, 0xFFFF);
   if (hcrc2 != hdr.hdr_crc) { metrics_.rx_crc_fail++; return; }
 
   // Проверяем общий CRC кадра
   tmp.hdr_crc = hdr.hdr_crc; tmp.frame_crc = 0;
-  tmp.encode(hdr_buf, FRAME_HEADER_SIZE);
-  uint16_t fcrc2 = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
-  fcrc2 = crc16_ccitt(frame + FRAME_HEADER_SIZE, hdr.payload_len, fcrc2);
+  tmp.encode(hdr_buf.data(), FRAME_HEADER_SIZE);
+  uint16_t fcrc2 = crc16_ccitt(hdr_buf.data(), FRAME_HEADER_SIZE, 0xFFFF);
+  fcrc2 = crc16_ccitt(frame + FRAME_HEADER_SIZE*2, hdr.payload_len, fcrc2);
   if (fcrc2 != hdr.frame_crc) { metrics_.rx_crc_fail++; return; }
 
   FrameLog::push('R', frame, len);
@@ -103,8 +116,18 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
     return;
   }
 
-  const uint8_t* p = frame + FRAME_HEADER_SIZE;
+  const uint8_t* p = frame + FRAME_HEADER_SIZE*2;
   std::vector<uint8_t> data(p, p + hdr.payload_len);
+
+  // Удаляем пилоты и обновляем фазу
+  if (!data.empty()) {
+    size_t pos = cfg::PILOT_INTERVAL_BYTES;
+    while (pos + cfg::PILOT_LEN <= data.size()) {
+      updatePhaseFromPilot(data.data() + pos, cfg::PILOT_LEN);
+      data.erase(data.begin() + pos, data.begin() + pos + cfg::PILOT_LEN);
+      pos += cfg::PILOT_INTERVAL_BYTES;
+    }
+  }
 
   if (interleave_depth_ > 1) {
     std::vector<uint8_t> tmp;
@@ -124,8 +147,9 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   lfsr_descramble(data.data(), data.size(), (uint16_t)hdr.msg_id);
   std::vector<uint8_t> plain;
   if (hdr.flags & F_ENC) {
-    hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
-    std::vector<uint8_t> aad(hdr_buf, hdr_buf + FRAME_HEADER_SIZE);
+    uint8_t hb[FRAME_HEADER_SIZE];
+    hdr.encode(hb, FRAME_HEADER_SIZE);
+    std::vector<uint8_t> aad(hb, hb + FRAME_HEADER_SIZE);
     if (!enc_.decrypt(data.data(), data.size(), aad.data(), aad.size(), plain)) { metrics_.dec_fail_tag++; return; }
   } else {
     plain = std::move(data);
@@ -179,4 +203,12 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
     reasm_bytes_ -= as.bytes; assemblers_.erase(hdr.msg_id);
   }
   gc();
+}
+
+// Простейшая обработка пилотной последовательности для обновления фазы
+void RxPipeline::updatePhaseFromPilot(const uint8_t* pilot, size_t len) {
+  int sum = 0;
+  for (size_t i = 0; i < len; ++i) sum += (int8_t)pilot[i];
+  // Экспоненциальное сглаживание оценки
+  phase_est_ = 0.9f * phase_est_ + 0.1f * sum;
 }
