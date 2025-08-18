@@ -207,11 +207,19 @@ void SatPingRun(const PingOptions& opts, PingStats& stats) {
       if (attempt > 0) stats.retransmits++;
       stats.tx_bytes += txbuf.size();
 
-      // ожидание ответа
+      // ожидание ответа с собственным таймаутом
       std::vector<uint8_t> rxbuf(txbuf.size());
-      uint32_t t1 = micros();
       radio.setFrequency(g_freq_rx_mhz);
-      int state = radio.receive(rxbuf.data(), rxbuf.size(), opts.timeout_ms);
+      radio.startReceive();
+      uint32_t t1 = micros();
+      int state = RADIOLIB_ERR_RX_TIMEOUT;
+      while ((micros() - t1) / 1000 < opts.timeout_ms) {
+        if (radio.available() == RADIOLIB_ERR_NONE) {
+          state = radio.readData(rxbuf.data(), rxbuf.size());
+          break;
+        }
+        delay(1); // короткая пауза, чтобы не грузить CPU
+      }
       uint32_t t2 = micros();
 
       if (state == RADIOLIB_ERR_NONE) {
