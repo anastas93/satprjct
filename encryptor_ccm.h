@@ -61,14 +61,14 @@ public:
 private:
   void buildNonce(const uint8_t* aad, size_t aad_len, uint8_t n[12]) const {
     memset(n, 0, 12);
-    if (aad_len < sizeof(FrameHeader)) return;
-    const FrameHeader* h = reinterpret_cast<const FrameHeader*>(aad);
-    n[0]=h->ver; n[1]=h->flags;
-    n[2]=(uint8_t)(h->frag_idx & 0xFF); n[3]=(uint8_t)(h->frag_idx>>8);
-    n[4]=(uint8_t)(h->frag_cnt & 0xFF); n[5]=(uint8_t)(h->frag_cnt>>8);
-    n[6]=(uint8_t)(h->msg_id); n[7]=(uint8_t)(h->msg_id>>8);
-    n[8]=(uint8_t)(h->msg_id>>16); n[9]=(uint8_t)(h->msg_id>>24);
-    n[10]=(uint8_t)(h->payload_len); n[11]=(uint8_t)(h->payload_len>>8);
+    FrameHeader h{};
+    if (!FrameHeader::decode(h, aad, aad_len)) return;
+    n[0]=h.ver; n[1]=h.flags;
+    n[2]=(uint8_t)(h.frag_idx & 0xFF); n[3]=(uint8_t)(h.frag_idx>>8);
+    n[4]=(uint8_t)(h.frag_cnt & 0xFF); n[5]=(uint8_t)(h.frag_cnt>>8);
+    n[6]=(uint8_t)(h.msg_id); n[7]=(uint8_t)(h.msg_id>>8);
+    n[8]=(uint8_t)(h.msg_id>>16); n[9]=(uint8_t)(h.msg_id>>24);
+    n[10]=(uint8_t)(h.payload_len); n[11]=(uint8_t)(h.payload_len>>8);
   }
   mbedtls_ccm_context ccm_;
   bool key_set_ = false;

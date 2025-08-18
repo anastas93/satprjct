@@ -19,9 +19,9 @@ static std::vector<uint8_t> g_pending_ack;
 
 // Заглушки радио
 bool Radio_sendRaw(const uint8_t* data, size_t len) {
-  if (!data || len < sizeof(FrameHeader)) return true;
+  if (!data || len < FRAME_HEADER_SIZE) return true;
   FrameHeader hdr;
-  memcpy(&hdr, data, sizeof(FrameHeader));
+  if (!FrameHeader::decode(hdr, data, len)) return true;
   if (hdr.flags & F_ACK) {
     g_pending_ack.assign(data, data + len); // доставим позже
   } else {

@@ -35,35 +35,38 @@ void RxPipeline::sendAck(uint32_t msg_id) {
   ack.flags = F_ACK;
   ack.msg_id = msg_id;
   ack.frag_idx = 0; ack.frag_cnt = 0; ack.payload_len = 0; ack.crc16 = 0;
-  uint16_t crc = crc16_ccitt(reinterpret_cast<const uint8_t*>(&ack), sizeof(FrameHeader), 0xFFFF);
+  uint8_t buf[FRAME_HEADER_SIZE];
+  ack.encode(buf, FRAME_HEADER_SIZE);
+  uint16_t crc = crc16_ccitt(buf, FRAME_HEADER_SIZE, 0xFFFF);
   ack.crc16 = crc;
-  uint8_t buf[sizeof(FrameHeader)];
-  memcpy(buf, &ack, sizeof(FrameHeader));
-  Radio_sendRaw(buf, sizeof(FrameHeader));
-  FrameLog::push('T', buf, sizeof(FrameHeader));
+  ack.encode(buf, FRAME_HEADER_SIZE);
+  Radio_sendRaw(buf, FRAME_HEADER_SIZE);
+  FrameLog::push('T', buf, FRAME_HEADER_SIZE);
 }
 
 void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
-  if (!frame || len < sizeof(FrameHeader)) return;
+  if (!frame || len < FRAME_HEADER_SIZE) return;
   FrameHeader hdr;
-  memcpy(&hdr, frame, sizeof(FrameHeader));
+  if (!FrameHeader::decode(hdr, frame, len)) return;
   if (hdr.ver != cfg::PIPE_VERSION) return;
-  if (len != sizeof(FrameHeader) + hdr.payload_len) { metrics_.rx_drop_len_mismatch++; return; }
+  if (len != FRAME_HEADER_SIZE + hdr.payload_len) { metrics_.rx_drop_len_mismatch++; return; }
 
   uint16_t got_crc = hdr.crc16;
   FrameHeader tmp = hdr; tmp.crc16 = 0;
-  uint16_t crc = crc16_ccitt(reinterpret_cast<const uint8_t*>(&tmp), sizeof(FrameHeader), 0xFFFF);
-  crc = crc16_ccitt(frame + sizeof(FrameHeader), hdr.payload_len, crc);
+  uint8_t hdr_buf[FRAME_HEADER_SIZE];
+  tmp.encode(hdr_buf, FRAME_HEADER_SIZE);
+  uint16_t crc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
+  crc = crc16_ccitt(frame + FRAME_HEADER_SIZE, hdr.payload_len, crc);
   if (crc != got_crc) { metrics_.rx_crc_fail++; return; }
 
   FrameLog::push('R', frame, len);
 
   if (hdr.flags & F_ACK) { if (ack_cb_) ack_cb_(hdr.msg_id); return; }
 
-  const uint8_t* p = frame + sizeof(FrameHeader);
+  const uint8_t* p = frame + FRAME_HEADER_SIZE;
   std::vector<uint8_t> plain;
   if (hdr.flags & F_ENC) {
-    std::vector<uint8_t> aad(reinterpret_cast<uint8_t*>(&tmp), reinterpret_cast<uint8_t*>(&tmp)+sizeof(FrameHeader));
+    std::vector<uint8_t> aad(hdr_buf, hdr_buf + FRAME_HEADER_SIZE);
     if (!enc_.decrypt(p, hdr.payload_len, aad.data(), aad.size(), plain)) { metrics_.dec_fail_tag++; return; }
   } else {
     plain.assign(p, p + hdr.payload_len);

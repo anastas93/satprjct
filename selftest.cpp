@@ -15,7 +15,8 @@ bool EncSelfTest_run(CcmEncryptor& ccm, size_t size, Print& out) {
   hdr.ver = cfg::PIPE_VERSION; hdr.flags = F_ENC;
   hdr.msg_id = 0xA55A1234; hdr.frag_idx = 0; hdr.frag_cnt = 1;
   hdr.payload_len = (uint16_t)plain.size(); hdr.crc16 = 0;
-  std::vector<uint8_t> aad(reinterpret_cast<uint8_t*>(&hdr), reinterpret_cast<uint8_t*>(&hdr)+sizeof(FrameHeader));
+  std::vector<uint8_t> aad(FRAME_HEADER_SIZE);
+  hdr.encode(aad.data(), aad.size());
 
   std::vector<uint8_t> enc, dec;
   unsigned long t0 = micros();
@@ -48,7 +49,8 @@ void EncSelfTest_badKid(CcmEncryptor& ccm, Print& out) {
   FrameHeader hdr{};
   hdr.ver = cfg::PIPE_VERSION; hdr.flags = F_ENC; hdr.msg_id = 0xDEADBEEF;
   hdr.frag_idx=0; hdr.frag_cnt=1; hdr.payload_len=(uint16_t)plain.size(); hdr.crc16=0;
-  std::vector<uint8_t> aad(reinterpret_cast<uint8_t*>(&hdr), reinterpret_cast<uint8_t*>(&hdr)+sizeof(FrameHeader));
+  std::vector<uint8_t> aad(FRAME_HEADER_SIZE);
+  hdr.encode(aad.data(), aad.size());
 
   std::vector<uint8_t> enc, dec;
   if (!ccm.encrypt(plain.data(), plain.size(), aad.data(), aad.size(), enc)) { out.println(F("Encrypt failed")); return; }
