@@ -14,8 +14,9 @@ h2{margin-top:0}
 .indicator.rx{background-color:var(--rx-color)}
 .indicator.blink{animation:blink 1s linear infinite}
 @keyframes blink{0%,50%{opacity:1}50%,100%{opacity:0}}
-#chat{height:35vh;width:100%;background-color:var(--panel-bg);border:1px solid #555;padding:10px;box-sizing:border-box;overflow-y:auto;display:flex;flex-direction:column;justify-content:flex-end;margin-bottom:10px}
-#inputRow{display:flex;margin-bottom:10px;flex-wrap:wrap;gap:6px}
+#chatPanel{height:40vh;display:flex;flex-direction:column;margin-bottom:10px}
+#chat{flex:1;width:100%;background-color:var(--panel-bg);border:1px solid #555;padding:10px;box-sizing:border-box;overflow-y:auto;display:flex;flex-direction:column;justify-content:flex-end}
+#inputRow{display:flex;margin-top:6px;flex-wrap:wrap;gap:6px}
 #msg{flex:1;padding:8px;border:1px solid #555;background-color:var(--panel-bg);color:var(--fg-color)}
 button{padding:8px 12px;border:none;color:#fff;cursor:pointer;border-radius:3px}
 .btn-primary{background-color:var(--primary)}
