@@ -10,6 +10,8 @@ h2{margin-top:0}
 .indicator{width:12px;height:12px;border-radius:50%;display:inline-block;margin-right:4px}
 .indicator.local{background-color:var(--sys-color)}
 .indicator.remote{background-color:var(--rx-color)}
+.indicator.tx{background-color:var(--tx-color)}
+.indicator.rx{background-color:var(--rx-color)}
 .indicator.blink{animation:blink 1s linear infinite}
 @keyframes blink{0%,50%{opacity:1}50%,100%{opacity:0}}
 #chat{height:35vh;width:100%;background-color:var(--panel-bg);border:1px solid #555;padding:10px;box-sizing:border-box;overflow-y:auto;display:flex;flex-direction:column;justify-content:flex-end;margin-bottom:10px}
