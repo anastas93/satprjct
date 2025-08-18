@@ -20,7 +20,8 @@ public:
   void onReceive(const uint8_t* frame, size_t len);
   void setMessageCallback(MsgCb cb) { cb_ = cb; }
   void setAckCallback(AckCb cb) { ack_cb_ = cb; }
-  void setFecEnabled(bool v) { fec_enabled_ = v; }
+  enum FecMode : uint8_t { FEC_OFF=0, FEC_RS_VIT=1, FEC_LDPC=2 };
+  void setFecMode(FecMode m) { fec_mode_ = m; fec_enabled_ = (m != FEC_OFF); }
   void setInterleaveDepth(uint8_t d) { interleave_depth_ = d; }
 private:
   struct AsmState {
@@ -47,6 +48,7 @@ private:
   std::unordered_set<uint32_t> dup_set_;
   size_t reasm_bytes_ = 0;
   bool fec_enabled_ = cfg::FEC_ENABLED_DEFAULT;
+  FecMode fec_mode_ = (FecMode)cfg::FEC_MODE_DEFAULT;
   uint8_t interleave_depth_ = cfg::INTERLEAVER_DEPTH_DEFAULT;
   float phase_est_ = 0.0f; // текущая оценка фазы
 };

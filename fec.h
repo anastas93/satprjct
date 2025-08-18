@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <vector>
+#include "libs/rs/rs.h"
+#include "libs/viterbi/viterbi.h"
 
 // Простейший повторный код R=1/2
 inline void fec_encode_repeat(const uint8_t* in, size_t len, std::vector<uint8_t>& out) {
@@ -24,5 +26,19 @@ inline bool fec_decode_repeat(const uint8_t* in, size_t len, std::vector<uint8_t
     out[i] = a;
     if (a != b) ok = false;
   }
+  return ok;
+}
+
+// Сложный FEC: RS(255,223) + Viterbi (K=7,R=1/2)
+inline void fec_encode_rs_viterbi(const uint8_t* in, size_t len, std::vector<uint8_t>& out) {
+  std::vector<uint8_t> rs;
+  rs255::encode(in, len, rs);
+  vit::encode(rs.data(), rs.size(), out);
+}
+
+inline bool fec_decode_rs_viterbi(const uint8_t* in, size_t len, std::vector<uint8_t>& out, int& corrected) {
+  std::vector<uint8_t> tmp;
+  if (!vit::decode(in, len, tmp)) return false;
+  bool ok = rs255::decode(tmp.data(), tmp.size(), out, corrected);
   return ok;
 }

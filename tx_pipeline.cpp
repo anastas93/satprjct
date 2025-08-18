@@ -13,12 +13,12 @@
 #include <array>
 
 // Параметры профилей передачи
-struct TxProfile { uint16_t payload; uint8_t fec; uint8_t inter; uint8_t repeat; };
+struct TxProfile { uint16_t payload; TxPipeline::FecMode fec; uint8_t inter; uint8_t repeat; };
 static const TxProfile PROFILES[4] = {
-  {200, 0, 1, 1}, // P0: лучший канал
-  {160, 0, 1, 2}, // P1
-  {120, 1, 2, 3}, // P2
-  { 80, 1, 4, 4}  // P3: худший канал
+  {200, TxPipeline::FEC_OFF,    1, 1}, // P0: лучший канал
+  {160, TxPipeline::FEC_OFF,    1, 2}, // P1
+  {120, TxPipeline::FEC_RS_VIT, 8, 3}, // P2
+  { 80, TxPipeline::FEC_RS_VIT,16, 4}  // P3: худший канал
 };
 
 static const float PER_THR[3]  = {0.1f, 0.2f, 0.3f};
@@ -60,11 +60,14 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     // Скремблирование полезной нагрузки для подавления длительных последовательностей
     lfsr_scramble(payload.data(), payload.size(), (uint16_t)hdr.msg_id);
 
-    // Простейший FEC повторным кодом
+    // FEC: RS + Viterbi
     if (fec_enabled_) {
       std::vector<uint8_t> fec_buf;
-      fec_encode_repeat(payload.data(), payload.size(), fec_buf);
-      payload.swap(fec_buf);
+      if (fec_mode_ == FEC_RS_VIT) {
+        fec_encode_rs_viterbi(payload.data(), payload.size(), fec_buf);
+        payload.swap(fec_buf);
+      }
+      // режим LDPC пока не реализован
     }
 
     // Байтовый интерливинг

@@ -8,7 +8,9 @@
 - Модуль `crypto_spec` (в корне проекта) с функциями `setCurrentKey` для хранения ключа и его CRC-16 и `setRootKeyHex` для установки корневого ключа из 32‑символьной hex-строки (по умолчанию загружается встроенное значение)
 - Простейший скремблер на LFSR (`lfsr_scramble`/`lfsr_descramble`) для
   избавления от длинных последовательностей бит
-- Простейший FEC на повторном коде и байтовый интерливинг (`setFecEnabled`, `setInterleaveDepth`)
+- FEC: RS(255,223) + Viterbi K=7, R=1/2 и байтовый интерливинг (`setFecMode`, `setInterleaveDepth`)
+- Параметр `setFecMode` принимает значения `off`, `rs_vit` или `ldpc` (зарезервировано).
+  Глубина интерливера задаётся `setInterleaveDepth` и может быть 1, 4, 8 или 16 байт.
 - Пилотные вставки каждые 64 байта и дублирование заголовка для UEP
 - SR‑ARQ с окном 8 сообщений и bitmap последних 8 кадров (`AckBitmap`)
 - Планировщик слотов TDD (`tdd_scheduler`) с окнами `TX`, `ACK` и защитным интервалом
@@ -18,6 +20,7 @@
 - [Arduino core for ESP32](https://github.com/espressif/arduino-esp32) — базовые классы (`Arduino.h`, `Preferences`, `WiFi`, `WebServer`)
 - [RadioLib](https://github.com/jgromes/RadioLib) — драйвер SX1262 и функции LoRa
 - [mbedTLS](https://github.com/Mbed-TLS/mbedtls) — криптография (AES‑CCM, ECDH и др.)
+- Собственные реализации RS(255,223) и Viterbi K=7, R=1/2 в каталоге `libs/`
 
 ### Версии
 Все библиотеки помещены в каталог `libs`.
@@ -159,10 +162,10 @@ ENCTESTBAD wrong-KID dec=FAIL (expected FAIL)
 
 | Профиль | Условие | `payload_len` | `fec_mode` | `interleave_depth` | `repeat_count` |
 |---------|---------|---------------|-----------|--------------------|----------------|
-| P0 | PER ≤ 0.1 и Eb/N0 ≥ 7 дБ | 200 | выкл | 1 | 1 |
-| P1 | PER ≤ 0.2 и Eb/N0 ≥ 5 дБ | 160 | выкл | 1 | 2 |
-| P2 | PER ≤ 0.3 и Eb/N0 ≥ 3 дБ | 120 | повтор | 2 | 3 |
-| P3 | иначе | 80 | повтор | 4 | 4 |
+| P0 | PER ≤ 0.1 и Eb/N0 ≥ 7 дБ | 200 | off    | 1  | 1 |
+| P1 | PER ≤ 0.2 и Eb/N0 ≥ 5 дБ | 160 | off    | 1  | 2 |
+| P2 | PER ≤ 0.3 и Eb/N0 ≥ 3 дБ | 120 | rs_vit | 8  | 3 |
+| P3 | иначе                     | 80  | rs_vit | 16 | 4 |
 
 Для доступа к последним измеренным значениям доступны функции `Radio_getSNR`/`Radio_getEbN0` и их сокращённые версии `Radio_readSNR`/`Radio_readEbN0`.
 
