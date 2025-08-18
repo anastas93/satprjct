@@ -18,4 +18,8 @@ struct PipelineMetrics {
 
   // ENC
   uint32_t dec_fail_tag = 0, dec_fail_other = 0, enc_fail = 0;
+
+  // Канальные параметры
+  float last_snr = 0.0f;   // последний измеренный SNR
+  float last_ebn0 = 0.0f;  // последний измеренный Eb/N0
 };

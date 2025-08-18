@@ -12,7 +12,8 @@ int main() {
   h.frag_idx = 2;
   h.frag_cnt = 5;
   h.payload_len = 7;
-  h.crc16 = 0xABCD;
+  h.hdr_crc = 0x1234;
+  h.frame_crc = 0xABCD;
 
   std::vector<uint8_t> buf(FrameHeader::ENCODED_SIZE);
   assert(h.encode(buf.data(), buf.size()));
@@ -25,7 +26,8 @@ int main() {
   assert(h2.frag_idx == h.frag_idx);
   assert(h2.frag_cnt == h.frag_cnt);
   assert(h2.payload_len == h.payload_len);
-  assert(h2.crc16 == h.crc16);
+  assert(h2.hdr_crc == h.hdr_crc);
+  assert(h2.frame_crc == h.frame_crc);
 
   // Проверяем отказ на усечённом буфере
   assert(!FrameHeader::decode(h2, buf.data(), buf.size()-1));

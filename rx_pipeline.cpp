@@ -2,6 +2,7 @@
 #include "rx_pipeline.h"
 #include "radio_adapter.h"
 #include "frame_log.h"
+#include "scrambler.h"
 #include <string.h>
 #include <algorithm> // для std::erase_if
 
@@ -34,11 +35,15 @@ void RxPipeline::sendAck(uint32_t msg_id) {
   ack.ver = cfg::PIPE_VERSION;
   ack.flags = F_ACK;
   ack.msg_id = msg_id;
-  ack.frag_idx = 0; ack.frag_cnt = 0; ack.payload_len = 0; ack.crc16 = 0;
+  ack.frag_idx = 0; ack.frag_cnt = 0; ack.payload_len = 0;
+  ack.hdr_crc = 0; ack.frame_crc = 0;
   uint8_t buf[FRAME_HEADER_SIZE];
   ack.encode(buf, FRAME_HEADER_SIZE);
-  uint16_t crc = crc16_ccitt(buf, FRAME_HEADER_SIZE, 0xFFFF);
-  ack.crc16 = crc;
+  uint16_t hcrc = crc16_ccitt(buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
+  ack.hdr_crc = hcrc;
+  ack.encode(buf, FRAME_HEADER_SIZE);
+  uint16_t fcrc = crc16_ccitt(buf, FRAME_HEADER_SIZE, 0xFFFF);
+  ack.frame_crc = fcrc;
   ack.encode(buf, FRAME_HEADER_SIZE);
   Radio_sendRaw(buf, FRAME_HEADER_SIZE);
   FrameLog::push('T', buf, FRAME_HEADER_SIZE);
@@ -51,25 +56,34 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   if (hdr.ver != cfg::PIPE_VERSION) return;
   if (len != FRAME_HEADER_SIZE + hdr.payload_len) { metrics_.rx_drop_len_mismatch++; return; }
 
-  uint16_t got_crc = hdr.crc16;
-  FrameHeader tmp = hdr; tmp.crc16 = 0;
+  // Проверяем CRC заголовка
+  FrameHeader tmp = hdr; tmp.hdr_crc = 0; tmp.frame_crc = 0;
   uint8_t hdr_buf[FRAME_HEADER_SIZE];
   tmp.encode(hdr_buf, FRAME_HEADER_SIZE);
-  uint16_t crc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
-  crc = crc16_ccitt(frame + FRAME_HEADER_SIZE, hdr.payload_len, crc);
-  if (crc != got_crc) { metrics_.rx_crc_fail++; return; }
+  uint16_t hcrc2 = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
+  if (hcrc2 != hdr.hdr_crc) { metrics_.rx_crc_fail++; return; }
+
+  // Проверяем общий CRC кадра
+  tmp.hdr_crc = hdr.hdr_crc; tmp.frame_crc = 0;
+  tmp.encode(hdr_buf, FRAME_HEADER_SIZE);
+  uint16_t fcrc2 = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
+  fcrc2 = crc16_ccitt(frame + FRAME_HEADER_SIZE, hdr.payload_len, fcrc2);
+  if (fcrc2 != hdr.frame_crc) { metrics_.rx_crc_fail++; return; }
 
   FrameLog::push('R', frame, len);
 
   if (hdr.flags & F_ACK) { if (ack_cb_) ack_cb_(hdr.msg_id); return; }
 
   const uint8_t* p = frame + FRAME_HEADER_SIZE;
+  std::vector<uint8_t> data(p, p + hdr.payload_len);
+  lfsr_descramble(data.data(), data.size(), (uint16_t)hdr.msg_id);
   std::vector<uint8_t> plain;
   if (hdr.flags & F_ENC) {
+    hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
     std::vector<uint8_t> aad(hdr_buf, hdr_buf + FRAME_HEADER_SIZE);
-    if (!enc_.decrypt(p, hdr.payload_len, aad.data(), aad.size(), plain)) { metrics_.dec_fail_tag++; return; }
+    if (!enc_.decrypt(data.data(), data.size(), aad.data(), aad.size(), plain)) { metrics_.dec_fail_tag++; return; }
   } else {
-    plain.assign(p, p + hdr.payload_len);
+    plain = std::move(data);
   }
 
   metrics_.rx_frames_ok++; metrics_.rx_bytes += len;

@@ -27,7 +27,7 @@ std::vector<Fragment> Fragmenter::split(uint32_t msg_id, const uint8_t* data, si
     hdr.frag_idx = i;
     hdr.frag_cnt = frag_cnt;
     hdr.payload_len = (uint16_t)chunk;
-    hdr.crc16 = 0;
+    hdr.hdr_crc = 0; hdr.frame_crc = 0;
 
     out.emplace_back(Fragment{hdr, std::move(payload)});
   }

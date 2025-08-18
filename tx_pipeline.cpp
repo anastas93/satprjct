@@ -4,6 +4,7 @@
 #include "config.h"
 #include "radio_adapter.h"
 #include "frame_log.h"
+#include "scrambler.h"
 #include <Arduino.h>
 #include <string.h>
 #include <array>
@@ -31,7 +32,7 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
 
   for (auto& fr : parts) {
     FrameHeader hdr = fr.hdr;
-    hdr.crc16 = 0;
+    hdr.hdr_crc = 0; hdr.frame_crc = 0;
     hdr.encode(aad.data(), aad.size());
     bool ok = true;
     payload.clear();
@@ -39,15 +40,21 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     else payload.assign(fr.payload.begin(), fr.payload.end());
     if (!ok) { metrics_.enc_fail++; continue; }
 
+    // Скремблирование полезной нагрузки для подавления длительных последовательностей
+    lfsr_scramble(payload.data(), payload.size(), (uint16_t)hdr.msg_id);
+
     FrameHeader final_hdr = fr.hdr;
     if (willEnc) final_hdr.flags |= F_ENC;
     final_hdr.payload_len = (uint16_t)payload.size();
-    final_hdr.crc16 = 0;
+    final_hdr.hdr_crc = 0; final_hdr.frame_crc = 0;
     uint8_t hdr_buf[FRAME_HEADER_SIZE];
     final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
-    uint16_t crc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
-    crc = crc16_ccitt(payload.data(), payload.size(), crc);
-    final_hdr.crc16 = crc;
+    uint16_t hcrc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
+    final_hdr.hdr_crc = hcrc;
+    final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
+    uint16_t fcrc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
+    fcrc = crc16_ccitt(payload.data(), payload.size(), fcrc);
+    final_hdr.frame_crc = fcrc;
     final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
 
     const size_t frame_len = FRAME_HEADER_SIZE + payload.size();

@@ -9,6 +9,11 @@ bool Radio_setCodingRate(uint8_t cr4x);
 bool Radio_setTxPower(int8_t dBm);
 void Radio_forceRx();
 
+// Получение качественных метрик канала
+bool Radio_getSNR(float& snr);        // отношение сигнал/шум последнего пакета
+bool Radio_getEbN0(float& ebn0);      // отношение энергии бита к спектральной плотности шума
+bool Radio_isSynced();                // есть ли синхронизация по уникальному слову
+
 bool Radio_setFrequency(uint32_t hz);
 inline bool Radio_setFrequencyHz(uint32_t hz) { return Radio_setFrequency(hz); }
 void Radio_onReceive(const uint8_t* data, size_t len);
