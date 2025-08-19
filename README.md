@@ -53,7 +53,7 @@
 Reed-Solomon, Viterbi и LDPC из подкаталогов `libs/rs`, `libs/viterbi` и `libs/ldpc`.
 В Arduino IDE скопируйте каталог `libs` в папку `libraries` вашего скетчбука либо
 добавьте его в пути поиска заголовков. После этого подключайте библиотеку так:
-`#include "ccsds_link/ccsds_link.h"` — путь задан относительно каталога `libs`.
+`#include "libs/ccsds_link/ccsds_link.h"` — полный путь до заголовка внутри каталога `libs`.
 
 Начиная с этой версии убраны относительные include-пути вроде `../../scrambler.h`,
 что устраняет ошибку «No such file or directory» при установке библиотеки в Arduino IDE.
