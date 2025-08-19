@@ -1,7 +1,7 @@
 #include "ccsds_link.h"
-#include "../../scrambler.h"
-#include "../../fec.h"
-#include "../../interleaver.h"
+#include <scrambler.h>
+#include <fec.h>
+#include <interleaver.h>
 
 namespace ccsds {
 

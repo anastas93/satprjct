@@ -1,6 +1,6 @@
 #ifndef ARDUINO
 // Тест чередователя байтов, исключается из сборки прошивки
-#include "interleaver.h"
+#include <interleaver.h>
 #include <vector>
 #include <cassert>
 #include <iostream>

@@ -1,6 +1,6 @@
 #ifndef ARDUINO
 // Юнит‑тест простейшего FEC, не участвует в прошивке
-#include "fec.h"
+#include <fec.h>
 #include <vector>
 #include <cassert>
 #include <iostream>

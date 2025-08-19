@@ -47,6 +47,14 @@
 - mbedTLS — **v2.28.2**
 - ESP32 SDK (arduino-esp32) — **v2.0.14**
 
+### Подключение библиотеки ccsds_link
+Библиотека `ccsds_link` использует заголовки `<scrambler.h>`, `<fec.h>` и `<interleaver.h>`
+из каталога `libs/ccsds_link`. Для корректной работы требуются также модули
+Reed-Solomon, Viterbi и LDPC из подкаталогов `libs/rs`, `libs/viterbi` и `libs/ldpc`.
+В Arduino IDE скопируйте каталог `libs` в папку `libraries` вашего скетчбука либо
+добавьте его в пути поиска заголовков, после чего можно подключать библиотеку через
+`#include <ccsds_link.h>` без относительных путей.
+
 ## Архитектура
 ```mermaid
 flowchart TD
