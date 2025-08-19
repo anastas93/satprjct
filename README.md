@@ -20,7 +20,7 @@
 - SR‑ARQ с настраиваемым окном кадров (`setWindowSize`), буфером вне порядка и кумулятивным ACK через `ack_mask`
   - Интервал агрегации ACK настраивается через `setAckAgg`
 - Планировщик слотов TDD (`tdd_scheduler`) с окнами `TX`, `ACK` и защитным интервалом
-- EMA‑метрики PER/RTT/goodput/SNR/EbN0 и автоматические профили `P0–P3`
+- Скользящие окна PER/RTT/goodput/EbN0 и контроллер профилей `P0–P3`
 
 ## Телеметрия канала
 - Вкладка **Link Diagnostics** веб‑интерфейса показывает графики PER, RTT p50/p95 и goodput.
@@ -234,7 +234,7 @@ ENCTESTBAD wrong-KID dec=FAIL (expected FAIL)
 | P2 | PER ≤ 0.3 и Eb/N0 ≥ 3 дБ | 96  | rs_vit | 8  | 3 |
 | P3 | иначе                     | 64  | rs_vit | 16 | 4 |
 
-Для доступа к последним измеренным значениям доступны функции `Radio_getSNR`/`Radio_getEbN0` и их сокращённые версии `Radio_readSNR`/`Radio_readEbN0`.
+Для доступа к последним измеренным значениям доступны функции `Radio_getSNR`/`Radio_getEbN0`/`Radio_getLinkQuality` и их сокращённые версии `Radio_readSNR`/`Radio_readEbN0`/`Radio_readLinkQuality`.
 
 ### TDD расписание
 - Параметры окон `TDD_TX_WINDOW_MS`, `TDD_ACK_WINDOW_MS` и `TDD_GUARD_MS` заданы в `config.h`.

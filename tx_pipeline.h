@@ -34,7 +34,7 @@ public:
 private:
   void sendMessageFragments(const OutgoingMessage& m);
   bool interFrameGap();
-  void updateProfile();       // обновление профиля по метрикам
+  void controlProfile();      // контроллер изменения профиля по метрикам
   void applyProfile(uint8_t p);
 
   MessageBuffer& buf_;

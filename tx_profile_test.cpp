@@ -2,6 +2,7 @@
 #include <cstdio>
 #define private public
 #include "tx_pipeline.h"
+#include <ccsds_link.h>
 #undef private
 
 class Print; // заглушка для FrameLog::dump
@@ -20,6 +21,12 @@ void maintain() {}
 bool isTxPhase(unsigned long) { return false; }
 }
 
+// Заглушки модуля CCSDS: кодирование/декодирование не требуются в тесте
+namespace ccsds {
+void encode(const uint8_t*, size_t, uint32_t, const Params&, std::vector<uint8_t>&) {}
+bool decode(const uint8_t*, size_t, uint32_t, const Params&, std::vector<uint8_t>&, int&) { return false; }
+}
+
 class DummyEncryptor : public IEncryptor {
 public:
   bool encrypt(const uint8_t*, size_t, const uint8_t*, size_t, std::vector<uint8_t>&) override { return false; }
@@ -34,24 +41,32 @@ int main() {
   DummyEncryptor enc;
   TxPipeline tx(buf, frag, enc, metrics);
 
-  metrics.per_ema.value = 0.0f;
-  metrics.ebn0_ema.value = 10.0f;
-  tx.updateProfile();
+  metrics.per_window.clear();
+  metrics.ebn0_window.clear();
+  metrics.per_window.add(0.0f);
+  metrics.ebn0_window.add(10.0f);
+  tx.controlProfile();
   if (tx.profile_idx_ != 0) { std::printf("P0 fail\n"); return 1; }
 
-  metrics.per_ema.value = 0.15f;
-  metrics.ebn0_ema.value = 10.0f;
-  tx.updateProfile();
+  metrics.per_window.clear();
+  metrics.ebn0_window.clear();
+  metrics.per_window.add(0.15f);
+  metrics.ebn0_window.add(10.0f);
+  tx.controlProfile();
   if (tx.profile_idx_ != 1) { std::printf("P1 fail\n"); return 1; }
 
-  metrics.per_ema.value = 0.25f;
-  metrics.ebn0_ema.value = 6.0f;
-  tx.updateProfile();
+  metrics.per_window.clear();
+  metrics.ebn0_window.clear();
+  metrics.per_window.add(0.25f);
+  metrics.ebn0_window.add(6.0f);
+  tx.controlProfile();
   if (tx.profile_idx_ != 2) { std::printf("P2 fail\n"); return 1; }
 
-  metrics.per_ema.value = 0.35f;
-  metrics.ebn0_ema.value = 2.0f;
-  tx.updateProfile();
+  metrics.per_window.clear();
+  metrics.ebn0_window.clear();
+  metrics.per_window.add(0.35f);
+  metrics.ebn0_window.add(2.0f);
+  tx.controlProfile();
   if (tx.profile_idx_ != 3) { std::printf("P3 fail\n"); return 1; }
 
   std::printf("tx_profile_test OK\n");

@@ -783,10 +783,10 @@ void handleMetrics() {
 // Обработчик /linkdiag: отдаёт короткие метрики канала в JSON
 void handleLinkDiag() {
   String json = "{";
-  json += "\"per\":" + String(g_metrics.per_ema.value, 3);
-  json += ",\"rtt_p50\":" + String(g_metrics.rtt_ema_ms.value, 2);
-  json += ",\"rtt_p95\":" + String(g_metrics.rtt_ema_ms.value, 2);
-  json += ",\"goodput\":" + String(g_metrics.goodput_ema.value, 2);
+  json += "\"per\":" + String(g_metrics.per_window.avg(), 3);
+  json += ",\"rtt_p50\":" + String(g_metrics.rtt_window_ms.avg(), 2);
+  json += ",\"rtt_p95\":" + String(g_metrics.rtt_window_ms.avg(), 2);
+  json += ",\"goodput\":" + String(g_metrics.goodput_window.avg(), 2);
   json += ",\"profile\":\"" + String((int)g_bank) + ":" + String(g_preset) + "\"";
   json += ",\"bitmap\":\"\"";
   json += ",\"tx_frames\":" + String(g_metrics.tx_frames);
