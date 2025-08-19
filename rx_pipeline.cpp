@@ -2,7 +2,7 @@
 #include "rx_pipeline.h"
 #include "radio_adapter.h"
 #include "frame_log.h"
-#include "libs/ccsds_link.h"
+#include <ccsds_link.h>
 #include "ack_bitmap.h"
 #include "tdd_scheduler.h"
 #include <string.h>
