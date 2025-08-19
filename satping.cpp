@@ -289,8 +289,11 @@ void SatPingRun(const PingOptions& opts, PingStats& stats) {
             Serial.print(F(" frag=")); Serial.print((int)fi);
             Serial.print(F(" rtt=")); Serial.print(rtt); Serial.print(F("ms snr="));
             Serial.print(radio.getSNR()); Serial.print(F("dB ebn0=")); Serial.print(ebn0);
-            Serial.print(F("dB fec_corr="));
-            Serial.print(corrected); Serial.println(F(" drop_reason=ok"));
+            Serial.print(F("dB fec_corr=")); Serial.print(corrected);
+            Serial.print(F(" fec_mode="));
+            Serial.print(FecModeName(stats.fec_mode));
+            Serial.print(F(" frag_size=")); Serial.print(stats.frag_size);
+            Serial.println(F(" drop_reason=ok"));
             success = true;
           } else {
             stats.fec_fail++;
@@ -311,7 +314,11 @@ void SatPingRun(const PingOptions& opts, PingStats& stats) {
       }
 
       if (!success) {
-        Serial.print(F("seq=")); Serial.print(seq); Serial.print(F(" frag=")); Serial.print((int)fi);
+        Serial.print(F("seq=")); Serial.print(seq);
+        Serial.print(F(" frag=")); Serial.print((int)fi);
+        Serial.print(F(" fec_mode="));
+        Serial.print(FecModeName(stats.fec_mode));
+        Serial.print(F(" frag_size=")); Serial.print(stats.frag_size);
         Serial.print(F(" drop_reason=")); Serial.println(drop_reason);
         msg_success = false;
         break; // прекращаем отправку остальных фрагментов
@@ -353,6 +360,28 @@ void SatPingRun(const PingOptions& opts, PingStats& stats) {
     Serial.print(rtt_p50); Serial.print('/');
     Serial.print(rtt_p95); Serial.print('/');
     Serial.print(rtt_max); Serial.println(F(" ms"));
+  }
+
+  // Перцентили RTT для отдельных фрагментов
+  if (!stats.rtt_frag.empty()) {
+    std::vector<uint32_t> all_frag_rtt;
+    for (const auto& v : stats.rtt_frag)
+      all_frag_rtt.insert(all_frag_rtt.end(), v.begin(), v.end());
+    if (!all_frag_rtt.empty()) {
+      std::sort(all_frag_rtt.begin(), all_frag_rtt.end());
+      uint32_t frtt_min = all_frag_rtt.front();
+      uint32_t frtt_max = all_frag_rtt.back();
+      uint32_t frtt_p50 = all_frag_rtt[all_frag_rtt.size() / 2];
+      uint32_t frtt_p95 = all_frag_rtt[all_frag_rtt.size() * 95 / 100];
+      uint64_t fsum = 0; for (uint32_t v : all_frag_rtt) fsum += v;
+      uint32_t frtt_avg = fsum / all_frag_rtt.size();
+      Serial.print(F("frag rtt min/avg/p50/p95/max = "));
+      Serial.print(frtt_min); Serial.print('/');
+      Serial.print(frtt_avg); Serial.print('/');
+      Serial.print(frtt_p50); Serial.print('/');
+      Serial.print(frtt_p95); Serial.print('/');
+      Serial.print(frtt_max); Serial.println(F(" ms"));
+    }
   }
 
   double duration_ms = millis() - start_ms;
