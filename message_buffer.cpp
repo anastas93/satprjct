@@ -143,28 +143,32 @@ void MessageBuffer::archive(uint32_t msg_id) {
   bytesArch_ += sz;
 }
 
-// возвращает одно сообщение из архива в соответствующую очередь
-bool MessageBuffer::restoreArchived() {
-  if (archived_.empty()) return false;
-  OutgoingMessage m = std::move(archived_.front());
-  archived_.pop_front();
-  size_t sz = m.data.size();
-  total_bytes_ += sz;
-  bytesArch_ -= sz;
-  if (m.qos == Qos::High) {
-    qH_.push_front(std::move(m));
-    index_[qH_.front().id] = {Qos::High, qH_.begin()};
-    bytesH_ += sz;
-  } else if (m.qos == Qos::Normal) {
-    qN_.push_front(std::move(m));
-    index_[qN_.front().id] = {Qos::Normal, qN_.begin()};
-    bytesN_ += sz;
-  } else {
-    qL_.push_front(std::move(m));
-    index_[qL_.front().id] = {Qos::Low, qL_.begin()};
-    bytesL_ += sz;
+// возвращает до count сообщений из архива в соответствующие очереди
+// восстановленные пакеты ставятся в начало очереди и имеют приоритет
+size_t MessageBuffer::restoreArchived(size_t count) {
+  size_t restored = 0;
+  while (restored < count && !archived_.empty()) {
+    OutgoingMessage m = std::move(archived_.front());
+    archived_.pop_front();
+    size_t sz = m.data.size();
+    total_bytes_ += sz;
+    bytesArch_ -= sz;
+    if (m.qos == Qos::High) {
+      qH_.push_front(std::move(m));
+      index_[qH_.front().id] = {Qos::High, qH_.begin()};
+      bytesH_ += sz;
+    } else if (m.qos == Qos::Normal) {
+      qN_.push_front(std::move(m));
+      index_[qN_.front().id] = {Qos::Normal, qN_.begin()};
+      bytesN_ += sz;
+    } else {
+      qL_.push_front(std::move(m));
+      index_[qL_.front().id] = {Qos::Low, qL_.begin()};
+      bytesL_ += sz;
+    }
+    restored++;
   }
-  return true;
+  return restored;
 }
 
 // заполняет вектор идентификаторами сообщений из архива

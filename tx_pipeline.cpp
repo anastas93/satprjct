@@ -166,10 +166,10 @@ void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
       ++it;
     }
   }
-  // восстанавливаем из архива столько сообщений, сколько освободилось слотов
-  size_t freed = before - pending_.size();
-  for (size_t i = 0; i < freed; ++i) {
-    if (!buf_.restoreArchived()) break;
+  // выясняем количество свободных слотов окна SR-ARQ и заполняем их из архива
+  size_t free_slots = (window_size_ > pending_.size()) ? (window_size_ - pending_.size()) : 0;
+  if (free_slots) {
+    buf_.restoreArchived(free_slots);
   }
   // Сброс ожидания после прихода ACK
   if (waiting_ack_) {
