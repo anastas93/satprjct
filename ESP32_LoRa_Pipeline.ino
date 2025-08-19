@@ -115,15 +115,17 @@ volatile bool txDoneFlag = false;
 volatile bool rxDoneFlag = false;
 
 // ISR DIO1: выставляет флаги завершения TX и RX
+// В новой версии RadioLib вызываем getIrqStatus(),
+// который сразу очищает соответствующие флаги прерываний.
 void IRAM_ATTR isr() {
-  uint32_t irq = radio.getIrqFlags();
+  uint16_t irq = radio.getIrqStatus();
   if (irq & RADIOLIB_SX126X_IRQ_TX_DONE) {
-    txDoneFlag = true;
+    txDoneFlag = true;   // завершена передача
   }
   if (irq & RADIOLIB_SX126X_IRQ_RX_DONE) {
-    rxDoneFlag = true;
+    rxDoneFlag = true;   // завершён приём
   }
-  radio.clearIrqStatus();
+  // Дополнительный вызов очистки не требуется
 }
 
 // -----------------------------------------------------------------------------
@@ -2567,7 +2569,7 @@ void setup() {
   float tcxo = (digitalRead(PIN_TCXO_DETECT) == LOW) ? 2.4f : 0.0f;
 
   int16_t st = radio.begin(g_freq_rx_mhz, g_bw_khz, g_sf, g_cr, 0x18, g_txp, 10, tcxo, false);
-  radio.setDio2AsRfSwitchCtrl(true); // включаем управление RF switch через DIO2
+  radio.setDio2AsRfSwitch(true); // включаем управление RF switch через DIO2
   radio.setDio1Action(isr); // регистрируем ISR на DIO1
   if (st != RADIOLIB_ERR_NONE) {
     Serial.printf("Radio begin failed: %d\n", st);
