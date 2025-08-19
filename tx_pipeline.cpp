@@ -58,7 +58,7 @@ bool TxPipeline::interFrameGap() {
   return true;
 }
 
-void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
+size_t TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
   bool reqAck = ack_enabled_ || m.ack_required;
   bool willEnc = enc_enabled_ && enc_.isReady();
   // Ограничение полезной нагрузки согласно выбранному профилю
@@ -72,6 +72,7 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
   std::vector<uint8_t> payload; payload.reserve(cfg::LORA_MTU);
   std::vector<uint8_t> frame; frame.reserve(cfg::LORA_MTU);
 
+  size_t sent = 0; // сколько кадров реально ушло в радио
   for (auto& fr : parts) {
     FrameHeader hdr = fr.hdr;
     hdr.hdr_crc = 0; hdr.frame_crc = 0;
@@ -137,10 +138,12 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
                      (uint16_t)metrics_.rtt_window_ms.avg());
       metrics_.tx_frames++; metrics_.tx_bytes += frame.size();
       last_tx_ms_ = millis();
+      sent++;
       while (!interFrameGap()) { delay(1); }
     }
   }
   metrics_.tx_msgs++;
+  return sent;
 }
 
 void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
@@ -167,6 +170,10 @@ void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
   size_t freed = before - pending_.size();
   for (size_t i = 0; i < freed; ++i) {
     if (!buf_.restoreArchived()) break;
+  }
+  // Сброс ожидания после прихода ACK
+  if (waiting_ack_) {
+    waiting_ack_ = false; frags_in_burst_ = 0; burst_wait_ms_ = 0;
   }
 }
 
@@ -204,6 +211,12 @@ void TxPipeline::loop() {
   // Если сейчас не окно передачи, выходим
   if (!tdd::isTxPhase()) return;
 
+  // При активном ACK ждём подтверждение серии
+  if (ack_enabled_ && waiting_ack_) {
+    if (millis() - burst_wait_ms_ < ack_timeout_) return; // ещё ждём
+    waiting_ack_ = false; frags_in_burst_ = 0;            // таймаут истёк
+  }
+
   // Заполняем окно новыми сообщениями
   while (pending_.size() < window_size_ && buf_.hasPending()) {
     if (!interFrameGap()) break;
@@ -211,10 +224,15 @@ void TxPipeline::loop() {
     if (!buf_.peekNext(m)) break;
     buf_.popFront();
     bool reqAck = ack_enabled_ || m.ack_required;
-    sendMessageFragments(m);
+    size_t sent = sendMessageFragments(m);
+    frags_in_burst_ += sent;
     if (reqAck) {
       Pending p{m, max_retries_, millis(), millis(), addJitter(ack_timeout_), 0}; // стартовый таймаут с джиттером
       pending_.push_back(std::move(p));
+    }
+    if (ack_enabled_ && frags_in_burst_ >= burst_limit_) {
+      waiting_ack_ = true; burst_wait_ms_ = millis();
+      break; // открываем окно ожидания
     }
   }
 }

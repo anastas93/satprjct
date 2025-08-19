@@ -68,13 +68,14 @@ private:
   uint16_t pilot_interval_bytes_ = cfg::PILOT_INTERVAL_BYTES_DEFAULT;
   bool hdr_dup_enabled_ = cfg::HEADER_DUP_DEFAULT;
   uint8_t window_size_ = cfg::SR_WINDOW_DEFAULT;
-  uint16_t ack_agg_ms_ = cfg::T_ACK_AGG_DEFAULT;
-  uint16_t ack_agg_jitter_ms_ = cfg::T_ACK_AGG_DEFAULT;
+  uint16_t ack_agg_ms_ = cfg::T_ACK_AGG_DEFAULT;     // базовый минимум (50 мс)
+  uint16_t ack_agg_jitter_ms_ = cfg::T_ACK_AGG_DEFAULT; // следующий интервал 50–100 мс
   float phase_est_ = 0.0f; // текущая оценка фазы
   KeyAckSender keyack_cb_ = nullptr; // отправка KEYACK
   uint8_t pending_kid_ = 0;          // ожидаемый идентификатор ключа
   bool expect_keyack_ = false;       // ждём подтверждение KEYCHG
   bool expect_final_ack_ = false;    // ждём окончательный KEYACK
+  void scheduleNextAck();            // пересчитать интервал
 };
 
 void Radio_onReceive(const uint8_t* data, size_t len);
