@@ -314,7 +314,8 @@ static void applyPreset() {
   g_freq_rx_mhz = tbl[g_preset].rxMHz;
   g_freq_tx_mhz = tbl[g_preset].txMHz;
   Radio_setFrequency((uint32_t)(g_freq_rx_mhz * 1e6f));
-  Radio_forceRx();
+  // Сразу возвращаем радио в приём на полный цикл TDD
+  Radio_forceRx(msToTicks(tdd::cycleLen()));
 }
 
 static void printHelp() {
@@ -363,7 +364,8 @@ bool Radio_sendRaw(const uint8_t* data, size_t len) {
   radio.setFrequency(g_freq_tx_mhz);
   int16_t st = radio.transmit(const_cast<uint8_t*>(data), len);
   radio.setFrequency(prev);
-  radio.startReceive();
+  // После передачи слушаем эфир на окно ACK+guard
+  Radio_forceRx(msToTicks(tdd::ackWindowMs + tdd::guardMs));
   return st == RADIOLIB_ERR_NONE;
 }
 bool Radio_setFrequency(uint32_t hz) {
@@ -381,8 +383,9 @@ bool Radio_setCodingRate(uint8_t cr4x) {
 bool Radio_setTxPower(int8_t dBm) {
   return radio.setOutputPower(dBm) == RADIOLIB_ERR_NONE;
 }
-void Radio_forceRx() {
-  radio.startReceive();
+void Radio_forceRx(uint32_t rx_ticks) {
+  // Запуск приёма с таймаутом в тиках
+  radio.startReceive(rx_ticks);
 }
 
 // Получаем SNR последнего пакета из драйвера
@@ -491,7 +494,8 @@ static void loadConfig() {
   g_ccm.setEnabled(g_enc_on);
   g_ccm.setActiveKid(g_kid);
   g_tx.setEncEnabled(g_enc_on);
-  Radio_forceRx();
+  // Возвращаемся в приём на полный цикл
+  Radio_forceRx(msToTicks(tdd::cycleLen()));
   Serial.println(F("Loaded."));
 }
 
@@ -1999,7 +2003,8 @@ void handlePingAsync() {
     // Record start time and switch to RX
     g_ping_start_us = micros();
     radio.setFrequency(g_freq_rx_mhz);
-    radio.startReceive();
+    // Ждём ответ не дольше g_ping_timeout_us
+    Radio_forceRx(msToTicks(g_ping_timeout_us / 1000));
     g_ping_stage = 1;
     return;
   }
@@ -2041,7 +2046,8 @@ void handlePingAsync() {
       g_ping_stage = 0;
       g_radio_busy = false;
       radio.setFrequency(g_freq_rx_mhz);
-      radio.startReceive();
+      // Возобновляем обычный приём
+      Radio_forceRx(msToTicks(tdd::cycleLen()));
       return;
     }
     // Timeout: if elapsed time exceeds the timeout threshold
@@ -2055,7 +2061,8 @@ void handlePingAsync() {
       g_ping_stage = 0;
       g_radio_busy = false;
       radio.setFrequency(g_freq_rx_mhz);
-      radio.startReceive();
+      // Возобновляем обычный приём
+      Radio_forceRx(msToTicks(tdd::cycleLen()));
       return;
     }
     // Otherwise, still waiting; yield control
@@ -2137,7 +2144,8 @@ void runPing() {
   // Short delay to allow radio to settle and resume continuous reception
   delay(150);
   radio.setFrequency(g_freq_rx_mhz);
-  radio.startReceive();
+  // Возвращаем радио к приёму
+  Radio_forceRx(msToTicks(tdd::cycleLen()));
 }
 
 static void handleCommand(const String& line) {
@@ -2232,7 +2240,8 @@ static void handleCommand(const String& line) {
     }
     g_freq_rx_mhz = mhz;
     Radio_setFrequency((uint32_t)(g_freq_rx_mhz * 1e6f));
-    Radio_forceRx();
+    // Обновляем приём после смены частоты
+    Radio_forceRx(msToTicks(tdd::cycleLen()));
     Serial.printf("FRX=%.3f\n", g_freq_rx_mhz);
     return;
   }
@@ -2549,7 +2558,8 @@ void setup() {
     g_ccm.setActiveKid(g_kid);
     loadKeyFromNVS();
     g_tx.setEncEnabled(g_enc_on);
-  Radio_forceRx();
+  // Первичный запуск приёма
+  Radio_forceRx(msToTicks(tdd::cycleLen()));
 
   // Start Wi‑Fi access point and HTTP server.  The device will create an
   // access point with SSID WIFI_SSID and password WIFI_PASSWORD.  Connect to

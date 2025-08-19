@@ -34,10 +34,22 @@ namespace tdd {
   }
 
   void maintain() {
-    // В не-передающих фазах включаем приём
+    // В не‑передающих фазах включаем приём на остаток окна
     unsigned long now = millis();
     if (!isTxPhase(now)) {
-      Radio_forceRx();
+      unsigned long t = now % cycleLen();
+      unsigned long remain = 0;
+      if (t < txWindowMs + guardMs) {
+        // Находимся в первом защитном интервале
+        remain = txWindowMs + guardMs - t;
+      } else if (t < txWindowMs + guardMs + ackWindowMs) {
+        // Окно ожидания ACK
+        remain = txWindowMs + guardMs + ackWindowMs - t;
+      } else {
+        // Второй защитный интервал до следующего цикла
+        remain = cycleLen() - t;
+      }
+      Radio_forceRx(msToTicks(remain));
     }
   }
 
