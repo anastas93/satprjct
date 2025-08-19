@@ -363,3 +363,201 @@ bool hasArg(size_t n) { return strlen((const char*)serial.buf) > n; }
 
 Если нужно — подготовлю **патч‑ветку** с правками и регрессионными тестами на парсинг/сборку пакетов.
 
+
+---
+
+## 16) Глубокий разбор: ПРИЁМ ↔ ПЕРЕДАЧА и переключения между функциями
+Ниже — подробно, по шагам, как устроены оба контура (RX и TX), где именно происходит переключение состояний и кто кого вызывает. Разбираю **фактический код** из `sat0095bak.ino`.
+
+### 16.1 Базовая инициализация приёма (RX)
+1) В `setup()` после `radio.begin(...)` настраивается ISR и немедленно включается неблокирующий приём:
+```
+radio.setDio1Action(setFlag);   // назначаем обработчик
+state = radio.startReceive();   // «встать на уши»: непрерывный RX
+```
+2) ISR:
+```
+void setFlag() { receivedFlag = true; }
+```
+`receivedFlag` — **volatile** (в исходнике так и объявлен), т.е. корректно виден вне ISR.
+
+3) Универсальная функция возврата в RX:
+```
+void RX_start() {
+  receivedFlag = false;
+  radio.setFrequency(fRX[radio_preset]);
+  radio.startReceive();
+}
+```
+Её вызывают из `loop()` после обработки команд, а также в конце `received_msg()` и некоторых сервисных функций.
+
+> Итог: «нормальный» режим работы — **неблокирующий приём** с прерыванием по `DIO1`; как только придёт пакет — ISR поднимет флаг, основной цикл разрулит.
+
+### 16.2 Контур приёма (interrupt-driven)
+**Главный цикл:**
+```
+void loop() {
+  if (online_on) Online();      // периодика
+  if (beacon_on) Beacon();
+  ...                           // приём команд с UART/BT
+  if (serial.available() || serialBT.available()) {
+    ... // разбор и вызов обработчиков
+    RX_start();                 // всегда уходим в прослушку
+  }
+  if (receivedFlag) received_msg();   // асинхронный приём
+}
+```
+**Обработка принятого пакета:**
+```
+void received_msg() {
+  receivedFlag = false;                 // сброс флага
+  byte rx_array[109] = {0};
+  int state = radio.readData(rx_array, 0); // чтение кадра из FIFO
+  // Валидация: ID (XOR), адрес (мой или 255)
+  // Логирование, печать RSSI/SNR
+  // Эхо (если запрос и eho_on==1): eho(addr_source)
+  RX_start();                           // обратно в RX
+}
+```
+Ключевые моменты:
+- `radio.startReceive()` был активен заранее; ISR лишь сообщает «готово». Сам кадр читается **вне ISR** через `radio.readData()`.
+- После обработки **всегда** вызывается `RX_start()` → приём немедленно возобновляется на `fRX[radio_preset]`.
+
+### 16.3 Контур передачи (TX) — общие шаги
+Любая передача (шлём текст, эхо, маяк, пинг) следует схеме:
+1) Сборка пакета (заголовок + payload).
+2) `radio.setFrequency(fTX[radio_preset]);`
+3) `radio.transmit(buf, len);`  // **блокирующий** вызов RadioLib
+4) `radio.setFrequency(fRX[radio_preset]);`
+5) (иногда) `delay(delay_time);` и сброс `receivedFlag`.
+6) Возврат в RX достигается либо **вызовом `RX_start()`** снаружи (после обработчика команды), либо самим обработчиком (например, в `received_msg()`), либо внутри функции (редко — как в `Beacon()`).
+
+### 16.4 Передача: широковещательная и адресная
+**Широковещание `@текст` → `SendMsg_BR()`**
+```
+new_packet[1..2] = random ID; new_packet[0] = XOR(1,2);
+new_packet[3] = address;      // мой адрес
+new_packet[4] = 255;          // broadcast
+new_packet[5] = 0;            // тип: обычный
+new_packet[8] = счетчик 0..255;
+// payload: текст (UTF-8 → Win1251) в new_packet[9..]
+radio.setFrequency(fTX[idx]);
+radio.transmit(new_packet, 9 + win_buf.length());
+radio.setFrequency(fRX[idx]);
+receivedFlag = false;  // очистка «на всякий»
+// В реальный RX переводит внешний RX_start() из loop()
+```
+**Адресная `#NNNтекст` → `SendMsg_AD()`** — аналогично, но `new_packet[4] = адрес_получателя`, `new_packet[5] = 1`, если `eho_on==1` (требуется эхо).
+
+> В обоих случаях **startReceive() не вызывается внутри функции** — на приём возвращаемся за счёт `RX_start()` в конце командного блока `loop()`.
+
+### 16.5 Авто-эхо → `eho(addr)` (ответ на доставку)
+В `received_msg()` при пришедшем кадре с `тип=1` и включённом `eho_on` вызывается `eho(addr_source)`:
+```
+// Формируется короткий кадр с текстом "eho:<RSSI>/<SNR>"
+eho[3] = мой_адрес; eho[4] = addr_source; eho[5] = 2; // тип=2 (эхо)
+radio.setFrequency(fTX[idx]);
+radio.transmit(eho, 9 + payload_len);
+radio.setFrequency(fRX[idx]);
+// Возврат в реальный RX делает вызывавший received_msg() → RX_start()
+```
+
+### 16.6 Пинг и синхронные ожидания (modal)
+Есть класс функций, которые **временно выключают неблокирующий RX** и сами синхронно ждут ответ — без `receivedFlag` и без ISR:
+- `SatPing()` — 5‑байтный пинг + `radio.receive(rx_ping, 5)` (блокирующий приём), расчёт RTT/дистанции.
+- `ch_ping()` — краткая проверка канала (используется в `Online()`), тоже через `radio.receive(...)`.
+- `Find_TX_RX()` — сервисный «hunt» кадр и синхронное `receive(...)` c обработкой кодов статуса.
+- `Auto_tune()` — цикл по 10 пресетам с пингом/приёмом, выбор по максимальному SNR.
+
+Общий паттерн (на примере `SatPing()`):
+```
+radio.setFrequency(fTX[idx]);
+radio.transmit(ping, 5);
+radio.setFrequency(fRX[idx]);
+int state = radio.receive(rx_ping, 5);  // БЛОКИРУЮЩЕ ждём ответ
+... // анализ результата
+receivedFlag = false;
+```
+Возврат в «неблокирующий мир» обеспечивается **внешним** `RX_start()`:
+- для `Online()` — он сам в конце вызывает `RX_start();`
+- при запуске `Auto_tune()` как отдельной команды — `loop()` после выхода из обработчика команд сделает `RX_start();`
+
+### 16.7 Маяк (периодика)
+`Beacon()` раз в `beacon_time` (60s) шлёт 15‑байтный кадр `"BEACON"` и **сам** возвращает модуль в неблокирующий приём:
+```
+radio.transmit(beacon_array, 15);
+radio.setFrequency(fRX[idx]);
+receivedFlag = false;
+radio.startReceive();   // исключение: сразу включаем RX
+```
+
+### 16.8 Где именно происходит «переключение»
+- **RX → TX**: внутри конкретной функции передачи через `radio.setFrequency(fTX[...]); radio.transmit(...);`
+- **TX → RX (частота)**: немедленно после `transmit()` — `radio.setFrequency(fRX[...]);`
+- **TX/RX → неблокирующий RX**: либо `RX_start()` (универсально), либо локально `radio.startReceive()` (например, в `Beacon()`).
+- **Асинхронный приём**: `radio.startReceive()` + ISR `setFlag()` + `received_msg()`.
+- **Синхронный приём**: `radio.receive(buf, n)` **без** ISR/флага (пинги, поиск, авто‑тюн).
+
+### 16.9 Последовательности (лестницы вызовов)
+**A) Пришло адресное сообщение, требуется эхо**
+```
+[startReceive] → (эфир) → [DIO1 ISR:setFlag]
+loop → received_msg
+  ├─ readData + валидация
+  ├─ печать логов
+  ├─ if (тип==1 && eho_on) → eho(addr_src)
+  │     ├─ setFrequency(TX) → transmit(eho)
+  │     └─ setFrequency(RX)
+  └─ RX_start() → startReceive
+```
+**B) Мы отправляем адресное `#NNN`**
+```
+loop читает команду → SendMsg_AD
+  ├─ сборка заголовка/текста
+  ├─ setFrequency(TX) → transmit
+  └─ setFrequency(RX) + receivedFlag=false
+(выход в loop) → RX_start() → startReceive
+```
+**C) Пинг канала (~t / Online/ch_ping)**
+```
+setFrequency(TX) → transmit(ping)
+setFrequency(RX) → receive(rx_ping,5) [блокирующе]
+анализ → (внешний) RX_start()
+```
+
+### 16.10 Важные нюансы/острые места по переключениям
+1) **`delay(delay_time)` после передач** (`SendMsg_*`, `eho`, `SatPing`) — искусственное окно ~500 мс. RadioLib `transmit()` уже блокирует до завершения TX; задержку можно убрать или сделать опциональной (см. §16.11-1).
+2) В `SendMsg_*` **нет локального `startReceive()`** — возврат в RX зависит от вызова `RX_start()` в `loop()` после команд. Это нормально, но уделить внимание потокам, вызывающим передачу **вне** команд (например, из колбэков) — там нужно самим дергать `RX_start()`.
+3) **Смешение async/sync**: асинхронный приём (`startReceive`+ISR) и синхронные `receive(...)` сосуществуют. Пока это безопасно, т.к. синхронные участки явно управляют частотой и не оставляют `startReceive` активным.
+4) **Сброс `receivedFlag`** делается и в `RX_start()`, и локально после TX. Это не ломает логику, но дублирование.
+5) **Частоты RX/TX**: строго переключаются одним и тем же индексом `radio_preset`. Любая смена канала/банка должна завершаться `RX_start()`.
+
+### 16.11 Рекомендации усилить надёжность переключений
+1) **Убрать фиксированную задержку** после TX. Вместо `delay(delay_time)` — ждать флаг «TX done» из RadioLib (если доступен) или проверять `state` из `transmit()`. Это закроет «глухое окно».
+2) **Единая обёртка «TX с авто‑возвратом»**:
+```
+int tx_then_rx(const uint8_t* p, size_t n) {
+  radio.setFrequency(fTX[radio_preset]);
+  int st = radio.transmit(p, n);
+  radio.setFrequency(fRX[radio_preset]);
+  RX_start();     // гарантируем возврат в async RX здесь же
+  return st;
+}
+```
+3) **Один стиль приёма**: либо везде async (`startReceive`+ISR), либо явный «modal» — сейчас допустим гибрид, но лучше минимизировать `receive(...)` вне сервисных диагностик.
+4) **Защита от гонок**: на время TX можно явно гасить прерывание DIO1 (если RadioLib не делает это сам) → исключить ложные `setFlag`.
+5) **Валидация длины payload до TX** (см. §13) — исключить мусор в буфере, из‑за него приём/эхо может расходиться.
+
+### 16.12 Небольшая коррекция моего прошлого комментария
+Ранее я отметил, что `receivedFlag` нужно сделать `volatile`. **В исходнике он уже `volatile`** — тут всё правильно. Поправка внесена в этот разбор.
+
+---
+
+## 17) Мини‑шпаргалка по ключевым переходам
+- **Старт RX:** `startReceive()` в `setup()` и `RX_start()`
+- **Сигнал приёма:** `DIO1 → setFlag()`
+- **Разбор принятого:** `received_msg()`
+- **Передача данных:** `SendMsg_BR/AD()` → `transmit()`
+- **Эхо:** `received_msg()` → `eho()` → назад в `RX_start()`
+- **Пинг/проверка:** `SatPing()/ch_ping()/Find_TX_RX()` используют `receive()` (блокирующе)
+- **Возврат в приём:** либо внутри `Beacon()`, либо универсально через `RX_start()`
