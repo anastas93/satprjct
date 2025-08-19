@@ -7,6 +7,7 @@
 #include "freq_map.h"
 #include "fec.h"
 #include "radio_adapter.h"
+#include "fragmenter.h"   // работа с фрагментами
 #include "satping.h"  // описание структур PingOptions и PingStats
 
 #if defined(ESP32) || defined(ESP_PLATFORM)
@@ -16,6 +17,17 @@
 extern SX1262 radio;
 extern float g_freq_rx_mhz;
 extern float g_freq_tx_mhz;
+
+// Преобразование режима FEC в строку для вывода
+static const char* FecModeName(PingFecMode m) {
+  switch (m) {
+    case PingFecMode::FEC_OFF: return "off";
+    case PingFecMode::FEC_RS_VIT: return "rs_vit";
+    case PingFecMode::FEC_LDPC: return "ldpc";
+    case PingFecMode::FEC_REPEAT2: return "repeat2";
+    default: return "unknown";
+  }
+}
 
 void SatPing() {
   // Устанавливаем частоту передачи, как в оригинальном коде
@@ -171,111 +183,145 @@ void MassPing(Bank bank) {
 
 // Пакетный пинг с расширенной статистикой
 void SatPingRun(const PingOptions& opts, PingStats& stats) {
+  // Сохраняем параметры запуска
+  stats.fec_mode = opts.fec_mode;
+  stats.frag_size = opts.frag_size;
+
   uint32_t seq = 0;                  // порядковый номер пакета
   uint32_t start_ms = millis();      // время начала теста
+  Fragmenter fr;                     // инструмент для резки сообщений на фрагменты
 
   while ((opts.count == 0 || seq < opts.count) &&
          (opts.duration_min == 0 || (millis() - start_ms) < opts.duration_min * 60000UL)) {
 
-    // формируем полезную нагрузку
-    std::vector<uint8_t> payload(opts.frag_size);
-    for (uint32_t i = 0; i < opts.frag_size; ++i) payload[i] = radio.randomByte();
-    if (opts.frag_size >= 3) payload[0] = payload[1] ^ payload[2]; // простой идентификатор
+    // формируем сообщение целиком
+    std::vector<uint8_t> msg(opts.frag_size);
+    for (uint32_t i = 0; i < opts.frag_size; ++i) msg[i] = radio.randomByte();
 
-    bool success = false;
-    const char* drop_reason = "timeout"; // причина отказа
-    uint8_t attempt = 0;
-    while (!success && attempt <= opts.retries) {
-      std::vector<uint8_t> txbuf;     // буфер для передачи (с учётом FEC)
-      int corrected = 0;              // число исправленных символов
-
-      // кодирование по выбранному режиму
-      if (opts.fec_mode == PingFecMode::FEC_RS_VIT) {
-        fec_encode_rs_viterbi(payload.data(), payload.size(), txbuf);
-      } else if (opts.fec_mode == PingFecMode::FEC_LDPC) {
-        fec_encode_ldpc(payload.data(), payload.size(), txbuf);
-      } else if (opts.fec_mode == PingFecMode::FEC_REPEAT2) {
-        fec_encode_repeat(payload.data(), payload.size(), txbuf);
-      } else {
-        txbuf = payload;
-      }
-
-      // передача
-      radio.setFrequency(g_freq_tx_mhz);
-      radio.transmit(txbuf.data(), txbuf.size());
-      stats.sent++;
-      if (attempt > 0) stats.retransmits++;
-      stats.tx_bytes += txbuf.size();
-
-      // ожидание ответа с собственным таймаутом
-      std::vector<uint8_t> rxbuf(txbuf.size());
-      radio.setFrequency(g_freq_rx_mhz);
-      radio.startReceive();
-      uint32_t t1 = micros();
-      int state = RADIOLIB_ERR_RX_TIMEOUT;
-      while ((micros() - t1) / 1000 < opts.timeout_ms) {
-        if (radio.available() == RADIOLIB_ERR_NONE) {
-          state = radio.readData(rxbuf.data(), rxbuf.size());
-          break;
-        }
-        delay(1); // короткая пауза, чтобы не грузить CPU
-      }
-      uint32_t t2 = micros();
-
-      if (state == RADIOLIB_ERR_NONE) {
-        bool ok = false;
-        const uint8_t* cmp = rxbuf.data();
-        size_t cmp_len = rxbuf.size();
-        std::vector<uint8_t> decoded;
-        if (opts.fec_mode == PingFecMode::FEC_RS_VIT) {
-          ok = fec_decode_rs_viterbi(rxbuf.data(), rxbuf.size(), decoded, corrected);
-          cmp = decoded.data();
-          cmp_len = decoded.size();
-        } else if (opts.fec_mode == PingFecMode::FEC_LDPC) {
-          ok = fec_decode_ldpc(rxbuf.data(), rxbuf.size(), decoded, corrected);
-          cmp = decoded.data();
-          cmp_len = decoded.size();
-        } else if (opts.fec_mode == PingFecMode::FEC_REPEAT2) {
-          ok = fec_decode_repeat(rxbuf.data(), rxbuf.size(), decoded);
-          cmp = decoded.data();
-          cmp_len = decoded.size();
-        } else {
-          ok = true;
-        }
-        if (ok && cmp_len == payload.size() && memcmp(payload.data(), cmp, payload.size()) == 0) {
-          // получен корректный ответ
-          uint32_t rtt = (t2 - t1) / 1000;
-          stats.received++;
-          stats.payload_bytes += payload.size();
-          stats.rtt.push_back(rtt);
-          float ebn0 = Radio_readEbN0();
-          Serial.print(F("seq=")); Serial.print(seq);
-          Serial.print(F(" rtt=")); Serial.print(rtt); Serial.print(F("ms snr="));
-          Serial.print(radio.getSNR()); Serial.print(F("dB ebn0=")); Serial.print(ebn0);
-          Serial.print(F("dB fec_corr="));
-          Serial.print(corrected); Serial.println(F(" drop_reason=ok"));
-          success = true;
-        } else {
-          stats.fec_fail++;
-          drop_reason = "fec_fail";
-        }
-      } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
-        stats.crc_fail++;
-        drop_reason = "crc_fail";
-      } else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
-        stats.timeout++;
-        drop_reason = "timeout";
-      } else {
-        stats.no_ack++;
-        drop_reason = "no_ack";
-      }
-
-      attempt++;
+    // режем на фрагменты при необходимости
+    std::vector<Fragment> frags;
+    if (opts.frag_size > FRAME_PAYLOAD_MAX) {
+      frags = fr.split(seq, msg.data(), msg.size(), false, FRAME_PAYLOAD_MAX);
+    } else {
+      Fragment f{};
+      f.hdr.frag_idx = 0; f.hdr.frag_cnt = 1;
+      f.payload = msg;
+      frags.push_back(std::move(f));
     }
 
-    if (!success) {
-      Serial.print(F("seq=")); Serial.print(seq); Serial.print(F(" drop_reason="));
-      Serial.println(drop_reason);
+    uint32_t msg_t1 = micros();                 // начало RTT всего сообщения
+    std::vector<uint32_t> frtt;                  // RTT отдельных фрагментов
+    bool msg_success = true;                    // флаг успешной доставки всех фрагментов
+
+    for (size_t fi = 0; fi < frags.size(); ++fi) {
+      Fragment& frag = frags[fi];
+      if (frag.payload.size() >= 3) frag.payload[0] = frag.payload[1] ^ frag.payload[2];
+
+      bool success = false;
+      const char* drop_reason = "timeout"; // причина отказа
+      uint8_t attempt = 0;
+      while (!success && attempt <= opts.retries) {
+        std::vector<uint8_t> txbuf;     // буфер для передачи (с учётом FEC)
+        int corrected = 0;              // число исправленных символов
+
+        // кодирование по выбранному режиму
+        if (opts.fec_mode == PingFecMode::FEC_RS_VIT) {
+          fec_encode_rs_viterbi(frag.payload.data(), frag.payload.size(), txbuf);
+        } else if (opts.fec_mode == PingFecMode::FEC_LDPC) {
+          fec_encode_ldpc(frag.payload.data(), frag.payload.size(), txbuf);
+        } else if (opts.fec_mode == PingFecMode::FEC_REPEAT2) {
+          fec_encode_repeat(frag.payload.data(), frag.payload.size(), txbuf);
+        } else {
+          txbuf = frag.payload;
+        }
+
+        // передача одного фрагмента
+        radio.setFrequency(g_freq_tx_mhz);
+        radio.transmit(txbuf.data(), txbuf.size());
+        stats.sent++;
+        if (attempt > 0) stats.retransmits++;
+        stats.tx_bytes += txbuf.size();
+
+        // ожидание ответа
+        std::vector<uint8_t> rxbuf(txbuf.size());
+        radio.setFrequency(g_freq_rx_mhz);
+        radio.startReceive();
+        uint32_t t1 = micros();
+        int state = RADIOLIB_ERR_RX_TIMEOUT;
+        while ((micros() - t1) / 1000 < opts.timeout_ms) {
+          if (radio.available() == RADIOLIB_ERR_NONE) {
+            state = radio.readData(rxbuf.data(), rxbuf.size());
+            break;
+          }
+          delay(1);
+        }
+        uint32_t t2 = micros();
+
+        if (state == RADIOLIB_ERR_NONE) {
+          bool ok = false;
+          const uint8_t* cmp = rxbuf.data();
+          size_t cmp_len = rxbuf.size();
+          std::vector<uint8_t> decoded;
+          if (opts.fec_mode == PingFecMode::FEC_RS_VIT) {
+            ok = fec_decode_rs_viterbi(rxbuf.data(), rxbuf.size(), decoded, corrected);
+            cmp = decoded.data();
+            cmp_len = decoded.size();
+          } else if (opts.fec_mode == PingFecMode::FEC_LDPC) {
+            ok = fec_decode_ldpc(rxbuf.data(), rxbuf.size(), decoded, corrected);
+            cmp = decoded.data();
+            cmp_len = decoded.size();
+          } else if (opts.fec_mode == PingFecMode::FEC_REPEAT2) {
+            ok = fec_decode_repeat(rxbuf.data(), rxbuf.size(), decoded);
+            cmp = decoded.data();
+            cmp_len = decoded.size();
+          } else {
+            ok = true;
+          }
+          if (ok && cmp_len == frag.payload.size() &&
+              memcmp(frag.payload.data(), cmp, frag.payload.size()) == 0) {
+            // получен корректный ответ
+            uint32_t rtt = (t2 - t1) / 1000;
+            stats.received++;
+            stats.payload_bytes += frag.payload.size();
+            frtt.push_back(rtt);
+            float ebn0 = Radio_readEbN0();
+            Serial.print(F("seq=")); Serial.print(seq);
+            Serial.print(F(" frag=")); Serial.print((int)fi);
+            Serial.print(F(" rtt=")); Serial.print(rtt); Serial.print(F("ms snr="));
+            Serial.print(radio.getSNR()); Serial.print(F("dB ebn0=")); Serial.print(ebn0);
+            Serial.print(F("dB fec_corr="));
+            Serial.print(corrected); Serial.println(F(" drop_reason=ok"));
+            success = true;
+          } else {
+            stats.fec_fail++;
+            drop_reason = "fec_fail";
+          }
+        } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
+          stats.crc_fail++;
+          drop_reason = "crc_fail";
+        } else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
+          stats.timeout++;
+          drop_reason = "timeout";
+        } else {
+          stats.no_ack++;
+          drop_reason = "no_ack";
+        }
+
+        attempt++;
+      }
+
+      if (!success) {
+        Serial.print(F("seq=")); Serial.print(seq); Serial.print(F(" frag=")); Serial.print((int)fi);
+        Serial.print(F(" drop_reason=")); Serial.println(drop_reason);
+        msg_success = false;
+        break; // прекращаем отправку остальных фрагментов
+      }
+    }
+
+    uint32_t msg_t2 = micros();
+    if (msg_success) {
+      stats.rtt.push_back((msg_t2 - msg_t1) / 1000);
+      stats.rtt_frag.push_back(frtt);
     }
 
     seq++;
@@ -284,6 +330,8 @@ void SatPingRun(const PingOptions& opts, PingStats& stats) {
 
   // итоги
   Serial.println(F("--- satlink ping statistics ---"));
+  Serial.print(F("fec_mode=")); Serial.print(FecModeName(stats.fec_mode));
+  Serial.print(F(" frag_size=")); Serial.println(stats.frag_size);
   Serial.print(stats.sent); Serial.print(F(" packets transmitted, "));
   Serial.print(stats.received); Serial.print(F(" received, "));
   uint32_t lost = stats.sent - stats.received;

@@ -33,7 +33,10 @@ struct PingStats {
   uint32_t retransmits = 0;  // количество ретраев
   uint64_t tx_bytes = 0;     // всего передано байт (с учётом служебных)
   uint64_t payload_bytes = 0;// полезная нагрузка, успешно доставленная
-  std::vector<uint32_t> rtt; // список RTT в миллисекундах
+  std::vector<uint32_t> rtt; // список RTT всего сообщения в миллисекундах
+  std::vector<std::vector<uint32_t>> rtt_frag; // RTT каждого фрагмента
+  PingFecMode fec_mode = PingFecMode::FEC_OFF; // использованный режим FEC
+  uint32_t frag_size = 0;    // размер полезной нагрузки в байтах
 };
 
 // Объявления вспомогательных функций пинга

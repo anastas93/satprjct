@@ -818,7 +818,9 @@ void handleSatPingAdv() {
                 ",\"fec_fail\":" + st.fec_fail +
                 ",\"no_ack\":" + st.no_ack +
                 ",\"timeout\":" + st.timeout +
-                ",\"retrans\":" + st.retransmits + "}";
+                ",\"retrans\":" + st.retransmits +
+                ",\"fec_mode\":" + (int)st.fec_mode +
+                ",\"frag_size\":" + st.frag_size + "}";
   server.send(200, "application/json", json);
 }
 
