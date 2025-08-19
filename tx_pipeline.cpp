@@ -15,11 +15,12 @@
 
 // Параметры профилей передачи
 struct TxProfile { uint16_t payload; TxPipeline::FecMode fec; uint8_t inter; uint8_t repeat; };
+// Профили ограничены диапазоном полезной нагрузки 64–160 байт
 static const TxProfile PROFILES[4] = {
-  {200, TxPipeline::FEC_OFF,    1, 1}, // P0: лучший канал
-  {160, TxPipeline::FEC_OFF,    1, 2}, // P1
-  {120, TxPipeline::FEC_RS_VIT, 8, 3}, // P2
-  { 80, TxPipeline::FEC_RS_VIT,16, 4}  // P3: худший канал
+  {160, TxPipeline::FEC_OFF,    1, 1}, // P0: лучший канал
+  {128, TxPipeline::FEC_OFF,    1, 2}, // P1
+  { 96, TxPipeline::FEC_RS_VIT, 8, 3}, // P2
+  { 64, TxPipeline::FEC_RS_VIT,16, 4}  // P3: худший канал
 };
 
 static const float PER_THR[3]  = {0.1f, 0.2f, 0.3f};
@@ -218,7 +219,10 @@ void TxPipeline::applyProfile(uint8_t p) {
   if (p > 3) p = 3;
   profile_idx_ = p;
   const TxProfile& pr = PROFILES[p];
+  // Ограничиваем полезную нагрузку 64–160 байт
   payload_len_ = pr.payload;
+  if (payload_len_ < 64) payload_len_ = 64;
+  else if (payload_len_ > 160) payload_len_ = 160;
   fec_mode_ = pr.fec;
   fec_enabled_ = (fec_mode_ != 0);
   interleave_depth_ = pr.inter;
