@@ -43,6 +43,12 @@ void RxPipeline::setAckAgg(uint16_t ms) {
   ack_agg_jitter_ms_ = addJitter(ms);
 }
 
+// Устанавливаем ожидание подтверждения смены ключа
+void RxPipeline::expectKeyAck(uint8_t kid) {
+  pending_kid_ = kid;
+  expect_keyack_ = true;
+}
+
 void RxPipeline::gc() {
   const unsigned long now = millis();
   // удаляем просроченные сборщики через стандартный алгоритм
@@ -210,11 +216,29 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   metrics_.rx_frames_ok++; metrics_.rx_bytes += len;
 
   if (!(hdr.flags & F_FRAG)) {
-    // Проверяем служебное сообщение смены ключа
+    // Проверяем служебные сообщения KEYCHG/KEYACK
     if (plain.size() >= 7 && memcmp(plain.data(), "KEYCHG ", 7) == 0) {
       uint8_t kid = (uint8_t)strtoul((const char*)plain.data() + 7, nullptr, 10);
-      // Смена активного ключа (для других реализаций шифрования это no-op)
-      enc_.setActiveKid(kid);
+      // Запоминаем ожидаемый KID и ждём финального подтверждения
+      pending_kid_ = kid; expect_final_ack_ = true;
+      if (keyack_cb_) keyack_cb_(kid); // отправляем ответ KEYACK
+      metrics_.rx_msgs_ok++;
+      if (hdr.flags & F_ACK_REQ) sendAck(hdr.msg_id);
+      gc();
+      return;
+    }
+    if (plain.size() >= 7 && memcmp(plain.data(), "KEYACK ", 7) == 0) {
+      uint8_t kid = (uint8_t)strtoul((const char*)plain.data() + 7, nullptr, 10);
+      if (expect_keyack_ && kid == pending_kid_) {
+        // Получили подтверждение на наш KEYCHG
+        enc_.setActiveKid(kid);
+        expect_keyack_ = false; pending_kid_ = 0;
+        if (keyack_cb_) keyack_cb_(kid); // уведомляем вторую сторону
+      } else if (expect_final_ack_ && kid == pending_kid_) {
+        // Завершающее подтверждение от инициатора
+        enc_.setActiveKid(kid);
+        expect_final_ack_ = false; pending_kid_ = 0;
+      }
       metrics_.rx_msgs_ok++;
       if (hdr.flags & F_ACK_REQ) sendAck(hdr.msg_id);
       gc();

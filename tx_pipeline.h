@@ -29,6 +29,8 @@ public:
   void setWindowSize(uint8_t w) { window_size_ = w; }
   // Поместить сообщение KEYCHG <kid> в очередь с требованием ACK
   void queueKeyChange(uint8_t kid);
+  // Поместить сообщение KEYACK <kid> в очередь без требования ACK
+  void queueKeyAck(uint8_t kid);
 private:
   void sendMessageFragments(const OutgoingMessage& m);
   bool interFrameGap();
