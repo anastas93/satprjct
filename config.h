@@ -10,12 +10,12 @@ namespace cfg {
 
   // ACK
   static constexpr bool     ACK_ENABLED_DEFAULT = false;
-  // базовый таймаут ожидания подтверждения
-  static constexpr uint16_t ACK_TIMEOUT   = 1200;   // мс
+  // базовый таймаут ожидания подтверждения (джиттер ±10–20%)
+  static constexpr uint16_t ACK_TIMEOUT   = 1500;   // мс
   // максимальный таймаут с учётом бэкоффа
   static constexpr uint16_t ACK_TIMEOUT_LIMIT = 5000; // мс
   // максимальное число повторов при отсутствии ACK
-  static constexpr uint8_t  MAX_RETRIES   = 3;
+  static constexpr uint8_t  MAX_RETRIES   = 7;
   // интервал агрегирования ACK (значение по умолчанию)
   static constexpr uint16_t T_ACK_AGG_DEFAULT = 50;     // мс
   // совместимость со старым API

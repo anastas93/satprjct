@@ -174,7 +174,7 @@ void TxPipeline::loop() {
   // Поддерживаем расписание и переключаем радио при необходимости
   tdd::maintain();
   updateProfile();
-  // Проверяем таймеры повторов для уже отправленных сообщений
+  // Проверяем таймеры повторов для уже отправленных кадров
   unsigned long now = millis();
   for (auto it = pending_.begin(); it != pending_.end(); ) {
     if (now - it->last_tx_ms >= it->timeout_ms) {

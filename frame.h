@@ -11,7 +11,7 @@ struct FrameHeader {
   uint16_t frag_idx;   // номер фрагмента
   uint16_t frag_cnt;   // общее количество фрагментов
   uint16_t payload_len;// длина полезной нагрузки
-  uint32_t ack_mask;   // маска подтверждённых сообщений
+  uint32_t ack_mask;   // маска подтверждённых сообщений (кумулятивный ACK)
   uint16_t hdr_crc;    // CRC только заголовка
   uint16_t frame_crc;  // CRC заголовка и данных
 

@@ -245,13 +245,27 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
       gc();
       return;
     }
-    if (!isDup(hdr.msg_id)) {
-      dup_window_.push_back(hdr.msg_id);
-      dup_set_.insert(hdr.msg_id);
+    if (hdr.flags & F_ACK_REQ) sendAck(hdr.msg_id);
+    if (isDup(hdr.msg_id)) { metrics_.rx_dup_msgs++; gc(); return; }
+    dup_window_.push_back(hdr.msg_id);
+    dup_set_.insert(hdr.msg_id);
+    if (expected_id_ == 0) expected_id_ = hdr.msg_id;
+    if (hdr.msg_id == expected_id_) {
       if (cb_) cb_(hdr.msg_id, plain.data(), plain.size());
       metrics_.rx_msgs_ok++;
-      if (hdr.flags & F_ACK_REQ) sendAck(hdr.msg_id);
-    } else { metrics_.rx_dup_msgs++; }
+      expected_id_++;
+      // выдаём кадры из буфера по порядку
+      while (true) {
+        auto it = ooo_buf_.find(expected_id_);
+        if (it == ooo_buf_.end()) break;
+        if (cb_) cb_(expected_id_, it->second.data(), it->second.size());
+        metrics_.rx_msgs_ok++;
+        ooo_buf_.erase(it);
+        expected_id_++;
+      }
+    } else if (hdr.msg_id > expected_id_) {
+      ooo_buf_[hdr.msg_id] = plain;
+    }
     gc(); return;
   }
 
@@ -280,13 +294,29 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   if (complete) {
     std::vector<uint8_t> full; full.reserve(total);
     for (auto& v : as.frags) full.insert(full.end(), v.begin(), v.end());
-    if (!isDup(hdr.msg_id)) {
+    if (hdr.flags & F_ACK_REQ) sendAck(hdr.msg_id);
+    if (isDup(hdr.msg_id)) {
+      metrics_.rx_dup_msgs++;
+    } else {
       dup_window_.push_back(hdr.msg_id);
       dup_set_.insert(hdr.msg_id);
-      if (cb_) cb_(hdr.msg_id, full.data(), full.size());
-      metrics_.rx_msgs_ok++;
-      if (hdr.flags & F_ACK_REQ) sendAck(hdr.msg_id);
-    } else { metrics_.rx_dup_msgs++; }
+      if (expected_id_ == 0) expected_id_ = hdr.msg_id;
+      if (hdr.msg_id == expected_id_) {
+        if (cb_) cb_(hdr.msg_id, full.data(), full.size());
+        metrics_.rx_msgs_ok++;
+        expected_id_++;
+        while (true) {
+          auto it2 = ooo_buf_.find(expected_id_);
+          if (it2 == ooo_buf_.end()) break;
+          if (cb_) cb_(expected_id_, it2->second.data(), it2->second.size());
+          metrics_.rx_msgs_ok++;
+          ooo_buf_.erase(it2);
+          expected_id_++;
+        }
+      } else if (hdr.msg_id > expected_id_) {
+        ooo_buf_[hdr.msg_id] = std::move(full);
+      }
+    }
     reasm_bytes_ -= as.bytes; assemblers_.erase(hdr.msg_id);
   }
   gc();

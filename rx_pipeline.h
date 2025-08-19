@@ -56,6 +56,8 @@ private:
   uint32_t ack_highest_ = 0;       // наибольший подтверждённый кадр
   uint32_t ack_bitmap_ = 0;        // bitmap последних W кадров
   unsigned long last_ack_sent_ms_ = 0; // время последней отправки ACK
+  uint32_t expected_id_ = 0;       // следующий ожидаемый msg_id
+  std::map<uint32_t, std::vector<uint8_t>> ooo_buf_; // буфер вне порядка
   std::map<uint32_t, AsmState> assemblers_;
   std::deque<uint32_t> dup_window_;
   std::unordered_set<uint32_t> dup_set_;
