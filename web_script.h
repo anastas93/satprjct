@@ -34,7 +34,8 @@ function updatePingHistory(rssi,snr,dist,time){
   ph.textContent=pingHistory.map((p,i)=>(i+1)+'. RSSI:'+p.rssi+' dBm, SNR:'+p.snr+' dB, dist:'+p.dist+' km, time:'+p.time+' ms').join('\n');
 }
 // простые массивы для графиков диагностики канала
-const perData=[],rttData=[],ebn0Data[];
+// ранее отсутствовал знак '=' при объявлении ebn0Data, что ломало скрипт
+const perData = [], rttData = [], ebn0Data = [];
 // последние значения счётчиков TX/RX для индикации активности
 let lastTx=0,lastRx=0;
 function drawGraph(id,data,color){
