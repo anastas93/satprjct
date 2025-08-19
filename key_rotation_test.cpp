@@ -1,12 +1,19 @@
 #include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include "crypto_spec.h"
 
-// Простейшая имитация обмена KEYCHG/KEYACK для тестового скрипта
+// Тест ротации ключа с подтверждением
 int main() {
-  int kid = 2;
-  printf("KEYCHG %d\n", kid);            // рассылка команды смены ключа
-  printf("Ожидаем KEYACK %d\n", kid);    // ожидание подтверждения
-  printf("KEYACK %d\n", kid);           // ответ от удалённой стороны
-  printf("ACTIVATE %d\n", kid);         // активация ключа после подтверждения
-  printf("KEY ROTATION OK\n");
-  return 0;
+  std::srand((unsigned)std::time(nullptr));
+  uint8_t newKey[16];
+  for (int i = 0; i < 16; ++i) newKey[i] = std::rand() & 0xFF;
+  uint8_t kid = 2;
+  printf("Генерация ключа для KID=%u\n", kid);
+  if (crypto_spec::rotateKeyWithAck(newKey, kid, 3)) {
+    printf("KEY ROTATION OK\n");
+    return 0;
+  }
+  printf("KEY ROTATION FAIL\n");
+  return 1;
 }

@@ -18,4 +18,9 @@ namespace crypto_spec {
   // Установка корневого ключа из 32‑символьной hex‑строки
   // Возвращает true при успешном разборе строки
   bool setRootKeyHex(const char* hex);
+
+  // Ротация ключа с зашифрованным подтверждением "ключ применён"
+  // `kid` — идентификатор ключа, `retries` — число попыток
+  // Возвращает true при успешной активации
+  bool rotateKeyWithAck(const uint8_t* newKey, uint8_t kid, int retries);
 }
