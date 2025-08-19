@@ -4,9 +4,7 @@
 #include "config.h"
 #include "radio_adapter.h"
 #include "frame_log.h"
-#include "scrambler.h"
-#include "fec.h"
-#include "interleaver.h"
+#include "libs/ccsds_link.h"
 #include "tdd_scheduler.h"
 #include <Arduino.h>
 #include <string.h>
@@ -76,25 +74,14 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     else payload.assign(fr.payload.begin(), fr.payload.end());
     if (!ok) { metrics_.enc_fail++; continue; }
 
-    // Скремблирование полезной нагрузки для подавления длительных последовательностей
-    lfsr_scramble(payload.data(), payload.size(), (uint16_t)hdr.msg_id);
-
-    // FEC: RS + Viterbi
-    if (fec_enabled_) {
-      std::vector<uint8_t> fec_buf;
-      if (fec_mode_ == FEC_RS_VIT) {
-        fec_encode_rs_viterbi(payload.data(), payload.size(), fec_buf);
-        payload.swap(fec_buf);
-      }
-      // режим LDPC пока не реализован
-    }
-
-    // Байтовый интерливинг
-    if (interleave_depth_ > 1) {
-      std::vector<uint8_t> inter_buf;
-      interleave_bytes(payload.data(), payload.size(), interleave_depth_, inter_buf);
-      payload.swap(inter_buf);
-    }
+    // Комплексная обработка CCSDS: рандомизация, FEC и интерливинг
+    ccsds::Params cp;
+    cp.fec = fec_enabled_ ? (ccsds::FecMode)fec_mode_ : ccsds::FEC_OFF;
+    cp.interleave = interleave_depth_;
+    cp.scramble = true;
+    std::vector<uint8_t> ccsds_buf;
+    ccsds::encode(payload.data(), payload.size(), hdr.msg_id, cp, ccsds_buf);
+    payload.swap(ccsds_buf);
 
     // Вставляем пилотные последовательности через заданный интервал
     if (pilot_interval_bytes_ > 0 && !payload.empty()) {

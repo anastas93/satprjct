@@ -12,6 +12,10 @@
 - FEC: RS(255,223) + Viterbi K=7, R=1/2 и байтовый интерливинг (`setFecMode`, `setInterleaveDepth`)
 - Параметр `setFecMode` принимает значения `off`, `rs_vit` или `ldpc`.
   Глубина интерливера задаётся `setInterleaveDepth` и может быть 1, 4, 8 или 16 байт.
+- Модуль `ccsds_link` объединяет рандомизацию, выбранный FEC и интерливинг и
+  предоставляет API `encode()`/`decode()`.
+  Настройки по умолчанию задаются в `config.h` константами
+  `CCSDS_FEC_MODE_DEFAULT` и `CCSDS_INTERLEAVER_DEPTH_DEFAULT`.
   - Пилотные вставки с настраиваемым интервалом (`setPilotInterval`, 0=выкл) и управляемое дублирование заголовка (`setHeaderDup`)
   - SR‑ARQ с настраиваемым окном сообщений (`setWindowSize`) и bitmap последних W кадров (`AckBitmap`)
   - Интервал агрегации ACK настраивается через `setAckAgg`
