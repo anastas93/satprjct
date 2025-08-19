@@ -63,6 +63,7 @@ void SatPing() {
     delay(1);
   }
   txDoneFlag = false;               // сбрасываем флаг окончания TX
+  radio.finishTransmit();           // фиксируем завершение передачи
   uint32_t time1 = micros();        // фиксируем момент завершения передачи
 
   delay(2);                         // короткая защита перед приёмом
@@ -119,6 +120,7 @@ bool ChannelPing() {
     delay(1);
   }
   txDoneFlag = false;
+  radio.finishTransmit();             // переводим радио из режима TX
   delay(2);                           // короткий guard
 
   radio.setFrequency(g_freq_rx_mhz);  // слушаем на текущей RX
@@ -154,6 +156,7 @@ bool PresetPing(Bank bank, int preset) {
     delay(1);
   }
   txDoneFlag = false;
+  radio.finishTransmit();               // завершение TX перед приёмом
   delay(2);                             // пауза перед приёмом
 
   radio.setFrequency(tbl[preset].rxMHz);
@@ -263,6 +266,7 @@ void SatPingRun(const PingOptions& opts, PingStats& stats) {
           delay(1);
         }
         txDoneFlag = false;
+        radio.finishTransmit();               // выходим из режима передачи
         stats.sent++;
         if (attempt > 0) stats.retransmits++;
         stats.tx_bytes += txbuf.size();
