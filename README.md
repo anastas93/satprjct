@@ -55,6 +55,9 @@ Reed-Solomon, Viterbi и LDPC из подкаталогов `libs/rs`, `libs/vit
 добавьте его в пути поиска заголовков, после чего можно подключать библиотеку через
 `#include <ccsds_link.h>` без относительных путей.
 
+Начиная с этой версии убраны относительные include-пути вроде `../../scrambler.h`,
+что устраняет ошибку «No such file or directory» при установке библиотеки в Arduino IDE.
+
 ## Архитектура
 ```mermaid
 flowchart TD
