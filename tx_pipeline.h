@@ -28,7 +28,8 @@ public:
   void setHeaderDup(bool v) { hdr_dup_enabled_ = v; }
   // Установка размера окна SR-ARQ
   void setWindowSize(uint8_t w) { window_size_ = w; }
-  // Лимит фрагментов в одной серии перед ожиданием ACK
+  // Установка предела фрагментов в серии перед ожиданием ACK.
+  // n — допустимое число подряд отправленных фрагментов (1..32)
   void setBurstFrags(uint8_t n) { burst_limit_ = n; }
   // Поместить сообщение KEYCHG <kid> в очередь с требованием ACK
   void queueKeyChange(uint8_t kid);

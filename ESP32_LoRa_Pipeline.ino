@@ -79,6 +79,7 @@ uint8_t g_window = cfg::SR_WINDOW_DEFAULT;
 uint16_t g_ackAgg = cfg::T_ACK_AGG_DEFAULT;
 uint8_t g_ackJitter = 0;                 // джиттер ожидания ACK в процентах
 std::vector<float> g_backoff;            // коэффициенты увеличения паузы между повторами
+uint8_t g_burst = cfg::SR_WINDOW_DEFAULT; // лимит фрагментов в серии
 
 // Таймстампы для простейшего rate-limit HTTP запросов
 unsigned long g_last_send_ms = 0;   // последний /send
@@ -184,6 +185,7 @@ void handleSetPilot();
 void handleSetDup();
 void handleSetWin();
 void handleSetAckAgg();
+void handleSetBurst();
 void handleSetAck();
 void handleSetAckJitter();
 void handleSetBackoff();
@@ -751,6 +753,16 @@ void handleSetAckAgg() {
   g_rx.setAckAgg(g_ackAgg);
   server.send(200, "text/plain", "ackagg set");
   serialBuffer += String("*SYS:* ACKAGG=") + String(ms) + "\n";
+}
+
+// Установка предела фрагментов в серии перед ожиданием ACK
+void handleSetBurst() {
+  int n = server.arg("val").toInt();
+  if (n < 1 || n > 32) { server.send(400, "text/plain", "range 1..32"); return; }
+  g_burst = (uint8_t)n;
+  g_tx.setBurstFrags(g_burst);
+  server.send(200, "text/plain", "burst set");
+  serialBuffer += String("*SYS:* BURST=") + String(n) + "\n";
 }
 
 // Обработчик явного включения/выключения ACK
@@ -2487,6 +2499,7 @@ void setup() {
     g_tx.enableAck(g_ack_on);
     g_tx.setHeaderDup(g_dup_on);
     g_tx.setWindowSize(g_window);
+    g_tx.setBurstFrags(g_burst);
     g_rx.setHeaderDup(g_dup_on);
     g_rx.setWindowSize(g_window);
     g_rx.setAckAgg(g_ackAgg);
@@ -2524,6 +2537,7 @@ void setup() {
     server.on("/setdup", handleSetDup);         // дублирование заголовка
     server.on("/setwin", handleSetWin);         // размер окна SR-ARQ
     server.on("/setackagg", handleSetAckAgg);   // интервал агрегации ACK
+    server.on("/setburst", handleSetBurst);     // предел фрагментов в серии
     server.on("/setack", handleSetAck);
     server.on("/setackjitter", handleSetAckJitter); // джиттер ожидания ACK
     server.on("/setbackoff", handleSetBackoff);     // коэффициенты backoff

@@ -155,6 +155,8 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
         <input id="ackAggInput" type="number" min="0" max="1000" step="10" value="50" title="Интервал агрегации ACK (мс)">
       </div>
       <div class="row">
+        <label for="burstInput">Burst:</label>
+        <input id="burstInput" type="number" min="1" max="32" step="1" title="Число фрагментов в серии перед ожиданием ACK">
         <label for="ackJitterInput">AckJitter:</label>
         <input id="ackJitterInput" type="number" min="0" max="100" step="1" title="Джиттер ожидания ACK (%)">
         <label for="backoffInput">Backoff:</label>
