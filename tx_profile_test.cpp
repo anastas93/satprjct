@@ -2,7 +2,7 @@
 #include <cstdio>
 #define private public
 #include "tx_pipeline.h"
-#include "ccsds_link/ccsds_link.h" // заголовок библиотеки CCSDS из каталога libs
+#include "libs/ccsds_link/ccsds_link.h" // заголовок библиотеки CCSDS
 #undef private
 
 class Print; // заглушка для FrameLog::dump
