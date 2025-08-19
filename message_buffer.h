@@ -27,8 +27,11 @@ public:
   void     markAcked(uint32_t msg_id);
   // перемещает сообщение в архив после неудачных попыток ACK
   void     archive(uint32_t msg_id);
-  // возвращает одно сообщение из архива в очередь
-  bool     restoreArchived();
+  // возвращает до count сообщений из архива в очередь, восстановленные
+  // добавляются в начало соответствующей очереди и получают приоритет
+  size_t   restoreArchived(size_t count);
+  // совместимость: восстановить один пакет
+  bool     restoreArchived() { return restoreArchived(1) > 0; }
   // получить список идентификаторов в архиве
   void     listArchived(std::vector<uint32_t>& out) const;
 
