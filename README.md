@@ -34,6 +34,7 @@
 - При включённой **AutoRate** значение `PER High` или `Eb/N0 Low` переводит устройство на более надёжный профиль, а `PER Low` и `Eb/N0 High` возвращают к более быстрому. Параметры отправляются на `/setautorate`, `/setperth` и `/setebn0th`.
 - `FrameLog` фиксирует поля `seq`, `fec_mode`, `interleave`, `frag_size`, `snr_db`, `ebn0_db`, `rssi`,
   `rs_corrections`, `viterbi_metric`, `drop_reason`, `rtt_estimate` для каждого кадра.
+- Реализована функция `Radio_getRSSI`, возвращающая уровень сигнала RSSI для последнего приёма.
 
 ## Используемые библиотеки
 - [Arduino core for ESP32](https://github.com/espressif/arduino-esp32) — базовые классы (`Arduino.h`, `Preferences`, `WiFi`, `WebServer`)

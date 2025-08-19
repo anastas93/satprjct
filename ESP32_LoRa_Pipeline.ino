@@ -43,6 +43,7 @@
 #endif
 
 #include <RadioLib.h>
+#include "libs/ccsds_link/ccsds_link.cpp" // реализация функций encode/decode
 
 static constexpr int PIN_NSS = 5;
 static constexpr int PIN_DIO1 = 26;
@@ -395,6 +396,12 @@ bool Radio_getEbN0(float& ebn0) {
   float snr = radio.getSNR();
   float efficiency = ((float)g_sf * 4.0f / (float)g_cr) / (1 << g_sf); // бит/Гц
   ebn0 = snr - 10.0f * log10f(efficiency);
+  return true;
+}
+
+// Возвращает уровень RSSI последнего принятого пакета
+bool Radio_getRSSI(float& rssi) {
+  rssi = radio.getRSSI();
   return true;
 }
 
