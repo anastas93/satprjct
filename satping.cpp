@@ -17,6 +17,7 @@
 extern SX1262 radio;
 extern float g_freq_rx_mhz;
 extern float g_freq_tx_mhz;
+extern volatile bool txDoneFlag;  // флаг завершения передачи из обработчика IRQ
 
 // Преобразование режима FEC в строку для вывода
 static const char* FecModeName(PingFecMode m) {
@@ -56,10 +57,17 @@ void SatPing() {
   Serial.print(F("/TX:"));
   Serial.println(g_freq_tx_mhz, 3);
 
-  // Передаём пакет и измеряем время
-  radio.transmit(ping, 5);
-  uint32_t time1 = micros();
-  radio.setFrequency(g_freq_rx_mhz);      // переходим на приём
+  // Передаём пакет асинхронно и ждём завершения по флагу
+  radio.startTransmit(ping, 5);
+  while (!txDoneFlag) {
+    delay(1);
+  }
+  txDoneFlag = false;               // сбрасываем флаг окончания TX
+  uint32_t time1 = micros();        // фиксируем момент завершения передачи
+
+  delay(2);                         // короткая защита перед приёмом
+  radio.setFrequency(g_freq_rx_mhz); // переходим на приём
+  radio.startReceive();             // включаем режим RX
   int state = radio.receive(rx_ping, 5);  // ждём ответ
   uint32_t time2 = micros();
 
@@ -89,9 +97,9 @@ void SatPing() {
   }
 
   // Возвращаемся на частоту приёма
-  delay(150);
+  delay(3);                      // короткий guard вместо длинной паузы
   radio.setFrequency(g_freq_rx_mhz);
-  // radio.startReceive();  // в оригинале не вызывался
+  radio.startReceive();          // возвращаем радио в режим RX
 }
 
 // Проверка канала на текущем пресете без вывода подробной информации
@@ -106,9 +114,15 @@ bool ChannelPing() {
   ping[4] = 0;
 
   radio.setFrequency(g_freq_tx_mhz);  // передаём на текущей TX
-  radio.transmit(ping, 5);
+  radio.startTransmit(ping, 5);
+  while (!txDoneFlag) {
+    delay(1);
+  }
+  txDoneFlag = false;
+  delay(2);                           // короткий guard
 
   radio.setFrequency(g_freq_rx_mhz);  // слушаем на текущей RX
+  radio.startReceive();               // переходим в режим приёма
   int state = radio.receive(rx, 5);
   bool ok = (state == RADIOLIB_ERR_NONE) || (memcmp(ping, rx, 5) == 0);
   radio.setFrequency(g_freq_rx_mhz);  // возвращаем приём
@@ -135,8 +149,15 @@ bool PresetPing(Bank bank, int preset) {
   ping[4] = 0;
 
   radio.setFrequency(tbl[preset].txMHz);
-  radio.transmit(ping, 5);
+  radio.startTransmit(ping, 5);
+  while (!txDoneFlag) {
+    delay(1);
+  }
+  txDoneFlag = false;
+  delay(2);                             // пауза перед приёмом
+
   radio.setFrequency(tbl[preset].rxMHz);
+  radio.startReceive();
   int state = radio.receive(rx, 5);
   bool ok = (state == RADIOLIB_ERR_NONE) || (memcmp(ping, rx, 5) == 0);
   radio.setFrequency(g_freq_rx_mhz);  // возвращаем исходную частоту
@@ -173,7 +194,7 @@ void MassPing(Bank bank) {
     } else {
       Serial.println(F("Bad"));
     }
-    delay(150);
+    delay(3);   // короткая пауза между пресетами
   }
   Serial.print(F("Found: "));
   Serial.println(found);
@@ -237,12 +258,17 @@ void SatPingRun(const PingOptions& opts, PingStats& stats) {
 
         // передача одного фрагмента
         radio.setFrequency(g_freq_tx_mhz);
-        radio.transmit(txbuf.data(), txbuf.size());
+        radio.startTransmit(txbuf.data(), txbuf.size());
+        while (!txDoneFlag) {
+          delay(1);
+        }
+        txDoneFlag = false;
         stats.sent++;
         if (attempt > 0) stats.retransmits++;
         stats.tx_bytes += txbuf.size();
 
-        // ожидание ответа
+        // короткая пауза и переход на приём
+        delay(2);
         std::vector<uint8_t> rxbuf(txbuf.size());
         radio.setFrequency(g_freq_rx_mhz);
         radio.startReceive();
