@@ -57,6 +57,8 @@ Reed-Solomon, Viterbi и LDPC из подкаталогов `libs/rs`, `libs/vit
 
 Начиная с этой версии убраны относительные include-пути вроде `../../scrambler.h`,
 что устраняет ошибку «No such file or directory» при установке библиотеки в Arduino IDE.
+Если такая ошибка всё же появляется, убедитесь, что каталог `libs` полностью
+скопирован в папку `libraries` вашего скетчбука Arduino.
 
 ## Архитектура
 ```mermaid
