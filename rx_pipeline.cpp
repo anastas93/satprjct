@@ -191,6 +191,7 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   cp.interleave = interleave_depth_;
   cp.scramble = true;
   std::vector<uint8_t> ccsds_buf;
+  // Обратная цепочка CCSDS с проверкой ASM
   if (!ccsds::decode(data.data(), data.size(), hdr.msg_id, cp, ccsds_buf, corrected)) {
     metrics_.rx_fec_fail++;
     FrameLog::push('R', frame, len, hdr.msg_id, fec_mode_, interleave_depth_,

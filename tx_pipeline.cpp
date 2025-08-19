@@ -82,7 +82,8 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
     else payload.assign(fr.payload.begin(), fr.payload.end());
     if (!ok) { metrics_.enc_fail++; continue; }
 
-    // Комплексная обработка CCSDS: рандомизация, FEC и интерливинг
+    // Комплексная обработка CCSDS (после AES-CCM):
+    // ASM -> рандомизация -> FEC -> интерливинг
     ccsds::Params cp;
     cp.fec = fec_enabled_ ? (ccsds::FecMode)fec_mode_ : ccsds::FEC_OFF;
     cp.interleave = interleave_depth_;
