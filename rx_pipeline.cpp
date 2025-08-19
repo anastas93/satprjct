@@ -23,24 +23,20 @@ static void softCombinePairs(const uint8_t* in, size_t len, std::vector<uint8_t>
   }
 }
 
-// Применяет случайный джиттер ±10–20% к таймауту
-static uint16_t addJitter(uint16_t base) {
-  if (base == 0) return 0; // без интервала джиттер не нужен
-  int sign = (rand() & 1) ? 1 : -1;
-  int pct = 10 + (rand() % 11);
-  uint16_t delta = (base * pct) / 100;
-  uint16_t res = (sign > 0) ? base + delta : (base > delta ? base - delta : 1);
-  return res;
-}
-
 RxPipeline::RxPipeline(IEncryptor& enc, PipelineMetrics& m)
 : enc_(enc), metrics_(m) {
-  ack_agg_jitter_ms_ = addJitter(ack_agg_ms_);
+  scheduleNextAck();
 }
 
 void RxPipeline::setAckAgg(uint16_t ms) {
   ack_agg_ms_ = ms;
-  ack_agg_jitter_ms_ = addJitter(ms);
+  scheduleNextAck();
+}
+
+void RxPipeline::scheduleNextAck() {
+  if (ack_agg_ms_ == 0) { ack_agg_jitter_ms_ = 0; return; }
+  // случайный интервал 50–100 мс (или ms–2*ms при настройке)
+  ack_agg_jitter_ms_ = ack_agg_ms_ + (rand() % (ack_agg_ms_ + 1));
 }
 
 // Устанавливаем ожидание подтверждения смены ключа
@@ -83,8 +79,10 @@ void RxPipeline::sendAck(uint32_t msg_id) {
   uint32_t off = ack_highest_ - msg_id;
   if (off > 0 && off <= window_size_) ack_bitmap_ |= (1u << (off - 1));
 
-  // агрегируем ACK по времени с джиттером
-  if (millis() - last_ack_sent_ms_ < ack_agg_jitter_ms_) return;
+  // отправляем пакет сразу при заполнении bitmap или по таймеру 50–100 мс
+  uint32_t full_mask = (window_size_ >= 32) ? 0xFFFFFFFF : ((1u << window_size_) - 1);
+  bool bitmap_full = (ack_bitmap_ & full_mask) == full_mask;
+  if (!bitmap_full && ack_agg_ms_ > 0 && (millis() - last_ack_sent_ms_ < ack_agg_jitter_ms_)) return;
 
   FrameHeader ack{};
   ack.ver = cfg::PIPE_VERSION;
@@ -122,7 +120,7 @@ void RxPipeline::sendAck(uint32_t msg_id) {
   FrameLog::push('T', frame.data(), frame.size(),
                  0, 0, 0, 0.0f, 0, 0, 0, 0);
   last_ack_sent_ms_ = millis();
-  ack_agg_jitter_ms_ = addJitter(ack_agg_ms_);
+  scheduleNextAck();
   // После передачи возвращаемся в режим приёма
   tdd::maintain();
 }

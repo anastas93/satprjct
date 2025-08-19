@@ -5,6 +5,7 @@
 #include "encryptor.h"
 #include "metrics.h"
 #include <deque>
+#include <stddef.h>
 
 class TxPipeline {
 public:
@@ -27,12 +28,14 @@ public:
   void setHeaderDup(bool v) { hdr_dup_enabled_ = v; }
   // Установка размера окна SR-ARQ
   void setWindowSize(uint8_t w) { window_size_ = w; }
+  // Лимит фрагментов в одной серии перед ожиданием ACK
+  void setBurstFrags(uint8_t n) { burst_limit_ = n; }
   // Поместить сообщение KEYCHG <kid> в очередь с требованием ACK
   void queueKeyChange(uint8_t kid);
   // Поместить сообщение KEYACK <kid> в очередь без требования ACK
   void queueKeyAck(uint8_t kid);
 private:
-  void sendMessageFragments(const OutgoingMessage& m);
+  size_t sendMessageFragments(const OutgoingMessage& m);
   bool interFrameGap();
   void controlProfile();      // контроллер изменения профиля по метрикам
   void applyProfile(uint8_t p);
@@ -62,6 +65,12 @@ private:
   uint16_t ack_timeout_ = cfg::ACK_TIMEOUT;
   uint8_t  max_retries_ = cfg::MAX_RETRIES;
   unsigned long last_tx_ms_ = 0;
+
+  // контроль серии фрагментов и ожидание подтверждения
+  uint8_t burst_limit_ = cfg::SR_WINDOW_DEFAULT; // размер серии
+  size_t  frags_in_burst_ = 0;                   // отправлено в текущей серии
+  bool    waiting_ack_ = false;                  // флаг ожидания ACK
+  unsigned long burst_wait_ms_ = 0;              // начало ожидания
 
   bool enc_enabled_ = cfg::ENCRYPTION_ENABLED_DEFAULT;
   bool fec_enabled_ = cfg::FEC_ENABLED_DEFAULT;
