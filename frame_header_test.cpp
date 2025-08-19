@@ -14,6 +14,7 @@ int main() {
   h.frag_idx = 2;
   h.frag_cnt = 5;
   h.payload_len = 7;
+  h.ack_mask = 0x55667788;
   h.hdr_crc = 0x1234;
   h.frame_crc = 0xABCD;
 
@@ -28,6 +29,7 @@ int main() {
   assert(h2.frag_idx == h.frag_idx);
   assert(h2.frag_cnt == h.frag_cnt);
   assert(h2.payload_len == h.payload_len);
+  assert(h2.ack_mask == h.ack_mask);
   assert(h2.hdr_crc == h.hdr_crc);
   assert(h2.frame_crc == h.frame_crc);
 

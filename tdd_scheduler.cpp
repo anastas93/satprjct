@@ -1,6 +1,8 @@
 #include "tdd_scheduler.h"
 #include "radio_adapter.h"
 
+#ifdef ARDUINO
+
 namespace tdd {
   // Текущие значения окон в мс
   unsigned long txWindowMs = cfg::TDD_TX_WINDOW_MS;
@@ -46,4 +48,25 @@ namespace tdd {
     guardMs = guard;
   }
 }
+
+#else
+
+namespace tdd {
+  // Упрощённая заглушка для десктопных тестов: считаем, что всегда можно
+  // передавать и принимать ACK без таймового расписания.
+  unsigned long txWindowMs = cfg::TDD_TX_WINDOW_MS;
+  unsigned long ackWindowMs = cfg::TDD_ACK_WINDOW_MS;
+  unsigned long guardMs     = cfg::TDD_GUARD_MS;
+
+  unsigned long cycleLen() { return txWindowMs + ackWindowMs + 2 * guardMs; }
+  Phase currentPhase(unsigned long) { return Phase::TX; }
+  bool isTxPhase(unsigned long) { return true; }
+  bool isAckPhase(unsigned long) { return true; }
+  void maintain() {}
+  void setParams(unsigned long tx, unsigned long ack, unsigned long guard) {
+    txWindowMs = tx; ackWindowMs = ack; guardMs = guard;
+  }
+}
+
+#endif // ARDUINO
 

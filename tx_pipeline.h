@@ -53,6 +53,7 @@ private:
     unsigned long start_ms;       // время первой отправки
     unsigned long last_tx_ms;     // время последней передачи
     uint16_t timeout_ms;          // текущий таймаут ожидания
+    uint8_t  backoff_stage;       // ступень бэкоффа
   };
   std::deque<Pending> pending_;
   uint16_t ack_timeout_ = cfg::ACK_TIMEOUT;

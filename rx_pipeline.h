@@ -30,7 +30,7 @@ public:
   // Настройка окна SR-ARQ
   void setWindowSize(uint8_t w) { window_size_ = w; }
   // Установка интервала агрегирования ACK
-  void setAckAgg(uint16_t ms) { ack_agg_ms_ = ms; }
+  void setAckAgg(uint16_t ms);
 private:
   struct AsmState {
     uint32_t msg_id;
@@ -62,6 +62,7 @@ private:
   bool hdr_dup_enabled_ = cfg::HEADER_DUP_DEFAULT;
   uint8_t window_size_ = cfg::SR_WINDOW_DEFAULT;
   uint16_t ack_agg_ms_ = cfg::T_ACK_AGG_DEFAULT;
+  uint16_t ack_agg_jitter_ms_ = cfg::T_ACK_AGG_DEFAULT;
   float phase_est_ = 0.0f; // текущая оценка фазы
 };
 
