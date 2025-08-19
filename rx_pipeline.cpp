@@ -2,9 +2,7 @@
 #include "rx_pipeline.h"
 #include "radio_adapter.h"
 #include "frame_log.h"
-#include "scrambler.h"
-#include "fec.h"
-#include "interleaver.h"
+#include "libs/ccsds_link.h"
 #include "ack_bitmap.h"
 #include "tdd_scheduler.h"
 #include <string.h>
@@ -181,30 +179,20 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
     }
   }
 
-  if (interleave_depth_ > 1) {
-    std::vector<uint8_t> tmp;
-    deinterleave_bytes(data.data(), data.size(), interleave_depth_, tmp);
-    data.swap(tmp);
-  }
-
   int corrected = 0;
-  if (fec_enabled_) {
-    std::vector<uint8_t> tmp;
-    if (fec_mode_ == FEC_RS_VIT) {
-      if (!fec_decode_rs_viterbi(data.data(), data.size(), tmp, corrected)) {
-        metrics_.rx_fec_fail++;
-        // логируем неудачное декодирование
-        FrameLog::push('R', frame, len, hdr.msg_id, fec_mode_, interleave_depth_,
-                       snr, corrected, 0, 1, 0);
-        return;
-      }
-      metrics_.rx_fec_corrected += corrected;
-      data.swap(tmp);
-    }
-    // LDPC не реализован
+  ccsds::Params cp;
+  cp.fec = fec_enabled_ ? (ccsds::FecMode)fec_mode_ : ccsds::FEC_OFF;
+  cp.interleave = interleave_depth_;
+  cp.scramble = true;
+  std::vector<uint8_t> ccsds_buf;
+  if (!ccsds::decode(data.data(), data.size(), hdr.msg_id, cp, ccsds_buf, corrected)) {
+    metrics_.rx_fec_fail++;
+    FrameLog::push('R', frame, len, hdr.msg_id, fec_mode_, interleave_depth_,
+                   snr, corrected, 0, 1, 0);
+    return;
   }
-
-  lfsr_descramble(data.data(), data.size(), (uint16_t)hdr.msg_id);
+  metrics_.rx_fec_corrected += corrected;
+  data.swap(ccsds_buf);
 
   // фиксируем успешно принятый кадр
   FrameLog::push('R', frame, len, hdr.msg_id, fec_mode_, interleave_depth_,

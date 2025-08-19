@@ -4,10 +4,15 @@
 #include "tx_pipeline.h"
 #undef private
 
-class Print; // forward declaration for FrameLog::dump stub
+class Print; // заглушка для FrameLog::dump
 
+// Минимальные заглушки для функций радиоинтерфейса и журнала кадров
+bool Radio_sendRaw(const uint8_t*, size_t) { return true; }
 namespace FrameLog {
-void push(char, const uint8_t*, size_t) {}
+void push(char, const uint8_t*, size_t,
+          uint32_t, uint8_t, uint8_t,
+          float, uint8_t, uint16_t, uint8_t,
+          uint16_t) {}
 void dump(Print&, unsigned int) {}
 }
 namespace tdd {

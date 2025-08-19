@@ -9,9 +9,13 @@
 - Модуль `crypto_spec` (в корне проекта) с функциями `setCurrentKey` для хранения ключа и его CRC-16 и `setRootKeyHex` для установки корневого ключа из 32‑символьной hex-строки (по умолчанию загружается встроенное значение)
 - Простейший скремблер на LFSR (`lfsr_scramble`/`lfsr_descramble`) для
   избавления от длинных последовательностей бит
-- FEC: RS(255,223) + Viterbi K=7, R=1/2 и байтовый интерливинг (`setFecMode`, `setInterleaveDepth`)
-- Параметр `setFecMode` принимает значения `off`, `rs_vit` или `ldpc`.
+- FEC: RS(255,223) + Viterbi K=7, R=1/2, либо простой LDPC на коде Хэмминга (12,8) и байтовый интерливинг (`setFecMode`, `setInterleaveDepth`)
+- Параметр `setFecMode` принимает значения `off`, `rs_vit` или `ldpc` (исправление одиночных ошибок).
   Глубина интерливера задаётся `setInterleaveDepth` и может быть 1, 4, 8 или 16 байт.
+- Модуль `ccsds_link` объединяет рандомизацию, выбранный FEC и интерливинг и
+  предоставляет API `encode()`/`decode()`.
+  Настройки по умолчанию задаются в `config.h` константами
+  `CCSDS_FEC_MODE_DEFAULT` и `CCSDS_INTERLEAVER_DEPTH_DEFAULT`.
   - Пилотные вставки с настраиваемым интервалом (`setPilotInterval`, 0=выкл) и управляемое дублирование заголовка (`setHeaderDup`)
   - SR‑ARQ с настраиваемым окном сообщений (`setWindowSize`) и bitmap последних W кадров (`AckBitmap`)
   - Интервал агрегации ACK настраивается через `setAckAgg`

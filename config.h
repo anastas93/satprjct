@@ -29,10 +29,14 @@ namespace cfg {
   static constexpr uint8_t  ENC_META_LEN           = 1; // KID
   static constexpr bool     ENC_MODE_PER_FRAGMENT  = true;
 
-  // FEC и интерливинг
-  static constexpr uint8_t  FEC_MODE_DEFAULT       = 0; // 0-off,1-rs_vit,2-ldpc
-  static constexpr bool     FEC_ENABLED_DEFAULT    = (FEC_MODE_DEFAULT!=0);
-  static constexpr uint8_t  INTERLEAVER_DEPTH_DEFAULT = 1; // 1/4/8/16
+  // Параметры CCSDS-звена: выбор FEC и глубины интерливера
+  static constexpr uint8_t  CCSDS_FEC_MODE_DEFAULT       = 0; // 0-off,1-rs_vit,2-ldpc
+  static constexpr bool     CCSDS_FEC_ENABLED_DEFAULT    = (CCSDS_FEC_MODE_DEFAULT!=0);
+  static constexpr uint8_t  CCSDS_INTERLEAVER_DEPTH_DEFAULT = 1; // 1/4/8/16
+  // старые имена оставлены для обратной совместимости
+  static constexpr uint8_t  FEC_MODE_DEFAULT       = CCSDS_FEC_MODE_DEFAULT;
+  static constexpr bool     FEC_ENABLED_DEFAULT    = CCSDS_FEC_ENABLED_DEFAULT;
+  static constexpr uint8_t  INTERLEAVER_DEPTH_DEFAULT = CCSDS_INTERLEAVER_DEPTH_DEFAULT;
 
   // Buffers
   static constexpr size_t   TX_BUF_MAX_BYTES        = 48 * 1024;
