@@ -23,6 +23,7 @@
 #include "web_style.h"
 #include "web_script.h"
 #include "crypto_spec.h"
+#include "radio_state.h" // состояние радио
 
 #include <string.h> // for memcmp
 #include <ctype.h>   // for toupper when parsing hex strings
@@ -376,9 +377,7 @@ static void printMetrics() {
 
 // --- Управление состоянием радио -------------------------------------------
 
-// Возможные состояния работы радиомодуля
-enum class RadioState { Idle, Rx, Tx };
-
+// Состояния радиомодуля описаны в radio_state.h
 // Текущее состояние; по умолчанию радио в простое
 static RadioState g_radio_state = RadioState::Idle;
 
