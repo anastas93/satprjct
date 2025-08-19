@@ -43,8 +43,9 @@ bool Radio_setTxPower(int8_t dBm) {
   return true;
 }
 
-void Radio_forceRx() {
-  // Do nothing in the stub.
+void Radio_forceRx(uint32_t rx_ticks) {
+  (void)rx_ticks;
+  // Заглушка ничего не делает.
 }
 
 // Заглушки измерений качества канала
