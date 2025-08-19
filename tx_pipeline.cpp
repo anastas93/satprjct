@@ -23,8 +23,9 @@ static const TxProfile PROFILES[4] = {
   { 64, TxPipeline::FEC_RS_VIT,16, 4}  // P3: худший канал
 };
 
-static const float PER_THR[3]  = {0.1f, 0.2f, 0.3f};
-static const float EBN0_THR[3] = {7.0f, 5.0f, 3.0f};
+// Пороговые значения приходят из глобальных переменных
+extern bool g_autoRate;
+extern float g_perHigh, g_perLow, g_ebn0High, g_ebn0Low;
 
 // Применяет случайный джиттер ±10–20% к базовому таймауту
 static uint16_t addJitter(uint16_t base) {
@@ -242,14 +243,16 @@ void TxPipeline::loop() {
 // Определение профиля по метрикам PER и Eb/N0
 // Контроллер профиля передачи на основе метрик
 void TxPipeline::controlProfile() {
+  if (!g_autoRate) return; // автонастройка выключена
   // средние значения PER и Eb/N0 из скользящих окон
   float per = metrics_.per_window.avg();
   float ebn0 = metrics_.ebn0_window.avg();
-  uint8_t idx = 0;
-  if (per > PER_THR[0] || ebn0 < EBN0_THR[0]) idx = 1;
-  if (per > PER_THR[1] || ebn0 < EBN0_THR[1]) idx = 2;
-  if (per > PER_THR[2] || ebn0 < EBN0_THR[2]) idx = 3;
-  if (idx != profile_idx_) applyProfile(idx);
+  // ухудшение или улучшение профиля в зависимости от порогов
+  if (per > g_perHigh || ebn0 < g_ebn0Low) {
+    if (profile_idx_ < 3) applyProfile(profile_idx_ + 1);
+  } else if (per < g_perLow && ebn0 > g_ebn0High) {
+    if (profile_idx_ > 0) applyProfile(profile_idx_ - 1);
+  }
 }
 
 // Применение конкретного профиля P0..P3
