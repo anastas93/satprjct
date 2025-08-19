@@ -121,12 +121,13 @@ flowchart TD
 - `retries` — количество повторов при отсутствии ответа.
 
 Во время работы выводится телеметрия вида:
-`seq=42 rtt=640ms snr=7.2dB ebn0=6.0dB fec_corr=12 drop_reason=ok`.
-В конце работы выводится сводка: min/avg/p50/p95/max RTT, goodput/overhead и счётчики ошибок (CRC, FEC, no-ack, timeout, retransmits). В заголовке отображаются выбранные `fec_mode` и `frag_size`.
+`seq=42 frag=0 rtt=640ms snr=7.2dB ebn0=6.0dB fec_corr=12 fec_mode=rs_vit frag_size=32 drop_reason=ok`.
+В конце работы выводится сводка: min/avg/p50/p95/max RTT по сообщениям и по отдельным фрагментам, goodput/overhead и счётчики ошибок (CRC, FEC, no-ack, timeout, retransmits). В заголовке отображаются выбранные `fec_mode` и `frag_size`.
 
 Статистика дополнительно содержит:
 - `fec_mode` и `frag_size` — параметры запуска;
 - `rtt_frag` — список RTT по каждому фрагменту многокадровых сообщений.
+В конце подсчитываются 50-й и 95-й перцентили RTT для сообщений и фрагментов.
 
 ## Команды
 | Команда | Параметры | Назначение | Пример ответа |
