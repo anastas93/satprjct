@@ -1,7 +1,8 @@
 #include "ccsds_link.h"
-#include <scrambler.h>
-#include <fec.h>
-#include <interleaver.h>
+// Подключаем локальные заголовки напрямую, чтобы Arduino не искал их во внешних путях
+#include "scrambler.h"
+#include "fec.h"
+#include "interleaver.h"
 
 namespace ccsds {
 
