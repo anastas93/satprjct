@@ -77,6 +77,8 @@ uint16_t g_retryMS = cfg::SEND_RETRY_MS_DEFAULT;
 bool g_dup_on = cfg::HEADER_DUP_DEFAULT;
 uint8_t g_window = cfg::SR_WINDOW_DEFAULT;
 uint16_t g_ackAgg = cfg::T_ACK_AGG_DEFAULT;
+uint8_t g_ackJitter = 0;                 // джиттер ожидания ACK в процентах
+std::vector<float> g_backoff;            // коэффициенты увеличения паузы между повторами
 
 // Таймстампы для простейшего rate-limit HTTP запросов
 unsigned long g_last_send_ms = 0;   // последний /send
@@ -183,6 +185,8 @@ void handleSetDup();
 void handleSetWin();
 void handleSetAckAgg();
 void handleSetAck();
+void handleSetAckJitter();
+void handleSetBackoff();
 void handleToggleEnc();
 void handleMetrics();
 void handlePing();
@@ -756,6 +760,34 @@ void handleSetAck() {
   g_tx.enableAck(g_ack_on);
   server.send(200, "text/plain", g_ack_on ? "ack on" : "ack off");
   serialBuffer += String("*SYS:* ACK=") + (g_ack_on ? "ON" : "OFF") + "\n";
+}
+
+// Установка процента джиттера ожидания ACK
+void handleSetAckJitter() {
+  if (!server.hasArg("val")) { server.send(400, "text/plain", "val missing"); return; }
+  int pct = server.arg("val").toInt();
+  if (pct < 0 || pct > 100) { server.send(400, "text/plain", "range 0..100"); return; }
+  g_ackJitter = (uint8_t)pct;
+  server.send(200, "text/plain", "ackjitter set");
+  serialBuffer += String("*SYS:* ACKJITTER=") + String(pct) + String("%\n");
+}
+
+// Задание списка коэффициентов backoff через запятую
+void handleSetBackoff() {
+  if (!server.hasArg("val")) { server.send(400, "text/plain", "val missing"); return; }
+  String v = server.arg("val");
+  g_backoff.clear();
+  int start = 0;
+  while (start < v.length()) {
+    int comma = v.indexOf(',', start);
+    String token = (comma == -1) ? v.substring(start) : v.substring(start, comma);
+    float c = token.toFloat();
+    if (c > 0) g_backoff.push_back(c);
+    if (comma == -1) break;
+    start = comma + 1;
+  }
+  server.send(200, "text/plain", "backoff set");
+  serialBuffer += String("*SYS:* BACKOFF=") + v + String("\n");
 }
 
 void handleToggleEnc() {
@@ -2493,6 +2525,8 @@ void setup() {
     server.on("/setwin", handleSetWin);         // размер окна SR-ARQ
     server.on("/setackagg", handleSetAckAgg);   // интервал агрегации ACK
     server.on("/setack", handleSetAck);
+    server.on("/setackjitter", handleSetAckJitter); // джиттер ожидания ACK
+    server.on("/setbackoff", handleSetBackoff);     // коэффициенты backoff
     server.on("/toggleenc", handleToggleEnc);
   server.on("/metrics", handleMetrics);
   server.on("/linkdiag", handleLinkDiag);

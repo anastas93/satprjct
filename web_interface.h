@@ -154,6 +154,12 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
         <label for="ackAggInput">AckAgg:</label>
         <input id="ackAggInput" type="number" min="0" max="1000" step="10" value="50" title="Интервал агрегации ACK (мс)">
       </div>
+      <div class="row">
+        <label for="ackJitterInput">AckJitter:</label>
+        <input id="ackJitterInput" type="number" min="0" max="100" step="1" title="Джиттер ожидания ACK (%)">
+        <label for="backoffInput">Backoff:</label>
+        <input id="backoffInput" type="text" placeholder="1,1.5,2" title="Коэффициенты задержки через запятую">
+      </div>
     </div>
   </details>
 
