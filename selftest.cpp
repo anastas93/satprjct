@@ -2,6 +2,7 @@
 #include "selftest.h"
 #include <vector>
 #include <string.h>
+#include "message_buffer.h"
 
 bool EncSelfTest_run(CcmEncryptor& ccm, size_t size, Print& out) {
   if (!ccm.isReady()) {
@@ -59,8 +60,32 @@ void EncSelfTest_badKid(CcmEncryptor& ccm, Print& out) {
   out.printf("ENCTESTBAD wrong-KID dec=%s (expected FAIL)\n", ok? "OK":"FAIL");
 }
 
+bool MsgBufSelfTest_run(Print& out) {
+  out.println(F("MSG_BUF_TEST begin"));
+  MessageBuffer buf;
+  uint8_t d1[]{1,2,3};
+  uint8_t d2[]{4,5};
+  uint32_t id1 = buf.enqueue(d1, sizeof(d1), true);
+  uint32_t id2 = buf.enqueue(d2, sizeof(d2), true);
+  buf.archive(id1);
+  std::vector<uint32_t> ids;
+  buf.listArchived(ids);
+  bool ok = (ids.size()==1 && ids[0]==id1 && buf.size()==1);
+  if (!ok) { out.println(F("Archive step fail")); return false; }
+  if (!buf.restoreArchived()) { out.println(F("Restore fail")); return false; }
+  OutgoingMessage m;
+  buf.peekNext(m);
+  if (m.id != id1) { out.println(F("Not restored to front")); return false; }
+  buf.popFront();
+  buf.peekNext(m);
+  if (m.id != id2) { out.println(F("Order wrong")); return false; }
+  out.println(F("MSG_BUF_TEST OK"));
+  return true;
+}
+
 void SelfTest_runAll(CcmEncryptor& ccm, Print& out) {
   out.println(F("SELFTEST: begin"));
   EncSelfTest_battery(ccm, out);
+  MsgBufSelfTest_run(out);
   out.println(F("SELFTEST: end"));
 }

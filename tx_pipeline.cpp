@@ -137,6 +137,7 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
 
 void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
   // отмечаем подтверждённые сообщения в окне
+  size_t before = pending_.size();
   for (auto it = pending_.begin(); it != pending_.end(); ) {
     uint32_t id = it->msg.id;
     bool ok = false;
@@ -153,6 +154,11 @@ void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
     } else {
       ++it;
     }
+  }
+  // восстанавливаем из архива столько сообщений, сколько освободилось слотов
+  size_t freed = before - pending_.size();
+  for (size_t i = 0; i < freed; ++i) {
+    if (!buf_.restoreArchived()) break;
   }
 }
 
@@ -177,6 +183,8 @@ void TxPipeline::loop() {
         it->timeout_ms = addJitter((uint16_t)next);
         ++it;
       } else {
+        // при полном исчерпании повторов переносим сообщение в архив
+        buf_.archive(it->msg.id);
         metrics_.ack_fail++;
         it = pending_.erase(it);
       }
