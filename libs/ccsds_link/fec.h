@@ -2,9 +2,9 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <vector>
-#include <rs/rs.h>
-#include <viterbi/viterbi.h>
-#include <ldpc/ldpc.h>
+#include "../rs/rs.h"        // код Рида–Соломона
+#include "../viterbi/viterbi.h" // алгоритм Витерби
+#include "../ldpc/ldpc.h"    // LDPC кодирование
 
 // Простейший повторный код R=1/2
 inline void fec_encode_repeat(const uint8_t* in, size_t len, std::vector<uint8_t>& out) {
