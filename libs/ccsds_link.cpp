@@ -5,12 +5,19 @@
 
 namespace ccsds {
 
-// Кодирование: рандомизация -> FEC -> интерливинг
+// Кодирование: ASM -> рандомизация -> FEC -> интерливинг
 void encode(const uint8_t* in, size_t len, uint32_t msg_id,
             const Params& p, std::vector<uint8_t>& out) {
-  std::vector<uint8_t> tmp(in, in + len);
+  // добавляем синхрометку в начало
+  std::vector<uint8_t> tmp;
+  tmp.reserve(len + 4);
+  tmp.push_back((uint8_t)(ASM >> 24));
+  tmp.push_back((uint8_t)(ASM >> 16));
+  tmp.push_back((uint8_t)(ASM >> 8));
+  tmp.push_back((uint8_t)(ASM));
+  tmp.insert(tmp.end(), in, in + len);
 
-  // Шаг 1: рандомизация
+  // Шаг 1: рандомизация всего блока
   if (p.scramble && !tmp.empty()) {
     lfsr_scramble(tmp.data(), tmp.size(), (uint16_t)msg_id);
   }
@@ -26,25 +33,27 @@ void encode(const uint8_t* in, size_t len, uint32_t msg_id,
     tmp.swap(buf);
   }
 
-  // Шаг 3: интерливинг
-  if (p.interleave > 1) {
+  // Шаг 3: интерливинг с ограничением 4–16
+  size_t depth = (p.interleave >= 4 && p.interleave <= 16) ? p.interleave : 1;
+  if (depth > 1) {
     std::vector<uint8_t> buf;
-    interleave_bytes(tmp.data(), tmp.size(), p.interleave, buf);
+    interleave_bytes(tmp.data(), tmp.size(), depth, buf);
     tmp.swap(buf);
   }
 
   out.swap(tmp);
 }
 
-// Декодирование: обратная последовательность
+// Декодирование: обратный порядок и проверка ASM
 bool decode(const uint8_t* in, size_t len, uint32_t msg_id,
             const Params& p, std::vector<uint8_t>& out, int& corrected) {
   std::vector<uint8_t> tmp(in, in + len);
 
   // Шаг 1: деинтерливинг
-  if (p.interleave > 1) {
+  size_t depth = (p.interleave >= 4 && p.interleave <= 16) ? p.interleave : 1;
+  if (depth > 1) {
     std::vector<uint8_t> buf;
-    deinterleave_bytes(tmp.data(), tmp.size(), p.interleave, buf);
+    deinterleave_bytes(tmp.data(), tmp.size(), depth, buf);
     tmp.swap(buf);
   }
 
@@ -67,7 +76,12 @@ bool decode(const uint8_t* in, size_t len, uint32_t msg_id,
     lfsr_descramble(tmp.data(), tmp.size(), (uint16_t)msg_id);
   }
 
-  out.swap(tmp);
+  // Шаг 4: проверка ASM
+  if (tmp.size() < 4) return false;
+  uint32_t got = (uint32_t(tmp[0]) << 24) | (uint32_t(tmp[1]) << 16) |
+                 (uint32_t(tmp[2]) << 8) | uint32_t(tmp[3]);
+  if (got != ASM) return false;
+  out.assign(tmp.begin() + 4, tmp.end());
   return true;
 }
 
