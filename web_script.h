@@ -150,6 +150,7 @@ on('pilotInput','change',e=>{localStorage.setItem('pilot',e.target.value);sendPa
 on('dupChk','change',e=>{const v=e.target.checked?'1':'0';localStorage.setItem('dup',v);fetch('/setdup?val='+v);});
 on('winInput','change',e=>{localStorage.setItem('win',e.target.value);sendParam('setwin',e.target.value);});
 on('ackAggInput','change',e=>{localStorage.setItem('ackAgg',e.target.value);sendParam('setackagg',e.target.value);});
+on('burstInput','change',e=>{localStorage.setItem('burst',e.target.value);sendParam('setburst',e.target.value);});
 on('ackJitterInput','change',e=>{localStorage.setItem('ackJitter',e.target.value);sendParam('setackjitter',e.target.value);});
 on('backoffInput','change',e=>{localStorage.setItem('backoff',e.target.value);sendParam('setbackoff',e.target.value);});
 on('encChk','change',e=>{localStorage.setItem('enc',e.target.checked?'1':'0');fetch('/toggleenc');});
@@ -172,7 +173,7 @@ function applySettings(){
       ['retryNInput','retryN'],['retryMSInput','retryMS'],['kidInput','kid'],
       ['fecSelect','fec'],['interSelect','inter'],['payloadInput','payload'],
       ['pilotInput','pilot'],['winInput','win'],['ackAggInput','ackAgg'],
-      ['ackJitterInput','ackJitter'],['backoffInput','backoff'],
+      ['burstInput','burst'],['ackJitterInput','ackJitter'],['backoffInput','backoff'],
       ['tddTxInput','tddTx'],['tddAckInput','tddAck'],['tddGuardInput','tddGuard'],
       ['diagFecSelect','fec'],['diagInterSelect','inter'],['diagFragInput','payload']
     ];
