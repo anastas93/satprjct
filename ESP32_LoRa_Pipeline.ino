@@ -622,9 +622,16 @@ void handleScript() {
   server.send_P(200, "application/javascript", WEB_SCRIPT_JS);
 }
 
-// События WebSocket пока не обрабатываются
+// Обработчик событий WebSocket
 void onWsEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t len) {
-  (void)num; (void)type; (void)payload; (void)len;
+  (void)payload; (void)len;
+  if (type == WStype_CONNECTED) {
+    // При подключении клиента отправляем накопленный буфер,
+    // чтобы сразу показать текущее состояние RX/TX
+    if (serialBuffer.length()) {
+      wsServer.sendTXT(num, serialBuffer.c_str());
+    }
+  }
 }
 
 void handleSetBank() {
