@@ -1,6 +1,7 @@
 #include "crypto_spec.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 namespace {
   // Локальная функция для расчёта CRC-16 (CRC-CCITT)
@@ -46,6 +47,36 @@ namespace crypto_spec {
     if (!key) return;
     memcpy(CURRENT_KEY, key, 16);
     CURRENT_KEY_CRC = crc16(CURRENT_KEY, 16);
+  }
+
+  // Простое XOR-"шифрование" для подтверждения
+  static void xorCrypt(const uint8_t* key, const uint8_t* in, uint8_t* out, size_t len) {
+    for (size_t i = 0; i < len; ++i) {
+      out[i] = in[i] ^ key[i % 16];
+    }
+  }
+
+  bool rotateKeyWithAck(const uint8_t* newKey, uint8_t kid, int retries) {
+    static const char ACK_TEXT[] = "ключ применён";
+    const size_t ACK_LEN = sizeof(ACK_TEXT) - 1;
+    uint8_t enc[32];
+    uint8_t dec[32];
+    for (int attempt = 0; attempt < retries; ++attempt) {
+      printf("KEYCHG %u попытка %d\n", kid, attempt + 1); // рассылка
+      xorCrypt(newKey, (const uint8_t*)ACK_TEXT, enc, ACK_LEN);
+      if (attempt == 0) enc[0] ^= 0xFF; // имитация сбоя для ретрая
+      xorCrypt(newKey, enc, dec, ACK_LEN);
+      if (memcmp(dec, ACK_TEXT, ACK_LEN) == 0) {
+        printf("ACK шифр: ");
+        for (size_t i = 0; i < ACK_LEN; ++i) printf("%02X", enc[i]);
+        printf("\n");
+        setCurrentKey(newKey); // активация ключа
+        printf("ACTIVATE %u\n", kid);
+        return true;
+      }
+      printf("Повтор запроса...\n");
+    }
+    return false;
   }
 
   // Автоматическая загрузка корневого ключа при старте
