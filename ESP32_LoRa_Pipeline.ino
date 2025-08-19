@@ -401,6 +401,7 @@ bool Radio_sendRaw(const uint8_t* data, size_t len) {
   // Смена состояния на передачу
   Radio_updateState(RadioState::Tx);
   int16_t st = radio.transmit(const_cast<uint8_t*>(data), len);
+  radio.finishTransmit();             // принудительно завершаем передачу
   radio.setFrequency(prev);
   // После передачи слушаем эфир на окно ACK+guard
   Radio_forceRx(msToTicks(tdd::ackWindowMs + tdd::guardMs));
@@ -458,6 +459,7 @@ static void radioPoll() {
       // отправителю для проверки канала связи
       radio.setFrequency(g_freq_tx_mhz);
       radio.transmit(tmp, 5);
+      radio.finishTransmit();          // принудительно завершаем TX
       radio.setFrequency(g_freq_rx_mhz);
       radio.startReceive();
       return; // Не обрабатываем пакет дальше
@@ -2056,6 +2058,7 @@ void handlePingAsync() {
     radio.setFrequency(g_freq_tx_mhz);
     delay(0);
     radio.transmit(g_ping_tx, 5);
+    radio.finishTransmit();             // завершаем передачу без ожидания
     // Record start time and switch to RX
     g_ping_start_us = micros();
     radio.setFrequency(g_freq_rx_mhz);
@@ -2159,6 +2162,7 @@ void runPing() {
   // Transmit ping on TX frequency
   radio.setFrequency(g_freq_tx_mhz);
   radio.transmit(ping, 5);
+  radio.finishTransmit();               // немедленно завершаем передачу
   // Record transmit timestamp
   uint32_t time1 = micros();
   // Switch to RX frequency and receive up to 5 bytes
@@ -2197,8 +2201,8 @@ void runPing() {
     Serial.println("~");
     serialBuffer += String("*SYS:* ") + msg + "\n";
   }
-  // Short delay to allow radio to settle and resume continuous reception
-  delay(150);
+  // Короткая пауза для перехода в режим приёма
+  delay(2);
   radio.setFrequency(g_freq_rx_mhz);
   // Возвращаем радио к приёму
   Radio_forceRx(msToTicks(tdd::cycleLen()));
@@ -2814,6 +2818,7 @@ void loop() {
     if (len == 5) {
       radio.setFrequency(g_freq_tx_mhz);
       radio.transmit(tmp, 5);
+      radio.finishTransmit();            // принудительный выход из TX
       radio.setFrequency(g_freq_rx_mhz);
       radio.startReceive();
     } else {
