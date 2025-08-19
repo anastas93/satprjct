@@ -5,7 +5,7 @@
 #include <vector>
 #include "RadioLib.h"
 #include "freq_map.h"
-#include "fec.h"
+#include <fec.h>
 #include "radio_adapter.h"
 #include "fragmenter.h"   // работа с фрагментами
 #include "satping.h"  // описание структур PingOptions и PingStats

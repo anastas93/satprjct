@@ -4,7 +4,8 @@
 #include <vector>
 
 // Модуль CCSDS звена: вставка ASM, рандомизация, FEC и интерливинг
-// Все функции работают в терминах байтов
+// Все функции работают в терминах байтов и используют заголовки
+// <scrambler.h>, <fec.h> и <interleaver.h>, расположенные в libs/ccsds_link
 namespace ccsds {
   // прикреплённая синхрометка (Attached Sync Marker)
   static constexpr uint32_t ASM = 0x1ACFFC1D;
