@@ -80,6 +80,11 @@ uint16_t g_ackAgg = cfg::T_ACK_AGG_DEFAULT;
 uint8_t g_ackJitter = 0;                 // джиттер ожидания ACK в процентах
 std::vector<float> g_backoff;            // коэффициенты увеличения паузы между повторами
 uint8_t g_burst = cfg::SR_WINDOW_DEFAULT; // лимит фрагментов в серии
+bool g_autoRate = false;                  // включена ли автонастройка профиля
+float g_perHigh = 0.2f;                   // верхний порог PER для ухудшения
+float g_perLow  = 0.05f;                  // нижний порог PER для улучшения
+float g_ebn0High = 8.0f;                  // верхний порог Eb/N0 для улучшения
+float g_ebn0Low  = 4.0f;                  // нижний порог Eb/N0 для ухудшения
 
 // Таймстампы для простейшего rate-limit HTTP запросов
 unsigned long g_last_send_ms = 0;   // последний /send
@@ -189,6 +194,9 @@ void handleSetBurst();
 void handleSetAck();
 void handleSetAckJitter();
 void handleSetBackoff();
+void handleSetAutorate();
+void handleSetPerTh();
+void handleSetEbn0Th();
 void handleToggleEnc();
 void handleMetrics();
 void handlePing();
@@ -800,6 +808,32 @@ void handleSetBackoff() {
   }
   server.send(200, "text/plain", "backoff set");
   serialBuffer += String("*SYS:* BACKOFF=") + v + String("\n");
+}
+
+// Переключение режима автонастройки профиля
+void handleSetAutorate() {
+  bool on = server.arg("val") == "1";
+  g_autoRate = on;
+  server.send(200, "text/plain", on ? "autorate on" : "autorate off");
+  serialBuffer += String("*SYS:* AUTORATE=") + (on ? "ON" : "OFF") + "\n";
+}
+
+// Установка порогов PER (hi/lo)
+void handleSetPerTh() {
+  if (!server.hasArg("hi") || !server.hasArg("lo")) { server.send(400, "text/plain", "hi/lo missing"); return; }
+  g_perHigh = server.arg("hi").toFloat();
+  g_perLow  = server.arg("lo").toFloat();
+  server.send(200, "text/plain", "perth set");
+  serialBuffer += String("*SYS:* PERTH=") + String(g_perHigh,2) + "," + String(g_perLow,2) + "\n";
+}
+
+// Установка порогов Eb/N0 (hi/lo)
+void handleSetEbn0Th() {
+  if (!server.hasArg("hi") || !server.hasArg("lo")) { server.send(400, "text/plain", "hi/lo missing"); return; }
+  g_ebn0High = server.arg("hi").toFloat();
+  g_ebn0Low  = server.arg("lo").toFloat();
+  server.send(200, "text/plain", "ebn0th set");
+  serialBuffer += String("*SYS:* EBN0TH=") + String(g_ebn0High,1) + "," + String(g_ebn0Low,1) + "\n";
 }
 
 void handleToggleEnc() {
@@ -2541,6 +2575,9 @@ void setup() {
     server.on("/setack", handleSetAck);
     server.on("/setackjitter", handleSetAckJitter); // джиттер ожидания ACK
     server.on("/setbackoff", handleSetBackoff);     // коэффициенты backoff
+    server.on("/setautorate", handleSetAutorate);   // включение автонастройки
+    server.on("/setperth", handleSetPerTh);         // пороги PER
+    server.on("/setebn0th", handleSetEbn0Th);       // пороги Eb/N0
     server.on("/toggleenc", handleToggleEnc);
   server.on("/metrics", handleMetrics);
   server.on("/linkdiag", handleLinkDiag);

@@ -105,6 +105,8 @@ function applyProfile(name){
 }
 function setSelect(id,val){const el=document.getElementById(id);if(el)el.value=val;}
 function sendParam(path,val){fetch('/'+path+'?val='+encodeURIComponent(val));}
+function sendPerTh(){const hi=document.getElementById('perHigh').value;const lo=document.getElementById('perLow').value;fetch('/setperth?hi='+encodeURIComponent(hi)+'&lo='+encodeURIComponent(lo));}
+function sendEbn0Th(){const hi=document.getElementById('ebn0High').value;const lo=document.getElementById('ebn0Low').value;fetch('/setebn0th?hi='+encodeURIComponent(hi)+'&lo='+encodeURIComponent(lo));}
 // Безопасно добавляет обработчики событий и пропускает отсутствующие элементы
 function on(id,ev,fn){const el=document.getElementById(id);if(el)el.addEventListener(ev,fn);}
 on('sendBtn','click',()=>{
@@ -153,6 +155,11 @@ on('ackAggInput','change',e=>{localStorage.setItem('ackAgg',e.target.value);send
 on('burstInput','change',e=>{localStorage.setItem('burst',e.target.value);sendParam('setburst',e.target.value);});
 on('ackJitterInput','change',e=>{localStorage.setItem('ackJitter',e.target.value);sendParam('setackjitter',e.target.value);});
 on('backoffInput','change',e=>{localStorage.setItem('backoff',e.target.value);sendParam('setbackoff',e.target.value);});
+on('perHigh','change',e=>{localStorage.setItem('perHigh',e.target.value);sendPerTh();});
+on('perLow','change',e=>{localStorage.setItem('perLow',e.target.value);sendPerTh();});
+on('ebn0High','change',e=>{localStorage.setItem('ebn0High',e.target.value);sendEbn0Th();});
+on('ebn0Low','change',e=>{localStorage.setItem('ebn0Low',e.target.value);sendEbn0Th();});
+on('autoRateChk','change',e=>{const v=e.target.checked?'1':'0';localStorage.setItem('autorate',v);fetch('/setautorate?val='+v);});
 on('encChk','change',e=>{localStorage.setItem('enc',e.target.checked?'1':'0');fetch('/toggleenc');});
 on('kidInput','change',e=>{localStorage.setItem('kid',e.target.value);sendParam('setkid',e.target.value);});
 on('keyBtn','click',()=>{const k=document.getElementById('keyInput').value;fetch('/setkey?val='+encodeURIComponent(k));});
@@ -174,6 +181,7 @@ function applySettings(){
       ['fecSelect','fec'],['interSelect','inter'],['payloadInput','payload'],
       ['pilotInput','pilot'],['winInput','win'],['ackAggInput','ackAgg'],
       ['burstInput','burst'],['ackJitterInput','ackJitter'],['backoffInput','backoff'],
+      ['perHigh','perHigh'],['perLow','perLow'],['ebn0High','ebn0High'],['ebn0Low','ebn0Low'],
       ['tddTxInput','tddTx'],['tddAckInput','tddAck'],['tddGuardInput','tddGuard'],
       ['diagFecSelect','fec'],['diagInterSelect','inter'],['diagFragInput','payload']
     ];
@@ -185,6 +193,7 @@ function applySettings(){
     document.getElementById('ackChk').checked=localStorage.getItem('ack')==='1';
     document.getElementById('encChk').checked=localStorage.getItem('enc')==='1';
     document.getElementById('dupChk').checked=localStorage.getItem('dup')==='1';
+    document.getElementById('autoRateChk').checked=localStorage.getItem('autorate')==='1';
   }
 applySettings();
 on('pingBtn','click',()=>{fetch('/ping');});

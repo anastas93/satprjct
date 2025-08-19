@@ -332,6 +332,17 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
         <div id="linkProfile"></div>
         <div id="ackBitmap"></div>
       </div>
+      <div class="row">
+        <label for="perHigh">PER High:</label>
+        <input id="perHigh" type="number" min="0" max="1" step="0.01" title="Порог ухудшения PER">
+        <label for="perLow">PER Low:</label>
+        <input id="perLow" type="number" min="0" max="1" step="0.01" title="Порог улучшения PER">
+        <label for="ebn0High">Eb/N0 High:</label>
+        <input id="ebn0High" type="number" min="0" max="30" step="0.1" title="Порог улучшения Eb/N0">
+        <label for="ebn0Low">Eb/N0 Low:</label>
+        <input id="ebn0Low" type="number" min="0" max="30" step="0.1" title="Порог ухудшения Eb/N0">
+        <label><input type="checkbox" id="autoRateChk" title="Автонастройка профиля"> AutoRate</label>
+      </div>
     </div>
   </details>
 
