@@ -2,19 +2,31 @@
 #pragma once
 #include <stdint.h>
 
-// Простая экспоненциальная скользящая средняя
-struct EmaCounter {
-  float value = 0.0f;    // текущее значение EMA
-  float alpha = 0.1f;    // коэффициент сглаживания
-  bool initialized = false;
+// Скользящее окно фиксированного размера
+struct SlidingWindow {
+  static const uint8_t SIZE = 16;   // длина окна
+  float data[SIZE] = {0};           // массив измерений
+  uint8_t idx = 0;                  // позиция для следующей записи
+  uint8_t count = 0;                // сколько значений реально заполнено
+  float sum = 0.0f;                 // сумма для быстрого среднего
 
-  // обновление счётчика новым измерением
-  inline void update(float sample) {
-    if (initialized)
-      value = alpha * sample + (1.0f - alpha) * value;
-    else
-      { value = sample; initialized = true; }
+  // добавить новое измерение в окно
+  inline void add(float sample) {
+    if (count < SIZE) {
+      data[idx] = sample; sum += sample; count++; idx = (idx + 1) % SIZE;
+    } else {
+      sum -= data[idx];
+      data[idx] = sample;
+      sum += sample;
+      idx = (idx + 1) % SIZE;
+    }
   }
+
+  // очистить содержимое окна
+  inline void clear() { idx = 0; count = 0; sum = 0.0f; }
+
+  // получить среднее по окну
+  inline float avg() const { return count ? (sum / count) : 0.0f; }
 };
 
 struct PipelineMetrics {
@@ -42,10 +54,9 @@ struct PipelineMetrics {
   float last_snr = 0.0f;   // последний измеренный SNR
   float last_ebn0 = 0.0f;  // последний измеренный Eb/N0
 
-  // EMA-метрики качества канала
-  EmaCounter per_ema;      // Packet Error Rate
-  EmaCounter rtt_ema_ms;   // время кругового обхода
-  EmaCounter goodput_ema;  // полезная пропускная способность
-  EmaCounter snr_ema;      // средний SNR
-  EmaCounter ebn0_ema;     // средний Eb/N0
+  // Скользящие окна метрик качества канала
+  SlidingWindow per_window;     // Packet Error Rate (0 или 1)
+  SlidingWindow rtt_window_ms;  // время кругового обхода
+  SlidingWindow goodput_window; // полезная пропускная способность
+  SlidingWindow ebn0_window;    // средний Eb/N0
 };

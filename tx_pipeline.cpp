@@ -134,7 +134,7 @@ void TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
       FrameLog::push('T', frame.data(), frame.size(),
                      final_hdr.msg_id, (uint8_t)fec_mode_, interleave_depth_,
                      0.0f, 0, 0, 0,
-                     (uint16_t)metrics_.rtt_ema_ms.value);
+                     (uint16_t)metrics_.rtt_window_ms.avg());
       metrics_.tx_frames++; metrics_.tx_bytes += frame.size();
       last_tx_ms_ = millis();
       while (!interFrameGap()) { delay(1); }
@@ -173,7 +173,7 @@ void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
 void TxPipeline::loop() {
   // Поддерживаем расписание и переключаем радио при необходимости
   tdd::maintain();
-  updateProfile();
+  controlProfile();      // адаптация параметров передачи
   // Проверяем таймеры повторов для уже отправленных кадров
   unsigned long now = millis();
   for (auto it = pending_.begin(); it != pending_.end(); ) {
@@ -220,9 +220,11 @@ void TxPipeline::loop() {
 }
 
 // Определение профиля по метрикам PER и Eb/N0
-void TxPipeline::updateProfile() {
-  float per = metrics_.per_ema.value;
-  float ebn0 = metrics_.ebn0_ema.value;
+// Контроллер профиля передачи на основе метрик
+void TxPipeline::controlProfile() {
+  // средние значения PER и Eb/N0 из скользящих окон
+  float per = metrics_.per_window.avg();
+  float ebn0 = metrics_.ebn0_window.avg();
   uint8_t idx = 0;
   if (per > PER_THR[0] || ebn0 < EBN0_THR[0]) idx = 1;
   if (per > PER_THR[1] || ebn0 < EBN0_THR[1]) idx = 2;
