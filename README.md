@@ -120,7 +120,11 @@ flowchart TD
 
 Во время работы выводится телеметрия вида:
 `seq=42 rtt=640ms snr=7.2dB ebn0=6.0dB fec_corr=12 drop_reason=ok`.
-В конце работы выводится сводка: min/avg/p50/p95/max RTT, goodput/overhead и счётчики ошибок (CRC, FEC, no-ack, timeout, retransmits).
+В конце работы выводится сводка: min/avg/p50/p95/max RTT, goodput/overhead и счётчики ошибок (CRC, FEC, no-ack, timeout, retransmits). В заголовке отображаются выбранные `fec_mode` и `frag_size`.
+
+Статистика дополнительно содержит:
+- `fec_mode` и `frag_size` — параметры запуска;
+- `rtt_frag` — список RTT по каждому фрагменту многокадровых сообщений.
 
 ## Команды
 | Команда | Параметры | Назначение | Пример ответа |
