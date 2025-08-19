@@ -300,9 +300,25 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
     <div class="panel-content">
       <div class="row">
         <canvas id="perGraph" width="300" height="100" class="graph"></canvas>
-        <canvas id="rtt50Graph" width="300" height="100" class="graph"></canvas>
-        <canvas id="rtt95Graph" width="300" height="100" class="graph"></canvas>
-        <canvas id="goodputGraph" width="300" height="100" class="graph"></canvas>
+        <canvas id="rttGraph" width="300" height="100" class="graph"></canvas>
+        <canvas id="ebn0Graph" width="300" height="100" class="graph"></canvas>
+      </div>
+      <div class="row">
+        <label for="diagFecSelect">FEC:</label>
+        <select id="diagFecSelect" title="Режим исправления ошибок">
+          <option value="off">off</option>
+          <option value="rs_vit">rs_vit</option>
+          <option value="ldpc">ldpc</option>
+        </select>
+        <label for="diagInterSelect">Interleave:</label>
+        <select id="diagInterSelect" title="Глубина интерливера">
+          <option value="1">1</option>
+          <option value="4">4</option>
+          <option value="8">8</option>
+          <option value="16">16</option>
+        </select>
+        <label for="diagFragInput">Frag:</label>
+        <input id="diagFragInput" type="number" min="1" max="241" step="1" title="Размер полезной нагрузки">
       </div>
       <div class="row">
         <div id="linkProfile"></div>

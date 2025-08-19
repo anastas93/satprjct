@@ -134,8 +134,10 @@ size_t TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
       // фиксируем факт передачи кадра и параметры профиля
       FrameLog::push('T', frame.data(), frame.size(),
                      final_hdr.msg_id, (uint8_t)fec_mode_, interleave_depth_,
-                     0.0f, 0, 0, 0,
-                     (uint16_t)metrics_.rtt_window_ms.avg());
+                     0.0f, 0.0f, 0.0f,
+                     0, 0, 0,
+                     (uint16_t)metrics_.rtt_window_ms.avg(),
+                     (uint16_t)payload.size());
       metrics_.tx_frames++; metrics_.tx_bytes += frame.size();
       last_tx_ms_ = millis();
       sent++;
