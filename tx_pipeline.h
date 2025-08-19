@@ -47,16 +47,17 @@ private:
   uint16_t pilot_interval_bytes_ = cfg::PILOT_INTERVAL_BYTES_DEFAULT;
   // флаг дублирования заголовка
   bool hdr_dup_enabled_ = cfg::HEADER_DUP_DEFAULT;
-  // окно неподтверждённых сообщений
+  // окно неподтверждённых кадров SR-ARQ
   uint8_t window_size_ = cfg::SR_WINDOW_DEFAULT;
   struct Pending {
     OutgoingMessage msg;          // сохранённое сообщение
     uint8_t retries_left;         // сколько повторов осталось
     unsigned long start_ms;       // время первой отправки
     unsigned long last_tx_ms;     // время последней передачи
-    uint16_t timeout_ms;          // текущий таймаут ожидания
+    uint16_t timeout_ms;          // индивидуальный таймер кадра
     uint8_t  backoff_stage;       // ступень бэкоффа
   };
+  // очередь кадров, ожидающих подтверждения
   std::deque<Pending> pending_;
   uint16_t ack_timeout_ = cfg::ACK_TIMEOUT;
   uint8_t  max_retries_ = cfg::MAX_RETRIES;
