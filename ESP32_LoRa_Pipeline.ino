@@ -111,6 +111,20 @@ int g_ping_stage = 0;
 // later in this file.
 static volatile bool g_hasRx = false;
 static std::vector<uint8_t> g_rxBuf;
+volatile bool txDoneFlag = false;
+volatile bool rxDoneFlag = false;
+
+// ISR DIO1: выставляет флаги завершения TX и RX
+void IRAM_ATTR isr() {
+  uint32_t irq = radio.getIrqFlags();
+  if (irq & RADIOLIB_SX126X_IRQ_TX_DONE) {
+    txDoneFlag = true;
+  }
+  if (irq & RADIOLIB_SX126X_IRQ_RX_DONE) {
+    rxDoneFlag = true;
+  }
+  radio.clearIrqStatus();
+}
 
 // -----------------------------------------------------------------------------
 // Key status and request state
@@ -2550,6 +2564,7 @@ void setup() {
 
   int16_t st = radio.begin(g_freq_rx_mhz, g_bw_khz, g_sf, g_cr, 0x18, g_txp, 10, tcxo, false);
   radio.setDio2AsRfSwitchCtrl(true); // включаем управление RF switch через DIO2
+  radio.setDio1Action(isr); // регистрируем ISR на DIO1
   if (st != RADIOLIB_ERR_NONE) {
     Serial.printf("Radio begin failed: %d\n", st);
   } else {
@@ -2752,7 +2767,29 @@ void loop() {
   // Handle incoming HTTP clients.
   server.handleClient();
   wsServer.loop();
-  radioPoll();
+  // Обработка завершения передачи
+  if (txDoneFlag) {
+    txDoneFlag = false;
+    radio.startReceive();
+    delay(2); // пауза для переключения в приём
+  }
+  // Обработка завершения приёма
+  if (rxDoneFlag) {
+    rxDoneFlag = false;
+    uint8_t tmp[cfg::LORA_MTU];
+    int16_t len = radio.readData(tmp, sizeof(tmp));
+    if (len == 5) {
+      radio.setFrequency(g_freq_tx_mhz);
+      radio.transmit(tmp, 5);
+      radio.setFrequency(g_freq_rx_mhz);
+      radio.startReceive();
+    } else {
+      if (len > 0) {
+        Radio_onReceive(tmp, (size_t)len);
+      }
+      radio.startReceive();
+    }
+  }
   // Progress asynchronous ping state if active
   handlePingAsync();
   if (g_hasRx) {
