@@ -374,12 +374,33 @@ static void printMetrics() {
                 g_metrics.rx_assem_drop_ttl, g_metrics.rx_assem_drop_overflow, g_metrics.dec_fail_tag, g_metrics.dec_fail_other);
 }
 
-// Radio glue
+// --- Управление состоянием радио -------------------------------------------
+
+// Возможные состояния работы радиомодуля
+enum class RadioState { Idle, Rx, Tx };
+
+// Текущее состояние; по умолчанию радио в простое
+static RadioState g_radio_state = RadioState::Idle;
+
+// Обновление состояния с выводом сообщения только при фактической смене
+static void Radio_updateState(RadioState st) {
+  if (g_radio_state == st) { return; }
+  g_radio_state = st;
+  if (st == RadioState::Tx) {
+    chatMsg("SYS", String("TX started ") + String(g_freq_tx_mhz, 3) + " MHz");
+  } else if (st == RadioState::Rx) {
+    chatMsg("SYS", String("RX started ") + String(g_freq_rx_mhz, 3) + " MHz");
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+// Отправка сырых данных по радио
 bool Radio_sendRaw(const uint8_t* data, size_t len) {
   float prev = g_freq_rx_mhz;
   radio.setFrequency(g_freq_tx_mhz);
-  // Логируем начало передачи с указанием частоты
-  chatMsg("SYS", String("TX started ") + String(g_freq_tx_mhz, 3) + " MHz");
+  // Смена состояния на передачу
+  Radio_updateState(RadioState::Tx);
   int16_t st = radio.transmit(const_cast<uint8_t*>(data), len);
   radio.setFrequency(prev);
   // После передачи слушаем эфир на окно ACK+guard
@@ -404,8 +425,8 @@ bool Radio_setTxPower(int8_t dBm) {
 void Radio_forceRx(uint32_t rx_ticks) {
   // Запуск приёма с таймаутом в тиках
   radio.startReceive(rx_ticks);
-  // Логируем начало приёма с указанием частоты
-  chatMsg("SYS", String("RX started ") + String(g_freq_rx_mhz, 3) + " MHz");
+  // Смена состояния на приём
+  Radio_updateState(RadioState::Rx);
 }
 
 // Получаем SNR последнего пакета из драйвера
