@@ -20,6 +20,11 @@ public:
   void onReceive(const uint8_t* frame, size_t len);
   void setMessageCallback(MsgCb cb) { cb_ = cb; }
   void setAckCallback(AckCb cb) { ack_cb_ = cb; }
+  // Установка колбэка для отправки KEYACK
+  using KeyAckSender = std::function<void(uint8_t)>;
+  void setKeyAckSender(KeyAckSender cb) { keyack_cb_ = cb; }
+  // Сообщить ожидание KEYACK после отправки KEYCHG
+  void expectKeyAck(uint8_t kid);
   enum FecMode : uint8_t { FEC_OFF=0, FEC_RS_VIT=1, FEC_LDPC=2 };
   void setFecMode(FecMode m) { fec_mode_ = m; fec_enabled_ = (m != FEC_OFF); }
   void setInterleaveDepth(uint8_t d) { interleave_depth_ = d; }
@@ -64,6 +69,10 @@ private:
   uint16_t ack_agg_ms_ = cfg::T_ACK_AGG_DEFAULT;
   uint16_t ack_agg_jitter_ms_ = cfg::T_ACK_AGG_DEFAULT;
   float phase_est_ = 0.0f; // текущая оценка фазы
+  KeyAckSender keyack_cb_ = nullptr; // отправка KEYACK
+  uint8_t pending_kid_ = 0;          // ожидаемый идентификатор ключа
+  bool expect_keyack_ = false;       // ждём подтверждение KEYCHG
+  bool expect_final_ack_ = false;    // ждём окончательный KEYACK
 };
 
 void Radio_onReceive(const uint8_t* data, size_t len);

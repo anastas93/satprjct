@@ -45,6 +45,13 @@ void TxPipeline::queueKeyChange(uint8_t kid) {
   buf_.enqueue(reinterpret_cast<uint8_t*>(tmp), n, true);
 }
 
+// Помещает служебное сообщение подтверждения смены ключа
+void TxPipeline::queueKeyAck(uint8_t kid) {
+  char tmp[16];
+  int n = snprintf(tmp, sizeof(tmp), "KEYACK %u", kid);
+  buf_.enqueue(reinterpret_cast<uint8_t*>(tmp), n, false);
+}
+
 bool TxPipeline::interFrameGap() {
   unsigned long now = millis();
   if (now - last_tx_ms_ < cfg::INTER_FRAME_GAP_MS) return false;
