@@ -8,8 +8,8 @@ std::vector<Fragment> Fragmenter::split(uint32_t msg_id, const uint8_t* data, si
   std::vector<Fragment> out;
   if (!data || len==0) return out;
   // Гарантируем диапазон полезной нагрузки 64–160 байт
-  if (payload_max < 64) return out;
-  if (payload_max > 160) payload_max = 160;
+  if (payload_max < 64) payload_max = 64;
+  else if (payload_max > 160) payload_max = 160;
   uint16_t frag_cnt = (len + payload_max - 1) / payload_max;
   out.reserve(frag_cnt);
   size_t offset = 0;
