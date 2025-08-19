@@ -2,7 +2,7 @@
 #include <cstdio>
 #define private public
 #include "tx_pipeline.h"
-#include <ccsds_link.h>
+#include "ccsds_link/ccsds_link.h" // заголовок библиотеки CCSDS из каталога libs
 #undef private
 
 class Print; // заглушка для FrameLog::dump
@@ -21,6 +21,9 @@ namespace tdd {
 void maintain() {}
 bool isTxPhase(unsigned long) { return false; }
 }
+
+// Заглушка таймера Arduino
+unsigned long millis() { static unsigned long t = 0; return t += 100; }
 
 // Заглушки модуля CCSDS: кодирование/декодирование не требуются в тесте
 namespace ccsds {
