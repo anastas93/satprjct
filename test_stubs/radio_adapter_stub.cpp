@@ -47,6 +47,12 @@ void Radio_forceRx() {
   // Do nothing in the stub.
 }
 
+// Заглушки измерений качества канала
+bool Radio_getSNR(float& snr) { snr = 0.0f; return true; }
+bool Radio_getEbN0(float& ebn0) { ebn0 = 0.0f; return true; }
+bool Radio_getLinkQuality(bool& good) { good = true; return true; }
+bool Radio_getRSSI(float& rssi) { rssi = 0.0f; return true; }
+
 void Radio_onReceive(const uint8_t* data, size_t len) {
   (void)data;
   (void)len;
