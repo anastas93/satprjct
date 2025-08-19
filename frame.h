@@ -11,11 +11,12 @@ struct FrameHeader {
   uint16_t frag_idx;   // номер фрагмента
   uint16_t frag_cnt;   // общее количество фрагментов
   uint16_t payload_len;// длина полезной нагрузки
+  uint32_t ack_mask;   // маска подтверждённых сообщений
   uint16_t hdr_crc;    // CRC только заголовка
   uint16_t frame_crc;  // CRC заголовка и данных
 
   // Размер заголовка в сериализованном виде
-  static constexpr size_t ENCODED_SIZE = 16;
+  static constexpr size_t ENCODED_SIZE = 20;
 
   // Кодирование заголовка в буфер (big-endian)
   bool encode(uint8_t* out, size_t len) const {
@@ -32,10 +33,14 @@ struct FrameHeader {
     out[9] = (uint8_t)(frag_cnt);
     out[10] = (uint8_t)(payload_len >> 8);
     out[11] = (uint8_t)(payload_len);
-    out[12] = (uint8_t)(hdr_crc >> 8);
-    out[13] = (uint8_t)(hdr_crc);
-    out[14] = (uint8_t)(frame_crc >> 8);
-    out[15] = (uint8_t)(frame_crc);
+    out[12] = (uint8_t)(ack_mask >> 24);
+    out[13] = (uint8_t)(ack_mask >> 16);
+    out[14] = (uint8_t)(ack_mask >> 8);
+    out[15] = (uint8_t)(ack_mask);
+    out[16] = (uint8_t)(hdr_crc >> 8);
+    out[17] = (uint8_t)(hdr_crc);
+    out[18] = (uint8_t)(frame_crc >> 8);
+    out[19] = (uint8_t)(frame_crc);
     return true;
   }
 
@@ -51,13 +56,17 @@ struct FrameHeader {
     hdr.frag_idx   = (uint16_t(buf[6]) << 8) | uint16_t(buf[7]);
     hdr.frag_cnt   = (uint16_t(buf[8]) << 8) | uint16_t(buf[9]);
     hdr.payload_len= (uint16_t(buf[10])<< 8) | uint16_t(buf[11]);
-    hdr.hdr_crc    = (uint16_t(buf[12])<< 8) | uint16_t(buf[13]);
-    hdr.frame_crc  = (uint16_t(buf[14])<< 8) | uint16_t(buf[15]);
+    hdr.ack_mask   = (uint32_t(buf[12]) << 24) |
+                    (uint32_t(buf[13]) << 16) |
+                    (uint32_t(buf[14]) << 8)  |
+                    uint32_t(buf[15]);
+    hdr.hdr_crc    = (uint16_t(buf[16])<< 8) | uint16_t(buf[17]);
+    hdr.frame_crc  = (uint16_t(buf[18])<< 8) | uint16_t(buf[19]);
     return true;
   }
 };
 
-static_assert(FrameHeader::ENCODED_SIZE == 16, "Ожидается 16 байт заголовка");
+static_assert(FrameHeader::ENCODED_SIZE == 20, "Ожидается 20 байт заголовка");
 
 enum FrameFlags : uint8_t {
   F_ACK_REQ = 0x01,

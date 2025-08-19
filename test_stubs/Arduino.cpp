@@ -1,4 +1,4 @@
-// Implementation of the global Serial object for host builds.
+// Реализация глобального объекта Serial для хостовых сборок.
 #include "Arduino.h"
 
 HardwareSerial Serial;

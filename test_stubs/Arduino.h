@@ -17,6 +17,8 @@
 #include <thread>
 #include <algorithm>
 #include <cctype>
+#include <sstream>
+#include <iomanip>
 
 // -----------------------------------------------------------------------------
 // Timing functions
@@ -56,6 +58,14 @@ public:
   String(const std::string& s) : data(s) {}
   String(const String& other) : data(other.data) {}
   String(char c) : data(1, c) {}
+  // Конструкторы из числовых типов
+  String(int v) : data(std::to_string(v)) {}
+  String(unsigned v) : data(std::to_string(v)) {}
+  String(long v) : data(std::to_string(v)) {}
+  String(unsigned long v) : data(std::to_string(v)) {}
+  // Конструктор с форматированием для плавающей точки
+  String(float v, unsigned char decs = 2) { std::ostringstream ss; ss<<std::fixed<<std::setprecision(decs)<<v; data=ss.str(); }
+  String(double v, unsigned char decs = 2) { std::ostringstream ss; ss<<std::fixed<<std::setprecision(decs)<<v; data=ss.str(); }
   String& operator=(const String& other) { data = other.data; return *this; }
   // Concatenation operators
   String& operator+=(const char* s) { data += (s ? s : ""); return *this; }

@@ -13,6 +13,7 @@
 #include <array>
 #include <vector>
 #include <stdio.h>
+#include <stdlib.h> // для rand()
 
 // Параметры профилей передачи
 struct TxProfile { uint16_t payload; TxPipeline::FecMode fec; uint8_t inter; uint8_t repeat; };
@@ -25,6 +26,15 @@ static const TxProfile PROFILES[4] = {
 
 static const float PER_THR[3]  = {0.1f, 0.2f, 0.3f};
 static const float EBN0_THR[3] = {7.0f, 5.0f, 3.0f};
+
+// Применяет случайный джиттер ±10–20% к базовому таймауту
+static uint16_t addJitter(uint16_t base) {
+  int sign = (rand() & 1) ? 1 : -1;
+  int pct = 10 + (rand() % 11); // 10..20%
+  uint16_t delta = (base * pct) / 100;
+  uint16_t res = (sign > 0) ? base + delta : (base > delta ? base - delta : 1);
+  return res;
+}
 
 TxPipeline::TxPipeline(MessageBuffer& buf, Fragmenter& frag, IEncryptor& enc, PipelineMetrics& m)
 : buf_(buf), frag_(frag), enc_(enc), metrics_(m) {}
@@ -170,7 +180,13 @@ void TxPipeline::loop() {
         sendMessageFragments(it->msg);
         it->retries_left--; metrics_.tx_retries++;
         it->last_tx_ms = now;
-        it->timeout_ms *= 2; // экспоненциальный бэкофф
+        float mult = 1.0f;
+        if (it->backoff_stage == 0) mult = 1.5f;
+        else mult = 2.0f; // далее остаётся на 2.0
+        if (it->backoff_stage < 2) it->backoff_stage++;
+        uint32_t next = (uint32_t)(ack_timeout_ * mult);
+        if (next > cfg::ACK_TIMEOUT_LIMIT) next = cfg::ACK_TIMEOUT_LIMIT;
+        it->timeout_ms = addJitter((uint16_t)next);
         ++it;
       } else {
         metrics_.ack_fail++;
@@ -193,7 +209,7 @@ void TxPipeline::loop() {
     bool reqAck = ack_enabled_ || m.ack_required;
     sendMessageFragments(m);
     if (reqAck) {
-      Pending p{m, max_retries_, millis(), millis(), ack_timeout_};
+      Pending p{m, max_retries_, millis(), millis(), addJitter(ack_timeout_), 0}; // стартовый таймаут с джиттером
       pending_.push_back(std::move(p));
     }
   }

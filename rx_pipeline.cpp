@@ -25,8 +25,25 @@ static void softCombinePairs(const uint8_t* in, size_t len, std::vector<uint8_t>
   }
 }
 
+// Применяет случайный джиттер ±10–20% к таймауту
+static uint16_t addJitter(uint16_t base) {
+  if (base == 0) return 0; // без интервала джиттер не нужен
+  int sign = (rand() & 1) ? 1 : -1;
+  int pct = 10 + (rand() % 11);
+  uint16_t delta = (base * pct) / 100;
+  uint16_t res = (sign > 0) ? base + delta : (base > delta ? base - delta : 1);
+  return res;
+}
+
 RxPipeline::RxPipeline(IEncryptor& enc, PipelineMetrics& m)
-: enc_(enc), metrics_(m) {}
+: enc_(enc), metrics_(m) {
+  ack_agg_jitter_ms_ = addJitter(ack_agg_ms_);
+}
+
+void RxPipeline::setAckAgg(uint16_t ms) {
+  ack_agg_ms_ = ms;
+  ack_agg_jitter_ms_ = addJitter(ms);
+}
 
 void RxPipeline::gc() {
   const unsigned long now = millis();
@@ -62,14 +79,15 @@ void RxPipeline::sendAck(uint32_t msg_id) {
   uint32_t off = ack_highest_ - msg_id;
   if (off > 0 && off <= window_size_) ack_bitmap_ |= (1u << (off - 1));
 
-  // агрегируем ACK по времени
-  if (millis() - last_ack_sent_ms_ < ack_agg_ms_) return;
+  // агрегируем ACK по времени с джиттером
+  if (millis() - last_ack_sent_ms_ < ack_agg_jitter_ms_) return;
 
   FrameHeader ack{};
   ack.ver = cfg::PIPE_VERSION;
   ack.flags = F_ACK;
-  ack.msg_id = 0; // поле не используется
+  ack.msg_id = ack_highest_;      // передаём наибольший подтверждённый ID
   ack.frag_idx = 0; ack.frag_cnt = 0; ack.payload_len = 8;
+  ack.ack_mask = ack_bitmap_;     // переносим bitmap в заголовок
   ack.hdr_crc = 0; ack.frame_crc = 0;
   uint8_t hdr_buf[FRAME_HEADER_SIZE];
   ack.encode(hdr_buf, FRAME_HEADER_SIZE);
@@ -100,6 +118,7 @@ void RxPipeline::sendAck(uint32_t msg_id) {
   FrameLog::push('T', frame.data(), frame.size(),
                  0, 0, 0, 0.0f, 0, 0, 0, 0);
   last_ack_sent_ms_ = millis();
+  ack_agg_jitter_ms_ = addJitter(ack_agg_ms_);
   // После передачи возвращаемся в режим приёма
   tdd::maintain();
 }
@@ -134,14 +153,18 @@ void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   Radio_getSNR(snr); // измеряем качество канала
 
   if (hdr.flags & F_ACK) {
-    // фиксируем входящий ACK без дополнительной обработки
+    // фиксируем входящий ACK
     FrameLog::push('R', frame, len, hdr.msg_id, fec_mode_, interleave_depth_,
                    snr, 0, 0, 0, 0);
+    uint32_t hi = hdr.msg_id;
+    uint32_t bm = hdr.ack_mask;
     if (hdr.payload_len == 8) {
       const uint8_t* pl = frame + hdr_len;
       AckBitmap a{}; ack_decode(a, pl);
-      if (ack_cb_) ack_cb_(a.highest, a.bitmap);
+      hi = a.highest;
+      bm = a.bitmap;
     }
+    if (ack_cb_) ack_cb_(hi, bm);
     return;
   }
 
