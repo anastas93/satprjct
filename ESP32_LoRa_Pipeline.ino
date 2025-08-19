@@ -413,6 +413,15 @@ static void radioPoll() {
   if (st == RADIOLIB_ERR_NONE) {
     uint8_t tmp[cfg::LORA_MTU];
     int16_t len = radio.readData(tmp, sizeof(tmp));
+    if (len == 5) {
+      // Зеркальный пинг: приёмник немедленно возвращает эти 5 байт
+      // отправителю для проверки канала связи
+      radio.setFrequency(g_freq_tx_mhz);
+      radio.transmit(tmp, 5);
+      radio.setFrequency(g_freq_rx_mhz);
+      radio.startReceive();
+      return; // Не обрабатываем пакет дальше
+    }
     if (len > 0) { Radio_onReceive(tmp, (size_t)len); }
   }
 }
