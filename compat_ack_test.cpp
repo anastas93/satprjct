@@ -4,8 +4,9 @@
 #include "tx_pipeline.h"
 #include "rx_pipeline.h"
 #include "fragmenter.h"
-#include "message_buffer.h"
+#include "message_cache.h"
 #include "encryptor.h"
+#include "packet_formatter.h"
 #include "frame.h"
 #include "tdd_scheduler.h"
 #include <vector>
@@ -13,34 +14,27 @@
 #include <algorithm>
 
 // Глобальные указатели для маршрутизации кадров
-static TxPipeline* g_tx = nullptr;
 static RxPipeline* g_rx_local = nullptr;   // Приём ACK
 static RxPipeline* g_rx_remote = nullptr;  // Приём обычных пакетов
 static std::vector<uint8_t> g_pending_ack;
 
-// Заглушки радио
-bool Radio_sendRaw(const uint8_t* data, size_t len, Qos) {
-  if (!data || len < FRAME_HEADER_SIZE) return true;
-  FrameHeader hdr;
-  if (!FrameHeader::decode(hdr, data, len)) return true;
-  if (hdr.flags & F_ACK) {
-    g_pending_ack.assign(data, data + len); // доставим позже
-  } else {
-    if (g_rx_remote) g_rx_remote->onReceive(data, len);
+// Минимальный радиоинтерфейс
+class DummyRadio : public IRadioTransport {
+public:
+  bool setFrequency(uint32_t) override { return true; }
+  bool transmit(const uint8_t* data, size_t len, Qos) override {
+    if (!data || len < FRAME_HEADER_SIZE) return true;
+    FrameHeader hdr;
+    if (!FrameHeader::decode(hdr, data, len)) return true;
+    if (hdr.flags & F_ACK) {
+      g_pending_ack.assign(data, data + len); // доставим позже
+    } else {
+      if (g_rx_remote) g_rx_remote->onReceive(data, len);
+    }
+    return true;
   }
-  return true;
-}
-bool Radio_setBandwidth(uint32_t) { return true; }
-bool Radio_setSpreadingFactor(uint8_t) { return true; }
-bool Radio_setCodingRate(uint8_t) { return true; }
-bool Radio_setTxPower(int8_t) { return true; }
-bool Radio_setRxBoost(bool) { return true; }
-void Radio_forceRx(uint32_t) {}
-bool Radio_getSNR(float& snr) { snr = 0.0f; return true; }
-bool Radio_getEbN0(float& ebn0) { ebn0 = 0.0f; return true; }
-bool Radio_isSynced() { return true; }
-bool Radio_setFrequency(uint32_t) { return true; }
-void Radio_onReceive(const uint8_t*, size_t) {}
+  void openRx(uint32_t) override {}
+} radio;
 
 static void processPendingAck() {
   if (!g_pending_ack.empty() && g_rx_local) {
@@ -51,17 +45,18 @@ static void processPendingAck() {
 
 int main() {
   PipelineMetrics m_local{}, m_remote{};
-  MessageBuffer buf_local;
+  MessageCache cache_local;
   Fragmenter frag_local;
   NoEncryptor enc_local, enc_remote;
-  TxPipeline tx(buf_local, frag_local, enc_local, m_local);
+  PacketFormatter fmt_local(frag_local, enc_local, m_local);
+  TxPipeline tx(cache_local, fmt_local, radio, m_local);
   RxPipeline rx_local(enc_local, m_local);    // принимает ACK
   RxPipeline rx_remote(enc_remote, m_remote); // принимает сообщение
-  g_tx = &tx; g_rx_local = &rx_local; g_rx_remote = &rx_remote;
+  g_rx_local = &rx_local; g_rx_remote = &rx_remote;
 
   // Минимальная конфигурация
   tdd::setParams(50, 50, 0);
-  tx.setFecMode(TxPipeline::FecMode::FEC_OFF);
+  tx.setFecMode(PacketFormatter::FEC_OFF);
   rx_local.setFecMode(RxPipeline::FecMode::FEC_OFF);
   rx_remote.setFecMode(RxPipeline::FecMode::FEC_OFF);
   tx.setInterleaveDepth(1); rx_local.setInterleaveDepth(1); rx_remote.setInterleaveDepth(1);
@@ -83,9 +78,9 @@ int main() {
   });
 
   const uint8_t msg[MSG_LEN] = {1,2,3,4,5};
-  buf_local.enqueue(msg, MSG_LEN, true);
+  cache_local.enqueue(msg, MSG_LEN, true);
 
-  for (int i = 0; i < 20 && buf_local.hasPending(); ++i) {
+  for (int i = 0; i < 20 && cache_local.hasPending(); ++i) {
     tx.loop();
     processPendingAck();
     delay(30);
