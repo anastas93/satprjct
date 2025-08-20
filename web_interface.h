@@ -1,8 +1,7 @@
 #pragma once
 // Переписанный HTML веб-меню с сохранением функционала из README
 // Строка хранится во флеше и отдаётся встроенным HTTP-сервером
-const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
+const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
