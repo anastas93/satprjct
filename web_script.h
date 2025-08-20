@@ -110,14 +110,21 @@ function sendPerTh(){const hi=document.getElementById('perHigh').value;const lo=
 function sendEbn0Th(){const hi=document.getElementById('ebn0High').value;const lo=document.getElementById('ebn0Low').value;fetch('/setebn0th?hi='+encodeURIComponent(hi)+'&lo='+encodeURIComponent(lo));}
 // Безопасно добавляет обработчики событий и пропускает отсутствующие элементы
 function on(id,ev,fn){const el=document.getElementById(id);if(el)el.addEventListener(ev,fn);}
+// Обработчик отправки сообщения с мгновенным откликом интерфейса
 on('sendBtn','click',()=>{
   const m=document.getElementById('msg').value;
   const st=document.getElementById('sendStatus');
+  const btn=document.getElementById('sendBtn');
   if(m){
+    // блокируем кнопку и показываем процесс отправки
+    btn.disabled=true;
+    st.textContent='...';
     fetch('/send?msg='+encodeURIComponent(m)).then(r=>{
-      if(r.ok){st.textContent='\u2714';st.style.color='var(--sys-color)';document.getElementById('msg').value='';}
+      if(r.ok){st.textContent='\u2714';st.style.color='var(--sys-color)';}
       else{st.textContent='\u2716';st.style.color='red';}
-    }).catch(()=>{st.textContent='\u2716';st.style.color='red';});
+    }).catch(()=>{st.textContent='\u2716';st.style.color='red';})
+      .finally(()=>{btn.disabled=false;});
+    document.getElementById('msg').value='';
     setTimeout(()=>{st.textContent=''},2000);
   }
 });
@@ -305,4 +312,6 @@ function loadFrames(){
 }
 on('frameRefreshBtn','click',loadFrames);
 on('frameDrop','change',loadFrames);
+// периодическое обновление таблицы кадров без перезагрузки страницы
+setInterval(loadFrames,2000);
 )rawliteral";
