@@ -25,7 +25,7 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
-  issues: write 
+  issues: write
 
 jobs:
   sync-libs:
@@ -34,9 +34,12 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Prepare dirs
+        run: mkdir -p libs
+
       # --- Arduino core for ESP32 (последняя дефолтная ветка) ---
       - name: Fetch Arduino core for ESP32
-        if: ${{ github.event_name == 'schedule' || inputs.run_arduino_esp32 == true }}
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && fromJSON(inputs.run_arduino_esp32)) }}
         run: |
           set -e
           rm -rf libs/arduino-esp32
@@ -44,19 +47,17 @@ jobs:
 
       # --- RadioLib: жёстко пин на теге 6.5.0 (без префикса v) ---
       - name: Fetch RadioLib 6.5.0
-        if: ${{ github.event_name == 'schedule' || inputs.run_radiolib == true }}
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && fromJSON(inputs.run_radiolib)) }}
         run: |
           set -e
           rm -rf libs/RadioLib
-          # Клонируем сразу по тегу: это устраняет ошибку с отсутствующим тегом в shallow-истории
           git clone --depth 1 --branch 6.5.0 https://github.com/jgromes/RadioLib.git libs/RadioLib
           cd libs/RadioLib
-          # Верифицируем, что HEAD именно на теге 6.5.0
           git describe --tags --exact-match
 
       # --- mbedTLS (последняя дефолтная ветка) ---
       - name: Fetch mbedTLS
-        if: ${{ github.event_name == 'schedule' || inputs.run_mbedtls == true }}
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && fromJSON(inputs.run_mbedtls)) }}
         run: |
           set -e
           rm -rf libs/mbedtls
