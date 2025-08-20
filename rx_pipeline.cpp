@@ -85,50 +85,10 @@ void RxPipeline::sendAck(uint32_t msg_id) { // QOS: Высокий Отправ�
   bool bitmap_full = (ack_bitmap_ & full_mask) == full_mask;
   if (!bitmap_full && ack_agg_ms_ > 0 && (millis() - last_ack_sent_ms_ < ack_agg_jitter_ms_)) return;
 
-  FrameHeader ack{};
-  ack.ver = cfg::PIPE_VERSION;
-  ack.flags = F_ACK;
-  ack.msg_id = ack_highest_;      // передаём наибольший подтверждённый ID
-  ack.frag_idx = 0; ack.frag_cnt = 0; ack.payload_len = 8;
-  ack.ack_mask = ack_bitmap_;     // переносим bitmap в заголовок
-  ack.hdr_crc = 0; ack.frame_crc = 0;
-  uint8_t hdr_buf[FRAME_HEADER_SIZE];
-  ack.encode(hdr_buf, FRAME_HEADER_SIZE);
-  AckBitmap pl{ack_highest_, ack_bitmap_};
-  uint8_t payload[8];
-  ack_encode(pl, payload);
-  uint16_t hcrc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
-  ack.hdr_crc = hcrc;
-  ack.encode(hdr_buf, FRAME_HEADER_SIZE);
-  uint16_t fcrc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
-  fcrc = crc16_ccitt(payload, 8, fcrc);
-  ack.frame_crc = fcrc;
-  ack.encode(hdr_buf, FRAME_HEADER_SIZE);
-
-  size_t frame_len = FRAME_HEADER_SIZE + 8;
-  if (hdr_dup_enabled_) frame_len += FRAME_HEADER_SIZE;
-  std::vector<uint8_t> frame(frame_len);
-  memcpy(frame.data(), hdr_buf, FRAME_HEADER_SIZE);
-  size_t off2 = FRAME_HEADER_SIZE;
-  if (hdr_dup_enabled_) {
-    memcpy(frame.data()+off2, hdr_buf, FRAME_HEADER_SIZE);
-    off2 += FRAME_HEADER_SIZE;
+  if (ack_sender_.send(ack_highest_, ack_bitmap_, window_size_, hdr_dup_enabled_, 0, 0)) {
+    last_ack_sent_ms_ = millis();
+    scheduleNextAck();
   }
-  memcpy(frame.data()+off2, payload, 8);
-
-  // ACK всегда отправляется с высоким приоритетом
-  Radio_sendRaw(frame.data(), frame.size(), Qos::High);
-  // логируем отправленный ACK
-  FrameLog::push('T', frame.data(), frame.size(),
-                 0, 0, 0,
-                 0.0f, 0.0f, 0.0f,
-                 0, 0, 0,
-                 0,
-                 8);
-  last_ack_sent_ms_ = millis();
-  scheduleNextAck();
-  // После передачи возвращаемся в режим приёма
-  tdd::maintain();
 }
 
 void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
