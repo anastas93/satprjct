@@ -208,13 +208,9 @@ bool ChannelPing() {
 
 // Пинг указанного пресета из заданного банка
 bool PresetPing(Bank bank, int preset) {
-  const FreqPreset* tbl = nullptr;
-  switch (bank) {
-    case Bank::MAIN:    tbl = FREQ_MAIN;    break;
-    case Bank::RESERVE: tbl = FREQ_RESERVE; break;
-    case Bank::TEST:    tbl = FREQ_TEST;    break;
-  }
-  if (!tbl || preset < 0 || preset >= 10) return false;
+  // Получаем нужный банк частот как вектор
+  const auto& tbl = GetFreqTable(bank);
+  if (preset < 0 || preset >= (int)tbl.size()) return false;
 
   uint8_t ping[5];
   uint8_t rx[5];
@@ -244,23 +240,18 @@ bool PresetPing(Bank bank, int preset) {
 
 // Обход всех пресетов выбранного банка и вывод результата в консоль
 void MassPing(Bank bank) {
-  const FreqPreset* tbl = nullptr;
-  switch (bank) {
-    case Bank::MAIN:    tbl = FREQ_MAIN;    break;
-    case Bank::RESERVE: tbl = FREQ_RESERVE; break;
-    case Bank::TEST:    tbl = FREQ_TEST;    break;
-  }
-  if (!tbl) return;
+  const auto& tbl = GetFreqTable(bank);
+  if (tbl.empty()) return;
 
   int found = 0;
-  for (int i = 0; i < 10; ++i) {
+  for (size_t i = 0; i < tbl.size(); ++i) {
     Serial.print(F("RX:"));
     Serial.print(tbl[i].rxMHz, 3);
     Serial.print(F("/TX:"));
     Serial.print(tbl[i].txMHz, 3);
     Serial.print(F(" "));
 
-    bool ok = PresetPing(bank, i);
+    bool ok = PresetPing(bank, static_cast<int>(i));
     if (ok) {
       Serial.print(F("OK RSSI:"));
       Serial.print(radio.getRSSI());

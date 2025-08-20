@@ -64,8 +64,8 @@ RxPipeline g_rx(g_ccm, g_metrics);
 Preferences prefs;
 Bank g_bank = Bank::MAIN;
 int g_preset = 0;
-float g_freq_rx_mhz = FREQ_MAIN[0].rxMHz;
-float g_freq_tx_mhz = FREQ_MAIN[0].txMHz;
+float g_freq_rx_mhz = GetFreqTable(Bank::MAIN)[0].rxMHz;
+float g_freq_tx_mhz = GetFreqTable(Bank::MAIN)[0].txMHz;
 float g_bw_khz = 125.0f;
 uint8_t g_sf = 9;
 uint8_t g_cr = 5;
@@ -323,13 +323,10 @@ static inline void persistMsgId() {
 // шестнадцатеричного идентификатора, отображаемого рядом с надписью
 // "Local" в веб‑интерфейсе для проверки активного ключа.
 static void applyPreset() {
-  const FreqPreset* tbl = nullptr;
-  switch (g_bank) {
-    case Bank::MAIN: tbl = FREQ_MAIN; break;
-    case Bank::RESERVE: tbl = FREQ_RESERVE; break;
-    case Bank::TEST: tbl = FREQ_TEST; break;
-  }
-  if (!tbl) return;
+  // Получаем вектор пресетов для текущего банка
+  const auto& tbl = GetFreqTable(g_bank);
+  if (g_preset < 0 || g_preset >= (int)tbl.size()) return;
+
   g_freq_rx_mhz = tbl[g_preset].rxMHz;
   g_freq_tx_mhz = tbl[g_preset].txMHz;
   Radio_setFrequency((uint32_t)(g_freq_rx_mhz * 1e6f));
