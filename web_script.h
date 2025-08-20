@@ -166,6 +166,14 @@ on('sendBtn','click',e=>{e.preventDefault(); // предотвращаем пе�
     setTimeout(()=>{st.textContent=''},2000);
   }
 });
+// Поддержка отправки по Enter без перезагрузки страницы
+on('msg','keydown',e=>{
+  if(e.key==='Enter'){
+    e.preventDefault();
+    const btn=document.getElementById('sendBtn');
+    if(btn)btn.click();
+  }
+});
 on('cleanBtn','click',()=>{
   const c=document.getElementById('chat');
   c.innerHTML='';
