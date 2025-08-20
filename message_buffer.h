@@ -1,66 +1,18 @@
 #pragma once
+#include <deque>
 #include <vector>
-#include <list>
-#include <stdint.h>
-#include <unordered_map>
-#include "libs/qos.h"
+#include <cstdint>
 
-struct OutgoingMessage {
-  uint32_t id = 0;
-  bool     ack_required = false;
-  Qos      qos = Qos::Normal;
-  std::vector<uint8_t> data;
-};
-
+// Буфер сообщений для хранения данных на отправку
 class MessageBuffer {
 public:
-  MessageBuffer();
-
-  uint32_t enqueue(const uint8_t* data, size_t len, bool ack_required);
-  uint32_t enqueueQos(const uint8_t* data, size_t len, bool ack_required, Qos q);
-
-  bool     hasPending() const;
-  bool     peekNext(OutgoingMessage& out);
-  void     popFront();
-  void     markAcked(uint32_t msg_id);
-  // перемещает сообщение в архив после неудачных попыток ACK
-  void     archive(uint32_t msg_id);
-  // возвращает до count сообщений из архива в очередь, восстановленные
-  // добавляются в начало соответствующей очереди и получают приоритет
-  size_t   restoreArchived(size_t count);
-  // совместимость: восстановить один пакет
-  bool     restoreArchived() { return restoreArchived(1) > 0; }
-  // получить список идентификаторов в архиве
-  void     listArchived(std::vector<uint32_t>& out) const;
-
-  size_t   size() const;
-
-  void     setNextId(uint32_t id);
-  uint32_t nextId() const { return next_id_; }
-
-  // QoS admin/status
-  void     setSchedulerMode(QosMode m);
-  QosMode  schedulerMode() const { return mode_; }
-  size_t   lenH() const { return qH_.size(); }
-  size_t   lenN() const { return qN_.size(); }
-  size_t   lenL() const { return qL_.size(); }
-  size_t   bytesH() const { return bytesH_; }
-  size_t   bytesN() const { return bytesN_; }
-  size_t   bytesL() const { return bytesL_; }
-
+  // Добавляет сообщение в буфер и возвращает его идентификатор
+  uint32_t enqueue(const uint8_t* data, size_t len);
+  // Проверяет, есть ли сообщения в очереди
+  bool hasPending() const;
+  // Извлекает первое сообщение из очереди
+  bool pop(std::vector<uint8_t>& out);
 private:
-  bool     pick(OutgoingMessage& out);
-
-  std::list<OutgoingMessage> qH_, qN_, qL_;
-  std::list<OutgoingMessage> archived_;   // архив отложенных сообщений
-  uint32_t next_id_;
-  size_t   total_bytes_;
-  size_t   bytesH_ = 0, bytesN_ = 0, bytesL_ = 0;
-  size_t   bytesArch_ = 0;                // объём архива
-
-  struct MsgRef { Qos qos; std::list<OutgoingMessage>::iterator it; };
-  std::unordered_map<uint32_t, MsgRef> index_;
-
-  QosMode  mode_ = QosMode::Strict;
-  uint8_t  rr_idx_ = 0;   // для Weighted421
+  uint32_t next_id_ = 1;                 // следующий идентификатор
+  std::deque<std::vector<uint8_t>> q_;   // очередь сообщений
 };
