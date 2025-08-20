@@ -2,7 +2,7 @@
 
 В форке оставлены только базовые компоненты:
 
-- `MessageBuffer` — простой буфер сообщений.
+- `MessageBuffer` — простой буфер сообщений с ограничением по размеру.
 - `TxModule` — передача данных через интерфейс `IRadio`.
 - `RxModule` — приём данных и передача их в пользовательский колбэк.
 - `IRadio` описан в `radio_interface.h`.
@@ -11,9 +11,10 @@
 
 ## API
 ### MessageBuffer
-- `uint32_t enqueue(const uint8_t* data, size_t len)` — добавляет сообщение в буфер.
+- `MessageBuffer(size_t capacity)` — создать буфер с максимальным количеством сообщений.
+- `uint32_t enqueue(const uint8_t* data, size_t len)` — добавляет сообщение в буфер, при переполнении возвращает `0`.
 - `bool hasPending() const` — проверяет наличие сообщений.
-- `bool pop(std::vector<uint8_t>& out)` — извлекает сообщение из очереди.
+- `bool pop(uint32_t& id, std::vector<uint8_t>& out)` — извлекает сообщение и его идентификатор.
 
 ### TxModule
 - `TxModule(IRadio& radio, MessageBuffer& buf)` — инициализация модуля.

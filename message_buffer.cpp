@@ -1,10 +1,15 @@
 #include "message_buffer.h"
 
+// Конструктор с заданной вместимостью
+MessageBuffer::MessageBuffer(size_t capacity) : capacity_(capacity) {}
+
 // Добавление сообщения в буфер
 uint32_t MessageBuffer::enqueue(const uint8_t* data, size_t len) {
-  if (!data || len == 0) return 0;
-  q_.emplace_back(data, data + len);
-  return next_id_++;
+  if (!data || len == 0) return 0;             // проверка входных данных
+  if (q_.size() >= capacity_) return 0;        // проверка переполнения
+  uint32_t id = next_id_++;                    // текущий идентификатор
+  q_.emplace_back(id, std::vector<uint8_t>(data, data + len));
+  return id;
 }
 
 // Проверка наличия сообщений
@@ -13,9 +18,11 @@ bool MessageBuffer::hasPending() const {
 }
 
 // Извлечение сообщения
-bool MessageBuffer::pop(std::vector<uint8_t>& out) {
-  if (q_.empty()) return false;
-  out = std::move(q_.front());
+bool MessageBuffer::pop(uint32_t& id, std::vector<uint8_t>& out) {
+  if (q_.empty()) return false;                // очередь пуста
+  auto& front = q_.front();
+  id = front.first;                            // возвращаем идентификатор
+  out = std::move(front.second);               // забираем данные
   q_.pop_front();
   return true;
 }

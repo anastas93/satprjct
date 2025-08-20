@@ -13,7 +13,8 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len) {
 void TxModule::loop() {
   if (!buffer_.hasPending()) return;
   std::vector<uint8_t> msg;
-  if (buffer_.pop(msg)) {
+  uint32_t id = 0;                      // получаемый идентификатор сообщения
+  if (buffer_.pop(id, msg)) {
     radio_.send(msg.data(), msg.size());
   }
 }
