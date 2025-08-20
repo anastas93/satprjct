@@ -874,10 +874,10 @@ void handleSetFec() {
     return;
   }
   String v = server.arg("val");
-  TxPipeline::FecMode m;
-  if (v == "off") m = TxPipeline::FEC_OFF;
-  else if (v == "rs_vit") m = TxPipeline::FEC_RS_VIT;
-  else if (v == "ldpc") m = TxPipeline::FEC_LDPC;
+  PacketFormatter::FecMode m;
+  if (v == "off") m = PacketFormatter::FEC_OFF;
+  else if (v == "rs_vit") m = PacketFormatter::FEC_RS_VIT;
+  else if (v == "ldpc") m = PacketFormatter::FEC_LDPC;
   else {
     server.send(400, "text/plain", "off|rs_vit|ldpc");
     return;
