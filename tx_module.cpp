@@ -1,12 +1,16 @@
 #include "tx_module.h"
 #include <vector>
 
-TxModule::TxModule(IRadio& radio, MessageBuffer& buf)
-  : radio_(radio), buffer_(buf) {}
+// Инициализация модуля передачи
+TxModule::TxModule(IRadio& radio, MessageBuffer& buf, PayloadMode mode)
+  : radio_(radio), buffer_(buf), splitter_(mode) {}
 
-// Помещаем сообщение в буфер
+// Смена режима пакета
+void TxModule::setPayloadMode(PayloadMode mode) { splitter_.setMode(mode); }
+
+// Помещаем сообщение в буфер через делитель
 uint32_t TxModule::queue(const uint8_t* data, size_t len) {
-  return buffer_.enqueue(data, len);
+  return splitter_.splitAndEnqueue(buffer_, data, len);
 }
 
 // Пытаемся отправить первое сообщение
@@ -18,3 +22,4 @@ void TxModule::loop() {
     radio_.send(msg.data(), msg.size());
   }
 }
+
