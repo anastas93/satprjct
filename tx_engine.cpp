@@ -1,5 +1,5 @@
 #include "tx_engine.h"
-#include "radio_adapter.h"
+#include "radio_interface.h"
 #include "libs/qos_moderator.h"
 #include "tdd_scheduler.h"
 #include "event_queue.h"
@@ -9,8 +9,9 @@
 extern float g_freq_tx_mhz;
 extern float g_freq_rx_mhz;
 
-// Функция низкоуровневой передачи, реализуется в прошивке или заглушке
-extern bool radioTransmit(const uint8_t* data, size_t len);
+// Перевод миллисекунд в тики таймера (1 тик = 15.625 мкс)
+inline uint32_t msToTicks(uint32_t ms) { return ms * 64; }
+
 
 // Глобальный экземпляр движка и мьютекс
 TxEngine g_tx_engine;
@@ -22,16 +23,16 @@ bool TxEngine::sendFrame(const uint8_t* data, size_t len, const TxOptions& opts)
   (void)opts.scramble; // скремблер применяется на более ранних этапах
 
   // Всегда переустанавливаем частоту передатчика
-  Radio_setFrequency(opts.freq_hz);
+  g_radio->setFrequency(opts.freq_hz);
   // Сигнализируем о начале передачи
   queueEvent(evt_t::EVT_TX_START);
-  bool ok = radioTransmit(data, len);
+  bool ok = g_radio->transmit(data, len);
   // Сигнализируем о завершении передачи
   queueEvent(evt_t::EVT_TX_DONE);
   // Возвращаемся на частоту приёма
-  Radio_setFrequency((uint32_t)(g_freq_rx_mhz * 1e6f));
+  g_radio->setFrequency((uint32_t)(g_freq_rx_mhz * 1e6f));
   // Открываем приём на окно ACK
-  Radio_forceRx(msToTicks(tdd::ackWindowMs + tdd::guardMs));
+  g_radio->openRx(msToTicks(tdd::ackWindowMs + tdd::guardMs));
   return ok;
 }
 

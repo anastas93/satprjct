@@ -2,7 +2,7 @@
 #include "tx_pipeline.h"
 #include "frame.h"
 #include "config.h"
-#include "radio_adapter.h"
+#include "tx_engine.h"
 #include "frame_log.h"
 #include "libs/ccsds_link/ccsds_link.h" // заголовок библиотеки CCSDS
 #include "tdd_scheduler.h"
