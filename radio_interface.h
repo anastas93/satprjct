@@ -1,19 +1,15 @@
 #pragma once
-#include <stddef.h>
-#include <stdint.h>
-#include "libs/qos.h"
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 
-// Интерфейс радиотранспорта для абстракции аппаратного модуля
-class IRadioTransport {
+// Простейший интерфейс радиоканала
+class IRadio {
 public:
-  virtual ~IRadioTransport() = default;
-  // Установка рабочей частоты в Гц
-  virtual bool setFrequency(uint32_t hz) = 0;
-  // Передача массива байт с учётом приоритета QoS
-  virtual bool transmit(const uint8_t* data, size_t len, Qos qos) = 0;
-  // Открыть окно приёма на указанное число тиков
-  virtual void openRx(uint32_t rx_ticks) = 0;
+  using RxCallback = std::function<void(const uint8_t*, size_t)>;
+  virtual ~IRadio() = default;
+  // Отправка данных по радио
+  virtual void send(const uint8_t* data, size_t len) = 0;
+  // Регистрация колбэка для приёма
+  virtual void setReceiveCallback(RxCallback cb) = 0;
 };
-
-// Глобальный экземпляр радиоинтерфейса для текущего модуля
-extern IRadioTransport& g_radio;
