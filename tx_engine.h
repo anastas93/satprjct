@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <mutex>
+#include "radio_interface.h"
 
 // Опции единичной передачи кадра
 struct TxOptions {
@@ -12,8 +13,12 @@ struct TxOptions {
 
 class TxEngine {
 public:
+  // Конструктор принимает абстракцию радиомодуля
+  explicit TxEngine(IRadioTransport& r) : radio_(r) {}
   // Отправка кадра с гарантированной установкой частоты
   bool sendFrame(const uint8_t* data, size_t len, const TxOptions& opts);
+private:
+  IRadioTransport& radio_;
 };
 
 // Глобальный экземпляр движка и мьютекс радиомодуля

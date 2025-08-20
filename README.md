@@ -93,14 +93,17 @@ flowchart TD
 ### PacketFormatter
 - Новый модуль, который готовит кадры: выполняет фрагментацию, шифрование и скремблирование.
 - `TxPipeline` теперь лишь управляет очередью и отправляет готовые кадры через `IRadioTransport`.
+- Интерфейс `IRadioTransport` инкапсулирует операции `setFrequency`, `transmit` и `openRx`.
+  Адаптер `LoraRadio` связывает его с текущими функциями `Radio_*` и `radioTransmit`.
+  Для подключения альтернативного радиомодуля реализуйте свой класс на основе `IRadioTransport`.
 - Пример использования:
 ```cpp
 Fragmenter frag;
 EncryptorCCM enc;
 PipelineMetrics m;
 PacketFormatter fmt(frag, enc, m);
-RadioTransport rt;
-TxPipeline tx(buf, fmt, rt, m);
+IRadioTransport& radio = g_radio; // адаптер текущего радиомодуля
+TxPipeline tx(buf, fmt, radio, m);
 tx.enableAck(true);
 ```
 

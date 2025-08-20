@@ -8,7 +8,12 @@
 class Print; // заглушка для FrameLog::dump
 
 // Минимальные заглушки для функций радиоинтерфейса и журнала кадров
-bool Radio_sendRaw(const uint8_t*, size_t, Qos) { return true; }
+class DummyRadio : public IRadioTransport {
+public:
+  bool setFrequency(uint32_t) override { return true; }
+  bool transmit(const uint8_t*, size_t, Qos) override { return true; }
+  void openRx(uint32_t) override {}
+} radio;
 namespace FrameLog {
 void push(char, const uint8_t*, size_t,
           uint32_t, uint8_t, uint8_t,
@@ -48,7 +53,8 @@ int main() {
   MessageBuffer buf;
   Fragmenter frag;
   DummyEncryptor enc;
-  TxPipeline tx(buf, frag, enc, metrics);
+  PacketFormatter fmt(frag, enc, metrics);
+  TxPipeline tx(buf, fmt, radio, metrics);
 
   metrics.per_window.clear();
   metrics.ebn0_window.clear();
