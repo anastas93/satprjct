@@ -2,25 +2,22 @@
 #include "tx_pipeline.h"
 #include "frame.h"
 #include "config.h"
-#include "radio_adapter.h"
 #include "frame_log.h"
-#include "libs/ccsds_link/ccsds_link.h" // заголовок библиотеки CCSDS
 #include "tdd_scheduler.h"
 #include <Arduino.h>
 #include <string.h>
-#include <array>
 #include <vector>
 #include <stdio.h>
 #include <stdlib.h> // для rand()
 
 // Параметры профилей передачи
-struct TxProfile { uint16_t payload; TxPipeline::FecMode fec; uint8_t inter; uint8_t repeat; };
+struct TxProfile { uint16_t payload; PacketFormatter::FecMode fec; uint8_t inter; uint8_t repeat; };
 // Профили ограничены диапазоном полезной нагрузки 64–160 байт
 static const TxProfile PROFILES[4] = {
-  {160, TxPipeline::FEC_OFF,    1, 1}, // P0: лучший канал
-  {128, TxPipeline::FEC_OFF,    1, 2}, // P1
-  { 96, TxPipeline::FEC_RS_VIT, 8, 3}, // P2
-  { 64, TxPipeline::FEC_RS_VIT,16, 4}  // P3: худший канал
+  {160, PacketFormatter::FEC_OFF,    1, 1}, // P0: лучший канал
+  {128, PacketFormatter::FEC_OFF,    1, 2}, // P1
+  { 96, PacketFormatter::FEC_RS_VIT, 8, 3}, // P2
+  { 64, PacketFormatter::FEC_RS_VIT,16, 4}  // P3: худший канал
 };
 
 // Пороговые значения приходят из глобальных переменных
@@ -36,8 +33,8 @@ static uint16_t addJitter(uint16_t base) {
   return res;
 }
 
-TxPipeline::TxPipeline(MessageBuffer& buf, Fragmenter& frag, IEncryptor& enc, PipelineMetrics& m)
-: buf_(buf), frag_(frag), enc_(enc), metrics_(m) {}
+TxPipeline::TxPipeline(MessageBuffer& buf, PacketFormatter& fmt, IRadioTransport& radio, PipelineMetrics& m)
+: buf_(buf), formatter_(fmt), radio_(radio), metrics_(m) {}
 
 // Помещает служебное сообщение смены ключа в очередь с требованием ACK
 void TxPipeline::queueKeyChange(uint8_t kid) {
@@ -64,91 +61,24 @@ bool TxPipeline::interFrameGap() {
   return true;
 }
 
-size_t TxPipeline::sendMessageFragments(const OutgoingMessage& m) { // QOS: Средний Фрагментация и отправка сообщения по кадрам
+size_t TxPipeline::sendMessageFragments(const OutgoingMessage& m) { // QOS: Средний Подготовка и отправка кадров
   bool reqAck = ack_enabled_ || m.ack_required;
-  bool willEnc = enc_enabled_ && enc_.isReady();
-  // Ограничение полезной нагрузки согласно выбранному профилю
-  const uint16_t base_payload_max =
-      (payload_len_ < (cfg::LORA_MTU - FRAME_HEADER_SIZE)) ? payload_len_ : (cfg::LORA_MTU - FRAME_HEADER_SIZE);
-  const uint16_t enc_overhead = willEnc ? (1 + cfg::ENC_TAG_LEN) : 0;
-  const uint16_t eff_payload_max = (base_payload_max > enc_overhead) ? (uint16_t)(base_payload_max - enc_overhead) : 0;
-  auto parts = frag_.split(m.id, m.data.data(), m.data.size(), reqAck, eff_payload_max);
+  std::vector<PreparedFrame> frames;
+  formatter_.prepareFrames(m, reqAck, frames);
 
-  std::array<uint8_t, FRAME_HEADER_SIZE> aad{};
-  std::vector<uint8_t> payload; payload.reserve(cfg::LORA_MTU);
-  std::vector<uint8_t> frame; frame.reserve(cfg::LORA_MTU);
-
-  size_t sent = 0; // сколько кадров реально ушло в радио
-  for (auto& fr : parts) {
-    FrameHeader hdr = fr.hdr;
-    hdr.hdr_crc = 0; hdr.frame_crc = 0;
-    hdr.encode(aad.data(), aad.size());
-    bool ok = true;
-    payload.clear();
-    if (willEnc) ok = enc_.encrypt(fr.payload.data(), fr.payload.size(), aad.data(), aad.size(), payload);
-    else payload.assign(fr.payload.begin(), fr.payload.end());
-    if (!ok) { metrics_.enc_fail++; continue; }
-
-    // Комплексная обработка CCSDS (после AES-CCM):
-    // ASM -> рандомизация -> FEC -> интерливинг
-    ccsds::Params cp;
-    cp.fec = fec_enabled_ ? (ccsds::FecMode)fec_mode_ : ccsds::FEC_OFF;
-    cp.interleave = interleave_depth_;
-    cp.scramble = true;
-    std::vector<uint8_t> ccsds_buf;
-    ccsds::encode(payload.data(), payload.size(), hdr.msg_id, cp, ccsds_buf);
-    payload.swap(ccsds_buf);
-
-    // Вставляем пилотные последовательности через заданный интервал
-    if (pilot_interval_bytes_ > 0 && !payload.empty()) {
-      size_t pos = pilot_interval_bytes_;
-      while (pos < payload.size()) {
-        payload.insert(payload.begin() + pos, cfg::PILOT_SEQ, cfg::PILOT_SEQ + cfg::PILOT_LEN);
-        pos += pilot_interval_bytes_ + cfg::PILOT_LEN;
-      }
-    }
-
-    FrameHeader final_hdr = fr.hdr;
-    if (willEnc) final_hdr.flags |= F_ENC;
-    final_hdr.payload_len = (uint16_t)payload.size();
-    final_hdr.hdr_crc = 0; final_hdr.frame_crc = 0;
-    uint8_t hdr_buf[FRAME_HEADER_SIZE];
-    final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
-    uint16_t hcrc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE - 4, 0xFFFF);
-    final_hdr.hdr_crc = hcrc;
-    final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
-    uint16_t fcrc = crc16_ccitt(hdr_buf, FRAME_HEADER_SIZE, 0xFFFF);
-    fcrc = crc16_ccitt(payload.data(), payload.size(), fcrc);
-    final_hdr.frame_crc = fcrc;
-    final_hdr.encode(hdr_buf, FRAME_HEADER_SIZE);
-
-    // Формируем окончательный кадр, при необходимости дублируя заголовок
-    size_t frame_len = FRAME_HEADER_SIZE + payload.size();
-    if (hdr_dup_enabled_) frame_len += FRAME_HEADER_SIZE;
-    frame.resize(frame_len);
-    memcpy(frame.data(), hdr_buf, FRAME_HEADER_SIZE);
-    size_t off = FRAME_HEADER_SIZE;
-    if (hdr_dup_enabled_) {
-      memcpy(frame.data()+off, hdr_buf, FRAME_HEADER_SIZE);
-      off += FRAME_HEADER_SIZE;
-    }
-    memcpy(frame.data()+off, payload.data(), payload.size());
-
-    // Повторяем отправку кадра согласно профилю
-    for (uint8_t r = 0; r < repeat_count_; ++r) {
-      Radio_sendRaw(frame.data(), frame.size(), m.qos);
-      // фиксируем факт передачи кадра и параметры профиля
-      FrameLog::push('T', frame.data(), frame.size(),
-                     final_hdr.msg_id, (uint8_t)fec_mode_, interleave_depth_,
-                     0.0f, 0.0f, 0.0f,
-                     0, 0, 0,
-                     (uint16_t)metrics_.rtt_window_ms.avg(),
-                     (uint16_t)payload.size());
-      metrics_.tx_frames++; metrics_.tx_bytes += frame.size();
-      last_tx_ms_ = millis();
-      sent++;
-      while (!interFrameGap()) { delay(1); }
-    }
+  size_t sent = 0;
+  for (auto& pf : frames) {
+    radio_.sendFrame(pf.data.data(), pf.data.size(), m.qos);
+    FrameLog::push('T', pf.data.data(), pf.data.size(),
+                   pf.hdr.msg_id, (uint8_t)formatter_.fecMode(), formatter_.interleaveDepth(),
+                   0.0f, 0.0f, 0.0f,
+                   0, 0, 0,
+                   (uint16_t)metrics_.rtt_window_ms.avg(),
+                   pf.hdr.payload_len);
+    metrics_.tx_frames++; metrics_.tx_bytes += pf.data.size();
+    last_tx_ms_ = millis();
+    sent++;
+    while (!interFrameGap()) { delay(1); }
   }
   metrics_.tx_msgs++;
   return sent;
@@ -266,11 +196,11 @@ void TxPipeline::applyProfile(uint8_t p) {
   profile_idx_ = p;
   const TxProfile& pr = PROFILES[p];
   // Ограничиваем полезную нагрузку 64–160 байт
-  payload_len_ = pr.payload;
-  if (payload_len_ < 64) payload_len_ = 64;
-  else if (payload_len_ > 160) payload_len_ = 160;
-  fec_mode_ = pr.fec;
-  fec_enabled_ = (fec_mode_ != 0);
-  interleave_depth_ = pr.inter;
-  repeat_count_ = pr.repeat;
+  uint16_t payload = pr.payload;
+  if (payload < 64) payload = 64;
+  else if (payload > 160) payload = 160;
+  formatter_.setPayloadLen(payload);
+  formatter_.setFecMode(pr.fec);
+  formatter_.setInterleaveDepth(pr.inter);
+  formatter_.setRepeatCount(pr.repeat);
 }
