@@ -13,10 +13,11 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   <!-- Заголовок и панель статуса -->
   <h2>ESP32 LoRa Pipeline</h2>
   <div id="statusBar">
-    <span id="keyIndicator" class="indicator local"></span>
+    <span id="keyIndicator" class="indicator round local"></span>
     <span id="keyStatusText">Local ----</span>
     <span id="txIndicator" class="indicator tx" title="Передача"></span>
     <span id="rxIndicator" class="indicator rx" title="Приём"></span>
+    <span id="queueCounter" title="Пакетов в очереди">Q: 0</span>
   </div>
 
   <!-- Чат и отправка сообщения -->
@@ -46,6 +47,19 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
           <option value="0">0</option>
           <option value="1">1</option>
           <option value="2">2</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="txProfMode">Tx profile:</label>
+        <select id="txProfMode" title="Режим профиля передачи">
+          <option value="auto">Auto</option>
+          <option value="manual">Manual</option>
+        </select>
+        <select id="txProfSelect" title="Выбор профиля P0–P3" disabled>
+          <option value="0">P0</option>
+          <option value="1">P1</option>
+          <option value="2">P2</option>
+          <option value="3">P3</option>
         </select>
       </div>
     </div>
@@ -343,7 +357,6 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         <input id="ebn0High" type="number" min="0" max="30" step="0.1" title="Порог улучшения Eb/N0">
         <label for="ebn0Low">Eb/N0 Low:</label>
         <input id="ebn0Low" type="number" min="0" max="30" step="0.1" title="Порог ухудшения Eb/N0">
-        <label><input type="checkbox" id="autoRateChk" title="Автонастройка профиля"> AutoRate</label>
       </div>
     </div>
   </details>
