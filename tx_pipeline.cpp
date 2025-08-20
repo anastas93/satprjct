@@ -64,7 +64,7 @@ bool TxPipeline::interFrameGap() {
   return true;
 }
 
-size_t TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
+size_t TxPipeline::sendMessageFragments(const OutgoingMessage& m) { // QOS: Средний Фрагментация и отправка сообщения по кадрам
   bool reqAck = ack_enabled_ || m.ack_required;
   bool willEnc = enc_enabled_ && enc_.isReady();
   // Ограничение полезной нагрузки согласно выбранному профилю
@@ -136,7 +136,7 @@ size_t TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
 
     // Повторяем отправку кадра согласно профилю
     for (uint8_t r = 0; r < repeat_count_; ++r) {
-      Radio_sendRaw(frame.data(), frame.size());
+      Radio_sendRaw(frame.data(), frame.size(), m.qos);
       // фиксируем факт передачи кадра и параметры профиля
       FrameLog::push('T', frame.data(), frame.size(),
                      final_hdr.msg_id, (uint8_t)fec_mode_, interleave_depth_,

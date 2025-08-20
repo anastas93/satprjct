@@ -3,9 +3,7 @@
 #include <list>
 #include <stdint.h>
 #include <unordered_map>
-
-enum class Qos : uint8_t { High=0, Normal=1, Low=2 };
-enum class QosMode : uint8_t { Strict=0, Weighted421=1 };
+#include "libs/qos.h"
 
 struct OutgoingMessage {
   uint32_t id = 0;

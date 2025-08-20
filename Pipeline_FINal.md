@@ -173,7 +173,7 @@ private:
 
 ### 6) Радио-хуки (реализованы в `.ino` через RadioLib)
 ```cpp
-bool Radio_sendRaw(const uint8_t* data, size_t len);
+bool Radio_sendRaw(const uint8_t* data, size_t len, Qos q);
 bool Radio_setFrequency(uint32_t hz);
 bool Radio_setBandwidth(uint32_t khz);
 bool Radio_setSpreadingFactor(uint8_t sf);

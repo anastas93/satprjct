@@ -1,5 +1,6 @@
 #include "tx_engine.h"
 #include "radio_adapter.h"
+#include "libs/qos_moderator.h"
 #include "tdd_scheduler.h"
 #include "event_queue.h"
 #include <mutex>
@@ -15,7 +16,7 @@ extern bool radioTransmit(const uint8_t* data, size_t len);
 TxEngine g_tx_engine;
 std::mutex gRadioMutex;
 
-bool TxEngine::sendFrame(const uint8_t* data, size_t len, const TxOptions& opts) {
+bool TxEngine::sendFrame(const uint8_t* data, size_t len, const TxOptions& opts) { // QOS: Высокий Низкоуровневая передача кадра через радио
   std::lock_guard<std::mutex> guard(gRadioMutex); // защищаем доступ к радио
   (void)opts.profile;  // профили пока не влияют на отправку
   (void)opts.scramble; // скремблер применяется на более ранних этапах
@@ -35,7 +36,9 @@ bool TxEngine::sendFrame(const uint8_t* data, size_t len, const TxOptions& opts)
 }
 
 // Совместимый API для старых вызовов
-bool Radio_sendRaw(const uint8_t* data, size_t len) {
+bool Radio_sendRaw(const uint8_t* data, size_t len, Qos q) { // QOS: Высокий Совместимый API для отправки кадров в радио
+  // Проверка приоритета через модератор QoS
+  if (!Qos_allow(q)) return false;
   TxOptions o{};
   o.freq_hz = (uint32_t)(g_freq_tx_mhz * 1e6f);
   o.profile = 0;

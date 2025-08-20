@@ -47,7 +47,7 @@ function drawGraph(id,data,color){
   ctx.beginPath();data.forEach((v,i)=>{const x=i*(c.width/(data.length-1));const y=c.height-((v-min)/k*c.height);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
   ctx.strokeStyle=color;ctx.stroke();
 }
-function updateLinkDiag(){
+function updateLinkDiag(){ // QOS: Низкий Получение диагностических данных
   fetch('/linkdiag').then(r=>r.json()).then(d=>{
     perData.push(d.per);if(perData.length>50)perData.shift();
     rttData.push(d.rtt);if(rttData.length>50)rttData.shift();
@@ -135,13 +135,13 @@ function applyProfile(name){
   }
 }
 function setSelect(id,val){const el=document.getElementById(id);if(el)el.value=val;}
-function sendParam(path,val){fetch('/'+path+'?val='+encodeURIComponent(val));}
-function sendPerTh(){const hi=document.getElementById('perHigh').value;const lo=document.getElementById('perLow').value;fetch('/setperth?hi='+encodeURIComponent(hi)+'&lo='+encodeURIComponent(lo));}
-function sendEbn0Th(){const hi=document.getElementById('ebn0High').value;const lo=document.getElementById('ebn0Low').value;fetch('/setebn0th?hi='+encodeURIComponent(hi)+'&lo='+encodeURIComponent(lo));}
+function sendParam(path,val){fetch('/'+path+'?val='+encodeURIComponent(val));} // QOS: Нормальный Настройка параметров радио
+function sendPerTh(){const hi=document.getElementById('perHigh').value;const lo=document.getElementById('perLow').value;fetch('/setperth?hi='+encodeURIComponent(hi)+'&lo='+encodeURIComponent(lo));} // QOS: Нормальный Установка порогов PER
+function sendEbn0Th(){const hi=document.getElementById('ebn0High').value;const lo=document.getElementById('ebn0Low').value;fetch('/setebn0th?hi='+encodeURIComponent(hi)+'&lo='+encodeURIComponent(lo));} // QOS: Нормальный Установка порогов Eb/N0
 // Безопасно добавляет обработчики событий и пропускает отсутствующие элементы
 function on(id,ev,fn){const el=document.getElementById(id);if(el)el.addEventListener(ev,fn);}
 // Обработчик отправки сообщения: WebSocket для чата + резервный HTTP
-on('sendBtn','click',()=>{
+on('sendBtn','click',()=>{ // QOS: Нормальный Отправка текстового сообщения через чат
   const m=document.getElementById('msg').value;
   const st=document.getElementById('sendStatus');
   const btn=document.getElementById('sendBtn');
@@ -177,9 +177,9 @@ on('bwSelect','change',e=>{localStorage.setItem('bw',e.target.value);sendParam('
 on('sfSelect','change',e=>{localStorage.setItem('sf',e.target.value);sendParam('setsf',e.target.value);});
 on('crSelect','change',e=>{localStorage.setItem('cr',e.target.value);sendParam('setcr',e.target.value);});
 on('txpSelect','change',e=>{localStorage.setItem('txp',e.target.value);sendParam('settxp',e.target.value);});
-on('rxBoostChk','change',e=>{const v=e.target.checked?'1':'0';localStorage.setItem('rxboost',v);fetch('/setrxboost?val='+v);});
+on('rxBoostChk','change',e=>{const v=e.target.checked?'1':'0';localStorage.setItem('rxboost',v);fetch('/setrxboost?val='+v);}); // QOS: Нормальный Переключение усиления приёмника
 // Явная установка ACK вместо неопределённого переключения
-on('ackChk','change',e=>{
+on('ackChk','change',e=>{ // QOS: Нормальный Включение/отключение ACK
   const v=e.target.checked?'1':'0';
   localStorage.setItem('ack',v);
   fetch('/setack?val='+v);
@@ -196,7 +196,7 @@ on('diagFecSelect','change',e=>{localStorage.setItem('fec',e.target.value);sendP
 on('diagInterSelect','change',e=>{localStorage.setItem('inter',e.target.value);sendParam('setinter',e.target.value);setSelect('interSelect',e.target.value);});
 on('diagFragInput','change',e=>{localStorage.setItem('payload',e.target.value);sendParam('setpayload',e.target.value);const p=document.getElementById('payloadInput');if(p)p.value=e.target.value;});
 on('pilotInput','change',e=>{localStorage.setItem('pilot',e.target.value);sendParam('setpilot',e.target.value);});
-on('dupChk','change',e=>{const v=e.target.checked?'1':'0';localStorage.setItem('dup',v);fetch('/setdup?val='+v);});
+on('dupChk','change',e=>{const v=e.target.checked?'1':'0';localStorage.setItem('dup',v);fetch('/setdup?val='+v);}); // QOS: Нормальный Переключение режима дублирования
 on('winInput','change',e=>{localStorage.setItem('win',e.target.value);sendParam('setwin',e.target.value);});
 on('ackAggInput','change',e=>{localStorage.setItem('ackAgg',e.target.value);sendParam('setackagg',e.target.value);});
 on('burstInput','change',e=>{localStorage.setItem('burst',e.target.value);sendParam('setburst',e.target.value);});
@@ -208,9 +208,9 @@ on('ebn0High','change',e=>{localStorage.setItem('ebn0High',e.target.value);sendE
 on('ebn0Low','change',e=>{localStorage.setItem('ebn0Low',e.target.value);sendEbn0Th();});
 on('txProfMode','change',e=>{const manual=e.target.value==='manual';localStorage.setItem('txProfMode',e.target.value);const sel=document.getElementById('txProfSelect');if(sel)sel.disabled=!manual;fetch('/setautorate?val='+(manual?'0':'1'));});
 on('txProfSelect','change',e=>{localStorage.setItem('txProfile',e.target.value);fetch('/settxprofile?val='+e.target.value);});
-on('encChk','change',e=>{localStorage.setItem('enc',e.target.checked?'1':'0');fetch('/toggleenc');});
-on('kidInput','change',e=>{localStorage.setItem('kid',e.target.value);sendParam('setkid',e.target.value);});
-on('keyBtn','click',()=>{const k=document.getElementById('keyInput').value;fetch('/setkey?val='+encodeURIComponent(k));});
+on('encChk','change',e=>{localStorage.setItem('enc',e.target.checked?'1':'0');fetch('/toggleenc');}); // QOS: Нормальный Переключение шифрования
+on('kidInput','change',e=>{localStorage.setItem('kid',e.target.value);sendParam('setkid',e.target.value);}); // QOS: Высокий Установка идентификатора ключа
+on('keyBtn','click',()=>{const k=document.getElementById('keyInput').value;fetch('/setkey?val='+encodeURIComponent(k));}); // QOS: Высокий Установка ключа шифрования
 on('saveBtn','click',()=>{fetch('/save');});
 on('loadBtn','click',()=>{fetch('/load');});
 on('resetBtn','click',()=>{fetch('/reset');});
@@ -251,20 +251,20 @@ applySettings();
 const initMode=localStorage.getItem('txProfMode')||'auto';
 fetch('/setautorate?val='+(initMode==='manual'?'0':'1'));
 if(initMode==='manual'){const p=localStorage.getItem('txProfile')||'0';fetch('/settxprofile?val='+p);}
-on('pingBtn','click',()=>{fetch('/ping');});
+on('pingBtn','click',()=>{fetch('/ping');}); // QOS: Низкий Диагностический ping
 // Дополнительные режимы пинга
-on('chanPingBtn','click',()=>{fetch('/channelping');});
-on('presetPingBtn','click',()=>{
+on('chanPingBtn','click',()=>{fetch('/channelping');}); // QOS: Низкий Диагностический ping канала
+on('presetPingBtn','click',()=>{ // QOS: Низкий Диагностический ping пресета
   const bank=document.getElementById('bankSelect').value;
   const preset=document.getElementById('presetSelect').value;
   fetch('/presetping?bank='+encodeURIComponent(bank)+'&preset='+encodeURIComponent(preset));
 });
-on('massPingBtn','click',()=>{
+on('massPingBtn','click',()=>{ // QOS: Низкий Массовый ping
   const bank=document.getElementById('bankSelect').value;
   fetch('/massping?bank='+encodeURIComponent(bank));
 });
 // Запуск расширенного SatPing с параметрами
-on('satRunBtn','click',()=>{
+on('satRunBtn','click',()=>{ // QOS: Низкий Расширенный SatPing
   const p=new URLSearchParams();
   const c=document.getElementById('satCount').value;if(c)p.append('count',c);
   const i=document.getElementById('satInterval').value;if(i)p.append('interval',i);
@@ -275,19 +275,19 @@ on('satRunBtn','click',()=>{
     document.getElementById('satPingResult').textContent='sent:'+d.sent+' recv:'+d.received+' timeout:'+d.timeout;
   });
 });
-on('metricsBtn','click',()=>{fetch('/metrics').then(r=>r.text()).then(t=>{document.getElementById('metrics').textContent=t;});});
-on('selfTestBtn','click',()=>{fetch('/selftest');});
-on('simpleBtn','click',()=>{const st=document.getElementById('simpleStatus');fetch('/simple').then(r=>{st.textContent=r.ok?'\u2714':'\u2716';st.style.color=r.ok?'var(--sys-color)':'red';}).catch(()=>{st.textContent='\u2716';st.style.color='red';});setTimeout(()=>{st.textContent=''},2000);});
-on('largeBtn','click',()=>{const n=document.getElementById('largeSize').value;const st=document.getElementById('largeStatus');fetch('/large?size='+encodeURIComponent(n)).then(r=>{st.textContent=r.ok?'\u2714':'\u2716';st.style.color=r.ok?'var(--sys-color)':'red';}).catch(()=>{st.textContent='\u2716';st.style.color='red';});setTimeout(()=>{st.textContent=''},2000);});
-on('encTestBtn','click',()=>{const n=document.getElementById('encTestSize').value;let url='/enctest';if(n)url+='?size='+encodeURIComponent(n);fetch(url);});
-on('encTestBadBtn','click',()=>{fetch('/enctestbad');});
-on('msgIdBtn','click',()=>{const n=document.getElementById('msgIdVal').value;let url='/msgid';if(n)url+='?val='+encodeURIComponent(n);fetch(url);});
-const keyTestBtn=document.getElementById('keyTestBtn');if(keyTestBtn){on('keyTestBtn','click',()=>{fetch('/keytest');});}
-const keyReqBtn=document.getElementById('keyReqBtn');if(keyReqBtn){on('keyReqBtn','click',()=>{fetch('/keyreq');});}
-const keySendBtn=document.getElementById('keySendBtn');if(keySendBtn){on('keySendBtn','click',()=>{fetch('/keysend');});}
-const keyDhBtn=document.getElementById('keyDhBtn');if(keyDhBtn){on('keyDhBtn','click',()=>{fetch('/keydh');});}
+on('metricsBtn','click',()=>{fetch('/metrics').then(r=>r.text()).then(t=>{document.getElementById('metrics').textContent=t;});}); // QOS: Низкий Получение метрик
+on('selfTestBtn','click',()=>{fetch('/selftest');}); // QOS: Низкий Тестовый запрос selftest
+on('simpleBtn','click',()=>{const st=document.getElementById('simpleStatus');fetch('/simple').then(r=>{st.textContent=r.ok?'\u2714':'\u2716';st.style.color=r.ok?'var(--sys-color)':'red';}).catch(()=>{st.textContent='\u2716';st.style.color='red';});setTimeout(()=>{st.textContent=''},2000);}); // QOS: Низкий Тестовый запрос simple
+on('largeBtn','click',()=>{const n=document.getElementById('largeSize').value;const st=document.getElementById('largeStatus');fetch('/large?size='+encodeURIComponent(n)).then(r=>{st.textContent=r.ok?'\u2714':'\u2716';st.style.color=r.ok?'var(--sys-color)':'red';}).catch(()=>{st.textContent='\u2716';st.style.color='red';});setTimeout(()=>{st.textContent=''},2000);}); // QOS: Нормальный Отправка большого сообщения
+on('encTestBtn','click',()=>{const n=document.getElementById('encTestSize').value;let url='/enctest';if(n)url+='?size='+encodeURIComponent(n);fetch(url);}); // QOS: Низкий Тест шифрования
+on('encTestBadBtn','click',()=>{fetch('/enctestbad');}); // QOS: Низкий Негативный тест шифрования
+on('msgIdBtn','click',()=>{const n=document.getElementById('msgIdVal').value;let url='/msgid';if(n)url+='?val='+encodeURIComponent(n);fetch(url);}); // QOS: Низкий Управление счётчиком сообщений
+const keyTestBtn=document.getElementById('keyTestBtn');if(keyTestBtn){on('keyTestBtn','click',()=>{fetch('/keytest');});} // QOS: Высокий Тест ключей
+const keyReqBtn=document.getElementById('keyReqBtn');if(keyReqBtn){on('keyReqBtn','click',()=>{fetch('/keyreq');});} // QOS: Высокий Запрос ключа
+const keySendBtn=document.getElementById('keySendBtn');if(keySendBtn){on('keySendBtn','click',()=>{fetch('/keysend');});} // QOS: Высокий Отправка ключа
+const keyDhBtn=document.getElementById('keyDhBtn');if(keyDhBtn){on('keyDhBtn','click',()=>{fetch('/keydh');});} // QOS: Высокий Диффи-Хеллман
 // Обновление информации о ключе: статус локальный/удалённый и отображение KID+CRC
-function updateKeyStatus(){
+function updateKeyStatus(){ // QOS: Высокий Получение статуса ключа
   fetch('/keystatus').then(r=>r.json()).then(d=>{
     const i=document.getElementById('keyIndicator');
     const t=document.getElementById('keyStatusText');
@@ -305,12 +305,12 @@ function updateKeyStatus(){
   setTimeout(updateKeyStatus,1000);
 }
 updateKeyStatus();
-on('sendQBtn','click',()=>{const msg=document.getElementById('sendQMsg').value;const prio=document.getElementById('sendQPrio').value;if(msg){fetch('/sendq?prio='+encodeURIComponent(prio)+'&msg='+encodeURIComponent(msg));document.getElementById('sendQMsg').value='';}});
-on('largeQBtn','click',()=>{const sz=document.getElementById('largeQSize').value;const prio=document.getElementById('largeQPrio').value;fetch('/largeq?prio='+encodeURIComponent(prio)+'&size='+encodeURIComponent(sz));});
-on('qosModeBtn','click',()=>{const mode=document.getElementById('qosModeSelect').value;fetch('/qosmode?val='+encodeURIComponent(mode));});
-on('qosBtn','click',()=>{fetch('/qos').then(r=>r.text()).then(t=>{document.getElementById('qosStats').textContent=t;});});
+on('sendQBtn','click',()=>{const msg=document.getElementById('sendQMsg').value;const prio=document.getElementById('sendQPrio').value;if(msg){fetch('/sendq?prio='+encodeURIComponent(prio)+'&msg='+encodeURIComponent(msg));document.getElementById('sendQMsg').value='';}}); // QOS: Зависит Сообщение с явным приоритетом
+on('largeQBtn','click',()=>{const sz=document.getElementById('largeQSize').value;const prio=document.getElementById('largeQPrio').value;fetch('/largeq?prio='+encodeURIComponent(prio)+'&size='+encodeURIComponent(sz));}); // QOS: Зависит Отправка большого сообщения с явным QoS
+on('qosModeBtn','click',()=>{const mode=document.getElementById('qosModeSelect').value;fetch('/qosmode?val='+encodeURIComponent(mode));}); // QOS: Нормальный Управление режимом QoS
+on('qosBtn','click',()=>{fetch('/qos').then(r=>r.text()).then(t=>{document.getElementById('qosStats').textContent=t;});}); // QOS: Нормальный Статистика QoS
 // Настройка TDD-планировщика
-on('tddApplyBtn','click',()=>{
+on('tddApplyBtn','click',()=>{ // QOS: Нормальный Настройка TDD-планировщика
   const tx=document.getElementById('tddTxInput').value;
   const ack=document.getElementById('tddAckInput').value;
   const g=document.getElementById('tddGuardInput').value;
@@ -326,14 +326,14 @@ on('uploadKeyBtn','click',()=>{
   r.onload=e=>{fetch('/setkey?val='+encodeURIComponent(e.target.result.trim()));};
   r.readAsText(f);
 });
-on('kidActBtn','click',()=>{const k=document.getElementById('kidActInput').value;fetch('/setkid?val='+encodeURIComponent(k));});
-on('idResetBtn','click',()=>{fetch('/idreset');});
-on('replayClrBtn','click',()=>{fetch('/replayclr');});
+on('kidActBtn','click',()=>{const k=document.getElementById('kidActInput').value;fetch('/setkid?val='+encodeURIComponent(k));}); // QOS: Высокий Активация ключевого идентификатора
+on('idResetBtn','click',()=>{fetch('/idreset');}); // QOS: Высокий Сброс счётчиков идентификаторов
+on('replayClrBtn','click',()=>{fetch('/replayclr');}); // QOS: Высокий Очистка счётчиков реплеев
 // Работа с архивом сообщений
-on('archListBtn','click',()=>{fetch('/archivelist').then(r=>r.text()).then(t=>{document.getElementById('archiveList').textContent=t;});});
-on('archRestoreBtn','click',()=>{fetch('/archiverestore');});
+on('archListBtn','click',()=>{fetch('/archivelist').then(r=>r.text()).then(t=>{document.getElementById('archiveList').textContent=t;});}); // QOS: Нормальный Список архива сообщений
+on('archRestoreBtn','click',()=>{fetch('/archiverestore');}); // QOS: Нормальный Восстановление архива сообщений
 // Отображение последних кадров
-function loadFrames(){
+function loadFrames(){ // QOS: Низкий Получение последних кадров
   const dr=document.getElementById('frameDrop').value;
   let url='/frames';
   if(dr)url+='?drop='+encodeURIComponent(dr);

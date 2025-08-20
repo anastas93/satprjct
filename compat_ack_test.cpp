@@ -19,7 +19,7 @@ static RxPipeline* g_rx_remote = nullptr;  // Приём обычных паке
 static std::vector<uint8_t> g_pending_ack;
 
 // Заглушки радио
-bool Radio_sendRaw(const uint8_t* data, size_t len) {
+bool Radio_sendRaw(const uint8_t* data, size_t len, Qos) {
   if (!data || len < FRAME_HEADER_SIZE) return true;
   FrameHeader hdr;
   if (!FrameHeader::decode(hdr, data, len)) return true;
