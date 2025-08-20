@@ -41,6 +41,7 @@ struct PingStats {
 
 // Объявления вспомогательных функций пинга
 void SatPing();                    // асинхронный пинг текущего пресета
+void SatPingTrace();               // детальный пинг с разбором по этапам
 bool ChannelPing();                // проверка канала на текущем пресете
 bool PresetPing(Bank bank, int preset); // проверка указанного пресета
 void MassPing(Bank bank);          // проверка всех пресетов банка

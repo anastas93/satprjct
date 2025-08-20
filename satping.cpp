@@ -103,6 +103,80 @@ void SatPing() {
   radio.startReceive();          // возвращаем радио в режим RX
 }
 
+// Детальный пинг с разбивкой по этапам и временем каждого шага
+void SatPingTrace() {
+  radio.setFrequency(g_freq_tx_mhz);     // работаем на частоте передачи
+
+  uint8_t ping[5];
+  uint8_t rx_ping[5];
+
+  uint32_t t_start = micros();           // время начала операции
+
+  // Формируем пакет пинга
+  ping[1] = radio.randomByte();
+  ping[2] = radio.randomByte();           // случайные байты
+  ping[0] = ping[1] ^ ping[2];            // идентификатор
+
+  uint8_t address = 0x01;
+#if defined(ESP32) || defined(ESP_PLATFORM)
+  uint64_t mac = ESP.getEfuseMac();
+  address = ((mac >> 8) & 0xFF) ^ (mac & 0xFF);
+#endif
+  ping[3] = address;
+  ping[4] = 0;
+
+  uint32_t t_pkt = micros();
+  Serial.print(F("[")); Serial.print((t_pkt - t_start) / 1000.0, 3);
+  Serial.println(F(" ms] пакет сформирован"));
+
+  // Передаём пакет и ждём окончания
+  radio.startTransmit(ping, 5);
+  while (!txDoneFlag) {
+    delay(1);
+  }
+  txDoneFlag = false;
+  radio.finishTransmit();
+  uint32_t t_tx = micros();
+  Serial.print(F("[")); Serial.print((t_tx - t_start) / 1000.0, 3);
+  Serial.println(F(" ms] передача завершена"));
+
+  // Переходим на приём
+  delay(2);
+  radio.setFrequency(g_freq_rx_mhz);
+  radio.startReceive();
+  uint32_t t_rx_start = micros();
+  Serial.print(F("[")); Serial.print((t_rx_start - t_start) / 1000.0, 3);
+  Serial.println(F(" ms] ожидание ответа"));
+
+  int state = radio.receive(rx_ping, 5);
+  uint32_t t_rx_end = micros();
+  Serial.print(F("[")); Serial.print((t_rx_end - t_start) / 1000.0, 3);
+  Serial.println(F(" ms] приём завершён"));
+
+  bool ok = (state == RADIOLIB_ERR_NONE) || (memcmp(ping, rx_ping, 5) == 0);
+  if (ok) {
+    Serial.print(F("Ping>OK RSSI:"));
+    Serial.print(radio.getRSSI());
+    Serial.print(F(" dBm/SNR:"));
+    Serial.print(radio.getSNR());
+    Serial.println(F(" dB"));
+  } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
+    Serial.println(F("CRC error!"));
+  } else {
+    Serial.print(F("failed, code "));
+    Serial.println(state);
+  }
+
+  Serial.print(F("Итого RTT: "));
+  Serial.print((t_rx_end - t_tx) / 1000.0, 3);
+  Serial.println(F(" ms"));
+
+  // Возврат на рабочую частоту приёма
+  delay(3);
+  radio.setFrequency(g_freq_rx_mhz);
+  radio.startReceive();
+}
+
 // Проверка канала на текущем пресете без вывода подробной информации
 bool ChannelPing() {
   uint8_t ping[5];
