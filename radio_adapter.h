@@ -2,11 +2,12 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include "libs/qos.h"
 
 // Перевод миллисекунд в тики таймера (1 тик = 15.625 мкс)
 inline uint32_t msToTicks(uint32_t ms) { return ms * 64; }
 
-bool Radio_sendRaw(const uint8_t* data, size_t len);
+bool Radio_sendRaw(const uint8_t* data, size_t len, Qos q = Qos::Normal);
 bool Radio_setBandwidth(uint32_t khz);
 bool Radio_setSpreadingFactor(uint8_t sf);
 bool Radio_setCodingRate(uint8_t cr4x);

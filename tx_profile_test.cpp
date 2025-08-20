@@ -8,7 +8,7 @@
 class Print; // заглушка для FrameLog::dump
 
 // Минимальные заглушки для функций радиоинтерфейса и журнала кадров
-bool Radio_sendRaw(const uint8_t*, size_t) { return true; }
+bool Radio_sendRaw(const uint8_t*, size_t, Qos) { return true; }
 namespace FrameLog {
 void push(char, const uint8_t*, size_t,
           uint32_t, uint8_t, uint8_t,

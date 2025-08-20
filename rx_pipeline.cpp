@@ -116,7 +116,8 @@ void RxPipeline::sendAck(uint32_t msg_id) {
   }
   memcpy(frame.data()+off2, payload, 8);
 
-  Radio_sendRaw(frame.data(), frame.size());
+  // ACK всегда отправляется с высоким приоритетом
+  Radio_sendRaw(frame.data(), frame.size(), Qos::High);
   // логируем отправленный ACK
   FrameLog::push('T', frame.data(), frame.size(),
                  0, 0, 0,
