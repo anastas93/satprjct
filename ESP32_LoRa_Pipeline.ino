@@ -70,6 +70,7 @@ float g_bw_khz = 125.0f;
 uint8_t g_sf = 9;
 uint8_t g_cr = 5;
 int8_t g_txp = 14;
+bool g_rx_boost = false;                // усиленный режим приёма
 
 bool g_ack_on = cfg::ACK_ENABLED_DEFAULT;
 bool g_enc_on = cfg::ENCRYPTION_ENABLED_DEFAULT;
@@ -201,6 +202,7 @@ void handleSetBw();
 void handleSetSf();
 void handleSetCr();
 void handleSetTxp();
+void handleSetRxBoost();
 void handleSetFec();
 void handleSetInter();
 void handleSetPayload();
@@ -422,6 +424,10 @@ bool Radio_setCodingRate(uint8_t cr4x) {
 bool Radio_setTxPower(int8_t dBm) {
   return radio.setOutputPower(dBm) == RADIOLIB_ERR_NONE;
 }
+bool Radio_setRxBoost(bool on) {
+  // Включение/выключение усиленного режима приёма
+  return radio.setRxBoostedGainMode(on, true) == RADIOLIB_ERR_NONE;
+}
 void Radio_forceRx(uint32_t rx_ticks) {
   // Запуск приёма с таймаутом в тиках
   radio.startReceive(rx_ticks);
@@ -484,6 +490,7 @@ static void saveConfig() {
   prefs.putUChar("sf", g_sf);
   prefs.putUChar("cr", g_cr);
   prefs.putChar("txp", g_txp);
+  prefs.putBool("rxboost", g_rx_boost);
   prefs.putBool("ack", g_ack_on);
   prefs.putUChar("rtryN", g_retryN);
   prefs.putUShort("rtryMS", g_retryMS);
@@ -519,6 +526,7 @@ static void loadConfig() {
   g_sf = prefs.getUChar("sf", g_sf);
   g_cr = prefs.getUChar("cr", g_cr);
   g_txp = prefs.getChar("txp", g_txp);
+  g_rx_boost = prefs.getBool("rxboost", false);
   g_ack_on = prefs.getBool("ack", cfg::ACK_ENABLED_DEFAULT);
   g_retryN = prefs.getUChar("rtryN", cfg::SEND_RETRY_COUNT_DEFAULT);
   g_retryMS = prefs.getUShort("rtryMS", cfg::SEND_RETRY_MS_DEFAULT);
@@ -539,6 +547,7 @@ static void loadConfig() {
   Radio_setSpreadingFactor(g_sf);
   Radio_setCodingRate(g_cr);
   Radio_setTxPower(g_txp);
+  Radio_setRxBoost(g_rx_boost);
   g_tx.enableAck(g_ack_on);
   g_tx.setRetry(g_retryN, g_retryMS);
   loadKeyFromNVS();
@@ -576,6 +585,7 @@ void handleRoot() {
   page.replace("%ACK%", g_ack_on ? "checked" : "");
   page.replace("%ENC%", g_enc_on ? "checked" : "");
   page.replace("%DUP%", g_dup_on ? "checked" : "");
+  page.replace("%RXBOOST%", g_rx_boost ? "checked" : "");
   server.send(200, "text/html", page);
 }
 
@@ -730,6 +740,15 @@ void handleSetTxp() {
   Radio_setTxPower(g_txp);
   server.send(200, "text/plain", "txp changed");
   serialBuffer += String("*SYS:* TXP set to ") + String(txp) + " dBm\n";
+}
+
+// Включение/выключение усиленного приёма
+void handleSetRxBoost() {
+  bool on = server.arg("val") == "1";
+  g_rx_boost = on;
+  Radio_setRxBoost(g_rx_boost);
+  server.send(200, "text/plain", g_rx_boost ? "rxboost on" : "rxboost off");
+  serialBuffer += String("*SYS:* RXBOOST=") + (g_rx_boost ? "ON" : "OFF") + "\n";
 }
 
 // Установка режима FEC: off/rs_vit/ldpc
@@ -2643,6 +2662,7 @@ void setup() {
   server.on("/setsf", handleSetSf);
   server.on("/setcr", handleSetCr);
   server.on("/settxp", handleSetTxp);
+  server.on("/setrxboost", handleSetRxBoost);
   server.on("/setfec", handleSetFec);       // установка режима FEC
   server.on("/setinter", handleSetInter);   // глубина интерливера
     server.on("/setpayload", handleSetPayload); // размер полезной нагрузки

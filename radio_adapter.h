@@ -11,6 +11,8 @@ bool Radio_setBandwidth(uint32_t khz);
 bool Radio_setSpreadingFactor(uint8_t sf);
 bool Radio_setCodingRate(uint8_t cr4x);
 bool Radio_setTxPower(int8_t dBm);
+// Включение усиленного режима приёма (setRxBoostedGainMode)
+bool Radio_setRxBoost(bool on);
 // Принудительный переход в RX на указанное число тиков
 void Radio_forceRx(uint32_t rx_ticks);
 

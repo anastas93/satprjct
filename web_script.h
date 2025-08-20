@@ -132,6 +132,7 @@ on('bwSelect','change',e=>{localStorage.setItem('bw',e.target.value);sendParam('
 on('sfSelect','change',e=>{localStorage.setItem('sf',e.target.value);sendParam('setsf',e.target.value);});
 on('crSelect','change',e=>{localStorage.setItem('cr',e.target.value);sendParam('setcr',e.target.value);});
 on('txpSelect','change',e=>{localStorage.setItem('txp',e.target.value);sendParam('settxp',e.target.value);});
+on('rxBoostChk','change',e=>{const v=e.target.checked?'1':'0';localStorage.setItem('rxboost',v);fetch('/setrxboost?val='+v);});
 // Явная установка ACK вместо неопределённого переключения
 on('ackChk','change',e=>{
   const v=e.target.checked?'1':'0';
@@ -195,6 +196,7 @@ function applySettings(){
     document.getElementById('encChk').checked=localStorage.getItem('enc')==='1';
     document.getElementById('dupChk').checked=localStorage.getItem('dup')==='1';
     document.getElementById('autoRateChk').checked=localStorage.getItem('autorate')==='1';
+    document.getElementById('rxBoostChk').checked=localStorage.getItem('rxboost')==='1';
   }
 applySettings();
 on('pingBtn','click',()=>{fetch('/ping');});

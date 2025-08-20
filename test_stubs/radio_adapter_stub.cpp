@@ -43,6 +43,11 @@ bool Radio_setTxPower(int8_t dBm) {
   return true;
 }
 
+bool Radio_setRxBoost(bool on) {
+  (void)on;
+  return true;
+}
+
 void Radio_forceRx(uint32_t rx_ticks) {
   (void)rx_ticks;
   // Заглушка ничего не делает.

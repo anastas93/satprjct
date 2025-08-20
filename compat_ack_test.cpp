@@ -34,6 +34,7 @@ bool Radio_setBandwidth(uint32_t) { return true; }
 bool Radio_setSpreadingFactor(uint8_t) { return true; }
 bool Radio_setCodingRate(uint8_t) { return true; }
 bool Radio_setTxPower(int8_t) { return true; }
+bool Radio_setRxBoost(bool) { return true; }
 void Radio_forceRx(uint32_t) {}
 bool Radio_getSNR(float& snr) { snr = 0.0f; return true; }
 bool Radio_getEbN0(float& ebn0) { ebn0 = 0.0f; return true; }
