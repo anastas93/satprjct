@@ -945,7 +945,7 @@ void handleSetTxProfile() {
     server.send(400, "text/plain", "range 0..3");
     return;
   }
-  g_tx.applyProfile((uint8_t)p);
+  g_tx.setProfile((uint8_t)p);
   server.send(200, "text/plain", "txprofile set");
   // Сообщаем выбранный профиль в чат
   chatMsg("SYS", String("TX profile P") + String(p));
