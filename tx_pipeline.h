@@ -4,6 +4,7 @@
 #include "packet_formatter.h"
 #include "radio_interface.h"
 #include "metrics.h"
+#include "ack_sender.h"
 #include <deque>
 #include <stddef.h>
 
@@ -24,7 +25,7 @@ public:
   // Установка интервала пилотных вставок (0 = выключить)
   void setPilotInterval(uint16_t b) { formatter_.setPilotInterval(b); }
   // Управление дублированием заголовка
-  void setHeaderDup(bool v) { formatter_.setHeaderDup(v); }
+  void setHeaderDup(bool v) { formatter_.setHeaderDup(v); hdr_dup_enabled_ = v; }
   // Установка размера окна SR-ARQ
   void setWindowSize(uint8_t w) { window_size_ = w; }
   // Установка предела фрагментов в серии перед ожиданием ACK.
@@ -36,6 +37,8 @@ public:
   void queueKeyAck(uint8_t kid);
   // Ручная установка профиля передачи P0..P3
   void setProfile(uint8_t p);
+  // Отправка ACK из TX-пайплайна (зеркальная роль)
+  bool sendAck(uint32_t highest, uint32_t bitmap);
 private:
   size_t sendMessageFragments(const OutgoingMessage& m);
   bool interFrameGap();
@@ -71,4 +74,6 @@ private:
   unsigned long burst_wait_ms_ = 0;              // начало ожидания
 
   uint8_t profile_idx_ = 0;                   // текущий профиль P0..P3
+  AckSender ack_sender_;
+  bool hdr_dup_enabled_ = cfg::HEADER_DUP_DEFAULT;
 };

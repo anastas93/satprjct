@@ -8,6 +8,7 @@
 | `ESP32_LoRa_Pipeline.ino` | `handleSendQ` | HTTP-обработчик отправки сообщения с явным QoS | Зависит |
 | `ESP32_LoRa_Pipeline.ino` | `sendKeyRequest` | Постановка в очередь запроса ключа | Высокий |
 | `ESP32_LoRa_Pipeline.ino` | `sendKeyResponse` | Постановка в очередь ответа с ключом | Высокий |
+| `ack_sender.cpp` | `AckSender::send` | Формирование и отправка ACK | Высокий |
 | `rx_pipeline.cpp` | `RxPipeline::sendAck` | Отправка ACK при приёме сообщений | Высокий |
 | `tx_engine.cpp` | `Radio_sendRaw` | Совместимый API для отправки кадров в радио | Высокий |
 | `tx_engine.cpp` | `TxEngine::sendFrame` | Низкоуровневая передача кадра через радио | Высокий |

@@ -10,6 +10,7 @@
 #include "frame.h"
 #include "metrics.h"
 #include "config.h"
+#include "ack_sender.h"
 
 class RxPipeline {
 public:
@@ -75,6 +76,7 @@ private:
   uint8_t pending_kid_ = 0;          // ожидаемый идентификатор ключа
   bool expect_keyack_ = false;       // ждём подтверждение KEYCHG
   bool expect_final_ack_ = false;    // ждём окончательный KEYACK
+  AckSender ack_sender_;             // отправка ACK кадров
   void scheduleNextAck();            // пересчитать интервал
 };
 

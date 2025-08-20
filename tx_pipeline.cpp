@@ -4,6 +4,7 @@
 #include "config.h"
 #include "frame_log.h"
 #include "tdd_scheduler.h"
+#include "ack_sender.h"
 #include <Arduino.h>
 #include <string.h>
 #include <vector>
@@ -48,6 +49,12 @@ void TxPipeline::queueKeyAck(uint8_t kid) {
   char tmp[16];
   int n = snprintf(tmp, sizeof(tmp), "KEYACK %u", kid);
   cache_.enqueue(reinterpret_cast<uint8_t*>(tmp), n, false);
+}
+
+// Отправка ACK со стороны передатчика
+bool TxPipeline::sendAck(uint32_t highest, uint32_t bitmap) {
+  return ack_sender_.send(highest, bitmap, window_size_, hdr_dup_enabled_,
+                          (uint8_t)formatter_.fecMode(), formatter_.interleaveDepth());
 }
 
 // Публичная обёртка для установки профиля вручную
