@@ -1,9 +1,9 @@
 // Стили веб-интерфейса
 #pragma once
-// Добавлены стили блока чата, меток времени и уменьшена кнопка отправки
+// Добавлены стили блока чата, меток времени, отдельный цвет сообщений частоты
 const char WEB_STYLE_CSS[] PROGMEM = R"rawliteral(
-:root{--bg-color:#222;--fg-color:#eee;--panel-bg:#333;--panel-bg-open:#2a2a2a;--primary:#3f51b5;--primary-hover:#5c6bc0;--base-font:16px;--tx-color:#00ccff;--rx-color:#ffb74d;--sys-color:#66bb6a}
-body.light{--bg-color:#f5f5f5;--fg-color:#222;--panel-bg:#eee;--panel-bg-open:#e0e0e0;--primary:#3f51b5;--primary-hover:#5c6bc0;--tx-color:#01579b;--rx-color:#e65100;--sys-color:#2e7d32}
+:root{--bg-color:#222;--fg-color:#eee;--panel-bg:#333;--panel-bg-open:#2a2a2a;--primary:#3f51b5;--primary-hover:#5c6bc0;--base-font:16px;--tx-color:#00ccff;--rx-color:#ffb74d;--sys-color:#66bb6a;--freq-color:#ab47bc}
+body.light{--bg-color:#f5f5f5;--fg-color:#222;--panel-bg:#eee;--panel-bg-open:#e0e0e0;--primary:#3f51b5;--primary-hover:#5c6bc0;--tx-color:#01579b;--rx-color:#e65100;--sys-color:#2e7d32;--freq-color:#6a1b9a}
 body{background-color:var(--bg-color);color:var(--fg-color);font-family:Arial,sans-serif;font-size:var(--base-font);margin:0;padding:10px}
 h2{margin-top:0}
 #statusBar{display:flex;align-items:center;margin-bottom:8px}
@@ -39,6 +39,7 @@ details[open] summary{background-color:var(--panel-bg-open)}
 .tx{color:var(--tx-color)}
 .rx{color:var(--rx-color)}
 .sys{color:var(--sys-color)}
+.freq{color:var(--freq-color)}
 .msg-line{display:flex;align-items:flex-start}
 .msg-time{font-family:monospace;margin-right:4px}
 .msg-tag{margin-right:4px;font-weight:700}
