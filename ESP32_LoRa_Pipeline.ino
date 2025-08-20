@@ -398,13 +398,14 @@ static void Radio_updateState(RadioState st) {
 
 // Отправка сырых данных по радио
 bool Radio_sendRaw(const uint8_t* data, size_t len) {
-  float prev = g_freq_rx_mhz;
+  // Переключаемся на частоту передачи
   radio.setFrequency(g_freq_tx_mhz);
   // Смена состояния на передачу
   Radio_updateState(RadioState::Tx);
   int16_t st = radio.transmit(const_cast<uint8_t*>(data), len);
   radio.finishTransmit();             // принудительно завершаем передачу
-  radio.setFrequency(prev);
+  // Возвращаемся на актуальную частоту приёма
+  radio.setFrequency(g_freq_rx_mhz);
   // После передачи слушаем эфир на окно ACK+guard
   Radio_forceRx(msToTicks(tdd::ackWindowMs + tdd::guardMs));
   return st == RADIOLIB_ERR_NONE;
