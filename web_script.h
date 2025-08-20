@@ -141,7 +141,7 @@ function sendEbn0Th(){const hi=document.getElementById('ebn0High').value;const l
 // Безопасно добавляет обработчики событий и пропускает отсутствующие элементы
 function on(id,ev,fn){const el=document.getElementById(id);if(el)el.addEventListener(ev,fn);}
 // Обработчик отправки сообщения: WebSocket для чата + резервный HTTP
-on('sendBtn','click',()=>{ // QOS: Нормальный Отправка текстового сообщения через чат
+on('sendBtn','click',e=>{e.preventDefault(); // предотвращаем перезагрузку страницы
   const m=document.getElementById('msg').value;
   const st=document.getElementById('sendStatus');
   const btn=document.getElementById('sendBtn');
