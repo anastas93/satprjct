@@ -129,6 +129,9 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(
           <option value="22">22</option>
         </select>
       </div>
+      <div class="row">
+        <label><input type="checkbox" id="rxBoostChk" %RXBOOST% title="Усиленный приём"> RX Boost</label>
+      </div>
     </div>
   </details>
 
