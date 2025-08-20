@@ -50,11 +50,11 @@ public:
 
 int main() {
   PipelineMetrics metrics{};
-  MessageBuffer buf;
+  MessageCache cache;
   Fragmenter frag;
   DummyEncryptor enc;
   PacketFormatter fmt(frag, enc, metrics);
-  TxPipeline tx(buf, fmt, radio, metrics);
+  TxPipeline tx(cache, fmt, radio, metrics);
 
   metrics.per_window.clear();
   metrics.ebn0_window.clear();

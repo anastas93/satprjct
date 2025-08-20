@@ -10,8 +10,9 @@
 #include "metrics.h"
 #include "encryptor.h"
 #include "encryptor_ccm.h"
-#include "message_buffer.h"
+#include "message_cache.h"
 #include "fragmenter.h"
+#include "packet_formatter.h"
 #include "tx_pipeline.h"
 #include "rx_pipeline.h"
 #include "radio_adapter.h"
@@ -63,9 +64,10 @@ SX1262 radio = SX1262(new Module(PIN_NSS, PIN_DIO1, PIN_NRST, PIN_BUSY));
 
 PipelineMetrics g_metrics;
 CcmEncryptor g_ccm;
-MessageBuffer g_buf;
+MessageCache g_cache;
 Fragmenter g_frag;
-TxPipeline g_tx(g_buf, g_frag, g_ccm, g_metrics);
+PacketFormatter g_fmt(g_frag, g_ccm, g_metrics);
+TxPipeline g_tx(g_cache, g_fmt, g_radio, g_metrics);
 RxPipeline g_rx(g_ccm, g_metrics);
 
 Preferences prefs;
@@ -221,7 +223,7 @@ void radioTask(void*) {
     while (xQueueReceive(g_cmd_queue, &cmd, 0) == pdTRUE) {
       switch (cmd.type) {
         case cmd_t::CMD_SEND_TEXT: {
-          g_buf.enqueue((uint8_t*)cmd.data.text.data, cmd.data.text.len, false);
+          g_cache.enqueue((uint8_t*)cmd.data.text.data, cmd.data.text.len, false);
           persistMsgId();
           chatMsg("TX", String(cmd.data.text.data, cmd.data.text.len));
           break;
@@ -426,7 +428,7 @@ public:
 
 static inline void persistMsgId() {
   prefs.begin("lora", false);
-  prefs.putULong("msgid", g_buf.nextId());
+  prefs.putULong("msgid", g_cache.nextId());
   prefs.end();
 }
 
@@ -602,7 +604,7 @@ static void saveConfig() {
   prefs.putUShort("rtryMS", g_retryMS);
   prefs.putBool("enc", g_enc_on);
   prefs.putUChar("kid", g_kid);
-  prefs.putULong("msgid", g_buf.nextId());
+  prefs.putULong("msgid", g_cache.nextId());
   // Persist whether the current key came from remote (Received) or is local.
   prefs.putBool("key_remote", g_key_status == KeyStatus::Received);
   prefs.end();
@@ -644,7 +646,7 @@ static void loadConfig() {
   g_key_status = remote ? KeyStatus::Received : KeyStatus::Local;
   uint32_t nid = prefs.getULong("msgid", 1);
   prefs.end();
-  g_buf.setNextId(nid);
+  g_cache.setNextId(nid);
 
   // Выбираем список частот и применяем остальные параметры
   g_freq_table = &GetFreqTable(g_bank);
@@ -1105,7 +1107,7 @@ void handleLinkDiag() {
   json += ",\"bitmap\":\"\"";
   json += ",\"tx_frames\":" + String(g_metrics.tx_frames);
   json += ",\"rx_frames\":" + String(g_metrics.rx_frames_ok);
-  json += ",\"queue\":" + String(g_buf.size());
+  json += ",\"queue\":" + String(g_cache.size());
   json += "}"; 
   server.send(200, "application/json", json);
 }
@@ -1359,7 +1361,7 @@ void handleSetTdd() {
 // Список сообщений в архиве
 void handleArchiveList() {
   std::vector<uint32_t> ids;
-  g_buf.listArchived(ids);
+  g_cache.listArchived(ids);
   String out;
   for (uint32_t id : ids) {
     out += String(id) + "\n";
@@ -1369,7 +1371,7 @@ void handleArchiveList() {
 
 // Восстановить одно сообщение из архива
 void handleArchiveRestore() {
-  bool ok = g_buf.restoreArchived();
+  bool ok = g_cache.restoreArchived();
   server.send(200, "text/plain", ok ? "restored" : "empty");
   // Логируем результат восстановления архива
   chatMsg("SYS", ok ? String("archive restored") : String("archive empty"));
@@ -1377,7 +1379,7 @@ void handleArchiveRestore() {
 
 // Сброс счётчика сообщений
 void handleIdReset() {
-  g_buf.setNextId(1);
+  g_cache.setNextId(1);
   persistMsgId();
   server.send(200, "text/plain", "msgid reset");
   // Логируем сброс счётчика сообщений
@@ -1407,7 +1409,7 @@ void handleFrames() {
 void handleSimple() {
   // Enqueue a simple test message ("ping").
   const char* msg = "ping";
-  g_buf.enqueue(reinterpret_cast<const uint8_t*>(msg), strlen(msg), false);
+  g_cache.enqueue(reinterpret_cast<const uint8_t*>(msg), strlen(msg), false);
   persistMsgId();
   server.send(200, "text/plain", "simple queued");
   // Сообщаем о постановке тестового сообщения
@@ -1425,7 +1427,7 @@ void handleLarge() {
   for (int i = 0; i < n; i++) {
     big[i] = (uint8_t)(i & 0xFF);
   }
-  g_buf.enqueue(big.data(), big.size(), false);
+  g_cache.enqueue(big.data(), big.size(), false);
   persistMsgId();
   server.send(200, "text/plain", "large queued");
   // Логируем постановку большого сообщения
@@ -1484,13 +1486,13 @@ void handleSetMsgId() {
     if (id == 0) {
       id = 1;
     }
-    g_buf.setNextId(id);
+    g_cache.setNextId(id);
     persistMsgId();
     // Логируем установку идентификатора
     chatMsg("SYS", String("MSGID set to ") + String(id));
   }
   char buf[32];
-  snprintf(buf, sizeof(buf), "%lu", (unsigned long)g_buf.nextId());
+  snprintf(buf, sizeof(buf), "%lu", (unsigned long)g_cache.nextId());
   server.send(200, "text/plain", buf);
 }
 
@@ -1501,7 +1503,7 @@ void handleSetMsgId() {
 // also emits a system message to the chat and persists the message ID.
 void sendKeyRequest() { // QOS: Высокий Постановка в очередь запроса ключа
   const char* req = "KEYREQ";
-  g_buf.enqueue(reinterpret_cast<const uint8_t*>(req), strlen(req), true);
+  g_cache.enqueue(reinterpret_cast<const uint8_t*>(req), strlen(req), true);
   persistMsgId();
   g_key_request_active = true;
   chatLine(String("*SYS:* KEYREQ queued"));
@@ -1523,7 +1525,7 @@ void sendKeyResponse() { // QOS: Высокий Постановка в очер
   }
   hexstr[32] = '\0';
   snprintf(buf, sizeof(buf), "KEYRES %u %s", (unsigned)g_kid, hexstr);
-  g_buf.enqueue(reinterpret_cast<const uint8_t*>(buf), strlen(buf), true);
+  g_cache.enqueue(reinterpret_cast<const uint8_t*>(buf), strlen(buf), true);
   persistMsgId();
   g_key_request_active = false;
   chatLine(String("*SYS:* KEYRES queued"));
@@ -1653,7 +1655,7 @@ void startKeyDh() {
     msg += hexdig[(hmac[i] >> 4) & 0xF];
     msg += hexdig[hmac[i] & 0xF];
   }
-  g_buf.enqueue(reinterpret_cast<const uint8_t*>(msg.c_str()), msg.length(), true);
+  g_cache.enqueue(reinterpret_cast<const uint8_t*>(msg.c_str()), msg.length(), true);
   persistMsgId();
   g_keydh_in_progress = true;
   g_keydh_initiator = true;
@@ -1806,7 +1808,7 @@ bool processKeyDh(const String& m) {
         resp += hex[(respHmac[i] >> 4) & 0xF];
         resp += hex[respHmac[i] & 0xF];
       }
-      g_buf.enqueue(reinterpret_cast<const uint8_t*>(resp.c_str()), resp.length(), true);
+      g_cache.enqueue(reinterpret_cast<const uint8_t*>(resp.c_str()), resp.length(), true);
       persistMsgId();
       chatLine(String("*SYS:* KEYDH2 queued; KID=") + String((unsigned)g_kid));
     } else {
@@ -1971,7 +1973,7 @@ void handleSendQ() { // QOS: Зависит HTTP-обработчик отпра
   Qos q = parseQos(pr);
   std::vector<uint8_t> bytes(txt.length());
   memcpy(bytes.data(), txt.c_str(), txt.length());
-  if (g_buf.enqueueQos(bytes.data(), bytes.size(), false, q) == 0) {
+  if (g_cache.enqueueQos(bytes.data(), bytes.size(), false, q) == 0) {
     server.send(503, "text/plain", "queue full");
     return;
   }
@@ -1996,7 +1998,7 @@ void handleLargeQ() {
   Qos q = parseQos(pr);
   std::vector<uint8_t> big(sz);
   for (int i = 0; i < sz; i++) big[i] = (uint8_t)(i & 0xFF);
-  if (g_buf.enqueueQos(big.data(), big.size(), false, q) == 0) {
+  if (g_cache.enqueueQos(big.data(), big.size(), false, q) == 0) {
     server.send(503, "text/plain", "queue full");
     return;
   }
@@ -2009,13 +2011,13 @@ void handleLargeQ() {
 void handleQos() {
   // Build a multiline string with counts and bytes per priority and current mode
   char buf[256];
-  const char* mode = (g_buf.schedulerMode() == QosMode::Strict) ? "STRICT" : "W421";
+  const char* mode = (g_cache.schedulerMode() == QosMode::Strict) ? "STRICT" : "W421";
   snprintf(buf, sizeof(buf),
            "Mode=%s\nH: q=%u bytes=%u cap=%u\nN: q=%u bytes=%u cap=%u\nL: q=%u bytes=%u cap=%u",
            mode,
-           (unsigned)g_buf.lenH(), (unsigned)g_buf.bytesH(), (unsigned)cfg::TX_BUF_QOS_CAP_HIGH,
-           (unsigned)g_buf.lenN(), (unsigned)g_buf.bytesN(), (unsigned)cfg::TX_BUF_QOS_CAP_NORMAL,
-           (unsigned)g_buf.lenL(), (unsigned)g_buf.bytesL(), (unsigned)cfg::TX_BUF_QOS_CAP_LOW);
+           (unsigned)g_cache.lenH(), (unsigned)g_cache.bytesH(), (unsigned)cfg::TX_BUF_QOS_CAP_HIGH,
+           (unsigned)g_cache.lenN(), (unsigned)g_cache.bytesN(), (unsigned)cfg::TX_BUF_QOS_CAP_NORMAL,
+           (unsigned)g_cache.lenL(), (unsigned)g_cache.bytesL(), (unsigned)cfg::TX_BUF_QOS_CAP_LOW);
   server.send(200, "text/plain", buf);
   // Логируем запрос статистики QoS
   chatMsg("SYS", "QOS stats requested");
@@ -2030,12 +2032,12 @@ void handleSetQosMode() {
   String v = server.arg("val");
   v.trim(); v.toUpperCase();
   if (v == "STRICT" || v == "S") {
-    g_buf.setSchedulerMode(QosMode::Strict);
+    g_cache.setSchedulerMode(QosMode::Strict);
     server.send(200, "text/plain", "qosmode strict");
     // Логируем смену режима QoS
     chatMsg("SYS", "QOSMODE=STRICT");
   } else if (v == "W421" || v == "WEIGHTED421") {
-    g_buf.setSchedulerMode(QosMode::Weighted421);
+    g_cache.setSchedulerMode(QosMode::Weighted421);
     server.send(200, "text/plain", "qosmode w421");
     // Логируем смену режима QoS
     chatMsg("SYS", "QOSMODE=W421");
@@ -2446,7 +2448,7 @@ static void handleCommand(const String& line) {
 
   if (CM == "SIMPLE") {
     const char* msg = "ping";
-    g_buf.enqueue(reinterpret_cast<const uint8_t*>(msg), strlen(msg), false);
+    g_cache.enqueue(reinterpret_cast<const uint8_t*>(msg), strlen(msg), false);
     persistMsgId();
     Serial.println(F("Queued SIMPLE."));
     return;
@@ -2456,7 +2458,7 @@ static void handleCommand(const String& line) {
     if (sz < 1) sz = 1200;
     std::vector<uint8_t> big(sz);
     for (int i = 0; i < sz; i++) big[i] = (uint8_t)(i & 0xFF);
-    g_buf.enqueue(big.data(), big.size(), false);
+    g_cache.enqueue(big.data(), big.size(), false);
     persistMsgId();
     Serial.printf("Queued LARGE %d bytes.\n", sz);
     return;
@@ -2469,7 +2471,7 @@ static void handleCommand(const String& line) {
     size_t n = (size_t)arg.length();
     std::vector<uint8_t> bytes(n);
     memcpy(bytes.data(), arg.c_str(), n);
-    g_buf.enqueue(bytes.data(), bytes.size(), false);
+    g_cache.enqueue(bytes.data(), bytes.size(), false);
     persistMsgId();
     Serial.println(F("Queued SEND."));
     return;
@@ -2669,10 +2671,10 @@ static void handleCommand(const String& line) {
     if (arg.length()) {
       uint32_t n = (uint32_t)strtoul(arg.c_str(), nullptr, 10);
       if (n == 0) n = 1;
-      g_buf.setNextId(n);
+      g_cache.setNextId(n);
       persistMsgId();
     }
-    Serial.printf("MSGID_NEXT=%lu\n", (unsigned long)g_buf.nextId());
+    Serial.printf("MSGID_NEXT=%lu\n", (unsigned long)g_cache.nextId());
     return;
   }
 
@@ -2739,7 +2741,7 @@ if (CM == "SENDQ") {
   else if (q.equalsIgnoreCase("L")) qq = Qos::Low;
 
   std::vector<uint8_t> bytes(txt.length()); memcpy(bytes.data(), txt.c_str(), txt.length());
-  if (g_buf.enqueueQos(bytes.data(), bytes.size(), false, qq) == 0) { Serial.println(F("Queue full (cap or total)")); return; }
+  if (g_cache.enqueueQos(bytes.data(), bytes.size(), false, qq) == 0) { Serial.println(F("Queue full (cap or total)")); return; }
   persistMsgId();
   Serial.println(F("Queued SENDQ.")); return;
 }
@@ -2756,21 +2758,21 @@ if (CM == "LARGEQ") {
   else if (q.equalsIgnoreCase("L")) qq = Qos::Low;
 
   std::vector<uint8_t> big(sz); for (int i=0;i<sz;i++) big[i] = (uint8_t)(i & 0xFF);
-  if (g_buf.enqueueQos(big.data(), big.size(), false, qq) == 0) { Serial.println(F("Queue full (cap or total)")); return; }
+  if (g_cache.enqueueQos(big.data(), big.size(), false, qq) == 0) { Serial.println(F("Queue full (cap or total)")); return; }
   persistMsgId();
   Serial.printf("Queued LARGEQ %d bytes.\n", sz); return;
 }
 if (CM == "QOS") {
-  Serial.printf("QOS H: q=%u bytes=%u cap=%u\n", (unsigned)g_buf.lenH(), (unsigned)g_buf.bytesH(), (unsigned)cfg::TX_BUF_QOS_CAP_HIGH);
-  Serial.printf("QOS N: q=%u bytes=%u cap=%u\n", (unsigned)g_buf.lenN(), (unsigned)g_buf.bytesN(), (unsigned)cfg::TX_BUF_QOS_CAP_NORMAL);
-  Serial.printf("QOS L: q=%u bytes=%u cap=%u\n", (unsigned)g_buf.lenL(), (unsigned)g_buf.bytesL(), (unsigned)cfg::TX_BUF_QOS_CAP_LOW);
+  Serial.printf("QOS H: q=%u bytes=%u cap=%u\n", (unsigned)g_cache.lenH(), (unsigned)g_cache.bytesH(), (unsigned)cfg::TX_BUF_QOS_CAP_HIGH);
+  Serial.printf("QOS N: q=%u bytes=%u cap=%u\n", (unsigned)g_cache.lenN(), (unsigned)g_cache.bytesN(), (unsigned)cfg::TX_BUF_QOS_CAP_NORMAL);
+  Serial.printf("QOS L: q=%u bytes=%u cap=%u\n", (unsigned)g_cache.lenL(), (unsigned)g_cache.bytesL(), (unsigned)cfg::TX_BUF_QOS_CAP_LOW);
   return;
 }
 
 if (CM == "QOSMODE") {
   String v = arg; v.trim(); v.toUpperCase();
-  if (v == "STRICT" || v == "S") { g_buf.setSchedulerMode(QosMode::Strict); Serial.println(F("QOSMODE=STRICT")); }
-  else if (v == "W421") { g_buf.setSchedulerMode(QosMode::Weighted421); Serial.println(F("QOSMODE=W421")); }
+  if (v == "STRICT" || v == "S") { g_cache.setSchedulerMode(QosMode::Strict); Serial.println(F("QOSMODE=STRICT")); }
+  else if (v == "W421") { g_cache.setSchedulerMode(QosMode::Weighted421); Serial.println(F("QOSMODE=W421")); }
   else { Serial.println(F("Usage: QOSMODE <STRICT|W421>")); }
   return;
 }

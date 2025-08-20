@@ -108,21 +108,32 @@ void MessageBuffer::popFront() {
 
 void MessageBuffer::markAcked(uint32_t msg_id) {
   auto it = index_.find(msg_id);
-  if (it == index_.end()) return;
-  auto ref = it->second;
-  size_t sz = ref.it->data.size();
-  total_bytes_ -= sz;
-  if (ref.qos == Qos::High) {
-    bytesH_ -= sz;
-    qH_.erase(ref.it);
-  } else if (ref.qos == Qos::Normal) {
-    bytesN_ -= sz;
-    qN_.erase(ref.it);
-  } else {
-    bytesL_ -= sz;
-    qL_.erase(ref.it);
+  if (it != index_.end()) {
+    auto ref = it->second;
+    size_t sz = ref.it->data.size();
+    total_bytes_ -= sz;
+    if (ref.qos == Qos::High) {
+      bytesH_ -= sz;
+      qH_.erase(ref.it);
+    } else if (ref.qos == Qos::Normal) {
+      bytesN_ -= sz;
+      qN_.erase(ref.it);
+    } else {
+      bytesL_ -= sz;
+      qL_.erase(ref.it);
+    }
+    index_.erase(it);
+    return;
   }
-  index_.erase(it);
+  // если сообщение было перенесено в архив
+  for (auto ait = archived_.begin(); ait != archived_.end(); ++ait) {
+    if (ait->id == msg_id) {
+      size_t sz = ait->data.size();
+      bytesArch_ -= sz;
+      archived_.erase(ait);
+      break;
+    }
+  }
 }
 
 // перенос сообщения в архив при неудачном ACK

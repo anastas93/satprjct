@@ -1,6 +1,6 @@
 
 #pragma once
-#include "message_buffer.h"
+#include "message_cache.h"
 #include "packet_formatter.h"
 #include "radio_interface.h"
 #include "metrics.h"
@@ -9,7 +9,7 @@
 
 class TxPipeline {
 public:
-  TxPipeline(MessageBuffer& buf, PacketFormatter& fmt, IRadioTransport& radio, PipelineMetrics& m);
+  TxPipeline(MessageCache& cache, PacketFormatter& fmt, IRadioTransport& radio, PipelineMetrics& m);
   void loop();
   void enableAck(bool v) { ack_enabled_ = v; }
   // настройка параметров повторов
@@ -42,7 +42,7 @@ private:
   void controlProfile();      // контроллер изменения профиля по метрикам
   void applyProfile(uint8_t p);
 
-  MessageBuffer& buf_;
+  MessageCache& cache_;
   PacketFormatter& formatter_;
   IRadioTransport& radio_;
   PipelineMetrics& metrics_;

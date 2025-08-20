@@ -33,21 +33,21 @@ static uint16_t addJitter(uint16_t base) {
   return res;
 }
 
-TxPipeline::TxPipeline(MessageBuffer& buf, PacketFormatter& fmt, IRadioTransport& radio, PipelineMetrics& m)
-: buf_(buf), formatter_(fmt), radio_(radio), metrics_(m) {}
+TxPipeline::TxPipeline(MessageCache& cache, PacketFormatter& fmt, IRadioTransport& radio, PipelineMetrics& m)
+: cache_(cache), formatter_(fmt), radio_(radio), metrics_(m) {}
 
 // Помещает служебное сообщение смены ключа в очередь с требованием ACK
 void TxPipeline::queueKeyChange(uint8_t kid) {
   char tmp[16];
   int n = snprintf(tmp, sizeof(tmp), "KEYCHG %u", kid);
-  buf_.enqueue(reinterpret_cast<uint8_t*>(tmp), n, true);
+  cache_.enqueue(reinterpret_cast<uint8_t*>(tmp), n, true);
 }
 
 // Помещает служебное сообщение подтверждения смены ключа
 void TxPipeline::queueKeyAck(uint8_t kid) {
   char tmp[16];
   int n = snprintf(tmp, sizeof(tmp), "KEYACK %u", kid);
-  buf_.enqueue(reinterpret_cast<uint8_t*>(tmp), n, false);
+  cache_.enqueue(reinterpret_cast<uint8_t*>(tmp), n, false);
 }
 
 // Публичная обёртка для установки профиля вручную
@@ -100,6 +100,7 @@ void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
       unsigned long dt = millis() - it->start_ms;
       metrics_.ack_time_ms_avg = (metrics_.ack_time_ms_avg == 0) ? dt : (metrics_.ack_time_ms_avg*3 + dt)/4;
       metrics_.ack_seen++;
+      cache_.markAcked(id);
       it = pending_.erase(it);
     } else {
       ++it;
@@ -108,7 +109,7 @@ void TxPipeline::notifyAck(uint32_t highest, uint32_t bitmap) {
   // выясняем количество свободных слотов окна SR-ARQ и заполняем их из архива
   size_t free_slots = (window_size_ > pending_.size()) ? (window_size_ - pending_.size()) : 0;
   if (free_slots) {
-    buf_.restoreArchived(free_slots);
+    cache_.restoreArchived(free_slots);
   }
   // Сброс ожидания после прихода ACK
   if (waiting_ack_) {
@@ -138,7 +139,7 @@ void TxPipeline::loop() {
         ++it;
       } else {
         // при полном исчерпании повторов переносим сообщение в архив
-        buf_.archive(it->msg.id);
+        cache_.archive(it->msg.id);
         metrics_.ack_fail++;
         it = pending_.erase(it);
       }
@@ -157,17 +158,19 @@ void TxPipeline::loop() {
   }
 
   // Заполняем окно новыми сообщениями
-  while (pending_.size() < window_size_ && buf_.hasPending()) {
+  while (pending_.size() < window_size_ && cache_.hasPending()) {
     if (!interFrameGap()) break;
     OutgoingMessage m;
-    if (!buf_.peekNext(m)) break;
-    buf_.popFront();
+    if (!cache_.peek(m)) break;
     bool reqAck = ack_enabled_ || m.ack_required;
     size_t sent = sendMessageFragments(m);
     frags_in_burst_ += sent;
     if (reqAck) {
       Pending p{m, max_retries_, millis(), millis(), addJitter(ack_timeout_), 0}; // стартовый таймаут с джиттером
       pending_.push_back(std::move(p));
+    } else {
+      // без требования ACK удаляем сразу
+      cache_.markAcked(m.id);
     }
     if (ack_enabled_ && frags_in_burst_ >= burst_limit_) {
       waiting_ack_ = true; burst_wait_ms_ = millis();
