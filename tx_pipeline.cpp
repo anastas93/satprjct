@@ -68,7 +68,8 @@ size_t TxPipeline::sendMessageFragments(const OutgoingMessage& m) { // QOS: Ср
 
   size_t sent = 0;
   for (auto& pf : frames) {
-    radio_.sendFrame(pf.data.data(), pf.data.size(), m.qos);
+    // Передача кадра через абстрактный радиоинтерфейс
+    radio_.transmit(pf.data.data(), pf.data.size(), m.qos);
     FrameLog::push('T', pf.data.data(), pf.data.size(),
                    pf.hdr.msg_id, (uint8_t)formatter_.fecMode(), formatter_.interleaveDepth(),
                    0.0f, 0.0f, 0.0f,

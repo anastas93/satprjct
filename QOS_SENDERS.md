@@ -11,7 +11,7 @@
 | `rx_pipeline.cpp` | `RxPipeline::sendAck` | Отправка ACK при приёме сообщений | Высокий |
 | `tx_engine.cpp` | `Radio_sendRaw` | Совместимый API для отправки кадров в радио | Высокий |
 | `tx_engine.cpp` | `TxEngine::sendFrame` | Низкоуровневая передача кадра через радио | Высокий |
-| `tx_pipeline.cpp` | `TxPipeline::sendMessageFragments` | Фрагментация и отправка сообщения по кадрам | Средний |
+| `tx_pipeline.cpp` | `TxPipeline::sendMessageFragments` | Подготовка и отправка кадров | Средний |
 | `web_script.h` | `ackChk` | Включение/отключение ACK | Нормальный |
 | `web_script.h` | `archivelist` | Список архива сообщений | Нормальный |
 | `web_script.h` | `archiverestore` | Восстановление архива сообщений | Нормальный |
@@ -36,7 +36,6 @@
 | `web_script.h` | `replayclr` | Очистка счётчиков реплеев | Высокий |
 | `web_script.h` | `satRunBtn` | Расширенный SatPing | Низкий |
 | `web_script.h` | `selftest` | Тестовый запрос selftest | Низкий |
-| `web_script.h` | `sendBtn` | Отправка текстового сообщения через чат | Нормальный |
 | `web_script.h` | `sendParam` | Настройка параметров радио | Нормальный |
 | `web_script.h` | `sendq` | Сообщение с явным приоритетом | Зависит |
 | `web_script.h` | `setdup` | Переключение режима дублирования | Нормальный |
