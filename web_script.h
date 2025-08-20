@@ -1,6 +1,6 @@
 // Скрипт веб-интерфейса
 #pragma once
-// Сохранение настроек и истории чата, статус Simple/Large, прочерки вместо хеша ключей, кнопка просмотра хеша
+// Сохранение настроек и истории чата, статус Simple/Large, автоматическое отображение хеша ключа
 const char WEB_SCRIPT_JS[] PROGMEM = R"rawliteral(
 function appendChat(t){
   const chat=document.getElementById('chat');
@@ -12,6 +12,7 @@ function appendChat(t){
     txt=m[2];
     if(tag==='TX'){cls='tx';blinkIndicator('txIndicator');}
     else if(tag==='RX'){cls='rx';blinkIndicator('rxIndicator');}
+    else if(tag==='SYS' && /^F(REQ|RX|TX)/.test(txt)){cls='freq';} // сообщения об изменении частоты
     else cls='sys';
   }
   const tm=new Date().toLocaleTimeString();
@@ -57,17 +58,19 @@ function updateLinkDiag(){
     const lp=document.getElementById('linkProfile');if(lp)lp.textContent='Профиль: '+d.profile;
     const ab=document.getElementById('ackBitmap');if(ab)ab.textContent='Bitmap долгов: '+d.bitmap;
     const qc=document.getElementById('queueCounter');if(qc)qc.textContent='Q: '+d.queue;
-    if(typeof d.tx_frames==='number' && d.tx_frames>lastTx){blinkIndicator('txIndicator');lastTx=d.tx_frames;}
-    if(typeof d.rx_frames==='number' && d.rx_frames>lastRx){blinkIndicator('rxIndicator');lastRx=d.rx_frames;}
+    const txf=Number(d.tx_frames); // счётчик передач
+    if(!isNaN(txf) && txf>lastTx){blinkIndicator('txIndicator');lastTx=txf;}
+    const rxf=Number(d.rx_frames); // счётчик приёмов
+    if(!isNaN(rxf) && rxf>lastRx){blinkIndicator('rxIndicator');lastRx=rxf;}
   }).catch(()=>{});
 }
 setInterval(updateLinkDiag,1000);
-// WebSocket с авто‑переподключением
-let ws;
+// Отдельный WebSocket только для чата, запросы веб‑меню идут по HTTP и не блокируют его
+let chatWs;
 let wsDelay=1000; // начальная задержка между попытками (мс)
-function connectWs(){
-  ws=new WebSocket('ws://'+location.hostname+':81/');
-  ws.onmessage=e=>{
+function connectChat(){
+  chatWs=new WebSocket('ws://'+location.hostname+':81/');
+  chatWs.onmessage=e=>{
     const t=e.data.trim();
     if(!t)return;
     t.split('\n').forEach(l=>{
@@ -87,13 +90,13 @@ function connectWs(){
       }
     });
   };
-  ws.onclose=()=>{ // при разрыве соединения переподключаемся с ростом задержки
-    setTimeout(connectWs,wsDelay);
+  chatWs.onclose=()=>{ // при разрыве соединения переподключаемся с ростом задержки
+    setTimeout(connectChat,wsDelay);
     wsDelay=Math.min(wsDelay*2,10000);
   };
-  ws.onopen=()=>{wsDelay=1000;};
+  chatWs.onopen=()=>{wsDelay=1000;};
 }
-connectWs();
+connectChat();
 function applyProfile(name){
   if(name==='range'){
     setSelect('bwSelect','7.8');setSelect('sfSelect','12');setSelect('crSelect','8');setSelect('txpSelect','12');
@@ -112,16 +115,24 @@ function sendPerTh(){const hi=document.getElementById('perHigh').value;const lo=
 function sendEbn0Th(){const hi=document.getElementById('ebn0High').value;const lo=document.getElementById('ebn0Low').value;fetch('/setebn0th?hi='+encodeURIComponent(hi)+'&lo='+encodeURIComponent(lo));}
 // Безопасно добавляет обработчики событий и пропускает отсутствующие элементы
 function on(id,ev,fn){const el=document.getElementById(id);if(el)el.addEventListener(ev,fn);}
-// Обработчик отправки сообщения с мгновенным откликом интерфейса
+// Обработчик отправки сообщения: WebSocket для чата + резервный HTTP
 on('sendBtn','click',()=>{
   const m=document.getElementById('msg').value;
   const st=document.getElementById('sendStatus');
   const btn=document.getElementById('sendBtn');
   if(m){
-    // блокируем кнопку и показываем процесс отправки
+    // мгновенно показываем в чате
+    appendChat('*TX:* '+m);
     btn.disabled=true;
     st.textContent='...';
-    fetch('/send?msg='+encodeURIComponent(m)).then(r=>{
+    let sendPromise;
+    if(chatWs && chatWs.readyState===WebSocket.OPEN){
+      try{chatWs.send(m);sendPromise=Promise.resolve({ok:true});}
+      catch(e){sendPromise=Promise.reject(e);}
+    }else{
+      sendPromise=fetch('/send?msg='+encodeURIComponent(m));
+    }
+    sendPromise.then(r=>{
       if(r.ok){st.textContent='\u2714';st.style.color='var(--sys-color)';}
       else{st.textContent='\u2716';st.style.color='red';}
     }).catch(()=>{st.textContent='\u2716';st.style.color='red';})
@@ -250,27 +261,12 @@ const keyTestBtn=document.getElementById('keyTestBtn');if(keyTestBtn){on('keyTes
 const keyReqBtn=document.getElementById('keyReqBtn');if(keyReqBtn){on('keyReqBtn','click',()=>{fetch('/keyreq');});}
 const keySendBtn=document.getElementById('keySendBtn');if(keySendBtn){on('keySendBtn','click',()=>{fetch('/keysend');});}
 const keyDhBtn=document.getElementById('keyDhBtn');if(keyDhBtn){on('keyDhBtn','click',()=>{fetch('/keydh');});}
-// Кнопка отображения хеша ключа с обработкой всех вариантов ответа
-const keyHashBtn=document.getElementById('keyHashBtn');
-if(keyHashBtn){
-  on('keyHashBtn','click',()=>{
-    fetch('/keyhash').then(r=>{
-      if(r.status===200){
-        return r.text().then(t=>{alert('Hash: '+t.trim());});
-      }else if(r.status===404){
-        return r.text().then(t=>{alert('Ключ не задан');});
-      }else{
-        alert('Нет связи с устройством');
-      }
-    }).catch(()=>{alert('Нет связи с устройством');});
-  });
-}
 function updateKeyStatus(){
   fetch('/keystatus').then(r=>r.json()).then(d=>{
     const i=document.getElementById('keyIndicator');
     const t=document.getElementById('keyStatusText');
     if(!i||!t)return;
-    const h=d.hash||'----';
+    const h=d.hash?d.hash:'no-key'; // если ключ отсутствует
     if(d.status==='local'){
       i.classList.remove('remote');i.classList.add('local');t.textContent='Local '+h;
     }else{

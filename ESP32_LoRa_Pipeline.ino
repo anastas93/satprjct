@@ -64,8 +64,11 @@ RxPipeline g_rx(g_ccm, g_metrics);
 Preferences prefs;
 Bank g_bank = Bank::MAIN;
 int g_preset = 0;
-float g_freq_rx_mhz = GetFreqTable(Bank::MAIN)[0].rxMHz;
-float g_freq_tx_mhz = GetFreqTable(Bank::MAIN)[0].txMHz;
+// Указатель на текущий список частот; позволяет быстро менять банк
+// и не обращаться к функции GetFreqTable каждый раз.
+const std::vector<FreqPreset>* g_freq_table = &FREQ_MAIN;
+float g_freq_rx_mhz = (*g_freq_table)[0].rxMHz;
+float g_freq_tx_mhz = (*g_freq_table)[0].txMHz;
 float g_curr_freq_mhz = g_freq_rx_mhz; // текущая фактическая частота
 float g_bw_khz = 125.0f;
 uint8_t g_sf = 9;
@@ -325,12 +328,14 @@ static inline void persistMsgId() {
 // шестнадцатеричного идентификатора, отображаемого рядом с надписью
 // "Local" в веб‑интерфейсе для проверки активного ключа.
 static void applyPreset() {
-  // Получаем вектор пресетов для текущего банка
-  const auto& tbl = GetFreqTable(g_bank);
-  if (g_preset < 0 || g_preset >= (int)tbl.size()) return;
+  // Используем ранее выбранный список частот
+  if (!g_freq_table) {
+    g_freq_table = &FREQ_MAIN;
+  }
+  if (g_preset < 0 || g_preset >= (int)g_freq_table->size()) return;
 
-  g_freq_rx_mhz = tbl[g_preset].rxMHz;
-  g_freq_tx_mhz = tbl[g_preset].txMHz;
+  g_freq_rx_mhz = (*g_freq_table)[g_preset].rxMHz;
+  g_freq_tx_mhz = (*g_freq_table)[g_preset].txMHz;
   Radio_setFrequency((uint32_t)(g_freq_rx_mhz * 1e6f));
   // Сразу возвращаем радио в приём на полный цикл TDD
   Radio_forceRx(msToTicks(tdd::cycleLen()));
@@ -491,8 +496,6 @@ static void saveConfig() {
   prefs.begin("lora", false);
   prefs.putUChar("bank", (uint8_t)g_bank);
   prefs.putChar("preset", (char)g_preset);
-  prefs.putFloat("frx", g_freq_rx_mhz);
-  prefs.putFloat("ftx", g_freq_tx_mhz);
   prefs.putFloat("bw", g_bw_khz);
   prefs.putUChar("sf", g_sf);
   prefs.putUChar("cr", g_cr);
@@ -527,8 +530,6 @@ static void loadConfig() {
   prefs.begin("lora", true);
   g_bank = (Bank)prefs.getUChar("bank", (uint8_t)g_bank);
   g_preset = (int)prefs.getChar("preset", (char)g_preset);
-  g_freq_rx_mhz = prefs.getFloat("frx", g_freq_rx_mhz);
-  g_freq_tx_mhz = prefs.getFloat("ftx", g_freq_tx_mhz);
   g_bw_khz = prefs.getFloat("bw", g_bw_khz);
   g_sf = prefs.getUChar("sf", g_sf);
   g_cr = prefs.getUChar("cr", g_cr);
@@ -549,7 +550,8 @@ static void loadConfig() {
   prefs.end();
   g_buf.setNextId(nid);
 
-  Radio_setFrequency((uint32_t)(g_freq_rx_mhz * 1e6f));
+  // Выбираем список частот и применяем остальные параметры
+  g_freq_table = &GetFreqTable(g_bank);
   Radio_setBandwidth((uint32_t)g_bw_khz);
   Radio_setSpreadingFactor(g_sf);
   Radio_setCodingRate(g_cr);
@@ -561,8 +563,8 @@ static void loadConfig() {
   g_ccm.setEnabled(g_enc_on);
   g_ccm.setActiveKid(g_kid);
   g_tx.setEncEnabled(g_enc_on);
-  // Возвращаемся в приём на полный цикл
-  Radio_forceRx(msToTicks(tdd::cycleLen()));
+  // Применяем выбранный пресет и переходим на приём
+  applyPreset();
   Serial.println(F("Loaded."));
 }
 
@@ -664,6 +666,7 @@ void handleSetBank() {
     return;
   }
   g_bank = static_cast<Bank>(b);
+  g_freq_table = &GetFreqTable(g_bank);
   applyPreset();
   server.send(200, "text/plain", "bank changed");
   // Логируем изменение банка в чат
