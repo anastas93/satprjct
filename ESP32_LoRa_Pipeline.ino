@@ -216,6 +216,7 @@ void handleSetAck();
 void handleSetAckJitter();
 void handleSetBackoff();
 void handleSetAutorate();
+void handleSetTxProfile();
 void handleSetPerTh();
 void handleSetEbn0Th();
 void handleToggleEnc();
@@ -682,8 +683,10 @@ void handleSetPreset() {
   g_preset = p;
   applyPreset();
   server.send(200, "text/plain", "preset changed");
-  // Логируем изменение пресета в чат
-  chatMsg("SYS", String("Preset set to ") + String(p));
+  // Логируем изменение пресета с указанием частот RX/TX
+  chatMsg("SYS", String("Preset set to ") + String(p) +
+                 String(" (RX ") + String(g_freq_rx_mhz,3) +
+                 String(" MHz TX ") + String(g_freq_tx_mhz,3) + " MHz)");
 }
 
 void handleSetBw() {
@@ -931,6 +934,23 @@ void handleSetAutorate() {
   chatMsg("SYS", String("AUTORATE=") + (on ? "ON" : "OFF"));
 }
 
+// Ручной выбор профиля передачи P0..P3
+void handleSetTxProfile() {
+  if (!server.hasArg("val")) {
+    server.send(400, "text/plain", "val missing");
+    return;
+  }
+  int p = server.arg("val").toInt();
+  if (p < 0 || p > 3) {
+    server.send(400, "text/plain", "range 0..3");
+    return;
+  }
+  g_tx.applyProfile((uint8_t)p);
+  server.send(200, "text/plain", "txprofile set");
+  // Сообщаем выбранный профиль в чат
+  chatMsg("SYS", String("TX profile P") + String(p));
+}
+
 // Установка порогов PER (hi/lo)
 void handleSetPerTh() {
   if (!server.hasArg("hi") || !server.hasArg("lo")) { server.send(400, "text/plain", "hi/lo missing"); return; }
@@ -987,7 +1007,8 @@ void handleLinkDiag() {
   json += ",\"bitmap\":\"\"";
   json += ",\"tx_frames\":" + String(g_metrics.tx_frames);
   json += ",\"rx_frames\":" + String(g_metrics.rx_frames_ok);
-  json += "}";
+  json += ",\"queue\":" + String(g_buf.size());
+  json += "}"; 
   server.send(200, "application/json", json);
 }
 
@@ -2736,6 +2757,7 @@ void setup() {
     server.on("/setackjitter", handleSetAckJitter); // джиттер ожидания ACK
     server.on("/setbackoff", handleSetBackoff);     // коэффициенты backoff
     server.on("/setautorate", handleSetAutorate);   // включение автонастройки
+    server.on("/settxprofile", handleSetTxProfile); // ручной профиль P0..P3
     server.on("/setperth", handleSetPerTh);         // пороги PER
     server.on("/setebn0th", handleSetEbn0Th);       // пороги Eb/N0
     server.on("/toggleenc", handleToggleEnc);

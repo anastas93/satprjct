@@ -22,8 +22,9 @@ function appendChat(t){
   while(chat.children.length>100)chat.removeChild(chat.lastChild);
   localStorage.setItem('chatLog',chat.innerHTML);
 }
-// Мигает выбранный индикатор активности TX/RX
-function blinkIndicator(id){const e=document.getElementById(id);if(!e)return;e.classList.add('blink');setTimeout(()=>e.classList.remove('blink'),500);}
+// Мигает выбранный индикатор активности TX/RX (до 1 секунды после события)
+const blinkTimers={};
+function blinkIndicator(id){const e=document.getElementById(id);if(!e)return;e.classList.add('active');clearTimeout(blinkTimers[id]);blinkTimers[id]=setTimeout(()=>e.classList.remove('active'),1000);}
 const savedChat=localStorage.getItem('chatLog');
 if(savedChat){const ch=document.getElementById('chat');ch.innerHTML=savedChat;ch.scrollTop=ch.scrollHeight;}
 const pingHistory=[];
@@ -55,6 +56,7 @@ function updateLinkDiag(){
     drawGraph('ebn0Graph',ebn0Data,'#ffb74d');
     const lp=document.getElementById('linkProfile');if(lp)lp.textContent='Профиль: '+d.profile;
     const ab=document.getElementById('ackBitmap');if(ab)ab.textContent='Bitmap долгов: '+d.bitmap;
+    const qc=document.getElementById('queueCounter');if(qc)qc.textContent='Q: '+d.queue;
     if(typeof d.tx_frames==='number' && d.tx_frames>lastTx){blinkIndicator('txIndicator');lastTx=d.tx_frames;}
     if(typeof d.rx_frames==='number' && d.rx_frames>lastRx){blinkIndicator('rxIndicator');lastRx=d.rx_frames;}
   }).catch(()=>{});
@@ -168,7 +170,8 @@ on('perHigh','change',e=>{localStorage.setItem('perHigh',e.target.value);sendPer
 on('perLow','change',e=>{localStorage.setItem('perLow',e.target.value);sendPerTh();});
 on('ebn0High','change',e=>{localStorage.setItem('ebn0High',e.target.value);sendEbn0Th();});
 on('ebn0Low','change',e=>{localStorage.setItem('ebn0Low',e.target.value);sendEbn0Th();});
-on('autoRateChk','change',e=>{const v=e.target.checked?'1':'0';localStorage.setItem('autorate',v);fetch('/setautorate?val='+v);});
+on('txProfMode','change',e=>{const manual=e.target.value==='manual';localStorage.setItem('txProfMode',e.target.value);const sel=document.getElementById('txProfSelect');if(sel)sel.disabled=!manual;fetch('/setautorate?val='+(manual?'0':'1'));});
+on('txProfSelect','change',e=>{localStorage.setItem('txProfile',e.target.value);fetch('/settxprofile?val='+e.target.value);});
 on('encChk','change',e=>{localStorage.setItem('enc',e.target.checked?'1':'0');fetch('/toggleenc');});
 on('kidInput','change',e=>{localStorage.setItem('kid',e.target.value);sendParam('setkid',e.target.value);});
 on('keyBtn','click',()=>{const k=document.getElementById('keyInput').value;fetch('/setkey?val='+encodeURIComponent(k));});
@@ -192,7 +195,8 @@ function applySettings(){
       ['burstInput','burst'],['ackJitterInput','ackJitter'],['backoffInput','backoff'],
       ['perHigh','perHigh'],['perLow','perLow'],['ebn0High','ebn0High'],['ebn0Low','ebn0Low'],
       ['tddTxInput','tddTx'],['tddAckInput','tddAck'],['tddGuardInput','tddGuard'],
-      ['diagFecSelect','fec'],['diagInterSelect','inter'],['diagFragInput','payload']
+      ['diagFecSelect','fec'],['diagInterSelect','inter'],['diagFragInput','payload'],
+      ['txProfMode','txProfMode'],['txProfSelect','txProfile']
     ];
   m.forEach(([id,key])=>{
     const el=document.getElementById(id);
@@ -202,10 +206,15 @@ function applySettings(){
     document.getElementById('ackChk').checked=localStorage.getItem('ack')==='1';
     document.getElementById('encChk').checked=localStorage.getItem('enc')==='1';
     document.getElementById('dupChk').checked=localStorage.getItem('dup')==='1';
-    document.getElementById('autoRateChk').checked=localStorage.getItem('autorate')==='1';
     document.getElementById('rxBoostChk').checked=localStorage.getItem('rxboost')==='1';
+    const mode=localStorage.getItem('txProfMode')||'auto';
+    const sel=document.getElementById('txProfSelect');
+    if(sel)sel.disabled=mode!=='manual';
   }
 applySettings();
+const initMode=localStorage.getItem('txProfMode')||'auto';
+fetch('/setautorate?val='+(initMode==='manual'?'0':'1'));
+if(initMode==='manual'){const p=localStorage.getItem('txProfile')||'0';fetch('/settxprofile?val='+p);}
 on('pingBtn','click',()=>{fetch('/ping');});
 // Дополнительные режимы пинга
 on('chanPingBtn','click',()=>{fetch('/channelping');});
@@ -267,7 +276,7 @@ function updateKeyStatus(){
     }else{
       i.classList.remove('local');i.classList.add('remote');t.textContent='Remote '+h;
     }
-    i.classList.toggle('blink',Number(d.request)===1);
+    i.classList.toggle('active',Number(d.request)===1);
   }).catch(()=>{});
   setTimeout(updateKeyStatus,1000);
 }

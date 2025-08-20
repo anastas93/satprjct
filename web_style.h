@@ -7,12 +7,13 @@ body.light{--bg-color:#f5f5f5;--fg-color:#222;--panel-bg:#eee;--panel-bg-open:#e
 body{background-color:var(--bg-color);color:var(--fg-color);font-family:Arial,sans-serif;font-size:var(--base-font);margin:0;padding:10px}
 h2{margin-top:0}
 #statusBar{display:flex;align-items:center;margin-bottom:8px}
-.indicator{width:12px;height:12px;border-radius:50%;display:inline-block;margin-right:4px}
+.indicator{display:inline-block;margin-right:4px}
+.indicator.round{width:12px;height:12px;border-radius:50%}
 .indicator.local{background-color:var(--sys-color)}
 .indicator.remote{background-color:var(--rx-color)}
-.indicator.tx{background-color:var(--tx-color)}
-.indicator.rx{background-color:var(--rx-color)}
-.indicator.blink{animation:blink 1s linear infinite}
+.indicator.tx{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:12px solid var(--tx-color)}
+.indicator.rx{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:12px solid var(--rx-color)}
+.indicator.active{animation:blink 1s linear infinite}
 @keyframes blink{0%,50%{opacity:1}50%,100%{opacity:0}}
 #chatPanel{height:40vh;display:flex;flex-direction:column;margin-bottom:10px}
 #chat{flex:1;width:100%;background-color:var(--panel-bg);border:1px solid #555;padding:10px;box-sizing:border-box;overflow-y:auto;display:flex;flex-direction:column;justify-content:flex-end}
