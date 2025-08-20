@@ -25,7 +25,7 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     <div id="chat"></div>
     <div id="inputRow">
       <input id="msg" type="text" placeholder="Введите сообщение">
-      <button id="sendBtn" class="btn-primary" title="Отправить текст по LoRa">Send</button>
+      <button id="sendBtn" type="button" class="btn-primary" title="Отправить текст по LoRa">Send</button><!-- исправлено: кнопка не отправляет форму -->
       <span id="sendStatus"></span>
     </div>
   </div>
