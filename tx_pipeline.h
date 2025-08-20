@@ -35,6 +35,8 @@ public:
   void queueKeyChange(uint8_t kid);
   // Поместить сообщение KEYACK <kid> в очередь без требования ACK
   void queueKeyAck(uint8_t kid);
+  // Ручная установка профиля передачи P0..P3
+  void setProfile(uint8_t p);
 private:
   size_t sendMessageFragments(const OutgoingMessage& m);
   bool interFrameGap();

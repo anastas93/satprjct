@@ -53,6 +53,11 @@ void TxPipeline::queueKeyAck(uint8_t kid) {
   buf_.enqueue(reinterpret_cast<uint8_t*>(tmp), n, false);
 }
 
+// Публичная обёртка для установки профиля вручную
+void TxPipeline::setProfile(uint8_t p) {
+  applyProfile(p);
+}
+
 bool TxPipeline::interFrameGap() {
   unsigned long now = millis();
   if (now - last_tx_ms_ < cfg::INTER_FRAME_GAP_MS) return false;
