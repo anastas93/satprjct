@@ -432,6 +432,9 @@ bool Radio_setRxBoost(bool on) {
   return radio.setRxBoostedGainMode(on, true) == RADIOLIB_ERR_NONE;
 }
 void Radio_forceRx(uint32_t rx_ticks) {
+  // Перед запуском приёма заново выставляем частоту RX,
+  // иначе драйвер может вернуться к 251.850 МГц после передачи
+  Radio_setFrequency((uint32_t)(g_freq_rx_mhz * 1e6f));
   // Запуск приёма с таймаутом в тиках
   radio.startReceive(rx_ticks);
   // Смена состояния на приём
