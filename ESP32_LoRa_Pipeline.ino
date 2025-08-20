@@ -19,15 +19,22 @@
 #include "tdd_scheduler.h"
 #include "selftest.h"
 #include "satping.h"
+#include "tx_engine.h"
 #include "web_interface.h"
 #include "web_style.h"
 #include "web_script.h"
 #include "crypto_spec.h"
 #include "radio_state.h" // состояние радио
+#include "event_queue.h" // очереди событий и команд
+
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
 
 #include <string.h> // for memcmp
 #include <ctype.h>   // for toupper when parsing hex strings
 #include <math.h>    // для вычисления Eb/N0
+#include <algorithm> // для std::min
 
 // --- WiFi and Web server includes ---
 #include <WiFi.h>
@@ -132,6 +139,103 @@ void IRAM_ATTR isr() {
     rxDoneFlag = true;   // завершён приём
   }
   // Дополнительный вызов очистки не требуется
+}
+
+// Задача обработки веб-сервера и рассылки событий
+void webTask(void*) {
+  evt_msg ev;
+  for (;;) {
+    server.handleClient();
+    wsServer.loop();
+    while (xQueueReceive(g_evt_queue, &ev, 0) == pdTRUE) {
+      switch (ev.type) {
+        case evt_t::EVT_RX_START: wsServer.broadcastTXT("{\"type\":\"rx_start\"}"); break;
+        case evt_t::EVT_RX_DONE:  wsServer.broadcastTXT("{\"type\":\"rx_done\"}"); break;
+        case evt_t::EVT_TX_START: wsServer.broadcastTXT("{\"type\":\"tx_start\"}"); break;
+        case evt_t::EVT_TX_DONE:  wsServer.broadcastTXT("{\"type\":\"tx_done\"}"); break;
+        case evt_t::EVT_KEY_CHANGED: {
+          char buf[64];
+          snprintf(buf, sizeof(buf), "{\"type\":\"key_changed\",\"kid\":%u,\"key_crc16\":%u}", ev.data.key.kid, ev.data.key.key_crc16);
+          wsServer.broadcastTXT(buf);
+          break;
+        }
+        case evt_t::EVT_METRICS: {
+          char buf[96];
+          snprintf(buf, sizeof(buf), "{\"type\":\"metrics\",\"per\":%.3f,\"rtt_ms\":%.1f,\"ebn0\":%.2f}",
+                   ev.data.metrics.per, ev.data.metrics.rtt_ms, ev.data.metrics.ebn0_db);
+          wsServer.broadcastTXT(buf);
+          break;
+        }
+      }
+    }
+    vTaskDelay(1);
+  }
+}
+
+// Задача радиоконвейера: обработка команд и событий радио
+void radioTask(void*) {
+  for (;;) {
+    pollUart(Serial, g_line);
+    pollUart(SerialRadxa, g_line_radxa);
+    if (txDoneFlag) {
+      txDoneFlag = false;
+      radio.startReceive();
+      delay(2); // пауза для переключения в приём
+    }
+    if (rxDoneFlag) {
+      rxDoneFlag = false;
+      uint8_t tmp[cfg::LORA_MTU];
+      int16_t len = radio.readData(tmp, sizeof(tmp));
+      if (len == 5) {
+        radio.setFrequency(g_freq_tx_mhz);
+        radio.transmit(tmp, 5);
+        radio.finishTransmit();
+        radio.setFrequency(g_freq_rx_mhz);
+        radio.startReceive();
+      } else {
+        if (len > 0) {
+          Radio_onReceive(tmp, (size_t)len);
+        }
+        radio.startReceive();
+      }
+    }
+    handlePingAsync();
+    if (g_hasRx) {
+      g_rx.onReceive(g_rxBuf.data(), g_rxBuf.size());
+      g_hasRx = false;
+    }
+    if (!g_radio_busy) {
+      g_tx.loop();
+    }
+    cmd_msg cmd;
+    while (xQueueReceive(g_cmd_queue, &cmd, 0) == pdTRUE) {
+      switch (cmd.type) {
+        case cmd_t::CMD_SEND_TEXT: {
+          g_buf.enqueue((uint8_t*)cmd.data.text.data, cmd.data.text.len, false);
+          persistMsgId();
+          chatMsg("TX", String(cmd.data.text.data, cmd.data.text.len));
+          break;
+        }
+        case cmd_t::CMD_SET_BW: {
+          g_bw_khz = cmd.data.bw.khz;
+          Radio_setBandwidth((uint32_t)g_bw_khz);
+          chatMsg("SYS", String("BW set to ") + String(g_bw_khz) + " kHz");
+          break;
+        }
+      }
+    }
+
+    // Периодически публикуем метрики канала
+    static uint32_t last_metrics_ms = 0;
+    uint32_t now = millis();
+    if (now - last_metrics_ms > 1000) {
+      queueMetrics(g_metrics.per_window.avg(),
+                   g_metrics.rtt_window_ms.avg(),
+                   g_metrics.ebn0_window.avg());
+      last_metrics_ms = now;
+    }
+    vTaskDelay(1);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -402,18 +506,11 @@ static void Radio_updateState(RadioState st) {
 
 // ---------------------------------------------------------------------------
 
-// Отправка сырых данных по радио
-bool Radio_sendRaw(const uint8_t* data, size_t len) {
-  // Переключаемся на частоту передачи через обёртку, чтобы избежать ошибок масштаба
-  Radio_setFrequency((uint32_t)(g_freq_tx_mhz * 1e6f));
-  // Смена состояния на передачу
-  Radio_updateState(RadioState::Tx);
+// Низкоуровневая отправка кадра в радио без переключения частот и событий
+// Выделена в отдельную функцию для использования единым TX-движком
+bool radioTransmit(const uint8_t* data, size_t len) {
   int16_t st = radio.transmit(const_cast<uint8_t*>(data), len);
-  radio.finishTransmit();             // принудительно завершаем передачу
-  // Возвращаемся на актуальную частоту приёма той же обёрткой
-  Radio_setFrequency((uint32_t)(g_freq_rx_mhz * 1e6f));
-  // После передачи слушаем эфир на окно ACK+guard
-  Radio_forceRx(msToTicks(tdd::ackWindowMs + tdd::guardMs));
+  radio.finishTransmit();             // принудительное завершение передачи
   return st == RADIOLIB_ERR_NONE;
 }
 bool Radio_setFrequency(uint32_t hz) {
@@ -616,15 +713,13 @@ void handleSend() {
     server.send(400, "text/plain", "empty");
     return;
   }
-  // Convert to byte vector
-  size_t n = (size_t)message.length();
-  std::vector<uint8_t> bytes(n);
-  memcpy(bytes.data(), message.c_str(), n);
-  g_buf.enqueue(bytes.data(), bytes.size(), false);
-  persistMsgId();
-  // Отправляем строку в чат и сохраняем её в буфер
-  chatMsg("TX", message);
-  server.send(200, "text/plain", "ok");
+  // Формируем команду для RadioTask
+  cmd_msg cmd{};
+  cmd.type = cmd_t::CMD_SEND_TEXT;
+  cmd.data.text.len = std::min((size_t)message.length(), sizeof(cmd.data.text.data));
+  memcpy(cmd.data.text.data, message.c_str(), cmd.data.text.len);
+  xQueueSend(g_cmd_queue, &cmd, 0);
+  server.send(202, "text/plain", "queued");
 }
 
 // Handler that returns accumulated serial/output messages since last read.
@@ -702,11 +797,12 @@ void handleSetBw() {
     server.send(400, "text/plain", "range 7.8..500");
     return;
   }
-  g_bw_khz = khz;
-  Radio_setBandwidth((uint32_t)g_bw_khz);
-  server.send(200, "text/plain", "bw changed");
-  // Сообщаем новый BW в чат
-  chatMsg("SYS", String("BW set to ") + String(khz) + " kHz");
+  // Формируем команду и отправляем в RadioTask
+  cmd_msg cmd{};
+  cmd.type = cmd_t::CMD_SET_BW;
+  cmd.data.bw.khz = khz;
+  xQueueSend(g_cmd_queue, &cmd, 0);
+  server.send(202, "text/plain", "queued");
 }
 
 void handleSetSf() {
@@ -1458,7 +1554,12 @@ void handleKeyStatus() {
   } else {
     snprintf(hbuf, sizeof(hbuf), "%04X", (unsigned)crypto_spec::CURRENT_KEY_CRC & 0xFFFF);
   }
-  String json = String("{\"status\":\"") + st + String("\",\"request\":") + (g_key_request_active ? "1" : "0") + String("\",\"hash\":\"") + hbuf + String("\"}");
+  // Отправляем статус, хеш и числовые значения KID/CRC для веб-интерфейса
+  String json = String("{\"status\":\"") + st +
+                String("\",\"request\":") + (g_key_request_active ? "1" : "0") +
+                String("\",\"hash\":\"") + hbuf + String("\",\"kid\":") +
+                String(crypto_spec::getActiveKid()) + String(",\"key_crc16\":") +
+                String(crypto_spec::getKeyCrc16()) + String("}");
   server.send(200, "application/json", json);
 }
 
@@ -1960,6 +2061,11 @@ void chatLine(const String& s) {
 // Формирует строку с тегом и единым форматом "*TAG:* текст" и выводит в чат
 void chatMsg(const String& tag, const String& text) {
   chatLine(String("*") + tag + String(":* ") + text);
+}
+
+// Кладём событие смены ключа в очередь для WebTask
+void notifyKeyChanged() {
+  queueEvent(evt_t::EVT_KEY_CHANGED, crypto_spec::getActiveKid(), crypto_spec::getKeyCrc16());
 }
 
 // -----------------------------------------------------------------------------
@@ -2808,6 +2914,9 @@ void setup() {
   server.begin();
   wsServer.begin();
   wsServer.onEvent(onWsEvent);
+  // Регистрируем колбэк оповещения о смене ключа и отправляем стартовое состояние
+  crypto_spec::setKeyChangedCallback(notifyKeyChanged);
+  notifyKeyChanged();
 
   // Run self-test at startup, outputting results to the serial console.
   SelfTest_runAll(g_ccm, Serial);
@@ -2902,46 +3011,15 @@ void setup() {
   });
 
   loadConfig();
+
+  // Создаём очереди и запускаем задачи WebTask и RadioTask
+  g_evt_queue = xQueueCreate(32, sizeof(evt_msg));
+  g_cmd_queue = xQueueCreate(8, sizeof(cmd_msg));
+  xTaskCreatePinnedToCore(webTask, "WebTask", 4096, nullptr, 2, nullptr, 0);
+  xTaskCreatePinnedToCore(radioTask, "RadioTask", 4096, nullptr, 4, nullptr, 1);
 }
 
 void loop() {
-  pollUart(Serial, g_line);
-  pollUart(SerialRadxa, g_line_radxa);
-  // Handle incoming HTTP clients.
-  server.handleClient();
-  wsServer.loop();
-  // Обработка завершения передачи
-  if (txDoneFlag) {
-    txDoneFlag = false;
-    radio.startReceive();
-    delay(2); // пауза для переключения в приём
-  }
-  // Обработка завершения приёма
-  if (rxDoneFlag) {
-    rxDoneFlag = false;
-    uint8_t tmp[cfg::LORA_MTU];
-    int16_t len = radio.readData(tmp, sizeof(tmp));
-    if (len == 5) {
-      radio.setFrequency(g_freq_tx_mhz);
-      radio.transmit(tmp, 5);
-      radio.finishTransmit();            // принудительный выход из TX
-      radio.setFrequency(g_freq_rx_mhz);
-      radio.startReceive();
-    } else {
-      if (len > 0) {
-        Radio_onReceive(tmp, (size_t)len);
-      }
-      radio.startReceive();
-    }
-  }
-  // Progress asynchronous ping state if active
-  handlePingAsync();
-  if (g_hasRx) {
-    g_rx.onReceive(g_rxBuf.data(), g_rxBuf.size());
-    g_hasRx = false;
-  }
-  // Only run the transmit pipeline when the radio is not busy (e.g. during ping)
-  if (!g_radio_busy) {
-    g_tx.loop();
-  }
+  // Основной цикл теперь пустой: работа ведётся в задачах WebTask/RadioTask
+  vTaskDelay(1);
 }

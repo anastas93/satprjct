@@ -26,8 +26,9 @@ void CcmEncryptor::setActiveKid(uint8_t kid) {
   active_kid_ = kid;
   auto it = keys_.find(kid);
   if (it != keys_.end()) {
-    // Обновляем глобальный ключ для диагностики
+    // Обновляем глобальные сведения о ключе и его идентификаторе
     crypto_spec::setCurrentKey(it->second.key);
+    crypto_spec::setActiveKid(kid);
   }
 }
 

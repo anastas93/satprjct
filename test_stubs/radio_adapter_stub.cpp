@@ -7,13 +7,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// Send a raw LoRa frame.  Always returns true in the stub.
-bool Radio_sendRaw(const uint8_t* data, size_t len) {
-  (void)data;
-  (void)len;
-  return true;
-}
-
 // Stub frequency setter.  Always returns true.
 bool Radio_setFrequencyHz(uint32_t hz) {
   (void)hz;

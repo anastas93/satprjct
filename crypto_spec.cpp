@@ -30,6 +30,12 @@ namespace crypto_spec {
 
   uint8_t CURRENT_KEY[16] = {0};
   uint16_t CURRENT_KEY_CRC = 0;
+  uint8_t CURRENT_KID = 0;
+
+  // Колбэк, вызываемый при смене ключа или KID
+  static KeyChangedCallback key_cb = nullptr;
+
+  void setKeyChangedCallback(KeyChangedCallback cb) { key_cb = cb; }
 
   bool setRootKeyHex(const char* hex) {
     if (!hex || strlen(hex) != 32) return false;
@@ -47,7 +53,17 @@ namespace crypto_spec {
     if (!key) return;
     memcpy(CURRENT_KEY, key, 16);
     CURRENT_KEY_CRC = crc16(CURRENT_KEY, 16);
+    if (key_cb) key_cb();
   }
+
+  void setActiveKid(uint8_t kid) {
+    CURRENT_KID = kid;
+    if (key_cb) key_cb();
+  }
+
+  uint8_t getActiveKid() { return CURRENT_KID; }
+
+  uint16_t getKeyCrc16() { return CURRENT_KEY_CRC; }
 
   // Простое XOR-"шифрование" для подтверждения
   static void xorCrypt(const uint8_t* key, const uint8_t* in, uint8_t* out, size_t len) {

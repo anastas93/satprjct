@@ -10,6 +10,7 @@
 #include <algorithm> // для std::erase_if
 #include <stdlib.h>
 #include "encryptor_ccm.h"
+#include "event_queue.h"
 
 // Простая функция soft-combining для повторов байтов
 static void softCombinePairs(const uint8_t* in, size_t len, std::vector<uint8_t>& out) {
@@ -132,6 +133,10 @@ void RxPipeline::sendAck(uint32_t msg_id) {
 void RxPipeline::onReceive(const uint8_t* frame, size_t len) {
   // Держим радио в нужном состоянии
   tdd::maintain();
+  // Уведомляем веб‑интерфейс о начале приёма и гарантируем событие завершения
+  // Кладём события начала и окончания RX в очередь
+  queueEvent(evt_t::EVT_RX_START);
+  struct RxDoneGuard { ~RxDoneGuard(){ queueEvent(evt_t::EVT_RX_DONE); } } guard;
   size_t hdr_len = hdr_dup_enabled_ ? FRAME_HEADER_SIZE*2 : FRAME_HEADER_SIZE;
   if (!frame || len < hdr_len) return;
   std::vector<uint8_t> hdr_buf;
