@@ -127,6 +127,16 @@ static std::vector<uint8_t> g_rxBuf;
 volatile bool txDoneFlag = false;
 volatile bool rxDoneFlag = false;
 
+// --- Глобальные объекты UART и веб-сервера ---
+HardwareSerial SerialRadxa(1);  // дополнительный UART для Radxa Zero 3W
+static String g_line;           // буфер команд для основного UART
+static String g_line_radxa;     // буфер команд для UART Radxa
+WebServer server(80);           // HTTP‑сервер для веб-интерфейса
+WebSocketsServer wsServer(81);  // WebSocket‑сервер для логов
+
+// Прототип обработчика асинхронного ping, используется в radioTask()
+void handlePingAsync();
+
 // ISR DIO1: выставляет флаги завершения TX и RX
 // В новой версии RadioLib вызываем getIrqStatus(),
 // который сразу очищает соответствующие флаги прерываний.
@@ -287,11 +297,6 @@ static const size_t SERIAL_MAX = 8 * 1024;
 const char* WIFI_SSID = "ESP32-LoRa";
 const char* WIFI_PASSWORD = "12345678";
 
-// WebServer instance listening on port 80.  Этот сервер отдаёт веб-интерфейс.
-WebServer server(80);
-// WebSocket сервер для мгновенной передачи логов
-WebSocketsServer wsServer(81);
-
 // Buffer used to accumulate messages for the web UI.  Whenever a message is
 // sent or received over LoRa it is appended to this buffer.  The /serial
 // endpoint returns the current buffer contents and then clears it.
@@ -362,8 +367,6 @@ void handleSelfTest();
 void handleSetMsgId();
 // Append a line to the chat buffer with automatic size limiting
 void chatLine(const String& s);
-// Perform asynchronous ping state progression; called from loop()
-void handlePingAsync();
 // Add handlers to control retry count and retry timeout if needed (optional)
 
 // QoS handlers.  These endpoints expose the SENDQ, LARGEQ, QOS and
@@ -583,10 +586,6 @@ static void radioPoll() {
   }
 }
 
-// UART
-HardwareSerial SerialRadxa(1); // Additional UART for Radxa Zero 3W
-static String g_line;
-static String g_line_radxa;
 static void handleCommand(const String& line);
 
 static void saveConfig() {
