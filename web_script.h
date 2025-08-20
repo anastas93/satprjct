@@ -73,6 +73,31 @@ function connectChat(){
   chatWs.onmessage=e=>{
     const t=e.data.trim();
     if(!t)return;
+    if(t[0]==='{'){
+      // Обработка JSON‑событий от сервера
+      try{
+        const m=JSON.parse(t);
+        if(m.type==='key_changed'){
+          const kid=Number(m.kid||0).toString(16).padStart(2,'0').toUpperCase();
+          const crc=Number(m.key_crc16||0).toString(16).padStart(4,'0').toUpperCase();
+          const el=document.getElementById('keyStatusText');
+          if(el)el.textContent='KID:0x'+kid+' • CRC:0x'+crc;
+        }else if(m.type==='rx_start'){
+          const e=document.getElementById('rxIndicator');if(e)e.classList.add('active');
+        }else if(m.type==='rx_done'){
+          const e=document.getElementById('rxIndicator');if(e)setTimeout(()=>e.classList.remove('active'),180);
+        }else if(m.type==='tx_start'){
+          const e=document.getElementById('txIndicator');if(e)e.classList.add('active');
+        }else if(m.type==='tx_done'){
+          const e=document.getElementById('txIndicator');if(e)setTimeout(()=>e.classList.remove('active'),180);
+        }else if(m.type==='metrics'){
+          // обновляем блок метрик без опроса сервера
+          const el=document.getElementById('metrics');
+          if(el)el.textContent=`PER:${(m.per||0).toFixed(3)} RTT:${(m.rtt_ms||0).toFixed(1)}ms EbN0:${(m.ebn0||0).toFixed(2)}dB`;
+        }
+      }catch(e){}
+      return;
+    }
     t.split('\n').forEach(l=>{
       if(!l)return;
       appendChat(l);
@@ -261,16 +286,19 @@ const keyTestBtn=document.getElementById('keyTestBtn');if(keyTestBtn){on('keyTes
 const keyReqBtn=document.getElementById('keyReqBtn');if(keyReqBtn){on('keyReqBtn','click',()=>{fetch('/keyreq');});}
 const keySendBtn=document.getElementById('keySendBtn');if(keySendBtn){on('keySendBtn','click',()=>{fetch('/keysend');});}
 const keyDhBtn=document.getElementById('keyDhBtn');if(keyDhBtn){on('keyDhBtn','click',()=>{fetch('/keydh');});}
+// Обновление информации о ключе: статус локальный/удалённый и отображение KID+CRC
 function updateKeyStatus(){
   fetch('/keystatus').then(r=>r.json()).then(d=>{
     const i=document.getElementById('keyIndicator');
     const t=document.getElementById('keyStatusText');
     if(!i||!t)return;
-    const h=d.hash?d.hash:'no-key'; // если ключ отсутствует
+    const kid=Number(d.kid||0).toString(16).padStart(2,'0').toUpperCase();
+    const crc=Number(d.key_crc16||0).toString(16).padStart(4,'0').toUpperCase();
+    t.textContent='KID:0x'+kid+' • CRC:0x'+crc;
     if(d.status==='local'){
-      i.classList.remove('remote');i.classList.add('local');t.textContent='Local '+h;
+      i.classList.remove('remote');i.classList.add('local');
     }else{
-      i.classList.remove('local');i.classList.add('remote');t.textContent='Remote '+h;
+      i.classList.remove('local');i.classList.add('remote');
     }
     i.classList.toggle('active',Number(d.request)===1);
   }).catch(()=>{});

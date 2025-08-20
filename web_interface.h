@@ -14,7 +14,7 @@ const char WEB_INTERFACE_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   <h2>ESP32 LoRa Pipeline</h2>
   <div id="statusBar">
     <span id="keyIndicator" class="indicator round local"></span>
-    <span id="keyStatusText">Local ????</span>
+    <span id="keyStatusText">KID:0x00 • CRC:0x0000</span>
     <span id="txIndicator" class="indicator tx" title="Передача"></span>
     <span id="rxIndicator" class="indicator rx" title="Приём"></span>
     <span id="queueCounter" title="Пакетов в очереди">Q: 0</span>
