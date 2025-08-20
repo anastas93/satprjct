@@ -659,7 +659,8 @@ void handleSetBank() {
   g_bank = static_cast<Bank>(b);
   applyPreset();
   server.send(200, "text/plain", "bank changed");
-  serialBuffer += String("*SYS:* Bank set to ") + String(b) + "\n";
+  // Логируем изменение банка в чат
+  chatMsg("SYS", String("Bank set to ") + String(b));
 }
 
 void handleSetPreset() {
@@ -675,7 +676,8 @@ void handleSetPreset() {
   g_preset = p;
   applyPreset();
   server.send(200, "text/plain", "preset changed");
-  serialBuffer += String("*SYS:* Preset set to ") + String(p) + "\n";
+  // Логируем изменение пресета в чат
+  chatMsg("SYS", String("Preset set to ") + String(p));
 }
 
 void handleSetBw() {
@@ -691,7 +693,8 @@ void handleSetBw() {
   g_bw_khz = khz;
   Radio_setBandwidth((uint32_t)g_bw_khz);
   server.send(200, "text/plain", "bw changed");
-  serialBuffer += String("*SYS:* BW set to ") + String(khz) + " kHz\n";
+  // Сообщаем новый BW в чат
+  chatMsg("SYS", String("BW set to ") + String(khz) + " kHz");
 }
 
 void handleSetSf() {
@@ -707,7 +710,8 @@ void handleSetSf() {
   g_sf = (uint8_t)sf;
   Radio_setSpreadingFactor(g_sf);
   server.send(200, "text/plain", "sf changed");
-  serialBuffer += String("*SYS:* SF set to ") + String(sf) + "\n";
+  // Сообщаем новый SF в чат
+  chatMsg("SYS", String("SF set to ") + String(sf));
 }
 
 void handleSetCr() {
@@ -723,7 +727,8 @@ void handleSetCr() {
   g_cr = (uint8_t)cr;
   Radio_setCodingRate(g_cr);
   server.send(200, "text/plain", "cr changed");
-  serialBuffer += String("*SYS:* CR set to 4/") + String(cr) + "\n";
+  // Сообщаем новый CR в чат
+  chatMsg("SYS", String("CR set to 4/") + String(cr));
 }
 
 void handleSetTxp() {
@@ -739,7 +744,8 @@ void handleSetTxp() {
   g_txp = txp;
   Radio_setTxPower(g_txp);
   server.send(200, "text/plain", "txp changed");
-  serialBuffer += String("*SYS:* TXP set to ") + String(txp) + " dBm\n";
+  // Сообщаем новый уровень мощности в чат
+  chatMsg("SYS", String("TXP set to ") + String(txp) + " dBm");
 }
 
 // Включение/выключение усиленного приёма
@@ -748,7 +754,8 @@ void handleSetRxBoost() {
   g_rx_boost = on;
   Radio_setRxBoost(g_rx_boost);
   server.send(200, "text/plain", g_rx_boost ? "rxboost on" : "rxboost off");
-  serialBuffer += String("*SYS:* RXBOOST=") + (g_rx_boost ? "ON" : "OFF") + "\n";
+  // Выводим статус усиленного приёма в чат
+  chatMsg("SYS", String("RXBOOST=") + (g_rx_boost ? "ON" : "OFF"));
 }
 
 // Установка режима FEC: off/rs_vit/ldpc
@@ -769,7 +776,8 @@ void handleSetFec() {
   g_tx.setFecMode(m);
   g_rx.setFecMode((RxPipeline::FecMode)m);
   server.send(200, "text/plain", "fec changed");
-  serialBuffer += String("*SYS:* FEC=") + v + "\n";
+  // Логируем выбранный режим FEC
+  chatMsg("SYS", String("FEC=") + v);
 }
 
 // Установка глубины интерливера: 1/4/8/16 байт
@@ -786,7 +794,8 @@ void handleSetInter() {
   g_tx.setInterleaveDepth((uint8_t)d);
   g_rx.setInterleaveDepth((uint8_t)d);
   server.send(200, "text/plain", "inter changed");
-  serialBuffer += String("*SYS:* INTER=") + String(d) + "\n";
+  // Логируем глубину интерливера
+  chatMsg("SYS", String("INTER=") + String(d));
 }
 
 // Установка размера полезной нагрузки
@@ -803,7 +812,8 @@ void handleSetPayload() {
   }
   g_tx.setPayloadLen((uint16_t)p);
   server.send(200, "text/plain", "payload changed");
-  serialBuffer += String("*SYS:* PAYLOAD=") + String(p) + "\n";
+  // Сообщаем размер полезной нагрузки в чат
+  chatMsg("SYS", String("PAYLOAD=") + String(p));
 }
 
 // Установка интервала пилотных вставок (0=выкл)
@@ -820,7 +830,8 @@ void handleSetPilot() {
   g_tx.setPilotInterval((uint16_t)iv);
   g_rx.setPilotInterval((uint16_t)iv);
   server.send(200, "text/plain", "pilot changed");
-  serialBuffer += String("*SYS:* PILOT=") + String(iv) + "\n";
+  // Сообщаем интервал пилотов в чат
+  chatMsg("SYS", String("PILOT=") + String(iv));
 }
 
 void handleSetDup() {
@@ -829,7 +840,8 @@ void handleSetDup() {
   g_tx.setHeaderDup(on);
   g_rx.setHeaderDup(on);
   server.send(200, "text/plain", on ? "dup on" : "dup off");
-  serialBuffer += String("*SYS:* HDRDUP=") + (on ? "ON" : "OFF") + "\n";
+  // Логируем переключение дублирования заголовка
+  chatMsg("SYS", String("HDRDUP=") + (on ? "ON" : "OFF"));
 }
 
 void handleSetWin() {
@@ -839,7 +851,8 @@ void handleSetWin() {
   g_tx.setWindowSize(g_window);
   g_rx.setWindowSize(g_window);
   server.send(200, "text/plain", "win set");
-  serialBuffer += String("*SYS:* WIN=") + String(w) + "\n";
+  // Сообщаем размер окна ARQ
+  chatMsg("SYS", String("WIN=") + String(w));
 }
 
 void handleSetAckAgg() {
@@ -848,7 +861,8 @@ void handleSetAckAgg() {
   g_ackAgg = (uint16_t)ms;
   g_rx.setAckAgg(g_ackAgg);
   server.send(200, "text/plain", "ackagg set");
-  serialBuffer += String("*SYS:* ACKAGG=") + String(ms) + "\n";
+  // Логируем интервал агрегации ACK
+  chatMsg("SYS", String("ACKAGG=") + String(ms));
 }
 
 // Установка предела фрагментов в серии перед ожиданием ACK
@@ -858,7 +872,8 @@ void handleSetBurst() {
   g_burst = (uint8_t)n;
   g_tx.setBurstFrags(g_burst);
   server.send(200, "text/plain", "burst set");
-  serialBuffer += String("*SYS:* BURST=") + String(n) + "\n";
+  // Логируем предел серии фрагментов
+  chatMsg("SYS", String("BURST=") + String(n));
 }
 
 // Обработчик явного включения/выключения ACK
@@ -867,7 +882,8 @@ void handleSetAck() {
   g_ack_on = on;
   g_tx.enableAck(g_ack_on);
   server.send(200, "text/plain", g_ack_on ? "ack on" : "ack off");
-  serialBuffer += String("*SYS:* ACK=") + (g_ack_on ? "ON" : "OFF") + "\n";
+  // Логируем состояние ACK
+  chatMsg("SYS", String("ACK=") + (g_ack_on ? "ON" : "OFF"));
 }
 
 // Установка процента джиттера ожидания ACK
@@ -877,7 +893,8 @@ void handleSetAckJitter() {
   if (pct < 0 || pct > 100) { server.send(400, "text/plain", "range 0..100"); return; }
   g_ackJitter = (uint8_t)pct;
   server.send(200, "text/plain", "ackjitter set");
-  serialBuffer += String("*SYS:* ACKJITTER=") + String(pct) + String("%\n");
+  // Логируем величину джиттера ожидания ACK
+  chatMsg("SYS", String("ACKJITTER=") + String(pct) + "%");
 }
 
 // Задание списка коэффициентов backoff через запятую
@@ -895,7 +912,8 @@ void handleSetBackoff() {
     start = comma + 1;
   }
   server.send(200, "text/plain", "backoff set");
-  serialBuffer += String("*SYS:* BACKOFF=") + v + String("\n");
+  // Логируем коэффициенты бэкоффа
+  chatMsg("SYS", String("BACKOFF=") + v);
 }
 
 // Переключение режима автонастройки профиля
@@ -903,7 +921,8 @@ void handleSetAutorate() {
   bool on = server.arg("val") == "1";
   g_autoRate = on;
   server.send(200, "text/plain", on ? "autorate on" : "autorate off");
-  serialBuffer += String("*SYS:* AUTORATE=") + (on ? "ON" : "OFF") + "\n";
+  // Логируем режим автонастройки
+  chatMsg("SYS", String("AUTORATE=") + (on ? "ON" : "OFF"));
 }
 
 // Установка порогов PER (hi/lo)
@@ -912,7 +931,8 @@ void handleSetPerTh() {
   g_perHigh = server.arg("hi").toFloat();
   g_perLow  = server.arg("lo").toFloat();
   server.send(200, "text/plain", "perth set");
-  serialBuffer += String("*SYS:* PERTH=") + String(g_perHigh,2) + "," + String(g_perLow,2) + "\n";
+  // Логируем пороги PER
+  chatMsg("SYS", String("PERTH=") + String(g_perHigh,2) + "," + String(g_perLow,2));
 }
 
 // Установка порогов Eb/N0 (hi/lo)
@@ -921,7 +941,8 @@ void handleSetEbn0Th() {
   g_ebn0High = server.arg("hi").toFloat();
   g_ebn0Low  = server.arg("lo").toFloat();
   server.send(200, "text/plain", "ebn0th set");
-  serialBuffer += String("*SYS:* EBN0TH=") + String(g_ebn0High,1) + "," + String(g_ebn0Low,1) + "\n";
+  // Логируем пороги Eb/N0
+  chatMsg("SYS", String("EBN0TH=") + String(g_ebn0High,1) + "," + String(g_ebn0Low,1));
 }
 
 void handleToggleEnc() {
@@ -929,7 +950,8 @@ void handleToggleEnc() {
   g_ccm.setEnabled(g_enc_on);
   g_tx.setEncEnabled(g_enc_on);
   server.send(200, "text/plain", g_enc_on ? "enc on" : "enc off");
-  serialBuffer += String("*SYS:* ENC=") + (g_enc_on ? "ON" : "OFF") + "\n";
+  // Логируем изменение состояния шифрования
+  chatMsg("SYS", String("ENC=") + (g_enc_on ? "ON" : "OFF"));
 }
 
 void handleMetrics() {
@@ -944,6 +966,8 @@ void handleMetrics() {
            g_metrics.rx_dup_msgs, g_metrics.rx_crc_fail, g_metrics.rx_drop_len_mismatch,
            g_metrics.rx_assem_drop_ttl, g_metrics.rx_assem_drop_overflow, g_metrics.dec_fail_tag, g_metrics.dec_fail_other);
   server.send(200, "text/plain", buf);
+  // Логируем запрос метрик
+  chatMsg("SYS", "Metrics requested");
 }
 
 // Обработчик /linkdiag: отдаёт короткие метрики канала в JSON
@@ -1086,7 +1110,8 @@ void handleSetRetryN() {
   g_retryN = (uint8_t)n;
   g_tx.setRetry(g_retryN, g_retryMS);
   server.send(200, "text/plain", "retryn changed");
-  serialBuffer += String("*SYS:* RETRYN set to ") + String(n) + "\n";
+  // Логируем число повторов
+  chatMsg("SYS", String("RETRYN set to ") + String(n));
 }
 
 // Set retry timeout (ms) for automatic retransmissions.  Range: 100..10000
@@ -1103,7 +1128,8 @@ void handleSetRetryMS() {
   g_retryMS = (uint16_t)ms;
   g_tx.setRetry(g_retryN, g_retryMS);
   server.send(200, "text/plain", "retryms changed");
-  serialBuffer += String("*SYS:* RETRYMS set to ") + String(ms) + " ms\n";
+  // Логируем таймаут повторов
+  chatMsg("SYS", String("RETRYMS set to ") + String(ms) + " ms");
 }
 
 // Set encryption key identifier (KID)
@@ -1121,7 +1147,8 @@ void handleSetKid() {
   g_ccm.setActiveKid(g_kid);
   loadKeyFromNVS();
   server.send(200, "text/plain", "kid changed");
-  serialBuffer += String("*SYS:* KID set to ") + String(kid) + "\n";
+  // Логируем выбранный KID
+  chatMsg("SYS", String("KID set to ") + String(kid));
 }
 
 // Set encryption key (32 hex characters).  Associates the key with the current KID.
@@ -1160,28 +1187,33 @@ void handleSetKey() {
   prefs.end();
   bool ok = g_ccm.setKey(g_kid, key, 16);
   server.send(200, "text/plain", ok ? "key loaded" : "key failed");
-  serialBuffer += ok ? String("*SYS:* Key loaded for KID ") + String(g_kid) + "\n" : String("*SYS:* Failed to load key\n");
+  // Сообщаем результат загрузки ключа
+  if (ok) chatMsg("SYS", String("Key loaded for KID ") + String(g_kid));
+  else    chatMsg("SYS", "Failed to load key");
 }
 
 // Save configuration to NVS
 void handleSave() {
   saveConfig();
   server.send(200, "text/plain", "config saved");
-  serialBuffer += "*SYS:* Config saved\n";
+  // Отражаем сохранение конфигурации
+  chatMsg("SYS", "Config saved");
 }
 
 // Load configuration from NVS
 void handleLoad() {
   loadConfig();
   server.send(200, "text/plain", "config loaded");
-  serialBuffer += "*SYS:* Config loaded\n";
+  // Отражаем загрузку конфигурации
+  chatMsg("SYS", "Config loaded");
 }
 
 // Reset (clear) configuration in NVS
 void handleReset() {
   resetConfig();
   server.send(200, "text/plain", "config reset");
-  serialBuffer += "*SYS:* Config reset\n";
+  // Отражаем сброс конфигурации
+  chatMsg("SYS", "Config reset");
 }
 
 // Установка параметров TDD-планировщика
@@ -1195,7 +1227,8 @@ void handleSetTdd() {
   unsigned long g = server.arg("guard").toInt();
   tdd::setParams(tx, ack, g);
   server.send(200, "text/plain", "tdd set");
-  serialBuffer += String("*SYS:* TDD tx=") + String(tx) + ", ack=" + String(ack) + ", g=" + String(g) + "\n";
+  // Логируем параметры TDD
+  chatMsg("SYS", String("TDD tx=") + String(tx) + ", ack=" + String(ack) + ", g=" + String(g));
 }
 
 // Список сообщений в архиве
@@ -1213,7 +1246,8 @@ void handleArchiveList() {
 void handleArchiveRestore() {
   bool ok = g_buf.restoreArchived();
   server.send(200, "text/plain", ok ? "restored" : "empty");
-  serialBuffer += ok ? String("*SYS:* archive restored\n") : String("*SYS:* archive empty\n");
+  // Логируем результат восстановления архива
+  chatMsg("SYS", ok ? String("archive restored") : String("archive empty"));
 }
 
 // Сброс счётчика сообщений
@@ -1221,13 +1255,15 @@ void handleIdReset() {
   g_buf.setNextId(1);
   persistMsgId();
   server.send(200, "text/plain", "msgid reset");
-  serialBuffer += String("*SYS:* msg_id set to 1\n");
+  // Логируем сброс счётчика сообщений
+  chatMsg("SYS", "msg_id set to 1");
 }
 
 // Очистка окна anti-replay (заглушка)
 void handleReplayClr() {
   server.send(200, "text/plain", "replay cleared");
-  serialBuffer += String("*SYS:* replay window cleared\n");
+  // Логируем очистку окна повторов
+  chatMsg("SYS", "replay window cleared");
 }
 
 // Возврат последних кадров в JSON
@@ -1249,7 +1285,8 @@ void handleSimple() {
   g_buf.enqueue(reinterpret_cast<const uint8_t*>(msg), strlen(msg), false);
   persistMsgId();
   server.send(200, "text/plain", "simple queued");
-  serialBuffer += String("*SYS:* SIMPLE queued\n");
+  // Сообщаем о постановке тестового сообщения
+  chatMsg("SYS", "SIMPLE queued");
 }
 
 void handleLarge() {
@@ -1266,7 +1303,8 @@ void handleLarge() {
   g_buf.enqueue(big.data(), big.size(), false);
   persistMsgId();
   server.send(200, "text/plain", "large queued");
-  serialBuffer += String("*SYS:* LARGE ") + String(n) + String(" bytes queued\n");
+  // Логируем постановку большого сообщения
+  chatMsg("SYS", String("LARGE ") + String(n) + String(" bytes queued"));
 }
 
 void handleEncTest() {
@@ -1289,7 +1327,8 @@ void handleEncTest() {
     EncSelfTest_battery(g_ccm, out);
   }
   server.send(200, "text/plain", "enctest started");
-  serialBuffer += String("*SYS:* ENCTEST started\n");
+  // Логируем запуск теста шифрования
+  chatMsg("SYS", "ENCTEST started");
 }
 
 void handleEncTestBad() {
@@ -1298,15 +1337,17 @@ void handleEncTestBad() {
   SerialChatPrint out(Serial);
   EncSelfTest_badKid(g_ccm, out);
   server.send(200, "text/plain", "enctestbad started");
-  serialBuffer += String("*SYS:* ENCTESTBAD started\n");
+  // Логируем запуск негативного теста шифрования
+  chatMsg("SYS", "ENCTESTBAD started");
 }
 
 // Выполняем полный самотест и передаём статус в чат
 void handleSelfTest() {
-  serialBuffer += String("*SYS:* SELFTEST started\n");
+  // Логируем запуск самотеста
+  chatMsg("SYS", "SELFTEST started");
   SerialChatPrint out(Serial);
   SelfTest_runAll(g_ccm, out);
-  serialBuffer += String("*SYS:* SELFTEST finished\n");
+  chatMsg("SYS", "SELFTEST finished");
   server.send(200, "text/plain", "selftest done");
 }
 
@@ -1320,7 +1361,8 @@ void handleSetMsgId() {
     }
     g_buf.setNextId(id);
     persistMsgId();
-    serialBuffer += String("*SYS:* MSGID set to ") + String(id) + String("\n");
+    // Логируем установку идентификатора
+    chatMsg("SYS", String("MSGID set to ") + String(id));
   }
   char buf[32];
   snprintf(buf, sizeof(buf), "%lu", (unsigned long)g_buf.nextId());
@@ -1805,7 +1847,8 @@ void handleSendQ() {
   }
   persistMsgId();
   server.send(200, "text/plain", "sendq queued");
-  serialBuffer += String("*SYS:* SENDQ(") + pr + String(") queued\n");
+  // Логируем постановку сообщения в очередь
+  chatMsg("SYS", String("SENDQ(") + pr + String(") queued"));
 }
 
 void handleLargeQ() {
@@ -1829,7 +1872,8 @@ void handleLargeQ() {
   }
   persistMsgId();
   server.send(200, "text/plain", "largeq queued");
-  serialBuffer += String("*SYS:* LARGEQ ") + String(sz) + String(" bytes (prio ") + pr + String(") queued\n");
+  // Логируем постановку большого сообщения в очередь
+  chatMsg("SYS", String("LARGEQ ") + String(sz) + String(" bytes (prio ") + pr + String(") queued"));
 }
 
 void handleQos() {
@@ -1843,7 +1887,8 @@ void handleQos() {
            (unsigned)g_buf.lenN(), (unsigned)g_buf.bytesN(), (unsigned)cfg::TX_BUF_QOS_CAP_NORMAL,
            (unsigned)g_buf.lenL(), (unsigned)g_buf.bytesL(), (unsigned)cfg::TX_BUF_QOS_CAP_LOW);
   server.send(200, "text/plain", buf);
-  serialBuffer += String("*SYS:* QOS stats requested\n");
+  // Логируем запрос статистики QoS
+  chatMsg("SYS", "QOS stats requested");
 }
 
 void handleSetQosMode() {
@@ -1857,11 +1902,13 @@ void handleSetQosMode() {
   if (v == "STRICT" || v == "S") {
     g_buf.setSchedulerMode(QosMode::Strict);
     server.send(200, "text/plain", "qosmode strict");
-    serialBuffer += String("*SYS:* QOSMODE=STRICT\n");
+    // Логируем смену режима QoS
+    chatMsg("SYS", "QOSMODE=STRICT");
   } else if (v == "W421" || v == "WEIGHTED421") {
     g_buf.setSchedulerMode(QosMode::Weighted421);
     server.send(200, "text/plain", "qosmode w421");
-    serialBuffer += String("*SYS:* QOSMODE=W421\n");
+    // Логируем смену режима QoS
+    chatMsg("SYS", "QOSMODE=W421");
   } else {
     server.send(400, "text/plain", "use STRICT or W421");
   }
@@ -2176,7 +2223,8 @@ void runPing() {
   Serial.print("~&Server: ");
   Serial.print(info);
   Serial.println("~");
-  serialBuffer += String("*SYS:* ") + info + "\n";
+  // Логируем текущие частоты
+  chatMsg("SYS", info);
 
   // Transmit ping on TX frequency
   radio.setFrequency(g_freq_tx_mhz);
@@ -2204,21 +2252,24 @@ void runPing() {
     Serial.print("~&Server: ");
     Serial.print(msg);
     Serial.println("~");
-    serialBuffer += String("*SYS:* ") + msg + "\n";
+    // Логируем результат пинга
+    chatMsg("SYS", msg);
   } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
     // Received a packet but CRC failed
     String msg = String("CRC error!");
     Serial.print("~&Server: ");
     Serial.print(msg);
     Serial.println("~");
-    serialBuffer += String("*SYS:* ") + msg + "\n";
+    // Логируем ошибку CRC
+    chatMsg("SYS", msg);
   } else {
     // Some other error
     String msg = String("failed, code ") + String(state);
     Serial.print("~&Server: ");
     Serial.print(msg);
     Serial.println("~");
-    serialBuffer += String("*SYS:* ") + msg + "\n";
+    // Логируем код ошибки
+    chatMsg("SYS", msg);
   }
   // Короткая пауза для перехода в режим приёма
   delay(2);
@@ -2808,8 +2859,8 @@ void setup() {
       }
       return;
     }
-    // Not a key management message: append to chat buffer normally
-    serialBuffer += String("*RX:* ") + m + String("\n");
+    // Обычное сообщение — выводим его в чат
+    chatLine(String("*RX:* ") + m);
   });
   g_rx.setAckCallback([&](uint32_t hi, uint32_t bm) {
     g_tx.notifyAck(hi, bm);
