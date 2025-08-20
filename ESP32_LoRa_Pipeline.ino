@@ -66,6 +66,7 @@ Bank g_bank = Bank::MAIN;
 int g_preset = 0;
 float g_freq_rx_mhz = GetFreqTable(Bank::MAIN)[0].rxMHz;
 float g_freq_tx_mhz = GetFreqTable(Bank::MAIN)[0].txMHz;
+float g_curr_freq_mhz = g_freq_rx_mhz; // текущая фактическая частота
 float g_bw_khz = 125.0f;
 uint8_t g_sf = 9;
 uint8_t g_cr = 5;
@@ -384,10 +385,12 @@ static RadioState g_radio_state = RadioState::Idle;
 static void Radio_updateState(RadioState st) {
   if (g_radio_state == st) { return; }
   g_radio_state = st;
+  // Используем фактическую частоту из последнего вызова Radio_setFrequency
+  float mhz = g_curr_freq_mhz;
   if (st == RadioState::Tx) {
-    chatMsg("SYS", String("TX started ") + String(g_freq_tx_mhz, 3) + " MHz");
+    chatMsg("SYS", String("TX started ") + String(mhz, 3) + " MHz");
   } else if (st == RadioState::Rx) {
-    chatMsg("SYS", String("RX started ") + String(g_freq_rx_mhz, 3) + " MHz");
+    chatMsg("SYS", String("RX started ") + String(mhz, 3) + " MHz");
   }
 }
 
@@ -408,7 +411,9 @@ bool Radio_sendRaw(const uint8_t* data, size_t len) {
   return st == RADIOLIB_ERR_NONE;
 }
 bool Radio_setFrequency(uint32_t hz) {
-  return radio.setFrequency(hz / 1e6f) == RADIOLIB_ERR_NONE;
+  // Конвертируем Гц в МГц и запоминаем установленное значение
+  g_curr_freq_mhz = hz / 1e6f;
+  return radio.setFrequency(g_curr_freq_mhz) == RADIOLIB_ERR_NONE;
 }
 bool Radio_setBandwidth(uint32_t khz) {
   return radio.setBandwidth(khz) == RADIOLIB_ERR_NONE;
@@ -2371,6 +2376,8 @@ static void handleCommand(const String& line) {
     // Обновляем приём после смены частоты
     Radio_forceRx(msToTicks(tdd::cycleLen()));
     Serial.printf("FRX=%.3f\n", g_freq_rx_mhz);
+    // Сообщаем новую RX-частоту в чат
+    chatMsg("SYS", String("FRX set to ") + String(g_freq_rx_mhz, 3) + " MHz");
     return;
   }
   if (CM == "FREQTX") {
@@ -2381,6 +2388,8 @@ static void handleCommand(const String& line) {
     }
     g_freq_tx_mhz = mhz;
     Serial.printf("FTX=%.3f\n", g_freq_tx_mhz);
+    // Сообщаем новую TX-частоту в чат
+    chatMsg("SYS", String("FTX set to ") + String(g_freq_tx_mhz, 3) + " MHz");
     return;
   }
   if (CM == "BW") {
