@@ -67,7 +67,7 @@ bool RxPipeline::isDup(uint32_t msg_id) {
   return dup_set_.find(msg_id) != dup_set_.end();
 }
 
-void RxPipeline::sendAck(uint32_t msg_id) {
+void RxPipeline::sendAck(uint32_t msg_id) { // QOS: Высокий Отправка ACK при приёме сообщений
   // Отправляем ACK только в соответствующее окно
   if (!tdd::isAckPhase()) return;
   // обновляем наибольший подтверждённый кадр и bitmap для окна W

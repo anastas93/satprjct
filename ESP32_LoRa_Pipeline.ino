@@ -696,7 +696,7 @@ void handleRoot() {
 
 // Handler that enqueues a message into the transmit buffer.  The message is
 // appended to the UI buffer and a new message ID persisted.
-void handleSend() {
+void handleSend() { // QOS: Нормальный HTTP-обработчик отправки текстового сообщения
   // Проверяем rate-limit: не чаще одного запроса в 200 мс
   if (!rateLimit(g_last_send_ms, 200)) {
     server.send(429, "text/plain", "rate");
@@ -1499,7 +1499,7 @@ void handleSetMsgId() {
 //
 // sendKeyRequest() enqueues a "KEYREQ" message and sets the request flag.  It
 // also emits a system message to the chat and persists the message ID.
-void sendKeyRequest() {
+void sendKeyRequest() { // QOS: Высокий Постановка в очередь запроса ключа
   const char* req = "KEYREQ";
   g_buf.enqueue(reinterpret_cast<const uint8_t*>(req), strlen(req), true);
   persistMsgId();
@@ -1510,7 +1510,7 @@ void sendKeyRequest() {
 // sendKeyResponse() constructs a "KEYRES <kid> <hexkey>" message using the
 // current key and enqueues it.  After queuing the response the pending
 // request flag is cleared.  A system message is appended to the chat.
-void sendKeyResponse() {
+void sendKeyResponse() { // QOS: Высокий Постановка в очередь ответа с ключом
   // Build key response string.  Format: KEYRES <kid> <32‑hex>.
   char buf[64];
   // Берём AES-ключ из общего хранилища
@@ -1955,7 +1955,7 @@ static Qos parseQos(const String& prio) {
   return Qos::Normal;
 }
 
-void handleSendQ() {
+void handleSendQ() { // QOS: Зависит HTTP-обработчик отправки сообщения с явным QoS
   // Expect ?prio=<H|N|L>&msg=<text>; missing args result in 400
   if (!server.hasArg("prio") || !server.hasArg("msg")) {
     server.send(400, "text/plain", "missing prio or msg");

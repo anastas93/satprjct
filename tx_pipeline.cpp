@@ -64,7 +64,7 @@ bool TxPipeline::interFrameGap() {
   return true;
 }
 
-size_t TxPipeline::sendMessageFragments(const OutgoingMessage& m) {
+size_t TxPipeline::sendMessageFragments(const OutgoingMessage& m) { // QOS: Средний Фрагментация и отправка сообщения по кадрам
   bool reqAck = ack_enabled_ || m.ack_required;
   bool willEnc = enc_enabled_ && enc_.isReady();
   // Ограничение полезной нагрузки согласно выбранному профилю
