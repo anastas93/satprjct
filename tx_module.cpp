@@ -11,7 +11,7 @@
 
 // Максимально допустимый размер кадра
 static constexpr size_t MAX_FRAME_SIZE = 255;      // максимально допустимый кадр
-static constexpr size_t RS_DATA_LEN = 223;         // длина блока данных RS
+static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
 static constexpr size_t RS_ENC_LEN = 255;         // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
 
@@ -36,7 +36,7 @@ TxModule::TxModule(IRadio& radio, const std::array<size_t,4>& capacities, Payloa
   : radio_(radio), buffers_{MessageBuffer(capacities[0]), MessageBuffer(capacities[1]),
                              MessageBuffer(capacities[2]), MessageBuffer(capacities[3])},
     splitter_(mode) {
-  last_send_ = std::chrono::steady_clock::now();
+  last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms_);
 }
 
 // Смена режима пакета
@@ -84,7 +84,7 @@ void TxModule::loop() {
 
   // TODO: шифрование сообщения (не реализовано)
 
-  // Разбиваем сообщение на блоки по 223 байта перед RS-кодированием
+  // Разбиваем сообщение на блоки по RS_DATA_LEN байт перед RS-кодированием
   PacketSplitter rs_splitter(PayloadMode::SMALL, RS_DATA_LEN);
   size_t parts = (msg.size() + RS_DATA_LEN - 1) / RS_DATA_LEN;
   MessageBuffer tmp(parts);

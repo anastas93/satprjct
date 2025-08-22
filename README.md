@@ -81,7 +81,7 @@
 - `void sendBeacon()` — отправить служебный пакет-маяк.
 - `ChannelBank getBank() const`, `uint8_t getChannel() const`, `float getBandwidth() const`, `int getSpreadingFactor() const`, `int getCodingRate() const`, `int getPower() const`, `float getRxFrequency() const`, `float getTxFrequency() const` — получить текущие параметры.
   - `bool resetToDefaults()` — вернуть параметры радиомодуля к значениям по умолчанию.
-  - Значения параметров по умолчанию заданы в файле `default_settings.h`.
+  - Значения параметров по умолчанию (размер блока для `PacketGatherer`, пауза между отправками и т.д.) заданы в файле `default_settings.h`.
 
 ### SerialProgramCollector
 - `void resetBuffer()` — очистить буфер и начать новый сбор.
@@ -136,7 +136,7 @@ rs255223::decode -> PacketGatherer -> обработка сообщения
 - Настройка мощности и команда INFO для отображения текущих параметров.
 - Отправка служебного маяка для поиска устройств.
 - Конвертация UTF-8 текста в CP1251 для команды TX.
-- Файл `default_settings.h` с параметрами радиомодуля по умолчанию.
+- Файл `default_settings.h` с параметрами радиомодуля, размером блока `PacketGatherer` и паузой между отправками по умолчанию.
 - Базовые тесты для буфера сообщений, делителя пакетов и формирования кадров.
 
 ## Что осталось сделать
