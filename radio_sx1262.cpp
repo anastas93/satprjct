@@ -39,7 +39,11 @@ void RadioSX1262::send(const uint8_t* data, size_t len) {
   float freq_rx = fRX_bank_[static_cast<int>(bank_)][channel_];
   DEBUG_LOG_VAL("RadioSX1262: отправка длины=", len);
   radio_.setFrequency(freq_tx);              // переключаемся на TX частоту
-  radio_.transmit((uint8_t*)data, len);
+  int state = radio_.transmit((uint8_t*)data, len); // отправляем пакет
+  if (state != RADIOLIB_ERR_NONE) {          // проверка кода ошибки
+    LOG_ERROR_VAL("RadioSX1262: ошибка передачи, код=", state);
+    return;                                  // выходим без смены частоты
+  }
   radio_.setFrequency(freq_rx);              // возвращаем частоту приёма
   radio_.startReceive();                     // и продолжаем слушать эфир
   DEBUG_LOG("RadioSX1262: передача завершена");
