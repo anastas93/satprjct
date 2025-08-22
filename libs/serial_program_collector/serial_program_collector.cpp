@@ -1,7 +1,7 @@
 #include "serial_program_collector.h"
+#include "default_settings.h"
 
-// Максимальный размер буфера (500 КБ)
-const size_t MAX_BUFFER = 500UL * 1024UL;
+// Ограничение на общий размер буфера задаётся в DefaultSettings::SERIAL_BUFFER_LIMIT
 
 // Текущие собранные данные
 String programBuffer;
@@ -18,7 +18,7 @@ void resetBuffer() {
 
 // Добавление строки в общий буфер
 bool appendToBuffer(const String &line) {
-  if (programBuffer.length() + line.length() + 1 > MAX_BUFFER) {
+  if (programBuffer.length() + line.length() + 1 > DefaultSettings::SERIAL_BUFFER_LIMIT) {
     Serial.println("Буфер переполнен, приём остановлен");
     collecting = false;
     return false;
