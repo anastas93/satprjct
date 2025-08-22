@@ -1,7 +1,6 @@
 #pragma once
 #include <cstdint>
-
-enum class ChannelBank { EAST, WEST, TEST }; // Банк каналов
+#include "channel_bank.h" // Банк каналов
 
 // Значения параметров радиомодуля по умолчанию
 namespace DefaultSettings {

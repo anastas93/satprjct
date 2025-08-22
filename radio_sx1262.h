@@ -3,9 +3,7 @@
 #include <vector>
 #include <cstdint>
 #include "radio_interface.h"
-
-// Банк каналов
-enum class ChannelBank { EAST, WEST, TEST };
+#include "channel_bank.h"
 
 // Реализация радиоинтерфейса на базе SX1262
 class RadioSX1262 : public IRadio {
