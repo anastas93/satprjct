@@ -16,7 +16,7 @@ namespace DefaultSettings {
   constexpr bool DEBUG = true;                    // Флаг отладочного вывода
   // Уровни журналирования для фильтрации сообщений
   enum class LogLevel : uint8_t { ERROR = 0, WARN = 1, INFO = 2, DEBUG = 3 };
-  constexpr LogLevel LOG_LEVEL = LogLevel::INFO;   // Текущий уровень вывода
+  constexpr LogLevel LOG_LEVEL = LogLevel::DEBUG;   // Текущий уровень вывода
 }
 
 #if !defined(LOG_MSG)
