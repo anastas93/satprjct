@@ -1,4 +1,4 @@
-#include <Arduino.h>
+#include "serial_program_collector.h"
 
 // Максимальный размер буфера (500 КБ)
 const size_t MAX_BUFFER = 500UL * 1024UL;
@@ -26,33 +26,4 @@ bool appendToBuffer(const String &line) {
   programBuffer += line;
   programBuffer += '\n';
   return true;
-}
-
-void setup() {
-  Serial.begin(115200);
-  while (!Serial) {}
-  Serial.println("Ожидание команд: BEGIN для старта, END для завершения");
-}
-
-void loop() {
-  if (Serial.available()) {
-    String line = Serial.readStringUntil('\n');
-    line.trim();
-
-    if (!collecting) {
-      if (line == "BEGIN") {
-        resetBuffer();
-      }
-    } else {
-      if (line == "END") {
-        collecting = false;
-        Serial.print("Сбор завершён. Размер: ");
-        Serial.print(programBuffer.length());
-        Serial.println(" байт");
-        Serial.println(programBuffer);
-      } else {
-        appendToBuffer(line);
-      }
-    }
-  }
 }
