@@ -12,6 +12,7 @@ namespace DefaultSettings {
   constexpr uint8_t CR_PRESET = 0;                // Индекс коэффициента кодирования
   constexpr size_t GATHER_BLOCK_SIZE = 110;       // Размер блока для PacketGatherer
   constexpr uint32_t SEND_PAUSE_MS = 80;           // Ожидание между отправками и приёмом (мс)
+  constexpr size_t SERIAL_BUFFER_LIMIT = 500UL * 1024UL; // Максимальный размер буфера приёма по Serial (байты)
   constexpr bool DEBUG = true;                    // Флаг отладочного вывода
   // Уровни журналирования для фильтрации сообщений
   enum class LogLevel : uint8_t { ERROR = 0, WARN = 1, INFO = 2, DEBUG = 3 };
