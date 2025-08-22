@@ -2,6 +2,7 @@
 #include "radio_sx1262.h"
 #include "message_buffer.h"
 #include "tx_module.h"
+#include "default_settings.h"
 
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
@@ -86,8 +87,10 @@ void loop() {
       } else if (line.startsWith("TX ")) {
         String msg = line.substring(3);
         // помещаем сообщение в очередь и проверяем успех
+        DEBUG_LOG("RC: команда TX");
         uint32_t id = tx.queue((const uint8_t*)msg.c_str(), msg.length());
         if (id != 0) {
+          DEBUG_LOG_VAL("RC: сообщение поставлено id=", id);
           tx.loop();                           // отправляем первый пакет
           Serial.println("Пакет отправлен");
         } else {

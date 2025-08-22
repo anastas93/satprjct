@@ -32,10 +32,12 @@ bool RadioSX1262::begin() {
 void RadioSX1262::send(const uint8_t* data, size_t len) {
   float freq_tx = fTX_bank_[static_cast<int>(bank_)][channel_];
   float freq_rx = fRX_bank_[static_cast<int>(bank_)][channel_];
+  DEBUG_LOG_VAL("RadioSX1262: отправка длины=", len);
   radio_.setFrequency(freq_tx);        // переключаемся на TX частоту
   radio_.transmit((uint8_t*)data, len);
   radio_.setFrequency(freq_rx);        // возвращаем частоту приёма
   radio_.startReceive();               // и продолжаем слушать эфир
+  DEBUG_LOG("RadioSX1262: передача завершена");
 }
 
 void RadioSX1262::setReceiveCallback(RxCallback cb) { rx_cb_ = cb; }
