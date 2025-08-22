@@ -4,7 +4,7 @@
 #include "libs/byte_interleaver/byte_interleaver.h" // байтовый интерливинг
 #include "libs/conv_codec/conv_codec.h" // свёрточное кодирование
 #include "libs/bit_interleaver/bit_interleaver.h" // битовый интерливинг
-#include "libs/ccsds_link/scrambler.h" // скремблер
+#include "libs/scrambler/scrambler.h" // скремблер
 #include "default_settings.h"
 #include <vector>
 #include <chrono>
@@ -93,8 +93,7 @@ void TxModule::loop() {
     conv_codec::encodeBits(rs_buf, RS_ENC_LEN, conv); // свёрточное кодирование
     if (USE_BIT_INTERLEAVER)
       bit_interleaver::interleave(conv.data(), conv.size()); // битовый интерливинг
-    lfsr_scramble(conv.data(), conv.size(), (uint16_t)id);   // скремблер
-    coded.swap(conv);
+    coded.swap(conv);                                       // перенос закодированных данных
   } else {
     coded = msg;                                      // без кодирования для других размеров
   }
@@ -113,6 +112,7 @@ void TxModule::loop() {
   frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE); // повтор заголовка
   auto payload = insertPilots(coded);
   frame.insert(frame.end(), payload.begin(), payload.end());
+  scrambler::scramble(frame.data(), frame.size());          // скремблируем весь кадр
 
   if (frame.size() > MAX_FRAME_SIZE) {            // проверка лимита
     LOG_ERROR_VAL("TxModule: превышен размер кадра=", frame.size());

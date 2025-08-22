@@ -4,6 +4,7 @@
 #include <array>
 #include "tx_module.h"
 #include "../libs/frame/frame_header.h" // заголовок кадра
+#include "../libs/scrambler/scrambler.h" // дескремблирование кадра
 
 // Простая заглушка радиоинтерфейса
 class MockRadio : public IRadio {
@@ -22,6 +23,8 @@ int main() {
   assert(id==1);                          // ожидаемый ID
   tx.loop();                              // формируем кадр
   assert(radio.last.size() == FrameHeader::SIZE*2 + 5);
+  // дескремблируем кадр перед проверкой
+  scrambler::descramble(radio.last.data(), radio.last.size());
   FrameHeader hdr;
   assert(FrameHeader::decode(radio.last.data(), radio.last.size(), hdr));
   assert(hdr.msg_id==1 && hdr.payload_len==5);

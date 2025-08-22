@@ -17,6 +17,8 @@
 - `byte_interleaver` — библиотека (`libs/byte_interleaver/`) с функциями `interleave()` и `deinterleave()` для байтового перемежения.
 - `conv_codec` — библиотека (`libs/conv_codec/`) с функциями `encodeBits()` и `viterbiDecode()` для свёрточного кодирования.
 - `bit_interleaver` — библиотека (`libs/bit_interleaver/`) с функциями `interleave()` и `deinterleave()` для битового перемежения.
+- `scrambler` — библиотека (`libs/scrambler/`) с функциями `scramble()` и `descramble()` на основе LFSR
+  (полином x^16 + x^14 + x^13 + x^11, стартовое значение 0xACE1).
 - Для отладочных сообщений предусмотрен флаг `DefaultSettings::DEBUG` и уровни журналирования `DefaultSettings::LOG_LEVEL`. Доступны макросы `LOG_ERROR`, `LOG_WARN`, `LOG_INFO`, `DEBUG_LOG` и их варианты с выводом значения (`*_VAL`) для фильтрации лишнего спама. Макросы на Arduino дополнительно вызывают `Serial.flush()`, чтобы не терять часть вывода.
 
 Все сторонние библиотеки расположены в каталоге `libs/`.
@@ -55,12 +57,12 @@
 - `void loop()` — отправить первое сообщение, если оно есть.
 - `void setSendPause(uint32_t pause_ms)` — задать паузу между отправками в миллисекундах.
 - После `rs255223::encode()` выполняется `byte_interleaver::interleave()`, затем `conv_codec::encodeBits()`,
-  при необходимости `bit_interleaver::interleave()` и `lfsr_scramble()`.
+  при необходимости `bit_interleaver::interleave()` и `scrambler::scramble()`.
 
 ### RxModule
 - `void setCallback(RxModule::Callback cb)` — установить обработчик входящих данных.
 - `void onReceive(const uint8_t* data, size_t len)` — принять кадр, проверить CRC и передать полезные данные обработчику.
-- Перед декодером RS выполняется обратная цепочка: `lfsr_descramble()`,
+- Перед декодером RS выполняется обратная цепочка: `scrambler::descramble()`,
   `bit_interleaver::deinterleave()`, `conv_codec::viterbiDecode()`,
   затем `byte_interleaver::deinterleave()`.
 
@@ -112,7 +114,7 @@
 - Настройка паузы между отправками пакетов в TxModule.
 - Добавлено кодирование и декодирование RS(255,223) с байтовым интерливингом.
 - Внедрены свёрточное кодирование и Viterbi-декодирование,
-  опциональный битовый интерливинг и скремблирование полезной нагрузки.
+  опциональный битовый интерливинг и скремблирование кадра перед передачей.
 - Проверка максимального размера кадра перед отправкой (255 байт).
 - Сброс параметров радиомодуля к значениям по умолчанию.
 - Автоматическая установка этих параметров при запуске.

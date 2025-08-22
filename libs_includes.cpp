@@ -9,3 +9,4 @@
 #include "libs/viterbi/viterbi.cpp"                  // сверточный кодер
 #include "libs/conv_codec/conv_codec.cpp"           // обёртки encodeBits/viterbiDecode
 #include "libs/bit_interleaver/bit_interleaver.cpp" // битовый интерливинг
+#include "libs/scrambler/scrambler.cpp"             // скремблер
