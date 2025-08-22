@@ -17,7 +17,8 @@ void setup() {
 }
 
 void loop() {
-    tx.loop();
+    radio.loop();                           // обработка входящих пакетов
+    tx.loop();                              // обработка очередей передачи
     if (Serial.available()) {
       String line = Serial.readStringUntil('\n');
       line.trim();

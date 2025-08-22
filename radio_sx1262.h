@@ -15,6 +15,8 @@ public:
   void send(const uint8_t* data, size_t len) override;
   // Отправка служебного маяка
   void sendBeacon();
+  // Обработка готовности пакета в основном цикле
+  void loop();
   // Установка колбэка приёма
   void setReceiveCallback(RxCallback cb) override;
   // Выбор банка каналов (EAST, WEST, TEST)
@@ -51,6 +53,7 @@ private:
   SX1262 radio_;                         // экземпляр радиомодуля
   RxCallback rx_cb_;                     // пользовательский колбэк
   static RadioSX1262* instance_;         // указатель на текущий объект
+  volatile bool packetReady_ = false;    // флаг готовности пакета
 
   ChannelBank bank_ = ChannelBank::EAST; // текущий банк
   uint8_t channel_ = 0;                  // текущий канал
