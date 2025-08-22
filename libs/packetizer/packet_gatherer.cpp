@@ -2,7 +2,8 @@
 #include <algorithm>
 
 // Конструктор
-PacketGatherer::PacketGatherer(PayloadMode mode) : mode_(mode) {}
+PacketGatherer::PacketGatherer(PayloadMode mode, size_t custom)
+    : mode_(mode), custom_(custom) {}
 
 // Сброс
 void PacketGatherer::reset() {
@@ -12,6 +13,7 @@ void PacketGatherer::reset() {
 
 // Размер полезной нагрузки
 size_t PacketGatherer::payloadSize() const {
+  if (custom_) return custom_;
   switch (mode_) {
     case PayloadMode::SMALL:  return 32;
     case PayloadMode::MEDIUM: return 64;

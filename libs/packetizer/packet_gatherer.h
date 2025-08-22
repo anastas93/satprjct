@@ -7,8 +7,8 @@
 // Сборщик пакетов в исходное сообщение
 class PacketGatherer {
 public:
-  // Конструктор с указанием режима
-  explicit PacketGatherer(PayloadMode mode = PayloadMode::SMALL);
+  // Конструктор с указанием режима и опциональным произвольным размером
+  explicit PacketGatherer(PayloadMode mode = PayloadMode::SMALL, size_t custom = 0);
   // Сброс текущего состояния
   void reset();
   // Добавить часть сообщения
@@ -20,6 +20,7 @@ public:
 private:
   size_t payloadSize() const;
   PayloadMode mode_;
+  size_t custom_ = 0; // произвольный размер, если задан
   bool complete_ = false;
   std::vector<uint8_t> data_;
 };

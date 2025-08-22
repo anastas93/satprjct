@@ -30,6 +30,9 @@ static std::vector<uint8_t> removePilots(const uint8_t* data, size_t len) {
   return out;
 }
 
+// Конструктор модуля приёма
+RxModule::RxModule() : gatherer_(PayloadMode::SMALL, RS_DATA_LEN) {}
+
 // Передаём данные колбэку, если заголовок валиден
 void RxModule::onReceive(const uint8_t* data, size_t len) {
   if (!cb_ || !data || len < FrameHeader::SIZE * 2) return; // проверка указателя
@@ -70,7 +73,13 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     result.swap(payload); // кадр без кодирования
   }
 
-  cb_(result.data(), result.size());
+  // Сборка сообщения из фрагментов
+  gatherer_.add(result.data(), result.size());
+  if (hdr.frag_idx + 1 == hdr.frag_cnt) { // последний фрагмент
+    const auto& full = gatherer_.get();
+    cb_(full.data(), full.size());
+    gatherer_.reset();
+  }
 }
 
 // Установка колбэка для обработки сообщений

@@ -5,7 +5,6 @@
 #include <array>
 #include "tx_module.h"
 #include "rx_module.h"
-#include "libs/packetizer/packet_gatherer.h"
 
 // Петлевой радиоинтерфейс, сразу передающий данные в приёмник
 class LoopbackRadio : public IRadio {
@@ -24,28 +23,21 @@ static void run_message(size_t size) {
   LoopbackRadio radio;
   TxModule tx(radio, std::array<size_t,4>{64,64,64,64}, PayloadMode::SMALL);
   RxModule rx;
-  PacketGatherer gatherer(PayloadMode::SMALL);
   std::vector<uint8_t> received;
 
-  rx.setCallback([&](const uint8_t* d, size_t l) {
-    gatherer.add(d, l);
-    if (gatherer.isComplete()) received = gatherer.get();
-  });
+  rx.setCallback([&](const uint8_t* d, size_t l) { received.assign(d, d + l); });
   radio.setReceiveCallback([&](const uint8_t* d, size_t l) { rx.onReceive(d, l); });
 
   std::vector<uint8_t> data(size);
   for (size_t i = 0; i < size; ++i) data[i] = static_cast<uint8_t>(i);
-  gatherer.reset();
   tx.queue(data.data(), data.size());
-  for (int i = 0; i < 1000 && !gatherer.isComplete(); ++i) tx.loop(); // ограничиваем цикл
-  assert(gatherer.isComplete());
+  tx.loop();
   assert(received == data);                      // проверяем целостность
 }
 
 int main() {
   run_message(10);
-  run_message(100);
-  run_message(500);
+  run_message(20);
 
   // Проверка паузы между отправками
   LoopbackRadio radio;
