@@ -10,11 +10,13 @@ namespace DefaultSettings {
   constexpr uint8_t BW_PRESET = 3;                // Индекс полосы
   constexpr uint8_t SF_PRESET = 2;                // Индекс фактора расширения
   constexpr uint8_t CR_PRESET = 0;                // Индекс коэффициента кодирования
-    constexpr bool DEBUG = true;                    // Флаг отладочного вывода
-    // Уровни журналирования для фильтрации сообщений
-    enum class LogLevel : uint8_t { ERROR = 0, WARN = 1, INFO = 2, DEBUG = 3 };
-    constexpr LogLevel LOG_LEVEL = LogLevel::INFO;   // Текущий уровень вывода
-  }
+  constexpr size_t GATHER_BLOCK_SIZE = 223;       // Размер блока для PacketGatherer
+  constexpr uint32_t SEND_PAUSE_MS = 0;           // Ожидание между отправками и приёмом (мс)
+  constexpr bool DEBUG = true;                    // Флаг отладочного вывода
+  // Уровни журналирования для фильтрации сообщений
+  enum class LogLevel : uint8_t { ERROR = 0, WARN = 1, INFO = 2, DEBUG = 3 };
+  constexpr LogLevel LOG_LEVEL = LogLevel::INFO;   // Текущий уровень вывода
+}
 
 #if !defined(LOG_MSG)
 #  if defined(ARDUINO)

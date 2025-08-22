@@ -5,6 +5,7 @@
 #include "radio_interface.h"
 #include "message_buffer.h"
 #include "libs/packetizer/packet_splitter.h" // подключаем разделитель пакетов из каталога libs
+#include "default_settings.h"                  // параметры по умолчанию
 
 // Модуль передачи данных с поддержкой классов QoS
 class TxModule {
@@ -23,7 +24,7 @@ private:
   IRadio& radio_;
   std::array<MessageBuffer,4> buffers_;             // очереди сообщений по классам QoS
   PacketSplitter splitter_;
-  uint32_t pause_ms_ = 0;                           // пауза между пакетами
+  uint32_t pause_ms_ = DefaultSettings::SEND_PAUSE_MS; // пауза между пакетами
   std::chrono::steady_clock::time_point last_send_; // время последней отправки
 };
 

@@ -5,9 +5,10 @@
 #include "libs/conv_codec/conv_codec.h" // свёрточный кодер/декодер
 #include "libs/bit_interleaver/bit_interleaver.h" // битовый интерливинг
 #include "libs/scrambler/scrambler.h" // скремблер
+#include "default_settings.h"         // параметры по умолчанию
 #include <vector>
 
-static constexpr size_t RS_DATA_LEN = 223;     // длина блока данных RS
+static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
 static constexpr size_t RS_ENC_LEN = 255;      // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
 
@@ -31,7 +32,7 @@ static std::vector<uint8_t> removePilots(const uint8_t* data, size_t len) {
 }
 
 // Конструктор модуля приёма
-RxModule::RxModule() : gatherer_(PayloadMode::SMALL, RS_DATA_LEN) {}
+RxModule::RxModule() : gatherer_(PayloadMode::SMALL, DefaultSettings::GATHER_BLOCK_SIZE) {}
 
 // Передаём данные колбэку, если заголовок валиден
 void RxModule::onReceive(const uint8_t* data, size_t len) {
