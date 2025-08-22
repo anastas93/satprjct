@@ -2,6 +2,7 @@
 #include "default_settings.h"
 #include <cmath>
 #include <array>
+#include <cstring>
 
 RadioSX1262* RadioSX1262::instance_ = nullptr; // инициализация статического указателя
 
@@ -146,3 +147,12 @@ void RadioSX1262::handleDio1() {
   radio_.startReceive();
 }
 
+void RadioSX1262::sendBeacon() {
+  uint8_t beacon[15]{0};                  // буфер маяка
+  beacon[1] = radio_.randomByte();        // случайный байт 1
+  beacon[2] = radio_.randomByte();        // случайный байт 2
+  beacon[0] = beacon[1] ^ beacon[2];      // идентификатор = XOR
+  const char text[6] = {'B','E','A','C','O','N'}; // надпись "BEACON"
+  memcpy(&beacon[9], text, 6);            // вставка текста
+  send(beacon, sizeof(beacon));           // отправляем как обычный пакет
+}

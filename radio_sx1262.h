@@ -13,6 +13,8 @@ public:
   bool begin();
   // Отправка данных
   void send(const uint8_t* data, size_t len) override;
+  // Отправка служебного маяка
+  void sendBeacon();
   // Установка колбэка приёма
   void setReceiveCallback(RxCallback cb) override;
   // Выбор банка каналов (EAST, WEST, TEST)

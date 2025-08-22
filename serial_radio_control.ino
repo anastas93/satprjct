@@ -13,7 +13,7 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) {}
   radio.begin();
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, INFO");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, BCN, INFO");
 }
 
 void loop() {
@@ -69,6 +69,9 @@ void loop() {
         } else {
           Serial.println("Ошибка установки мощности");
         }
+      } else if (line.equalsIgnoreCase("BCN")) {
+        radio.sendBeacon();
+        Serial.println("Маяк отправлен");
       } else if (line.equalsIgnoreCase("INFO")) {
         // выводим текущие настройки радиомодуля
         Serial.print("Банк: ");
