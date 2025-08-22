@@ -2,7 +2,7 @@
 #include <iostream>
 #include <vector>
 #include "tx_module.h"
-#include "frame/frame_header.h"
+#include "../libs/frame/frame_header.h" // заголовок кадра
 
 // Простая заглушка радиоинтерфейса
 class MockRadio : public IRadio {
