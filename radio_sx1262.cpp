@@ -1,4 +1,6 @@
 #include "radio_sx1262.h"
+#include "default_settings.h"
+#include <cmath>
 
 RadioSX1262* RadioSX1262::instance_ = nullptr; // инициализация статического указателя
 
@@ -55,28 +57,53 @@ bool RadioSX1262::setFrequency(float freq) {
 }
 
 bool RadioSX1262::setBandwidth(float bw) {
-  int state = radio_.setBandwidth(bw);        // задаём полосу пропускания
-  return state == RADIOLIB_ERR_NONE;          // возвращаем успех
+  int idx = -1;
+  for (int i = 0; i < 5; ++i) {
+    if (std::fabs(BW_[i] - bw) < 0.01f) { idx = i; break; }
+  }
+  if (idx < 0) return false;                           // значение не из таблицы
+  bw_preset_ = idx;
+  int state = radio_.setBandwidth(bw);                 // задаём полосу пропускания
+  return state == RADIOLIB_ERR_NONE;                   // возвращаем успех
 }
 
 bool RadioSX1262::setSpreadingFactor(int sf) {
-  int state = radio_.setSpreadingFactor(sf);  // задаём фактор расширения
-  return state == RADIOLIB_ERR_NONE;          // возвращаем успех
+  int idx = -1;
+  for (int i = 0; i < 8; ++i) {
+    if (SF_[i] == sf) { idx = i; break; }
+  }
+  if (idx < 0) return false;                           // недопустимое значение
+  sf_preset_ = idx;
+  int state = radio_.setSpreadingFactor(sf);           // задаём фактор расширения
+  return state == RADIOLIB_ERR_NONE;                   // возвращаем успех
 }
 
 bool RadioSX1262::setCodingRate(int cr) {
-  int state = radio_.setCodingRate(cr);       // задаём коэффициент кодирования
-  return state == RADIOLIB_ERR_NONE;          // возвращаем успех
+  int idx = -1;
+  for (int i = 0; i < 4; ++i) {
+    if (CR_[i] == cr) { idx = i; break; }
+  }
+  if (idx < 0) return false;                           // недопустимое значение
+  cr_preset_ = idx;
+  int state = radio_.setCodingRate(cr);                // задаём коэффициент кодирования
+  return state == RADIOLIB_ERR_NONE;                   // возвращаем успех
+}
+
+bool RadioSX1262::setPower(uint8_t preset) {
+  if (preset >= 10) return false;                      // индекс вне диапазона
+  pw_preset_ = preset;
+  int state = radio_.setOutputPower(Pwr_[pw_preset_]); // установка мощности
+  return state == RADIOLIB_ERR_NONE;                   // возвращаем успех
 }
 
 bool RadioSX1262::resetToDefaults() {
-  // возвращаем все параметры к значениям из референса
-  bank_ = ChannelBank::EAST;   // банк Восток
-  channel_ = 0;                // канал 0
-  pw_preset_ = 9;              // индекс мощности
-  bw_preset_ = 3;              // индекс полосы
-  sf_preset_ = 2;              // индекс фактора расширения
-  cr_preset_ = 0;              // индекс коэффициента кодирования
+  // возвращаем все параметры к значениям из файла default_settings.h
+  bank_ = DefaultSettings::BANK;       // банк каналов
+  channel_ = DefaultSettings::CHANNEL; // канал
+  pw_preset_ = DefaultSettings::POWER_PRESET; // мощность
+  bw_preset_ = DefaultSettings::BW_PRESET;    // полоса
+  sf_preset_ = DefaultSettings::SF_PRESET;    // фактор расширения
+  cr_preset_ = DefaultSettings::CR_PRESET;    // коэффициент кодирования
 
   int state = radio_.begin(
       fRX_bank_[static_cast<int>(bank_)][channel_],

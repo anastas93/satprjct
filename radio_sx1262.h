@@ -27,6 +27,17 @@ public:
   bool setSpreadingFactor(int sf);
   // Установка коэффициента кодирования
   bool setCodingRate(int cr);
+  // Установка уровня мощности по индексу пресета
+  bool setPower(uint8_t preset);
+  // Получение текущих параметров
+  ChannelBank getBank() const { return bank_; }
+  uint8_t getChannel() const { return channel_; }
+  float getBandwidth() const { return BW_[bw_preset_]; }
+  int getSpreadingFactor() const { return SF_[sf_preset_]; }
+  int getCodingRate() const { return CR_[cr_preset_]; }
+  int getPower() const { return Pwr_[pw_preset_]; }
+  float getRxFrequency() const { return fRX_bank_[static_cast<int>(bank_)][channel_]; }
+  float getTxFrequency() const { return fTX_bank_[static_cast<int>(bank_)][channel_]; }
   // Сброс параметров к значениям по умолчанию с перезапуском приёма
   bool resetToDefaults();
 
