@@ -10,7 +10,7 @@
 - `FrameHeader` — заголовок кадра с функциями `encode()` и `decode()`.
 - `IRadio` описан в `radio_interface.h`.
 - `RadioSX1262` — конкретная реализация интерфейса на базе модуля SX1262.
-- `serial_program_collector.ino` — пример приёма строк по Serial и сборки их в один буфер.
+- `SerialProgramCollector` — библиотека для приёма строк по Serial и сборки их в один буфер (`libs/serial_program_collector/`).
 - `serial_radio_control.ino` — пример настройки частоты, BW и SF через Serial.
 
 Все сторонние библиотеки расположены в каталоге `libs/`.
