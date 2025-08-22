@@ -1,6 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include <vector>
+#include <array>
 #include "tx_module.h"
 #include "../libs/frame/frame_header.h" // заголовок кадра
 
@@ -14,9 +15,8 @@ public:
 
 // Проверка формирования кадра и вызова send
 int main() {
-  MessageBuffer buf(10);
   MockRadio radio;
-  TxModule tx(radio, buf, PayloadMode::SMALL);
+  TxModule tx(radio, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
   const char* msg = "HELLO";
   uint32_t id = tx.queue(reinterpret_cast<const uint8_t*>(msg), 5);
   assert(id==1);                          // ожидаемый ID

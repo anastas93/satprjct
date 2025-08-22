@@ -1,14 +1,13 @@
 #include <Arduino.h>
+#include <array>
 #include "radio_sx1262.h"
-#include "message_buffer.h"
 #include "tx_module.h"
 #include "default_settings.h"
 #include "libs/text_converter/text_converter.h" // конвертер UTF-8 -> CP1251
 
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
-MessageBuffer msgBuf(4);        // буфер сообщений
-TxModule tx(radio, msgBuf);     // модуль отправки
+TxModule tx(radio, std::array<size_t,4>{4,4,4,4}); // модуль отправки с очередями QoS
 
 void setup() {
   Serial.begin(115200);

@@ -20,23 +20,26 @@ static std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
   return out;
 }
 
-// Инициализация модуля передачи
-TxModule::TxModule(IRadio& radio, MessageBuffer& buf, PayloadMode mode)
-  : radio_(radio), buffer_(buf), splitter_(mode) {
+// Инициализация модуля передачи с классами QoS
+TxModule::TxModule(IRadio& radio, const std::array<size_t,4>& capacities, PayloadMode mode)
+  : radio_(radio), buffers_{MessageBuffer(capacities[0]), MessageBuffer(capacities[1]),
+                             MessageBuffer(capacities[2]), MessageBuffer(capacities[3])},
+    splitter_(mode) {
   last_send_ = std::chrono::steady_clock::now();
 }
 
 // Смена режима пакета
 void TxModule::setPayloadMode(PayloadMode mode) { splitter_.setMode(mode); }
 
-// Помещаем сообщение в буфер через делитель
-uint32_t TxModule::queue(const uint8_t* data, size_t len) {
+// Помещаем сообщение в очередь согласно классу QoS
+uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos) {
   if (!data || len == 0) {                        // проверка указателя
     DEBUG_LOG("TxModule: пустой ввод");
     return 0;
   }
+  if (qos > 3) qos = 3;                           // ограничение диапазона QoS
   DEBUG_LOG_VAL("TxModule: постановка длины=", len);
-  uint32_t res = splitter_.splitAndEnqueue(buffer_, data, len);
+  uint32_t res = splitter_.splitAndEnqueue(buffers_[qos], data, len);
   if (res) {
     DEBUG_LOG_VAL("TxModule: сообщение id=", res);
   } else {
@@ -52,13 +55,18 @@ void TxModule::loop() {
     DEBUG_LOG("TxModule: пауза");
     return; // ждём паузу
   }
-  if (!buffer_.hasPending()) {
-    DEBUG_LOG("TxModule: очередь пуста");
+  // ищем первую непустую очередь QoS
+  MessageBuffer* buf = nullptr;
+  for (auto& b : buffers_) {
+    if (b.hasPending()) { buf = &b; break; }
+  }
+  if (!buf) {                                     // все очереди пусты
+    DEBUG_LOG("TxModule: очереди пусты");
     return;
   }
   std::vector<uint8_t> msg;
   uint32_t id = 0;                      // получаемый идентификатор сообщения
-  if (!buffer_.pop(id, msg)) {
+  if (!buf->pop(id, msg)) {
     DEBUG_LOG("TxModule: ошибка извлечения");
     return;
   }
