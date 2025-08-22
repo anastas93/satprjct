@@ -85,9 +85,14 @@ void loop() {
         Serial.print("Power: "); Serial.print(radio.getPower()); Serial.println(" dBm");
       } else if (line.startsWith("TX ")) {
         String msg = line.substring(3);
-        tx.queue((const uint8_t*)msg.c_str(), msg.length());
-        tx.loop();
-        Serial.println("Пакет отправлен");
+        // помещаем сообщение в очередь и проверяем успех
+        uint32_t id = tx.queue((const uint8_t*)msg.c_str(), msg.length());
+        if (id != 0) {
+          tx.loop();                           // отправляем первый пакет
+          Serial.println("Пакет отправлен");
+        } else {
+          Serial.println("Ошибка постановки пакета в очередь");
+        }
       }
     }
 }
