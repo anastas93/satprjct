@@ -19,19 +19,27 @@ namespace DefaultSettings {
 #if !defined(LOG_MSG)
 #  if defined(ARDUINO)
 #    include <Arduino.h>
+// Вывод сообщения с принудительным сбросом буфера Serial
 #    define LOG_MSG(level, msg) do { \
-      if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) Serial.println(msg); \
+      if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) { \
+        Serial.println(msg); \
+        Serial.flush(); \
+      } \
     } while (0)
+// Вывод значения с префиксом и сбросом буфера Serial
 #    define LOG_MSG_VAL(level, prefix, val) do { \
       if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) { \
         Serial.print(prefix); Serial.println(val); \
+        Serial.flush(); \
       } \
     } while (0)
 #  else
 #    include <iostream>
+// Вывод сообщения в стандартный поток с окончанием строки
 #    define LOG_MSG(level, msg) do { \
       if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) std::cout << msg << std::endl; \
     } while (0)
+// Вывод значения с префиксом в стандартный поток
 #    define LOG_MSG_VAL(level, prefix, val) do { \
       if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) \
         std::cout << prefix << val << std::endl; \
