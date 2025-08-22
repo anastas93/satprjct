@@ -12,7 +12,7 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) {}
   radio.begin();
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, TX <строка>");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, INFO");
 }
 
 void loop() {
@@ -61,6 +61,28 @@ void loop() {
         } else {
           Serial.println("Ошибка выбора канала");
         }
+      } else if (line.startsWith("PW ")) {
+        int pw = line.substring(3).toInt();
+        if (radio.setPower(pw)) {
+          Serial.println("Мощность установлена");
+        } else {
+          Serial.println("Ошибка установки мощности");
+        }
+      } else if (line.equalsIgnoreCase("INFO")) {
+        // выводим текущие настройки радиомодуля
+        Serial.print("Банк: ");
+        switch (radio.getBank()) {
+          case ChannelBank::EAST: Serial.println("Восток"); break;
+          case ChannelBank::WEST: Serial.println("Запад"); break;
+          case ChannelBank::TEST: Serial.println("Тест"); break;
+        }
+        Serial.print("Канал: "); Serial.println(radio.getChannel());
+        Serial.print("RX: "); Serial.print(radio.getRxFrequency(), 3); Serial.println(" MHz");
+        Serial.print("TX: "); Serial.print(radio.getTxFrequency(), 3); Serial.println(" MHz");
+        Serial.print("BW: "); Serial.print(radio.getBandwidth(), 2); Serial.println(" kHz");
+        Serial.print("SF: "); Serial.println(radio.getSpreadingFactor());
+        Serial.print("CR: "); Serial.println(radio.getCodingRate());
+        Serial.print("Power: "); Serial.print(radio.getPower()); Serial.println(" dBm");
       } else if (line.startsWith("TX ")) {
         String msg = line.substring(3);
         tx.queue((const uint8_t*)msg.c_str(), msg.length());
