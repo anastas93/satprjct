@@ -13,7 +13,7 @@
 - `SerialProgramCollector` — библиотека для приёма строк по Serial и сборки их в один буфер (`libs/serial_program_collector/`).
   - `serial_radio_control.ino` — пример настройки банков каналов, BW, SF, CR и мощности через Serial, вывода текущих параметров и отправки тестовых пакетов через `TxModule`.
 - `TextConverter` — библиотека (`libs/text_converter/`) для преобразования UTF-8 текста в байты CP1251, используемая командой `TX`.
-- Для отладочных сообщений предусмотрен флаг `DefaultSettings::DEBUG` и уровни журналирования `DefaultSettings::LOG_LEVEL`. Доступны макросы `LOG_ERROR`, `LOG_WARN`, `LOG_INFO`, `DEBUG_LOG` и их варианты с выводом значения (`*_VAL`) для фильтрации лишнего спама.
+- Для отладочных сообщений предусмотрен флаг `DefaultSettings::DEBUG` и уровни журналирования `DefaultSettings::LOG_LEVEL`. Доступны макросы `LOG_ERROR`, `LOG_WARN`, `LOG_INFO`, `DEBUG_LOG` и их варианты с выводом значения (`*_VAL`) для фильтрации лишнего спама. Макросы на Arduino дополнительно вызывают `Serial.flush()`, чтобы не терять часть вывода.
 
 Все сторонние библиотеки расположены в каталоге `libs/`.
 Для корректной сборки в Arduino добавлен вспомогательный файл `libs_includes.cpp`,
