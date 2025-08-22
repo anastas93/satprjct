@@ -31,6 +31,10 @@ void TxModule::setPayloadMode(PayloadMode mode) { splitter_.setMode(mode); }
 
 // Помещаем сообщение в буфер через делитель
 uint32_t TxModule::queue(const uint8_t* data, size_t len) {
+  if (!data || len == 0) {                        // проверка указателя
+    DEBUG_LOG("TxModule: пустой ввод");
+    return 0;
+  }
   DEBUG_LOG_VAL("TxModule: постановка длины=", len);
   uint32_t res = splitter_.splitAndEnqueue(buffer_, data, len);
   if (res) {
