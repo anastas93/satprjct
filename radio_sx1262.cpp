@@ -30,6 +30,21 @@ void RadioSX1262::send(const uint8_t* data, size_t len) {
 
 void RadioSX1262::setReceiveCallback(RxCallback cb) { rx_cb_ = cb; }
 
+bool RadioSX1262::setFrequency(float freq) {
+  int state = radio_.setFrequency(freq);      // задаём частоту
+  return state == RADIOLIB_ERR_NONE;          // возвращаем успех
+}
+
+bool RadioSX1262::setBandwidth(float bw) {
+  int state = radio_.setBandwidth(bw);        // задаём полосу пропускания
+  return state == RADIOLIB_ERR_NONE;          // возвращаем успех
+}
+
+bool RadioSX1262::setSpreadingFactor(int sf) {
+  int state = radio_.setSpreadingFactor(sf);  // задаём фактор расширения
+  return state == RADIOLIB_ERR_NONE;          // возвращаем успех
+}
+
 void RadioSX1262::onDio1Static() {
   if (instance_) {
     instance_->handleDio1();
