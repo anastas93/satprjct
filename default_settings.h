@@ -10,22 +10,40 @@ namespace DefaultSettings {
   constexpr uint8_t BW_PRESET = 3;                // Индекс полосы
   constexpr uint8_t SF_PRESET = 2;                // Индекс фактора расширения
   constexpr uint8_t CR_PRESET = 0;                // Индекс коэффициента кодирования
-  constexpr bool DEBUG = true;                    // Флаг отладочного вывода
-}
+    constexpr bool DEBUG = true;                    // Флаг отладочного вывода
+    // Уровни журналирования для фильтрации сообщений
+    enum class LogLevel : uint8_t { ERROR = 0, WARN = 1, INFO = 2, DEBUG = 3 };
+    constexpr LogLevel LOG_LEVEL = LogLevel::INFO;   // Текущий уровень вывода
+  }
 
-#if !defined(DEBUG_LOG)
+#if !defined(LOG_MSG)
 #  if defined(ARDUINO)
 #    include <Arduino.h>
-#    define DEBUG_LOG(msg) do { if (DefaultSettings::DEBUG) Serial.println(msg); } while (0)
-#    define DEBUG_LOG_VAL(prefix, val) do { \
-      if (DefaultSettings::DEBUG) { Serial.print(prefix); Serial.println(val); } \
+#    define LOG_MSG(level, msg) do { \
+      if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) Serial.println(msg); \
+    } while (0)
+#    define LOG_MSG_VAL(level, prefix, val) do { \
+      if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) { \
+        Serial.print(prefix); Serial.println(val); \
+      } \
     } while (0)
 #  else
 #    include <iostream>
-#    define DEBUG_LOG(msg) do { if (DefaultSettings::DEBUG) std::cout << msg << std::endl; } while (0)
-#    define DEBUG_LOG_VAL(prefix, val) do { \
-      if (DefaultSettings::DEBUG) std::cout << prefix << val << std::endl; \
+#    define LOG_MSG(level, msg) do { \
+      if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) std::cout << msg << std::endl; \
+    } while (0)
+#    define LOG_MSG_VAL(level, prefix, val) do { \
+      if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) \
+        std::cout << prefix << val << std::endl; \
     } while (0)
 #  endif
+#  define LOG_ERROR(msg) LOG_MSG(DefaultSettings::LogLevel::ERROR, msg)
+#  define LOG_WARN(msg)  LOG_MSG(DefaultSettings::LogLevel::WARN,  msg)
+#  define LOG_INFO(msg)  LOG_MSG(DefaultSettings::LogLevel::INFO,  msg)
+#  define DEBUG_LOG(msg) LOG_MSG(DefaultSettings::LogLevel::DEBUG, msg)
+#  define LOG_ERROR_VAL(prefix, val) LOG_MSG_VAL(DefaultSettings::LogLevel::ERROR, prefix, val)
+#  define LOG_WARN_VAL(prefix, val)  LOG_MSG_VAL(DefaultSettings::LogLevel::WARN,  prefix, val)
+#  define LOG_INFO_VAL(prefix, val)  LOG_MSG_VAL(DefaultSettings::LogLevel::INFO,  prefix, val)
+#  define DEBUG_LOG_VAL(prefix, val) LOG_MSG_VAL(DefaultSettings::LogLevel::DEBUG, prefix, val)
 #endif
 
