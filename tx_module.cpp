@@ -10,7 +10,10 @@
 #include <chrono>
 
 // Максимально допустимый размер кадра
-static constexpr size_t MAX_FRAME_SIZE = 255;      // максимально допустимый кадр
+static constexpr size_t MAX_FRAME_SIZE = 564;      // максимально допустимый кадр
+// Допустимая длина полезной нагрузки одного кадра с учётом заголовков и пилотов
+static constexpr size_t MAX_FRAGMENT_LEN =
+    MAX_FRAME_SIZE - FrameHeader::SIZE * 2 - (MAX_FRAME_SIZE / 64) * 2;
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
 static constexpr size_t RS_ENC_LEN = 255;         // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
@@ -86,18 +89,18 @@ void TxModule::loop() {
 
   // Разбиваем сообщение на блоки по RS_DATA_LEN байт перед RS-кодированием
   PacketSplitter rs_splitter(PayloadMode::SMALL, RS_DATA_LEN);
-  size_t parts = (msg.size() + RS_DATA_LEN - 1) / RS_DATA_LEN;
-  MessageBuffer tmp(parts);
+  MessageBuffer tmp((msg.size() + RS_DATA_LEN - 1) / RS_DATA_LEN);
   rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size());
 
-  for (size_t idx = 0; tmp.hasPending(); ++idx) {
+  std::vector<std::vector<uint8_t>> fragments;      // конечные фрагменты для отправки
+
+  while (tmp.hasPending()) {
     std::vector<uint8_t> part;
     uint32_t dummy;
-    if (!tmp.pop(dummy, part)) break; // защита от ошибок
+    if (!tmp.pop(dummy, part)) break;               // защита от ошибок
 
-    std::vector<uint8_t> conv;
+    std::vector<uint8_t> conv;                      // закодированный блок
     if (part.size() == RS_DATA_LEN) {
-      // Полный блок: кодируем RS и применяем интерливинги
       uint8_t rs_buf[RS_ENC_LEN];
       rs255223::encode(part.data(), rs_buf);               // кодируем блок
       byte_interleaver::interleave(rs_buf, RS_ENC_LEN);    // байтовый интерливинг
@@ -105,14 +108,32 @@ void TxModule::loop() {
       if (USE_BIT_INTERLEAVER)
         bit_interleaver::interleave(conv.data(), conv.size()); // битовый интерливинг
     } else {
-      // Короткий блок передаём без кодирования
-      conv = part;
+      conv = part;                                       // короткий блок без кодирования
     }
 
+    if (conv.size() > MAX_FRAGMENT_LEN) {                // проверяем лимит
+      size_t pieces = (conv.size() + MAX_FRAGMENT_LEN - 1) / MAX_FRAGMENT_LEN;
+      PacketSplitter frag_splitter(PayloadMode::SMALL, MAX_FRAGMENT_LEN);
+      MessageBuffer fb(pieces);
+      frag_splitter.splitAndEnqueue(fb, conv.data(), conv.size());
+      LOG_WARN_VAL("TxModule: фрагмент превышает лимит, частей=", pieces);
+      while (fb.hasPending()) {
+        std::vector<uint8_t> sub;
+        fb.pop(dummy, sub);
+        fragments.push_back(std::move(sub));
+      }
+    } else {
+      fragments.push_back(std::move(conv));
+    }
+  }
+
+  uint16_t frag_cnt = static_cast<uint16_t>(fragments.size());
+  for (size_t idx = 0; idx < fragments.size(); ++idx) {
+    auto& conv = fragments[idx];
     FrameHeader hdr;
     hdr.msg_id = id;                                   // один ID для всех фрагментов
     hdr.frag_idx = static_cast<uint16_t>(idx);         // номер фрагмента
-    hdr.frag_cnt = static_cast<uint16_t>(parts);       // общее количество
+    hdr.frag_cnt = frag_cnt;                           // общее число фрагментов
     hdr.payload_len = static_cast<uint16_t>(conv.size());
     uint8_t hdr_buf[FrameHeader::SIZE];
     if (!hdr.encode(hdr_buf, sizeof(hdr_buf), conv.data(), conv.size())) {
@@ -125,13 +146,13 @@ void TxModule::loop() {
     frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE); // повтор заголовка
     auto payload = insertPilots(conv);
     frame.insert(frame.end(), payload.begin(), payload.end());
-    scrambler::scramble(frame.data(), frame.size());          // скремблируем весь кадр
+    scrambler::scramble(frame.data(), frame.size());          // скремблируем кадр
 
-    if (frame.size() > MAX_FRAME_SIZE) {            // проверка лимита
+    if (frame.size() > MAX_FRAME_SIZE) {                     // финальная проверка
       LOG_ERROR_VAL("TxModule: превышен размер кадра=", frame.size());
-      continue; // пропускаем отправку слишком больших фрагментов
+      continue;                                             // пропускаем отправку
     }
-    radio_.send(frame.data(), frame.size());        // отправка кадра
+    radio_.send(frame.data(), frame.size());                // отправка кадра
     DEBUG_LOG_VAL("TxModule: отправлен фрагмент=", idx);
   }
   last_send_ = std::chrono::steady_clock::now();
