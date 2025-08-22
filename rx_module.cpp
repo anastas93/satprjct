@@ -4,7 +4,7 @@
 #include "libs/byte_interleaver/byte_interleaver.h" // байтовый интерливинг
 #include "libs/conv_codec/conv_codec.h" // свёрточный кодер/декодер
 #include "libs/bit_interleaver/bit_interleaver.h" // битовый интерливинг
-#include "libs/ccsds_link/scrambler.h" // скремблер
+#include "libs/scrambler/scrambler.h" // скремблер
 #include <vector>
 
 static constexpr size_t RS_DATA_LEN = 223;     // длина блока данных RS
@@ -34,13 +34,18 @@ static std::vector<uint8_t> removePilots(const uint8_t* data, size_t len) {
 void RxModule::onReceive(const uint8_t* data, size_t len) {
   if (!cb_ || !data || len < FrameHeader::SIZE * 2) return; // проверка указателя
 
+  std::vector<uint8_t> frame(data, data + len);            // копия для дескремблирования
+  scrambler::descramble(frame.data(), frame.size());       // дескремблируем весь кадр
+
   FrameHeader hdr;
-  bool ok = FrameHeader::decode(data, len, hdr);
-  if (!ok) ok = FrameHeader::decode(data + FrameHeader::SIZE, len - FrameHeader::SIZE, hdr);
+  bool ok = FrameHeader::decode(frame.data(), frame.size(), hdr);
+  if (!ok)
+    ok = FrameHeader::decode(frame.data() + FrameHeader::SIZE,
+                             frame.size() - FrameHeader::SIZE, hdr);
   if (!ok) return; // оба заголовка повреждены
 
-  const uint8_t* payload_p = data + FrameHeader::SIZE * 2;
-  size_t payload_len = len - FrameHeader::SIZE * 2;
+  const uint8_t* payload_p = frame.data() + FrameHeader::SIZE * 2;
+  size_t payload_len = frame.size() - FrameHeader::SIZE * 2;
   auto payload = removePilots(payload_p, payload_len);
   if (payload.size() != hdr.payload_len) return; // несоответствие длины
   if (!hdr.checkFrameCrc(payload.data(), payload.size())) return; // неверный CRC
@@ -48,7 +53,6 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   // Деинтерливинг и декодирование
   std::vector<uint8_t> result;
   if (payload.size() == RS_ENC_LEN * 2) {
-    lfsr_descramble(payload.data(), payload.size(), (uint16_t)hdr.msg_id); // дескремблирование
     if (USE_BIT_INTERLEAVER)
       bit_interleaver::deinterleave(payload.data(), payload.size()); // деинтерливинг бит
     std::vector<uint8_t> vit_dec;

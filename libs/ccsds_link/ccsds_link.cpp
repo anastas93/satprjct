@@ -1,8 +1,7 @@
 #include "ccsds_link.h"
 // Заголовки лежат в этом же каталоге библиотеки, поэтому подключаем их напрямую.
-// Использование относительных путей вроде "../../scrambler.h" раньше вызывало
-// ошибку компиляции «No such file or directory» в Arduino IDE.
-#include "scrambler.h"
+// Скремблер вынесен в отдельную библиотеку
+#include "../scrambler/scrambler.h"
 #include "fec.h"
 #include "interleaver.h"
 
@@ -22,7 +21,7 @@ void encode(const uint8_t* in, size_t len, uint32_t msg_id,
 
   // Шаг 1: рандомизация всего блока
   if (p.scramble && !tmp.empty()) {
-    lfsr_scramble(tmp.data(), tmp.size(), (uint16_t)msg_id);
+    scrambler::scramble(tmp.data(), tmp.size(), (uint16_t)msg_id);
   }
 
   // Шаг 2: FEC
@@ -76,7 +75,7 @@ bool decode(const uint8_t* in, size_t len, uint32_t msg_id,
 
   // Шаг 3: деррандомизация
   if (p.scramble && !tmp.empty()) {
-    lfsr_descramble(tmp.data(), tmp.size(), (uint16_t)msg_id);
+    scrambler::descramble(tmp.data(), tmp.size(), (uint16_t)msg_id);
   }
 
   // Шаг 4: проверка ASM
