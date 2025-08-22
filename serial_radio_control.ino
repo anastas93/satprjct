@@ -3,6 +3,7 @@
 #include "message_buffer.h"
 #include "tx_module.h"
 #include "default_settings.h"
+#include "libs/text_converter/text_converter.h" // конвертер UTF-8 -> CP1251
 
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
@@ -88,10 +89,12 @@ void loop() {
         Serial.print("CR: "); Serial.println(radio.getCodingRate());
         Serial.print("Power: "); Serial.print(radio.getPower()); Serial.println(" dBm");
       } else if (line.startsWith("TX ")) {
-        String msg = line.substring(3);
+        String msg = line.substring(3);                     // исходный текст
+        // конвертация UTF-8 в CP1251 для корректной передачи русских символов
+        std::vector<uint8_t> data = utf8ToCp1251(std::string(msg.c_str()));
         // помещаем сообщение в очередь и проверяем успех
         DEBUG_LOG("RC: команда TX");
-        uint32_t id = tx.queue((const uint8_t*)msg.c_str(), msg.length());
+        uint32_t id = tx.queue(data.data(), data.size());
         if (id != 0) {
           DEBUG_LOG_VAL("RC: сообщение поставлено id=", id);
           tx.loop();                           // отправляем первый пакет
