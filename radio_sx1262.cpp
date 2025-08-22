@@ -132,19 +132,29 @@ void RadioSX1262::onDio1Static() {
 }
 
 void RadioSX1262::handleDio1() {
+  packetReady_ = true;                     // устанавливаем флаг готовности пакета
+}
+
+// Проверка флага готовности и чтение данных
+void RadioSX1262::loop() {
+  if (!packetReady_) {                      // пакет пока не готов
+    return;
+  }
   size_t len = radio_.getPacketLength();
   // При завершении передачи длина пакета может быть мусорной и вызвать
-  // выделение огромного буфера, что приводит к перезагрузке.
+  // выделение огромного буфера, что приводит к перезагрузке
   if (len == 0 || len > 256) {
-    radio_.startReceive();
+    packetReady_ = false;                   // сбрасываем флаг
+    radio_.startReceive();                  // возобновляем приём
     return;
   }
   std::array<uint8_t, 256> buf;            // статический буфер на стеке
   int state = radio_.readData(buf.data(), len);
   if (state == RADIOLIB_ERR_NONE && rx_cb_) {
-    rx_cb_(buf.data(), len);
+    rx_cb_(buf.data(), len);                // передаём данные пользователю
   }
-  radio_.startReceive();
+  packetReady_ = false;                     // пакет обработан
+  radio_.startReceive();                    // снова слушаем эфир
 }
 
 void RadioSX1262::sendBeacon() {
