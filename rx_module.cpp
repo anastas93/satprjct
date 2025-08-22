@@ -1,5 +1,5 @@
 #include "rx_module.h"
-#include "frame/frame_header.h"
+#include "libs/frame/frame_header.h" // заголовок кадра
 #include <vector>
 
 // Удаление пилотов из полезной нагрузки

@@ -1,5 +1,5 @@
 #include "tx_module.h"
-#include "frame/frame_header.h"
+#include "libs/frame/frame_header.h" // заголовок кадра
 #include <vector>
 
 // Вставка пилотов каждые 64 байта
