@@ -82,45 +82,58 @@ void TxModule::loop() {
     return;
   }
 
-  // Кодирование RS и последующая обработка
-  std::vector<uint8_t> coded;
-  if (msg.size() == RS_DATA_LEN) {
-    uint8_t rs_buf[RS_ENC_LEN];
-    rs255223::encode(msg.data(), rs_buf);             // кодируем блок
-    byte_interleaver::interleave(rs_buf, RS_ENC_LEN); // байтовый интерливинг
+  // TODO: шифрование сообщения (не реализовано)
+
+  // Разбиваем сообщение на блоки по 223 байта перед RS-кодированием
+  PacketSplitter rs_splitter(PayloadMode::SMALL, RS_DATA_LEN);
+  size_t parts = (msg.size() + RS_DATA_LEN - 1) / RS_DATA_LEN;
+  MessageBuffer tmp(parts);
+  rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size());
+
+  for (size_t idx = 0; tmp.hasPending(); ++idx) {
+    std::vector<uint8_t> part;
+    uint32_t dummy;
+    if (!tmp.pop(dummy, part)) break; // защита от ошибок
 
     std::vector<uint8_t> conv;
-    conv_codec::encodeBits(rs_buf, RS_ENC_LEN, conv); // свёрточное кодирование
-    if (USE_BIT_INTERLEAVER)
-      bit_interleaver::interleave(conv.data(), conv.size()); // битовый интерливинг
-    coded.swap(conv);                                       // перенос закодированных данных
-  } else {
-    coded = msg;                                      // без кодирования для других размеров
-  }
+    if (part.size() == RS_DATA_LEN) {
+      // Полный блок: кодируем RS и применяем интерливинги
+      uint8_t rs_buf[RS_ENC_LEN];
+      rs255223::encode(part.data(), rs_buf);               // кодируем блок
+      byte_interleaver::interleave(rs_buf, RS_ENC_LEN);    // байтовый интерливинг
+      conv_codec::encodeBits(rs_buf, RS_ENC_LEN, conv);    // свёрточное кодирование
+      if (USE_BIT_INTERLEAVER)
+        bit_interleaver::interleave(conv.data(), conv.size()); // битовый интерливинг
+    } else {
+      // Короткий блок передаём без кодирования
+      conv = part;
+    }
 
-  FrameHeader hdr;
-  hdr.msg_id = id;
-  hdr.payload_len = static_cast<uint16_t>(coded.size());
-  uint8_t hdr_buf[FrameHeader::SIZE];
-  if (!hdr.encode(hdr_buf, sizeof(hdr_buf), coded.data(), coded.size())) {
-    DEBUG_LOG("TxModule: ошибка кодирования заголовка");
-    return;
-  }
+    FrameHeader hdr;
+    hdr.msg_id = id;                                   // один ID для всех фрагментов
+    hdr.frag_idx = static_cast<uint16_t>(idx);         // номер фрагмента
+    hdr.frag_cnt = static_cast<uint16_t>(parts);       // общее количество
+    hdr.payload_len = static_cast<uint16_t>(conv.size());
+    uint8_t hdr_buf[FrameHeader::SIZE];
+    if (!hdr.encode(hdr_buf, sizeof(hdr_buf), conv.data(), conv.size())) {
+      DEBUG_LOG("TxModule: ошибка кодирования заголовка");
+      continue;
+    }
 
-  std::vector<uint8_t> frame;
-  frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE);
-  frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE); // повтор заголовка
-  auto payload = insertPilots(coded);
-  frame.insert(frame.end(), payload.begin(), payload.end());
-  scrambler::scramble(frame.data(), frame.size());          // скремблируем весь кадр
+    std::vector<uint8_t> frame;
+    frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE);
+    frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE); // повтор заголовка
+    auto payload = insertPilots(conv);
+    frame.insert(frame.end(), payload.begin(), payload.end());
+    scrambler::scramble(frame.data(), frame.size());          // скремблируем весь кадр
 
-  if (frame.size() > MAX_FRAME_SIZE) {            // проверка лимита
-    LOG_ERROR_VAL("TxModule: превышен размер кадра=", frame.size());
-    // TODO: реализовать разделение кадра на части
-    return;
+    if (frame.size() > MAX_FRAME_SIZE) {            // проверка лимита
+      LOG_ERROR_VAL("TxModule: превышен размер кадра=", frame.size());
+      continue; // пропускаем отправку слишком больших фрагментов
+    }
+    radio_.send(frame.data(), frame.size());        // отправка кадра
+    DEBUG_LOG_VAL("TxModule: отправлен фрагмент=", idx);
   }
-  radio_.send(frame.data(), frame.size());        // отправка кадра
-  DEBUG_LOG_VAL("TxModule: отправлен кадр id=", id);
   last_send_ = std::chrono::steady_clock::now();
 }
 

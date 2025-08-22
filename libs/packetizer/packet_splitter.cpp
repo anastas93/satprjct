@@ -3,13 +3,18 @@
 #include "default_settings.h"
 
 // Конструктор
-PacketSplitter::PacketSplitter(PayloadMode mode) : mode_(mode) {}
+PacketSplitter::PacketSplitter(PayloadMode mode, size_t custom)
+    : mode_(mode), custom_(custom) {}
 
 // Смена режима
 void PacketSplitter::setMode(PayloadMode mode) { mode_ = mode; }
 
+// Установка произвольного размера
+void PacketSplitter::setCustomSize(size_t custom) { custom_ = custom; }
+
 // Размер полезной нагрузки
 size_t PacketSplitter::payloadSize() const {
+  if (custom_) return custom_;
   switch (mode_) {
     case PayloadMode::SMALL:  return 32;
     case PayloadMode::MEDIUM: return 64;
