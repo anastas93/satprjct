@@ -1,5 +1,6 @@
 #include "packet_splitter.h"
 #include <algorithm>
+#include "default_settings.h"
 
 // Конструктор
 PacketSplitter::PacketSplitter(PayloadMode mode) : mode_(mode) {}
@@ -19,10 +20,17 @@ size_t PacketSplitter::payloadSize() const {
 
 // Разделение данных и помещение в буфер
 uint32_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data, size_t len) const {
-  if (!data || len == 0) return 0;
+  if (!data || len == 0) {                              // проверка входных данных
+    DEBUG_LOG("PacketSplitter: пустой ввод");
+    return 0;
+  }
   size_t chunk = payloadSize();
   size_t parts = (len + chunk - 1) / chunk;             // сколько частей потребуется
-  if (buf.freeSlots() < parts) return 0;                // недостаточно места в буфере
+  if (buf.freeSlots() < parts) {                        // недостаточно места в буфере
+    DEBUG_LOG("PacketSplitter: нет места в буфере");
+    return 0;
+  }
+  DEBUG_LOG_VAL("PacketSplitter: частей=", parts);
   size_t offset = 0;
   uint32_t first_id = 0;
   size_t added = 0;                                     // количество успешно добавленных частей
@@ -30,6 +38,7 @@ uint32_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data
     size_t part = std::min(chunk, len - offset);
     uint32_t id = buf.enqueue(data + offset, part);
     if (id == 0) {                                      // ошибка добавления
+      DEBUG_LOG("PacketSplitter: ошибка добавления, откат");
       while (added--) buf.dropLast();                   // откат всех ранее добавленных частей
       return 0;
     }
@@ -37,6 +46,7 @@ uint32_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data
     offset += part;
     ++added;
   }
+  DEBUG_LOG_VAL("PacketSplitter: первый id=", first_id);
   return first_id;
 }
 
