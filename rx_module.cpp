@@ -5,6 +5,9 @@
 // Удаление пилотов из полезной нагрузки
 static std::vector<uint8_t> removePilots(const uint8_t* data, size_t len) {
   std::vector<uint8_t> out;
+  if (!data || len == 0) {               // проверка указателя и длины
+    return out;
+  }
   out.reserve(len);
   size_t count = 0;
   for (size_t i = 0; i < len; ++i) {
@@ -20,7 +23,7 @@ static std::vector<uint8_t> removePilots(const uint8_t* data, size_t len) {
 
 // Передаём данные колбэку, если заголовок валиден
 void RxModule::onReceive(const uint8_t* data, size_t len) {
-  if (!cb_ || len < FrameHeader::SIZE * 2) return;
+  if (!cb_ || !data || len < FrameHeader::SIZE * 2) return; // проверка указателя
 
   FrameHeader hdr;
   bool ok = FrameHeader::decode(data, len, hdr);
