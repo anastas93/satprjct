@@ -30,6 +30,22 @@ void RadioSX1262::send(const uint8_t* data, size_t len) {
 
 void RadioSX1262::setReceiveCallback(RxCallback cb) { rx_cb_ = cb; }
 
+// Установка рабочей частоты
+bool RadioSX1262::setFrequency(float mhz) {
+  // RadioLib ожидает частоту в МГц
+  return radio_.setFrequency(mhz) == RADIOLIB_ERR_NONE;
+}
+
+// Установка ширины полосы
+bool RadioSX1262::setBandwidth(float khz) {
+  return radio_.setBandwidth(khz) == RADIOLIB_ERR_NONE;
+}
+
+// Установка фактора расширения спектра
+bool RadioSX1262::setSpreadingFactor(int sf) {
+  return radio_.setSpreadingFactor(sf) == RADIOLIB_ERR_NONE;
+}
+
 void RadioSX1262::onDio1Static() {
   if (instance_) {
     instance_->handleDio1();
