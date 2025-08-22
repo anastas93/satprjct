@@ -1,6 +1,7 @@
 #include "tx_module.h"
 #include "libs/frame/frame_header.h" // заголовок кадра
 #include <vector>
+#include <chrono>
 
 // Вставка пилотов каждые 64 байта
 static std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
@@ -20,7 +21,9 @@ static std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
 
 // Инициализация модуля передачи
 TxModule::TxModule(IRadio& radio, MessageBuffer& buf, PayloadMode mode)
-  : radio_(radio), buffer_(buf), splitter_(mode) {}
+  : radio_(radio), buffer_(buf), splitter_(mode) {
+  last_send_ = std::chrono::steady_clock::now();
+}
 
 // Смена режима пакета
 void TxModule::setPayloadMode(PayloadMode mode) { splitter_.setMode(mode); }
@@ -32,6 +35,8 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len) {
 
 // Пытаемся отправить первое сообщение
 void TxModule::loop() {
+  auto now = std::chrono::steady_clock::now();
+  if (pause_ms_ && now - last_send_ < std::chrono::milliseconds(pause_ms_)) return; // ждём паузу
   if (!buffer_.hasPending()) return;
   std::vector<uint8_t> msg;
   uint32_t id = 0;                      // получаемый идентификатор сообщения
@@ -50,4 +55,11 @@ void TxModule::loop() {
   frame.insert(frame.end(), payload.begin(), payload.end());
 
   radio_.send(frame.data(), frame.size());
+  last_send_ = std::chrono::steady_clock::now();
+}
+
+// Установка паузы между отправками
+void TxModule::setSendPause(uint32_t pause_ms) {
+  pause_ms_ = pause_ms;
+  last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms);
 }

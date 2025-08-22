@@ -51,9 +51,25 @@ bool FrameHeader::encode(uint8_t* out, size_t out_len, const uint8_t* payload, s
 // Проверка контрольной суммы кадра
 bool FrameHeader::checkFrameCrc(const uint8_t* payload, size_t payload_len) const {
   uint8_t hdr[18];
-  FrameHeader copy = *this;
-  copy.frame_crc = 0;
-  copy.encode(hdr, sizeof(hdr), nullptr, 0);
+  hdr[0] = ver;
+  hdr[1] = flags;
+  hdr[2] = static_cast<uint8_t>(msg_id >> 24);
+  hdr[3] = static_cast<uint8_t>(msg_id >> 16);
+  hdr[4] = static_cast<uint8_t>(msg_id >> 8);
+  hdr[5] = static_cast<uint8_t>(msg_id);
+  hdr[6] = static_cast<uint8_t>(frag_idx >> 8);
+  hdr[7] = static_cast<uint8_t>(frag_idx);
+  hdr[8] = static_cast<uint8_t>(frag_cnt >> 8);
+  hdr[9] = static_cast<uint8_t>(frag_cnt);
+  hdr[10] = static_cast<uint8_t>(payload_len >> 8);
+  hdr[11] = static_cast<uint8_t>(payload_len);
+  hdr[12] = static_cast<uint8_t>(ack_mask >> 24);
+  hdr[13] = static_cast<uint8_t>(ack_mask >> 16);
+  hdr[14] = static_cast<uint8_t>(ack_mask >> 8);
+  hdr[15] = static_cast<uint8_t>(ack_mask);
+  uint16_t hc = crc16(hdr, 16);
+  hdr[16] = static_cast<uint8_t>(hc >> 8);
+  hdr[17] = static_cast<uint8_t>(hc);
   std::vector<uint8_t> tmp(hdr, hdr + 18);
   if (payload && payload_len) tmp.insert(tmp.end(), payload, payload + payload_len);
   return crc16(tmp.data(), tmp.size()) == frame_crc;
