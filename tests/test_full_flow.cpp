@@ -2,6 +2,7 @@
 #include <iostream>
 #include <vector>
 #include <thread>
+#include <array>
 #include "tx_module.h"
 #include "rx_module.h"
 #include "libs/packetizer/packet_gatherer.h"
@@ -20,9 +21,8 @@ public:
 
 // Проверка передачи сообщения указанного размера через Tx и Rx
 static void run_message(size_t size) {
-  MessageBuffer buf(64);                          // буфер сообщений
   LoopbackRadio radio;
-  TxModule tx(radio, buf, PayloadMode::SMALL);
+  TxModule tx(radio, std::array<size_t,4>{64,64,64,64}, PayloadMode::SMALL);
   RxModule rx;
   PacketGatherer gatherer(PayloadMode::SMALL);
   std::vector<uint8_t> received;
@@ -48,9 +48,8 @@ int main() {
   run_message(500);
 
   // Проверка паузы между отправками
-  MessageBuffer buf(4);
   LoopbackRadio radio;
-  TxModule tx(radio, buf, PayloadMode::SMALL);
+  TxModule tx(radio, std::array<size_t,4>{4,4,4,4}, PayloadMode::SMALL);
   tx.setSendPause(50);                           // пауза 50 мс
   std::vector<uint8_t> pkt(10, 1);
   tx.queue(pkt.data(), pkt.size());
