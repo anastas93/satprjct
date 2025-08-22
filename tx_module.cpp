@@ -4,6 +4,9 @@
 #include <vector>
 #include <chrono>
 
+// Максимально допустимый размер кадра
+static constexpr size_t MAX_FRAME_SIZE = 255;
+
 // Вставка пилотов каждые 64 байта
 static std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
   std::vector<uint8_t> out;
@@ -86,7 +89,12 @@ void TxModule::loop() {
   auto payload = insertPilots(msg);
   frame.insert(frame.end(), payload.begin(), payload.end());
 
-  radio_.send(frame.data(), frame.size());
+  if (frame.size() > MAX_FRAME_SIZE) {            // проверка лимита
+    LOG_ERROR_VAL("TxModule: превышен размер кадра=", frame.size());
+    // TODO: реализовать разделение кадра на части
+    return;
+  }
+  radio_.send(frame.data(), frame.size());        // отправка кадра
   DEBUG_LOG_VAL("TxModule: отправлен кадр id=", id);
   last_send_ = std::chrono::steady_clock::now();
 }
