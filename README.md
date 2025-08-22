@@ -19,13 +19,15 @@
 ### MessageBuffer
 - `MessageBuffer(size_t capacity)` — создать буфер с максимальным количеством сообщений.
 - `uint32_t enqueue(const uint8_t* data, size_t len)` — добавляет сообщение в буфер, при переполнении возвращает `0`.
+- `size_t freeSlots() const` — получить число свободных слотов в очереди.
+- `bool dropLast()` — удалить последнее сообщение (используется для отката).
 - `bool hasPending() const` — проверяет наличие сообщений.
 - `bool pop(uint32_t& id, std::vector<uint8_t>& out)` — извлекает сообщение и его идентификатор.
 
 ### PacketSplitter
 - `PacketSplitter(PayloadMode mode)` — создать делитель с выбранным режимом (`SMALL`, `MEDIUM`, `LARGE`).
 - `void setMode(PayloadMode mode)` — сменить режим.
-- `uint32_t splitAndEnqueue(MessageBuffer& buf, const uint8_t* data, size_t len)` — разбить данные на части и занести их в буфер.
+- `uint32_t splitAndEnqueue(MessageBuffer& buf, const uint8_t* data, size_t len)` — разбить данные на части и занести их в буфер с предварительной проверкой свободных слотов и откатом при ошибке.
 
 ### PacketGatherer
 - `PacketGatherer(PayloadMode mode)` — создать собиратель.

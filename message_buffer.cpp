@@ -12,6 +12,19 @@ uint32_t MessageBuffer::enqueue(const uint8_t* data, size_t len) {
   return id;
 }
 
+// Количество свободных слотов
+size_t MessageBuffer::freeSlots() const {
+  return capacity_ - q_.size();
+}
+
+// Удаление последнего сообщения (для отката)
+bool MessageBuffer::dropLast() {
+  if (q_.empty()) return false;
+  q_.pop_back();
+  --next_id_;                                  // возвращаем идентификатор назад
+  return true;
+}
+
 // Проверка наличия сообщений
 bool MessageBuffer::hasPending() const {
   return !q_.empty();
