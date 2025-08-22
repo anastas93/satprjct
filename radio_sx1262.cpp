@@ -1,6 +1,7 @@
 #include "radio_sx1262.h"
 #include "default_settings.h"
 #include <cmath>
+#include <array>
 
 RadioSX1262* RadioSX1262::instance_ = nullptr; // инициализация статического указателя
 
@@ -125,11 +126,13 @@ void RadioSX1262::onDio1Static() {
 
 void RadioSX1262::handleDio1() {
   size_t len = radio_.getPacketLength();
-  if (len == 0) {
+  // При завершении передачи длина пакета может быть мусорной и вызвать
+  // выделение огромного буфера, что приводит к перезагрузке.
+  if (len == 0 || len > 256) {
     radio_.startReceive();
     return;
   }
-  std::vector<uint8_t> buf(len);
+  std::array<uint8_t, 256> buf;            // статический буфер на стеке
   int state = radio_.readData(buf.data(), len);
   if (state == RADIOLIB_ERR_NONE && rx_cb_) {
     rx_cb_(buf.data(), len);
