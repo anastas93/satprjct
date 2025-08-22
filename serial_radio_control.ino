@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <array>
+#include <vector>
 #include "radio_sx1262.h"
 #include "tx_module.h"
 #include "default_settings.h"
@@ -13,7 +14,7 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) {}
   radio.begin();
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, BCN, INFO");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO");
 }
 
 void loop() {
@@ -101,6 +102,26 @@ void loop() {
           Serial.println("Пакет отправлен");
         } else {
           Serial.println("Ошибка постановки пакета в очередь");
+        }
+      } else if (line.startsWith("TXL ")) {
+        int sz = line.substring(4).toInt();                // размер требуемого пакета
+        if (sz > 0) {
+          // формируем тестовый массив указанного размера с возрастающими байтами
+          std::vector<uint8_t> data(sz);
+          for (int i = 0; i < sz; ++i) {
+            data[i] = static_cast<uint8_t>(i);            // шаблон данных
+          }
+          tx.setPayloadMode(PayloadMode::LARGE);          // временно включаем крупные пакеты
+          uint32_t id = tx.queue(data.data(), data.size());
+          tx.setPayloadMode(PayloadMode::SMALL);          // возвращаем режим по умолчанию
+          if (id != 0) {
+            tx.loop();                                   // отправляем сформированные фрагменты
+            Serial.println("Большой пакет отправлен");
+          } else {
+            Serial.println("Ошибка постановки большого пакета");
+          }
+        } else {
+          Serial.println("Неверный размер");
         }
       }
     }
