@@ -1,6 +1,13 @@
 #pragma once
 #include <cstdint>
 #include "channel_bank.h" // Банк каналов
+#include <string>
+#ifndef ARDUINO
+#  include <sstream>
+#  include <iostream>
+#else
+#  include <Arduino.h>
+#endif
 
 // Значения параметров радиомодуля по умолчанию
 namespace DefaultSettings {
@@ -21,34 +28,65 @@ namespace DefaultSettings {
 }
 
 #if !defined(LOG_MSG)
-#  if defined(ARDUINO)
-#    include <Arduino.h>
-// Вывод сообщения с принудительным сбросом буфера Serial
-#    define LOG_MSG(level, msg) do { \
-      if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) { \
-        Serial.println(msg); \
-        Serial.flush(); \
-      } \
-    } while (0)
-// Вывод значения с префиксом и сбросом буфера Serial
-#    define LOG_MSG_VAL(level, prefix, val) do { \
-      if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) { \
-        Serial.print(prefix); Serial.println(val); \
-        Serial.flush(); \
-      } \
-    } while (0)
-#  else
-#    include <iostream>
-// Вывод сообщения в стандартный поток с окончанием строки
-#    define LOG_MSG(level, msg) do { \
-      if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) std::cout << msg << std::endl; \
-    } while (0)
-// Вывод значения с префиксом в стандартный поток
-#    define LOG_MSG_VAL(level, prefix, val) do { \
-      if (DefaultSettings::DEBUG && level <= DefaultSettings::LOG_LEVEL) \
-        std::cout << prefix << val << std::endl; \
-    } while (0)
-#  endif
+// Вспомогательные функции фильтрации повторяющихся сообщений
+namespace LogDetail {
+#ifdef ARDUINO
+  // Проверка необходимости вывода сообщения (Arduino)
+  inline bool shouldPrint(DefaultSettings::LogLevel level, const String& msg) {
+    static String last;                                   // последнее выведенное сообщение
+    if (!DefaultSettings::DEBUG || level > DefaultSettings::LOG_LEVEL) return false;
+    if (last == msg) return false;                        // пропускаем дубль
+    last = msg;
+    return true;
+  }
+
+  // Вывод строки с фильтрацией дублей
+  inline void logMsg(DefaultSettings::LogLevel level, const char* msg) {
+    if (!shouldPrint(level, String(msg))) return;
+    Serial.println(msg);
+    Serial.flush();
+  }
+
+  // Вывод строки с значением и фильтрацией дублей
+  template <typename T>
+  inline void logMsgVal(DefaultSettings::LogLevel level, const char* prefix, const T& val) {
+    String full = String(prefix) + String(val);
+    if (!shouldPrint(level, full)) return;
+    Serial.print(prefix); Serial.println(val);
+    Serial.flush();
+  }
+#else
+  // Проверка необходимости вывода сообщения (стандартный вывод)
+  inline bool shouldPrint(DefaultSettings::LogLevel level, const std::string& msg) {
+    static std::string last;                              // последнее выведенное сообщение
+    if (!DefaultSettings::DEBUG || level > DefaultSettings::LOG_LEVEL) return false;
+    if (last == msg) return false;                        // пропускаем дубль
+    last = msg;
+    return true;
+  }
+
+  // Вывод строки в стандартный поток
+  inline void logMsg(DefaultSettings::LogLevel level, const char* msg) {
+    std::string s(msg);
+    if (!shouldPrint(level, s)) return;
+    std::cout << msg << std::endl;
+  }
+
+  // Вывод строки с значением в стандартный поток
+  template <typename T>
+  inline void logMsgVal(DefaultSettings::LogLevel level, const char* prefix, const T& val) {
+    std::ostringstream oss;
+    oss << prefix << val;
+    std::string s = oss.str();
+    if (!shouldPrint(level, s)) return;
+    std::cout << s << std::endl;
+  }
+#endif
+} // namespace LogDetail
+
+// Макросы верхнего уровня для логирования
+#  define LOG_MSG(level, msg) LogDetail::logMsg(level, msg)
+#  define LOG_MSG_VAL(level, prefix, val) LogDetail::logMsgVal(level, prefix, val)
 #  define LOG_ERROR(msg) LOG_MSG(DefaultSettings::LogLevel::ERROR, msg)
 #  define LOG_WARN(msg)  LOG_MSG(DefaultSettings::LogLevel::WARN,  msg)
 #  define LOG_INFO(msg)  LOG_MSG(DefaultSettings::LogLevel::INFO,  msg)
