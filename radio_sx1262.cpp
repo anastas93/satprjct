@@ -22,17 +22,8 @@ const int8_t RadioSX1262::CR_[4] = {5, 6, 7, 8};
 RadioSX1262::RadioSX1262() : radio_(new Module(5, 26, 27, 25)) {}
 
 bool RadioSX1262::begin() {
-  instance_ = this;
-  int state = radio_.begin(
-      fRX_bank_[static_cast<int>(bank_)][channel_],
-      BW_[bw_preset_], SF_[sf_preset_], CR_[cr_preset_],
-      0x18, Pwr_[pw_preset_], 10, tcxo_, false);
-  if (state != RADIOLIB_ERR_NONE) {
-    return false;
-  }
-  radio_.setDio1Action(onDio1Static);  // колбэк приёма
-  radio_.startReceive();               // начинаем слушать эфир
-  return true;
+  instance_ = this;               // сохраняем указатель на объект
+  return resetToDefaults();       // применяем настройки по умолчанию
 }
 
 void RadioSX1262::send(const uint8_t* data, size_t len) {
@@ -76,6 +67,27 @@ bool RadioSX1262::setSpreadingFactor(int sf) {
 bool RadioSX1262::setCodingRate(int cr) {
   int state = radio_.setCodingRate(cr);       // задаём коэффициент кодирования
   return state == RADIOLIB_ERR_NONE;          // возвращаем успех
+}
+
+bool RadioSX1262::resetToDefaults() {
+  // возвращаем все параметры к значениям из референса
+  bank_ = ChannelBank::EAST;   // банк Восток
+  channel_ = 0;                // канал 0
+  pw_preset_ = 9;              // индекс мощности
+  bw_preset_ = 3;              // индекс полосы
+  sf_preset_ = 2;              // индекс фактора расширения
+  cr_preset_ = 0;              // индекс коэффициента кодирования
+
+  int state = radio_.begin(
+      fRX_bank_[static_cast<int>(bank_)][channel_],
+      BW_[bw_preset_], SF_[sf_preset_], CR_[cr_preset_],
+      0x18, Pwr_[pw_preset_], 10, tcxo_, false);
+  if (state != RADIOLIB_ERR_NONE) {
+    return false;                                         // ошибка инициализации
+  }
+  radio_.setDio1Action(onDio1Static);                     // колбэк приёма
+  radio_.startReceive();                                  // начинаем приём
+  return true;
 }
 
 void RadioSX1262::onDio1Static() {
