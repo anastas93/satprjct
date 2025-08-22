@@ -2,7 +2,7 @@
 #include <cstdint>
 #include "radio_interface.h"
 #include "message_buffer.h"
-#include "packetizer/packet_splitter.h"
+#include "libs/packetizer/packet_splitter.h" // подключаем разделитель пакетов из каталога libs
 
 // Модуль передачи данных
 class TxModule {
