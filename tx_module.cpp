@@ -1,7 +1,7 @@
 #include "tx_module.h"
 #include "libs/frame/frame_header.h" // заголовок кадра
 #include "libs/rs255223/rs255223.h"    // RS(255,223)
-#include "libs/ccsds_link/interleaver.h" // байтовый интерливинг
+#include "libs/byte_interleaver/byte_interleaver.h" // байтовый интерливинг
 #include "default_settings.h"
 #include <vector>
 #include <chrono>
@@ -10,7 +10,6 @@
 static constexpr size_t MAX_FRAME_SIZE = 255;      // максимально допустимый кадр
 static constexpr size_t RS_DATA_LEN = 223;         // длина блока данных RS
 static constexpr size_t RS_ENC_LEN = 255;         // длина закодированного блока
-static constexpr size_t INTERLEAVE_DEPTH = 8;     // глубина интерливинга
 
 // Вставка пилотов каждые 64 байта
 static std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
@@ -84,9 +83,8 @@ void TxModule::loop() {
   if (msg.size() == RS_DATA_LEN) {
     uint8_t rs_buf[RS_ENC_LEN];
     rs255223::encode(msg.data(), rs_buf);          // кодируем блок
-    std::vector<uint8_t> inter;
-    interleave_bytes(rs_buf, RS_ENC_LEN, INTERLEAVE_DEPTH, inter);
-    coded.swap(inter);
+    byte_interleaver::interleave(rs_buf, RS_ENC_LEN); // байтовый интерливинг
+    coded.assign(rs_buf, rs_buf + RS_ENC_LEN);
   } else {
     coded = msg;                                   // без кодирования для других размеров
   }

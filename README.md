@@ -14,6 +14,7 @@
   - `serial_radio_control.ino` — пример настройки банков каналов, BW, SF, CR и мощности через Serial, вывода текущих параметров и отправки тестовых пакетов через `TxModule`.
 - `TextConverter` — библиотека (`libs/text_converter/`) для преобразования UTF-8 текста в байты CP1251, используемая командой `TX`.
 - `rs255223` — библиотека (`libs/rs255223/`) с обёртками `encode()` и `decode()` для кода Рида–Соломона RS(255,223).
+- `byte_interleaver` — библиотека (`libs/byte_interleaver/`) с функциями `interleave()` и `deinterleave()` для байтового перемежения.
 - Для отладочных сообщений предусмотрен флаг `DefaultSettings::DEBUG` и уровни журналирования `DefaultSettings::LOG_LEVEL`. Доступны макросы `LOG_ERROR`, `LOG_WARN`, `LOG_INFO`, `DEBUG_LOG` и их варианты с выводом значения (`*_VAL`) для фильтрации лишнего спама. Макросы на Arduino дополнительно вызывают `Serial.flush()`, чтобы не терять часть вывода.
 
 Все сторонние библиотеки расположены в каталоге `libs/`.
@@ -55,8 +56,8 @@
 ### RxModule
 - `void setCallback(RxModule::Callback cb)` — установить обработчик входящих данных.
 - `void onReceive(const uint8_t* data, size_t len)` — принять кадр, проверить CRC и передать полезные данные обработчику.
-- В `TxModule` перед интерливингом вызывается `rs255223::encode()`,
-  в `RxModule` после деинтерливинга вызывается `rs255223::decode()`.
+- После кодера RS применяется `byte_interleaver::interleave()`,
+  перед декодером RS — `byte_interleaver::deinterleave()`.
 
 ### RadioSX1262
   - `bool begin()` — инициализация радиомодуля с автоматическим возвратом параметров к значениям по умолчанию.
