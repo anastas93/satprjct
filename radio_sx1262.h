@@ -13,6 +13,12 @@ public:
   void send(const uint8_t* data, size_t len) override;
   // Установка колбэка приёма
   void setReceiveCallback(RxCallback cb) override;
+  // Установка частоты приёма/передачи в МГц
+  bool setFrequency(float mhz);
+  // Установка ширины полосы (Bandwidth) в кГц
+  bool setBandwidth(float khz);
+  // Установка фактора расширения спектра (Spreading Factor)
+  bool setSpreadingFactor(int sf);
 
 private:
   static void onDio1Static();            // статический обработчик прерывания
