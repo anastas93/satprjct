@@ -14,6 +14,10 @@ public:
   explicit MessageBuffer(size_t capacity);
   // Добавляет сообщение в буфер и возвращает его идентификатор
   uint32_t enqueue(const uint8_t* data, size_t len);
+  // Возвращает количество свободных слотов в очереди
+  size_t freeSlots() const;
+  // Удаляет последнее сообщение (для отката операций)
+  bool dropLast();
   // Проверяет, есть ли сообщения в очереди
   bool hasPending() const;
   // Извлекает первое сообщение из очереди, возвращает ID и данные
