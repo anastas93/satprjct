@@ -2,10 +2,14 @@
 #include "libs/frame/frame_header.h" // заголовок кадра
 #include "libs/rs255223/rs255223.h"    // RS(255,223)
 #include "libs/byte_interleaver/byte_interleaver.h" // байтовый интерливинг
+#include "libs/conv_codec/conv_codec.h" // свёрточный кодер/декодер
+#include "libs/bit_interleaver/bit_interleaver.h" // битовый интерливинг
+#include "libs/ccsds_link/scrambler.h" // скремблер
 #include <vector>
 
 static constexpr size_t RS_DATA_LEN = 223;     // длина блока данных RS
 static constexpr size_t RS_ENC_LEN = 255;      // длина закодированного блока
+static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
 
 // Удаление пилотов из полезной нагрузки
 static std::vector<uint8_t> removePilots(const uint8_t* data, size_t len) {
@@ -43,7 +47,17 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
 
   // Деинтерливинг и декодирование
   std::vector<uint8_t> result;
-  if (payload.size() == RS_ENC_LEN) {
+  if (payload.size() == RS_ENC_LEN * 2) {
+    lfsr_descramble(payload.data(), payload.size(), (uint16_t)hdr.msg_id); // дескремблирование
+    if (USE_BIT_INTERLEAVER)
+      bit_interleaver::deinterleave(payload.data(), payload.size()); // деинтерливинг бит
+    std::vector<uint8_t> vit_dec;
+    if (!conv_codec::viterbiDecode(payload.data(), payload.size(), vit_dec)) return;
+    byte_interleaver::deinterleave(vit_dec.data(), vit_dec.size()); // байтовый деинтерливинг
+    std::vector<uint8_t> decoded(RS_DATA_LEN);
+    if (!rs255223::decode(vit_dec.data(), decoded.data())) return;
+    result.swap(decoded);
+  } else if (payload.size() == RS_ENC_LEN) {
     byte_interleaver::deinterleave(payload.data(), payload.size()); // байтовый деинтерливинг
     std::vector<uint8_t> decoded(RS_DATA_LEN);
     if (!rs255223::decode(payload.data(), decoded.data())) return;

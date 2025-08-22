@@ -15,6 +15,8 @@
 - `TextConverter` — библиотека (`libs/text_converter/`) для преобразования UTF-8 текста в байты CP1251, используемая командой `TX`.
 - `rs255223` — библиотека (`libs/rs255223/`) с обёртками `encode()` и `decode()` для кода Рида–Соломона RS(255,223).
 - `byte_interleaver` — библиотека (`libs/byte_interleaver/`) с функциями `interleave()` и `deinterleave()` для байтового перемежения.
+- `conv_codec` — библиотека (`libs/conv_codec/`) с функциями `encodeBits()` и `viterbiDecode()` для свёрточного кодирования.
+- `bit_interleaver` — библиотека (`libs/bit_interleaver/`) с функциями `interleave()` и `deinterleave()` для битового перемежения.
 - Для отладочных сообщений предусмотрен флаг `DefaultSettings::DEBUG` и уровни журналирования `DefaultSettings::LOG_LEVEL`. Доступны макросы `LOG_ERROR`, `LOG_WARN`, `LOG_INFO`, `DEBUG_LOG` и их варианты с выводом значения (`*_VAL`) для фильтрации лишнего спама. Макросы на Arduino дополнительно вызывают `Serial.flush()`, чтобы не терять часть вывода.
 
 Все сторонние библиотеки расположены в каталоге `libs/`.
@@ -52,12 +54,15 @@
 - `uint32_t queue(const uint8_t* data, size_t len, uint8_t qos = 0)` — поместить сообщение в очередь выбранного класса QoS.
 - `void loop()` — отправить первое сообщение, если оно есть.
 - `void setSendPause(uint32_t pause_ms)` — задать паузу между отправками в миллисекундах.
+- После `rs255223::encode()` выполняется `byte_interleaver::interleave()`, затем `conv_codec::encodeBits()`,
+  при необходимости `bit_interleaver::interleave()` и `lfsr_scramble()`.
 
 ### RxModule
 - `void setCallback(RxModule::Callback cb)` — установить обработчик входящих данных.
 - `void onReceive(const uint8_t* data, size_t len)` — принять кадр, проверить CRC и передать полезные данные обработчику.
-- После кодера RS применяется `byte_interleaver::interleave()`,
-  перед декодером RS — `byte_interleaver::deinterleave()`.
+- Перед декодером RS выполняется обратная цепочка: `lfsr_descramble()`,
+  `bit_interleaver::deinterleave()`, `conv_codec::viterbiDecode()`,
+  затем `byte_interleaver::deinterleave()`.
 
 ### RadioSX1262
   - `bool begin()` — инициализация радиомодуля с автоматическим возвратом параметров к значениям по умолчанию.
@@ -86,6 +91,14 @@
 - `void encode(const uint8_t* in, uint8_t* out)` — кодирует 223 байта в 255 байт.
 - `bool decode(const uint8_t* in, uint8_t* out)` — декодирует 255 байт и возвращает 223 байта данных.
 
+### conv_codec
+- `void encodeBits(const uint8_t* in, size_t len, std::vector<uint8_t>& out)` — свёрточное кодирование (R=1/2).
+- `bool viterbiDecode(const uint8_t* in, size_t len, std::vector<uint8_t>& out)` — декодирование алгоритмом Витерби.
+
+### bit_interleaver
+- `void interleave(uint8_t* buf, size_t len)` — битовое перемежение.
+- `void deinterleave(uint8_t* buf, size_t len)` — обратное битовое перемежение.
+
 ## Что реализовано
 - Базовая отправка и приём сообщений.
 - Очереди сообщений по классам QoS с приоритетной обработкой.
@@ -98,6 +111,8 @@
 - Тестовая отправка пакета через Serial с автоматическим переключением частоты TX.
 - Настройка паузы между отправками пакетов в TxModule.
 - Добавлено кодирование и декодирование RS(255,223) с байтовым интерливингом.
+- Внедрены свёрточное кодирование и Viterbi-декодирование,
+  опциональный битовый интерливинг и скремблирование полезной нагрузки.
 - Проверка максимального размера кадра перед отправкой (255 байт).
 - Сброс параметров радиомодуля к значениям по умолчанию.
 - Автоматическая установка этих параметров при запуске.
@@ -119,4 +134,5 @@
   - Реализовать поддержку других кодировок и символов в конвертере текста.
   - Внедрить планировщик WFQ для классов QoS.
   - Реализовать разделение кадра при превышении лимита размера.
+  - Добавить тесты и настройку для битового интерливинга и свёрточного кодека.
 
