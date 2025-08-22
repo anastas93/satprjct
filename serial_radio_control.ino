@@ -8,7 +8,12 @@
 
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
-TxModule tx(radio, std::array<size_t,4>{4,4,4,4}); // модуль отправки с очередями QoS
+// Увеличиваем ёмкость очередей до 160 слотов, чтобы помещалось несколько пакетов по 5000 байт
+TxModule tx(radio, std::array<size_t,4>{
+  DefaultSettings::TX_QUEUE_CAPACITY,
+  DefaultSettings::TX_QUEUE_CAPACITY,
+  DefaultSettings::TX_QUEUE_CAPACITY,
+  DefaultSettings::TX_QUEUE_CAPACITY});
 
 void setup() {
   Serial.begin(115200);
