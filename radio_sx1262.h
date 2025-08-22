@@ -11,7 +11,7 @@ enum class ChannelBank { EAST, WEST, TEST };
 class RadioSX1262 : public IRadio {
 public:
   RadioSX1262();
-  // Инициализация модуля с параметрами из примера
+  // Инициализация модуля и установка параметров по умолчанию
   bool begin();
   // Отправка данных
   void send(const uint8_t* data, size_t len) override;
@@ -27,6 +27,8 @@ public:
   bool setSpreadingFactor(int sf);
   // Установка коэффициента кодирования
   bool setCodingRate(int cr);
+  // Сброс параметров к значениям по умолчанию с перезапуском приёма
+  bool resetToDefaults();
 
 private:
   static void onDio1Static();            // статический обработчик прерывания
