@@ -1,4 +1,7 @@
-#pragma once
+// Защита от повторного включения заголовка
+#ifndef MESSAGE_BUFFER_H
+#define MESSAGE_BUFFER_H
+
 #include <deque>
 #include <vector>
 #include <cstdint>
@@ -20,3 +23,5 @@ private:
   size_t capacity_;                                            // максимальное количество сообщений
   std::deque<std::pair<uint32_t, std::vector<uint8_t>>> q_;    // очередь сообщений с идентификаторами
 };
+
+#endif // MESSAGE_BUFFER_H
