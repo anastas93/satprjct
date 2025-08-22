@@ -1,12 +1,11 @@
 #include "rx_module.h"
 #include "libs/frame/frame_header.h" // заголовок кадра
 #include "libs/rs255223/rs255223.h"    // RS(255,223)
-#include "libs/ccsds_link/interleaver.h" // байтовый интерливинг
+#include "libs/byte_interleaver/byte_interleaver.h" // байтовый интерливинг
 #include <vector>
 
 static constexpr size_t RS_DATA_LEN = 223;     // длина блока данных RS
 static constexpr size_t RS_ENC_LEN = 255;      // длина закодированного блока
-static constexpr size_t INTERLEAVE_DEPTH = 8;  // глубина интерливинга
 
 // Удаление пилотов из полезной нагрузки
 static std::vector<uint8_t> removePilots(const uint8_t* data, size_t len) {
@@ -45,10 +44,9 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   // Деинтерливинг и декодирование
   std::vector<uint8_t> result;
   if (payload.size() == RS_ENC_LEN) {
-    std::vector<uint8_t> tmp;
-    deinterleave_bytes(payload.data(), payload.size(), INTERLEAVE_DEPTH, tmp);
+    byte_interleaver::deinterleave(payload.data(), payload.size()); // байтовый деинтерливинг
     std::vector<uint8_t> decoded(RS_DATA_LEN);
-    if (!rs255223::decode(tmp.data(), decoded.data())) return;
+    if (!rs255223::decode(payload.data(), decoded.data())) return;
     result.swap(decoded);
   } else {
     result.swap(payload); // кадр без кодирования
