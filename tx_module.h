@@ -24,6 +24,7 @@ private:
   IRadio& radio_;
   std::array<MessageBuffer,4> buffers_;             // очереди сообщений по классам QoS
   PacketSplitter splitter_;
+  std::array<uint8_t,16> key_{};                    // ключ шифрования
   uint32_t pause_ms_ = DefaultSettings::SEND_PAUSE_MS; // пауза между пакетами
   std::chrono::steady_clock::time_point last_send_; // время последней отправки
 };

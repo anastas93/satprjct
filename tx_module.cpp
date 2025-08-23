@@ -5,6 +5,7 @@
 #include "libs/conv_codec/conv_codec.h" // свёрточное кодирование
 #include "libs/bit_interleaver/bit_interleaver.h" // битовый интерливинг
 #include "libs/scrambler/scrambler.h" // скремблер
+#include "libs/key_loader/key_loader.h" // загрузка ключа
 #include "default_settings.h"
 #include <vector>
 #include <chrono>
@@ -43,7 +44,8 @@ static std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
 TxModule::TxModule(IRadio& radio, const std::array<size_t,4>& capacities, PayloadMode mode)
   : radio_(radio), buffers_{MessageBuffer(capacities[0]), MessageBuffer(capacities[1]),
                              MessageBuffer(capacities[2]), MessageBuffer(capacities[3])},
-    splitter_(mode) {
+    splitter_(mode), key_(KeyLoader::loadKey()) {
+  // TODO: использовать key_ для шифрования сообщений
   last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms_);
 }
 

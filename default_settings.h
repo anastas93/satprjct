@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <array>
 #include "channel_bank.h" // Банк каналов
 #include <string>
 #ifndef ARDUINO
@@ -26,6 +27,12 @@ namespace DefaultSettings {
   // Уровни журналирования для фильтрации сообщений
   enum class LogLevel : uint8_t { ERROR = 0, WARN = 1, INFO = 2, DEBUG = 3 };
   constexpr LogLevel LOG_LEVEL = LogLevel::DEBUG;   // Текущий уровень вывода
+  // Ключ шифрования по умолчанию (16 байт)
+  constexpr std::array<uint8_t, 16> DEFAULT_KEY{
+      0x00, 0x01, 0x02, 0x03,
+      0x04, 0x05, 0x06, 0x07,
+      0x08, 0x09, 0x0A, 0x0B,
+      0x0C, 0x0D, 0x0E, 0x0F};
 }
 
 #if !defined(LOG_MSG)
