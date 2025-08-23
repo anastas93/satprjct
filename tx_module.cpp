@@ -6,11 +6,13 @@
 #include "libs/bit_interleaver/bit_interleaver.h" // битовый интерливинг
 #include "libs/scrambler/scrambler.h" // скремблер
 #include "libs/key_loader/key_loader.h" // загрузка ключа
+#include "libs/crypto/aes_ccm.h" // AES-CCM шифрование
 #include "default_settings.h"
 #include <vector>
 #include <chrono>
 #include <algorithm>
 #include <string>
+#include <array>
 #include "libs/simple_logger/simple_logger.h" // журнал статусов
 
 // Максимально допустимый размер кадра
@@ -20,6 +22,7 @@ static constexpr size_t MAX_FRAME_SIZE = 245;      // максимально д�
 static constexpr size_t MAX_FRAGMENT_LEN =
     MAX_FRAME_SIZE - FrameHeader::SIZE * 2 - (MAX_FRAME_SIZE / 64) * 2;
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
+static constexpr size_t TAG_LEN = 8;              // длина тега аутентичности
 static constexpr size_t RS_ENC_LEN = 255;         // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
 static constexpr bool USE_RS = DefaultSettings::USE_RS; // включение кода RS(255,223)
@@ -45,7 +48,7 @@ TxModule::TxModule(IRadio& radio, const std::array<size_t,4>& capacities, Payloa
   : radio_(radio), buffers_{MessageBuffer(capacities[0]), MessageBuffer(capacities[1]),
                              MessageBuffer(capacities[2]), MessageBuffer(capacities[3])},
     splitter_(mode), key_(KeyLoader::loadKey()) {
-  // TODO: использовать key_ для шифрования сообщений
+  // ключ считывается один раз и используется при шифровании
   last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms_);
 }
 
@@ -97,11 +100,10 @@ void TxModule::loop() {
     prefix.assign(msg.begin(), it + 1);
   }
 
-  // TODO: шифрование сообщения (не реализовано)
-
-  // Разбиваем сообщение на блоки по RS_DATA_LEN байт перед RS-кодированием
-  PacketSplitter rs_splitter(PayloadMode::SMALL, RS_DATA_LEN);
-  MessageBuffer tmp((msg.size() + RS_DATA_LEN - 1) / RS_DATA_LEN);
+  // Шифруем сообщение по блокам перед кодированием и фрагментацией
+  PacketSplitter rs_splitter(PayloadMode::SMALL, RS_DATA_LEN - TAG_LEN);
+  MessageBuffer tmp((msg.size() + (RS_DATA_LEN - TAG_LEN) - 1) /
+                    (RS_DATA_LEN - TAG_LEN));
   rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size(), false);
 
   std::vector<std::vector<uint8_t>> fragments;      // конечные фрагменты для отправки
@@ -110,6 +112,18 @@ void TxModule::loop() {
     std::vector<uint8_t> part;
     uint32_t dummy;
     if (!tmp.pop(dummy, part)) break;               // защита от ошибок
+
+    // Шифруем блок и добавляем тег аутентичности
+    std::vector<uint8_t> enc;
+    std::vector<uint8_t> tag;
+    std::array<uint8_t,12> nonce{};                 // простой нонс
+    if (!encrypt_ccm(key_.data(), key_.size(), nonce.data(), nonce.size(),
+                     nullptr, 0, part.data(), part.size(), enc, tag, TAG_LEN)) {
+      LOG_ERROR("TxModule: ошибка шифрования");
+      continue;                                     // пропускаем при ошибке
+    }
+    enc.insert(enc.end(), tag.begin(), tag.end());  // добавляем тег к данным
+    part.swap(enc);
 
     std::vector<uint8_t> conv;                      // закодированный блок
     if (part.size() == RS_DATA_LEN) {
