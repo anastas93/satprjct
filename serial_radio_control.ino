@@ -31,7 +31,7 @@ void setup() {
   radio.setReceiveCallback([&](const uint8_t* d, size_t l){  // привязка приёма
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, PI, SEAR");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, PI, SEAR");
 }
 
 void loop() {
@@ -72,6 +72,9 @@ void loop() {
         } else if (b == 't') {
           radio.setBank(ChannelBank::TEST);
           Serial.println("Банк Тест");
+        } else if (b == 'a') {
+          radio.setBank(ChannelBank::ALL);
+          Serial.println("Банк All");
         }
       } else if (line.startsWith("CH ")) {
         int ch = line.substring(3).toInt();
@@ -98,6 +101,7 @@ void loop() {
           case ChannelBank::EAST: Serial.println("Восток"); break;
           case ChannelBank::WEST: Serial.println("Запад"); break;
           case ChannelBank::TEST: Serial.println("Тест"); break;
+          case ChannelBank::ALL: Serial.println("All"); break;
         }
         Serial.print("Канал: "); Serial.println(radio.getChannel());
         Serial.print("RX: "); Serial.print(radio.getRxFrequency(), 3); Serial.println(" MHz");
@@ -201,7 +205,7 @@ void loop() {
       } else if (line.equalsIgnoreCase("SEAR")) {
         // перебор каналов с пингом и возвратом исходного канала
         uint8_t prevCh = radio.getChannel();         // сохраняем текущий канал
-        for (int ch = 0; ch < 10; ++ch) {
+        for (int ch = 0; ch < radio.getBankSize(); ++ch) {
           if (!radio.setChannel(ch)) {               // переключаемся
             Serial.print("CH ");
             Serial.print(ch);

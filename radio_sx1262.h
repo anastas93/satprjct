@@ -24,10 +24,10 @@ public:
   float getLastRssi() const; // последний RSSI
   // Получить случайный байт
   uint8_t randomByte();
-  // Выбор банка каналов (EAST, WEST, TEST)
-  bool setBank(ChannelBank bank);
-  // Выбор канала 0-9 из текущего банка
-  bool setChannel(uint8_t ch);
+    // Выбор банка каналов (EAST, WEST, TEST, ALL)
+    bool setBank(ChannelBank bank);
+    // Выбор канала 0-166 в зависимости от банка
+    bool setChannel(uint8_t ch);
   // Установка ширины полосы пропускания
   bool setBandwidth(float bw);
   // Установка фактора расширения
@@ -37,14 +37,16 @@ public:
   // Установка уровня мощности по индексу пресета
   bool setPower(uint8_t preset);
   // Получение текущих параметров
-  ChannelBank getBank() const { return bank_; }
-  uint8_t getChannel() const { return channel_; }
+    ChannelBank getBank() const { return bank_; }
+    uint8_t getChannel() const { return channel_; }
+    // Получить количество каналов в текущем банке
+    uint16_t getBankSize() const { return BANK_CHANNELS_[static_cast<int>(bank_)]; }
   float getBandwidth() const { return BW_[bw_preset_]; }
   int getSpreadingFactor() const { return SF_[sf_preset_]; }
   int getCodingRate() const { return CR_[cr_preset_]; }
   int getPower() const { return Pwr_[pw_preset_]; }
-  float getRxFrequency() const { return fRX_bank_[static_cast<int>(bank_)][channel_]; }
-  float getTxFrequency() const { return fTX_bank_[static_cast<int>(bank_)][channel_]; }
+    float getRxFrequency() const { return fRX_bank_[static_cast<int>(bank_)][channel_]; }
+    float getTxFrequency() const { return fTX_bank_[static_cast<int>(bank_)][channel_]; }
   // Сброс параметров к значениям по умолчанию с перезапуском приёма
   bool resetToDefaults();
 
@@ -71,8 +73,10 @@ private:
   float lastSnr_ = 0.0f;     // SNR последнего пакета
   float lastRssi_ = 0.0f;    // RSSI последнего пакета
 
-  static const float fRX_bank_[3][10];
-  static const float fTX_bank_[3][10];
+    // Таблицы частот для всех банков
+    static const float* fRX_bank_[4];
+    static const float* fTX_bank_[4];
+    static const uint16_t BANK_CHANNELS_[4];
   static const int8_t Pwr_[10];
   static const float BW_[5];
   static const int8_t SF_[8];
