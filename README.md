@@ -121,6 +121,11 @@
 - `std::array<uint8_t,16> KeyLoader::loadKey()` — читает ключ из `key_storage/key.bin` и
   возвращает значение по умолчанию при отсутствии файла.
 
+### AES-CCM
+
+- `bool encrypt_ccm(const uint8_t* key, size_t key_len, const uint8_t* nonce, size_t nonce_len, const uint8_t* aad, size_t aad_len, const uint8_t* input, size_t input_len, std::vector<uint8_t>& output, std::vector<uint8_t>& tag, size_t tag_len)` — шифрует данные и формирует тег.
+- `bool decrypt_ccm(const uint8_t* key, size_t key_len, const uint8_t* nonce, size_t nonce_len, const uint8_t* aad, size_t aad_len, const uint8_t* input, size_t input_len, const uint8_t* tag, size_t tag_len, std::vector<uint8_t>& output)` — проверяет тег и расшифровывает данные.
+
 ## Пример последовательности вызовов
 ```
 // Передача
@@ -165,6 +170,7 @@ rs255223::decode -> PacketGatherer -> обработка сообщения
 - Добавлен комплексный тест, проверяющий полный цикл обработки без реального радиоканала. Запуск: `g++ -I. -I.. tests/test_processing_without_send.cpp tx_module.cpp rx_module.cpp message_buffer.cpp libs_includes.cpp -std=c++17 && ./a.out`.
 - Базовые тесты для буфера сообщений, делителя пакетов и формирования кадров.
 - Загрузка ключа шифрования из `key_storage/key.bin` с использованием значения по умолчанию при отсутствии файла.
+- Реализованы функции `encrypt_ccm()` и `decrypt_ccm()` для шифрования AES-CCM.
 
 ## Что осталось сделать
   - Расширить управление радиомодулем (массовый пинг и т.д.).
@@ -175,7 +181,7 @@ rs255223::decode -> PacketGatherer -> обработка сообщения
   - Интегрировать `ReceivedBuffer` в цепочку обработки и удаление исходных пакетов после преобразования.
   - Завершить интеграцию RS-кода для сообщений произвольной длины.
   - Передавать точную длину последнего фрагмента при сборке сообщений.
-  - Реализовать шифрование полезной нагрузки перед фрагментацией с использованием загруженного ключа.
+  - Интегрировать использование `encrypt_ccm()` и `decrypt_ccm()` перед фрагментацией полезной нагрузки.
   - Добавить сохранение собранной программы и расширенную обработку команд завершения.
   - Покрыть тестами приём и обработку пилотов.
   - Реализовать поддержку других кодировок и символов в конвертере текста.
