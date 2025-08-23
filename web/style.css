@@ -4,6 +4,28 @@ body {
   color: #000; /* чёрный текст */
 }
 
+/* Скрываем элементы визуально, оставляя их доступными для скринридеров */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  border: 0;
+}
+
+/* Отображение скрытого элемента при получении фокуса */
+.sr-only.focusable:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+}
+
 /* Тёмная тема */
 body.dark {
   background: #121212; /* тёмный фон */
