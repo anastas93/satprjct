@@ -6,6 +6,9 @@
 
 RadioSX1262* RadioSX1262::instance_ = nullptr; // инициализация статического указателя
 
+// Максимальный размер пакета для SX1262
+static constexpr size_t MAX_PACKET_SIZE = 245;
+
 // Таблицы частот приёма и передачи для трёх банков
 const float RadioSX1262::fRX_bank_[3][10] = {
     {251.900, 252.000, 253.800, 253.700, 257.000, 257.100, 256.850, 258.650, 262.225, 262.325}, // Восток
@@ -33,6 +36,10 @@ bool RadioSX1262::begin() {
 void RadioSX1262::send(const uint8_t* data, size_t len) {
   if (!data || len == 0) {                   // проверка указателя и длины
     DEBUG_LOG("RadioSX1262: пустая передача");
+    return;
+  }
+  if (len > MAX_PACKET_SIZE) {               // проверка аппаратного лимита
+    LOG_ERROR_VAL("RadioSX1262: превышен лимит длины=", len);
     return;
   }
   float freq_tx = fTX_bank_[static_cast<int>(bank_)][channel_];

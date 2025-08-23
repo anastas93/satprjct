@@ -10,7 +10,8 @@
 #include <chrono>
 
 // Максимально допустимый размер кадра
-static constexpr size_t MAX_FRAME_SIZE = 564;      // максимально допустимый кадр
+// Ограничение радиомодуля SX1262 — не более 245 байт в пакете
+static constexpr size_t MAX_FRAME_SIZE = 245;      // максимально допустимый кадр
 // Допустимая длина полезной нагрузки одного кадра с учётом заголовков и пилотов
 static constexpr size_t MAX_FRAGMENT_LEN =
     MAX_FRAME_SIZE - FrameHeader::SIZE * 2 - (MAX_FRAME_SIZE / 64) * 2;
