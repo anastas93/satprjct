@@ -8,6 +8,8 @@
 #include "libs/text_converter/text_converter.h" // конвертер UTF-8 -> CP1251
 #include "libs/simple_logger/simple_logger.h"    // журнал статусов
 #include "libs/received_buffer/received_buffer.h"// буфер принятых сообщений
+#include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
+#include <cstring>                                 // для strlen
 
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
@@ -151,6 +153,31 @@ void loop() {
           }
         } else {
           Serial.println("Неверный размер");
+        }
+      } else if (line.equalsIgnoreCase("ENCT")) {
+        // тест шифрования: создаём сообщение, шифруем и расшифровываем
+        const uint8_t key[16]   = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+        const uint8_t nonce[12] = {0,1,2,3,4,5,6,7,8,9,10,11};
+        const char* text = "Test ENCT";                    // исходное сообщение
+        size_t len = strlen(text);
+        std::vector<uint8_t> cipher, tag, plain;
+        bool enc = encrypt_ccm(key, sizeof(key), nonce, sizeof(nonce),
+                               nullptr, 0,
+                               reinterpret_cast<const uint8_t*>(text), len,
+                               cipher, tag, 8);
+        bool dec = false;
+        if (enc) {
+          dec = decrypt_ccm(key, sizeof(key), nonce, sizeof(nonce),
+                            nullptr, 0,
+                            cipher.data(), cipher.size(),
+                            tag.data(), tag.size(), plain);
+        }
+        if (enc && dec && plain.size() == len &&
+            std::equal(plain.begin(), plain.end(),
+                       reinterpret_cast<const uint8_t*>(text))) {
+          Serial.println("ENCT: успех");
+        } else {
+          Serial.println("ENCT: ошибка");
         }
       }
     }
