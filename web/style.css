@@ -17,11 +17,20 @@ nav {
   margin-bottom: 20px;
 }
 
-/* Контейнер ссылок навигации */
-#nav-links {
+/* Список ссылок навигации */
+nav ul {
   display: flex;
   gap: 10px;
   flex: 1;
+  list-style: none; /* убираем маркеры списка */
+  margin: 0; /* убираем внешние отступы */
+  padding: 0; /* убираем внутренние отступы */
+}
+
+/* Последний пункт списка — ссылка безопасности */
+nav li:last-child {
+  margin-left: auto; /* отделяем ссылку безопасности справа */
+  align-self: center;
 }
 
 /* Кнопка вызова мобильного меню */
@@ -44,11 +53,6 @@ body.dark nav {
   display: block; /* показываем выбранную вкладку */
 }
 
-#security-link {
-  margin-left: auto; /* отделяем ссылку безопасности справа */
-  align-self: center;
-}
-
 /* Адаптация меню под мобильные устройства */
 @media (max-width: 600px) {
   nav {
@@ -58,16 +62,16 @@ body.dark nav {
   #menu-toggle {
     display: block; /* показываем кнопку меню */
   }
-  #nav-links {
+  nav ul {
     display: none; /* скрываем ссылки пока меню закрыто */
     flex-direction: column;
     width: 100%;
     gap: 5px;
   }
-  nav.open #nav-links {
+  nav.open ul {
     display: flex; /* показываем при открытии */
   }
-  #security-link {
+  nav li:last-child {
     margin-left: 0; /* убираем отступ справа */
   }
 }
