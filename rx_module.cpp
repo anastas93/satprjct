@@ -6,11 +6,14 @@
 #include "libs/bit_interleaver/bit_interleaver.h" // битовый интерливинг
 #include "libs/scrambler/scrambler.h" // скремблер
 #include "libs/key_loader/key_loader.h" // загрузка ключа
+#include "libs/crypto/aes_ccm.h" // AES-CCM шифрование
 #include "default_settings.h"         // параметры по умолчанию
 #include <vector>
 #include <algorithm>
+#include <array>
 
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
+static constexpr size_t TAG_LEN = 8;              // длина тега аутентичности
 static constexpr size_t RS_ENC_LEN = 255;      // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
 static constexpr bool USE_RS = DefaultSettings::USE_RS; // использовать RS(255,223)
@@ -37,7 +40,7 @@ static std::vector<uint8_t> removePilots(const uint8_t* data, size_t len) {
 // Конструктор модуля приёма
 RxModule::RxModule()
     : gatherer_(PayloadMode::SMALL, DefaultSettings::GATHER_BLOCK_SIZE),
-      key_(KeyLoader::loadKey()) {} // TODO: использовать key_ для дешифрования
+      key_(KeyLoader::loadKey()) {} // ключ для последующего дешифрования
 
 // Передаём данные колбэку, если заголовок валиден
 void RxModule::onReceive(const uint8_t* data, size_t len) {
@@ -85,20 +88,32 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     result.swap(payload); // кадр без кодирования
   }
 
-  // Сборка сообщения из фрагментов
-  if (!result.empty() && result[0] == '[') {            // удаляем префикс [ID|n]
-    auto it = std::find(result.begin(), result.end(), ']');
-    if (it != result.end()) {
-      result.erase(result.begin(), it + 1);
+  // Дешифрование и сборка сообщения
+  if (result.size() < TAG_LEN) return;                 // недостаточно данных
+  std::vector<uint8_t> tag(result.end() - TAG_LEN, result.end());
+  std::vector<uint8_t> cipher(result.begin(), result.end() - TAG_LEN);
+  std::array<uint8_t,12> nonce{};                     // простой нонс
+  std::vector<uint8_t> plain;
+  if (!decrypt_ccm(key_.data(), key_.size(), nonce.data(), nonce.size(),
+                   nullptr, 0, cipher.data(), cipher.size(),
+                   tag.data(), TAG_LEN, plain)) {
+    LOG_ERROR("RxModule: ошибка дешифрования");
+    return;                                           // прекращаем обработку
+  }
+
+  if (!plain.empty() && plain[0] == '[') {            // удаляем префикс [ID|n]
+    auto it = std::find(plain.begin(), plain.end(), ']');
+    if (it != plain.end()) {
+      plain.erase(plain.begin(), it + 1);
     }
   }
-  gatherer_.add(result.data(), result.size());
-  if (hdr.frag_idx + 1 == hdr.frag_cnt) { // последний фрагмент
+  gatherer_.add(plain.data(), plain.size());
+  if (hdr.frag_idx + 1 == hdr.frag_cnt) {             // последний фрагмент
     const auto& full = gatherer_.get();
-    if (buf_) { // при наличии внешнего буфера сохраняем данные
+    if (buf_) {                                       // при наличии внешнего буфера сохраняем данные
       buf_->pushReady(hdr.msg_id, full.data(), full.size());
     }
-    cb_(full.data(), full.size());          // передаём сообщение пользователю
+    cb_(full.data(), full.size());                    // передаём сообщение пользователю
     gatherer_.reset();
   }
 }
