@@ -1,4 +1,7 @@
 #pragma once
+#ifndef DEFAULT_SETTINGS_H
+#define DEFAULT_SETTINGS_H // защита от повторного включения
+
 #include <cstdint>
 #include <array>
 #include "channel_bank.h" // Банк каналов
@@ -103,5 +106,7 @@ namespace LogDetail {
 #  define LOG_WARN_VAL(prefix, val)  LOG_MSG_VAL(DefaultSettings::LogLevel::WARN,  prefix, val)
 #  define LOG_INFO_VAL(prefix, val)  LOG_MSG_VAL(DefaultSettings::LogLevel::INFO,  prefix, val)
 #  define DEBUG_LOG_VAL(prefix, val) LOG_MSG_VAL(DefaultSettings::LogLevel::DEBUG, prefix, val)
-#endif
+#endif // !defined(LOG_MSG)
+
+#endif // DEFAULT_SETTINGS_H
 
