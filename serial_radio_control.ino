@@ -10,6 +10,8 @@
 #include "libs/received_buffer/received_buffer.h"// буфер принятых сообщений
 #include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
 #include <cstring>                                 // для strlen
+#include <WiFi.h>                                   // работа с Wi-Fi
+#include <WebServer.h>                              // встроенный HTTP-сервер
 
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
@@ -23,9 +25,30 @@ RxModule rx;                // модуль приёма
 ReceivedBuffer recvBuf;     // буфер полученных сообщений
 bool ackEnabled = DefaultSettings::USE_ACK; // флаг автоматической отправки ACK
 
+WebServer server(80);       // HTTP-сервер для веб-интерфейса
+// Простая HTML-страница для проверки работы точки доступа
+const char INDEX_HTML[] PROGMEM =
+  "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Radio</title></head>"
+  "<body>Устройство готово.</body></html>";
+
+// Отправка заглушки при обращении к корню
+void handleRoot() {
+  server.send(200, "text/html", INDEX_HTML);
+}
+
+// Настройка Wi-Fi точки доступа и запуск сервера
+void setupWifi() {
+  WiFi.softAP(DefaultSettings::WIFI_SSID, DefaultSettings::WIFI_PASS); // создаём AP
+  server.on("/", handleRoot);                                         // обработчик страницы
+  server.begin();                                                      // старт сервера
+  Serial.print("AP IP: ");
+  Serial.println(WiFi.softAPIP());                                     // выводим адрес
+}
+
 void setup() {
   Serial.begin(115200);
   while (!Serial) {}
+  setupWifi();                                       // запускаем точку доступа
   radio.begin();
   rx.setBuffer(&recvBuf);                                   // сохраняем принятые пакеты
   // обработка входящих данных с учётом ACK
@@ -50,6 +73,7 @@ void setup() {
 }
 
 void loop() {
+    server.handleClient();                  // обработка HTTP-запросов
     radio.loop();                           // обработка входящих пакетов
     tx.loop();                              // обработка очередей передачи
     if (Serial.available()) {
