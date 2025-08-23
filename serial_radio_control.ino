@@ -213,8 +213,10 @@ void loop() {
           b = radio.randomByte();              // заполняем случайностями
         }
         tx.queue(pkt.data(), pkt.size());      // ставим пакет в очередь
-        tx.loop();                             // отправляем сразу
-        delay(DefaultSettings::PING_WAIT_MS);  // ждём ответ
+        while (!tx.loop()) {                   // ждём подтверждения отправки
+          delay(1);                            // короткая пауза
+        }
+        delay(DefaultSettings::PING_WAIT_MS);  // отсчёт после отправки
         radio.loop();                          // обрабатываем возможное получение
         ReceivedBuffer::Item item;
         if (recvBuf.popRaw(item)) {
@@ -244,8 +246,10 @@ void loop() {
             b = radio.randomByte();                 // случайные данные
           }
           tx.queue(pkt2.data(), pkt2.size());
-          tx.loop();
-          delay(DefaultSettings::PING_WAIT_MS);     // ждём ответ
+          while (!tx.loop()) {                     // подтверждаем отправку
+            delay(1);                               // короткая пауза
+          }
+          delay(DefaultSettings::PING_WAIT_MS);     // отсчёт после отправки
           radio.loop();                             // обрабатываем приём
           ReceivedBuffer::Item res;
           if (recvBuf.popRaw(res)) {

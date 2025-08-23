@@ -17,7 +17,8 @@ public:
   // Добавляет сообщение в очередь на отправку с указанием класса QoS (0..3)
   uint32_t queue(const uint8_t* data, size_t len, uint8_t qos = 0);
   // Отправляет первое доступное сообщение (если есть)
-  void loop();
+  // Возвращает true при успешной передаче
+  bool loop();
   // Задать минимальную паузу между отправками (мс)
   void setSendPause(uint32_t pause_ms);
 private:
