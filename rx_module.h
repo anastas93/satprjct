@@ -2,6 +2,7 @@
 #include <functional>
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include "libs/packetizer/packet_gatherer.h" // сборщик пакетов
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
 
@@ -21,4 +22,5 @@ private:
   Callback cb_;
   PacketGatherer gatherer_; // внутренний сборщик фрагментов
   ReceivedBuffer* buf_ = nullptr; // внешний буфер готовых данных
+  std::array<uint8_t,16> key_{};   // ключ для дешифрования
 };

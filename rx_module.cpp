@@ -5,6 +5,7 @@
 #include "libs/conv_codec/conv_codec.h" // свёрточный кодер/декодер
 #include "libs/bit_interleaver/bit_interleaver.h" // битовый интерливинг
 #include "libs/scrambler/scrambler.h" // скремблер
+#include "libs/key_loader/key_loader.h" // загрузка ключа
 #include "default_settings.h"         // параметры по умолчанию
 #include <vector>
 #include <algorithm>
@@ -34,7 +35,9 @@ static std::vector<uint8_t> removePilots(const uint8_t* data, size_t len) {
 }
 
 // Конструктор модуля приёма
-RxModule::RxModule() : gatherer_(PayloadMode::SMALL, DefaultSettings::GATHER_BLOCK_SIZE) {}
+RxModule::RxModule()
+    : gatherer_(PayloadMode::SMALL, DefaultSettings::GATHER_BLOCK_SIZE),
+      key_(KeyLoader::loadKey()) {} // TODO: использовать key_ для дешифрования
 
 // Передаём данные колбэку, если заголовок валиден
 void RxModule::onReceive(const uint8_t* data, size_t len) {
