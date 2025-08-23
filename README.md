@@ -90,14 +90,14 @@
 - `float getLastSnr() const` — получить SNR последнего принятого пакета.
 - `float getLastRssi() const` — получить RSSI последнего принятого пакета.
 - `uint8_t randomByte()` — получить случайный байт от радиомодуля.
-- `bool setBank(ChannelBank bank)` — выбрать банк каналов (`EAST`, `WEST`, `TEST`).
-- `bool setChannel(uint8_t ch)` — выбрать номер канала 0…9 и установить частоту приёма.
+- `bool setBank(ChannelBank bank)` — выбрать банк каналов (`EAST`, `WEST`, `TEST`, `ALL`).
+- `bool setChannel(uint8_t ch)` — выбрать номер канала 0…N-1 и установить частоту приёма.
 - `bool setBandwidth(float bw)` — задать ширину полосы в кГц.
 - `bool setSpreadingFactor(int sf)` — указать фактор расширения 5…12.
 - `bool setCodingRate(int cr)` — задать коэффициент кодирования 5…8.
 - `bool setPower(uint8_t preset)` — установить уровень мощности из таблицы (-5…22 дБм).
 - `void sendBeacon()` — отправить служебный пакет-маяк.
-- `ChannelBank getBank() const`, `uint8_t getChannel() const`, `float getBandwidth() const`, `int getSpreadingFactor() const`, `int getCodingRate() const`, `int getPower() const`, `float getRxFrequency() const`, `float getTxFrequency() const` — получить текущие параметры.
+- `ChannelBank getBank() const`, `uint8_t getChannel() const`, `uint16_t getBankSize() const`, `float getBandwidth() const`, `int getSpreadingFactor() const`, `int getCodingRate() const`, `int getPower() const`, `float getRxFrequency() const`, `float getTxFrequency() const` — получить текущие параметры.
   - `bool resetToDefaults()` — вернуть параметры радиомодуля к значениям по умолчанию.
   - Значения параметров по умолчанию (размер блока для `PacketGatherer`, пауза между отправками и т.д.) заданы в файле `default_settings.h`.
 
@@ -149,6 +149,8 @@ ENCT: успех
 
 ## Команды Serial
 
+- `BANK <e|w|t|a>` — выбрать банк каналов.
+- `CH <номер>` — переключить канал в пределах текущего банка.
 - `PI` — отправляет пинг на текущем канале и ожидает ответ `PING_WAIT_MS` миллисекунд. При успешном ответе выводится `PI: RSSI=<дБм> SNR=<дБ>`, при отсутствии — `PI: timeout`.
 - `SEAR` — последовательно пингует все каналы. Для каждого канала выводится `SEAR <канал>: RSSI=<дБм> SNR=<дБ>` либо `SEAR <канал>: timeout`.
 
@@ -194,6 +196,7 @@ rs255223::decode -> PacketGatherer -> обработка сообщения
 - Добавлена команда SEAR для последовательного пинга всех каналов с выводом RSSI и SNR.
 - Добавлены методы `getLastRssi()` и `getLastSnr()` в `RadioSX1262`.
 - Добавлен метод `randomByte()` в `RadioSX1262`.
+- Добавлен банк частот `ALL` и команда выбора этого банка через Serial.
 - Введена константа `PING_WAIT_MS`, задающая время ожидания ответа на пинг.
 - Пример `serial_radio_control.ino` использует 160-слотовые очереди, что позволяет хранить несколько сообщений по 5000 байт.
 - Файл `default_settings.h` с параметрами радиомодуля, размером блока `PacketGatherer`,
