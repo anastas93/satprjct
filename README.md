@@ -12,7 +12,7 @@
 - `IRadio` описан в `radio_interface.h`.
 - `RadioSX1262` — конкретная реализация интерфейса на базе модуля SX1262.
 - `SerialProgramCollector` — библиотека для приёма строк по Serial и сборки их в один буфер (`libs/serial_program_collector/`).
-  - `serial_radio_control.ino` — пример настройки банков каналов, BW, SF, CR и мощности через Serial, вывода текущих параметров и отправки тестовых пакетов через `TxModule`, включая команды `TXL` для больших сообщений, `STS <n>` для просмотра журнала и `STSR <n>` для просмотра содержимого `ReceivedBuffer`.
+  - `serial_radio_control.ino` — пример настройки банков каналов, BW, SF, CR и мощности через Serial, вывода текущих параметров и отправки тестовых пакетов через `TxModule`, включая команды `TXL` для больших сообщений, `STS <n>` для просмотра журнала и `RSTS <n>` для просмотра содержимого `ReceivedBuffer`.
 - `TextConverter` — библиотека (`libs/text_converter/`) для преобразования UTF-8 текста в байты CP1251, используемая командой `TX`.
 - `rs255223` — библиотека (`libs/rs255223/`) с обёртками `encode()` и `decode()` для кода Рида–Соломона RS(255,223).
 - `byte_interleaver` — библиотека (`libs/byte_interleaver/`) с функциями `interleave()` и `deinterleave()` для байтового перемежения.
