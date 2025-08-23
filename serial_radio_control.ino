@@ -31,7 +31,7 @@ void setup() {
   radio.setReceiveCallback([&](const uint8_t* d, size_t l){  // привязка приёма
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, PI, SEAR");
 }
 
 void loop() {
@@ -198,6 +198,43 @@ void loop() {
         } else {
           Serial.println("Пинг: тайм-аут");
         }
+      } else if (line.equalsIgnoreCase("SEAR")) {
+        // перебор каналов с пингом и возвратом исходного канала
+        uint8_t prevCh = radio.getChannel();         // сохраняем текущий канал
+        for (int ch = 0; ch < 10; ++ch) {
+          if (!radio.setChannel(ch)) {               // переключаемся
+            Serial.print("CH ");
+            Serial.print(ch);
+            Serial.println(": ошибка");
+            continue;
+          }
+          // очищаем буфер перед новым запросом
+          ReceivedBuffer::Item dump;
+          while (recvBuf.popRaw(dump)) {}
+          // формируем и отправляем пинг
+          std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> pkt2;
+          for (auto &b : pkt2) {
+            b = radio.randomByte();                 // случайные данные
+          }
+          tx.queue(pkt2.data(), pkt2.size());
+          tx.loop();
+          delay(DefaultSettings::PING_WAIT_MS);     // ждём ответ
+          radio.loop();                             // обрабатываем приём
+          ReceivedBuffer::Item res;
+          if (recvBuf.popRaw(res)) {
+            Serial.print("CH ");
+            Serial.print(ch);
+            Serial.print(": RSSI ");
+            Serial.print(radio.getLastRssi());
+            Serial.print(" SNR ");
+            Serial.println(radio.getLastSnr());
+          } else {
+            Serial.print("CH ");
+            Serial.print(ch);
+            Serial.println(": тайм-аут");
+          }
+        }
+        radio.setChannel(prevCh);                    // возвращаем исходный канал
       }
     }
 }
