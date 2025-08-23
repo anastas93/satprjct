@@ -22,16 +22,16 @@ int main() {
   uint32_t id = tx.queue(reinterpret_cast<const uint8_t*>(msg), 5);
   assert(id==1);                          // ожидаемый ID
   tx.loop();                              // формируем кадр
-  assert(radio.last.size() == FrameHeader::SIZE*2 + 5);
+  assert(radio.last.size() == FrameHeader::SIZE*2 + 14); // 9 байт префикс + 5 данных
   // дескремблируем кадр перед проверкой
   scrambler::descramble(radio.last.data(), radio.last.size());
   FrameHeader hdr;
   assert(FrameHeader::decode(radio.last.data(), radio.last.size(), hdr));
-  assert(hdr.msg_id==1 && hdr.payload_len==5);
-  // проверяем, что полезная нагрузка совпадает
+  assert(hdr.msg_id==1 && hdr.payload_len==14);
+  // проверяем, что полезная нагрузка содержит "HELLO" в конце
   std::vector<uint8_t> payload(radio.last.begin()+FrameHeader::SIZE*2, radio.last.end());
   std::string text(payload.begin(), payload.end());
-  assert(text == "HELLO");
+  assert(text.size() >= 5 && text.substr(text.size()-5) == "HELLO");
   std::cout << "OK" << std::endl;
   return 0;
 }

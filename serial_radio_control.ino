@@ -5,6 +5,7 @@
 #include "tx_module.h"
 #include "default_settings.h"
 #include "libs/text_converter/text_converter.h" // конвертер UTF-8 -> CP1251
+#include "libs/simple_logger/simple_logger.h"    // журнал статусов
 
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
@@ -19,7 +20,7 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) {}
   radio.begin();
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>");
 }
 
 void loop() {
@@ -94,6 +95,13 @@ void loop() {
         Serial.print("SF: "); Serial.println(radio.getSpreadingFactor());
         Serial.print("CR: "); Serial.println(radio.getCodingRate());
         Serial.print("Power: "); Serial.print(radio.getPower()); Serial.println(" dBm");
+      } else if (line.startsWith("STS")) {
+        int cnt = line.length() > 3 ? line.substring(4).toInt() : 10;
+        if (cnt <= 0) cnt = 10;                       // значение по умолчанию
+        auto logs = SimpleLogger::getLast(cnt);
+        for (const auto& s : logs) {
+          Serial.println(s.c_str());
+        }
       } else if (line.startsWith("TX ")) {
         String msg = line.substring(3);                     // исходный текст
         // конвертация UTF-8 в CP1251 для корректной передачи русских символов
