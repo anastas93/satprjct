@@ -250,5 +250,53 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   settingsSection.appendChild(clearBtn);
 
+  // --- Логика безопасности ---
+  const keyInfo = document.getElementById('key-info'); // блок отображения хеша ключа
+  const keygenBtn = document.getElementById('keygen-btn'); // генерация нового ключа
+  const keysendBtn = document.getElementById('keysend-btn'); // отправка текущего ключа
+  const keyrecvBtn = document.getElementById('keyrecv-btn'); // приём ключа
+
+  // загрузка ключа из localStorage
+  const loadKey = () => localStorage.getItem('cryptoKey');
+
+  // вычисление первых четырёх символов SHA-256
+  const keyHash4 = async (keyHex) => {
+    const bytes = new Uint8Array(keyHex.match(/.{2}/g).map(b => parseInt(b, 16)));
+    const hash = await crypto.subtle.digest('SHA-256', bytes);
+    const hex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+    return hex.slice(0, 4);
+  };
+
+  // обновление информации о ключе
+  const updateKeyInfo = async () => {
+    const keyHex = loadKey();
+    if (!keyHex) {
+      keyInfo.textContent = 'LOCAL';
+    } else {
+      keyInfo.textContent = await keyHash4(keyHex);
+    }
+  };
+
+  // генерация нового ключа и сохранение
+  keygenBtn.addEventListener('click', async () => {
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr); // создание случайных байтов
+    const keyHex = Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+    localStorage.setItem('cryptoKey', keyHex);
+    await updateKeyInfo();
+  });
+
+  // заглушка передачи ключа
+  keysendBtn.addEventListener('click', () => {
+    // TODO: реализовать передачу ключа на другое устройство
+  });
+
+  // заглушка получения ключа
+  keyrecvBtn.addEventListener('click', () => {
+    // TODO: реализовать получение ключа от другого устройства
+  });
+
+  updateKeyInfo();
+
   renderTable(); // первоначальное заполнение таблицы
 });
