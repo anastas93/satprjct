@@ -10,13 +10,15 @@
   <nav id="main-nav">
     <!-- Кнопка отображения пунктов меню на узких экранах -->
     <button id="menu-toggle">☰</button>
-    <!-- Группа ссылок навигации -->
-    <div id="nav-links">
-      <button class="tab-btn" data-tab="chat">Chat</button>
-      <button class="tab-btn" data-tab="channels">Channels/Ping</button>
-      <button class="tab-btn" data-tab="settings">Settings</button>
-      <a href="#" id="security-link" data-tab="security">Security</a>
-    </div>
+    <!-- Основные ссылки навигации -->
+    <nav aria-label="Главное меню">
+      <ul id="nav-links">
+        <li><a class="tab-btn" data-tab="chat" href="#chat">Chat</a></li>
+        <li><a class="tab-btn" data-tab="channels" href="#channels">Channels/Ping</a></li>
+        <li><a class="tab-btn" data-tab="settings" href="#settings">Settings</a></li>
+        <li><a id="security-link" data-tab="security" href="#security">Security</a></li>
+      </ul>
+    </nav>
   </nav>
 
   <!-- Области содержимого для каждой вкладки -->
