@@ -58,6 +58,12 @@ void RadioSX1262::send(const uint8_t* data, size_t len) {
 
 void RadioSX1262::setReceiveCallback(RxCallback cb) { rx_cb_ = cb; }
 
+// Получить SNR последнего принятого пакета
+float RadioSX1262::getLastSnr() const { return lastSnr_; }
+
+// Получить RSSI последнего принятого пакета
+float RadioSX1262::getLastRssi() const { return lastRssi_; }
+
 bool RadioSX1262::setBank(ChannelBank bank) {
   bank_ = bank;
   channel_ = 0;
@@ -161,8 +167,12 @@ void RadioSX1262::loop() {
   }
   std::array<uint8_t, 256> buf;            // статический буфер на стеке
   int state = radio_.readData(buf.data(), len);
-  if (state == RADIOLIB_ERR_NONE && rx_cb_) {
-    rx_cb_(buf.data(), len);                // передаём данные пользователю
+  if (state == RADIOLIB_ERR_NONE) {
+    lastSnr_ = radio_.getPacketSNR();       // сохраняем SNR
+    lastRssi_ = radio_.getPacketRSSI();     // сохраняем RSSI
+    if (rx_cb_) {
+      rx_cb_(buf.data(), len);              // передаём данные пользователю
+    }
   }
   packetReady_ = false;                     // пакет обработан
   radio_.startReceive();                    // снова слушаем эфир
