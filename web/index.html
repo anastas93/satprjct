@@ -32,8 +32,21 @@
     </div>
   </section>
   <section id="channels" class="tab-content">
-    <!-- Здесь будут отображаться каналы и отправка ping -->
+    <!-- Вкладка отображения банка каналов и отправки пингов -->
     <h2>Channels / Ping</h2>
+    <!-- Панель управления каналами -->
+    <div id="channel-controls">
+      <button id="ping-btn">Ping</button>
+      <button id="search-btn">Search</button>
+      <button id="export-btn">Выгрузить CSV</button>
+    </div>
+    <!-- Таблица активного банка каналов -->
+    <table id="channel-table">
+      <thead>
+        <tr><th>Канал</th><th>Частота, МГц</th><th>Замеры приёма</th></tr>
+      </thead>
+      <tbody id="channel-table-body"></tbody>
+    </table>
   </section>
   <section id="settings" class="tab-content">
     <!-- Здесь будут параметры настройки -->
