@@ -11,3 +11,4 @@
 #include "libs/bit_interleaver/bit_interleaver.cpp" // битовый интерливинг
 #include "libs/scrambler/scrambler.cpp"             // скремблер
 #include "libs/simple_logger/simple_logger.cpp"     // журнал статусов
+#include "libs/received_buffer/received_buffer.cpp" // буфер принятых сообщений
