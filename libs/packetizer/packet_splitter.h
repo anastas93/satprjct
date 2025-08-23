@@ -21,7 +21,8 @@ public:
   // Задать произвольный размер полезной нагрузки
   void setCustomSize(size_t custom);
   // Разделить данные и занести части в буфер, возвращает ID первого пакета
-  uint32_t splitAndEnqueue(MessageBuffer& buf, const uint8_t* data, size_t len) const;
+  // with_id=true добавляет префикс и журналирование
+  uint32_t splitAndEnqueue(MessageBuffer& buf, const uint8_t* data, size_t len, bool with_id = true) const;
 private:
   // Возвращает размер полезной нагрузки для текущего режима
   size_t payloadSize() const;

@@ -8,6 +8,9 @@
 #include "default_settings.h"
 #include <vector>
 #include <chrono>
+#include <algorithm>
+#include <string>
+#include "libs/simple_logger/simple_logger.h" // журнал статусов
 
 // Максимально допустимый размер кадра
 // Ограничение радиомодуля SX1262 — не более 245 байт в пакете
@@ -86,13 +89,18 @@ void TxModule::loop() {
     DEBUG_LOG("TxModule: ошибка извлечения");
     return;
   }
+  std::string prefix;                   // извлечём префикс [ID|n]
+  auto it = std::find(msg.begin(), msg.end(), ']');
+  if (it != msg.end()) {
+    prefix.assign(msg.begin(), it + 1);
+  }
 
   // TODO: шифрование сообщения (не реализовано)
 
   // Разбиваем сообщение на блоки по RS_DATA_LEN байт перед RS-кодированием
   PacketSplitter rs_splitter(PayloadMode::SMALL, RS_DATA_LEN);
   MessageBuffer tmp((msg.size() + RS_DATA_LEN - 1) / RS_DATA_LEN);
-  rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size());
+  rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size(), false);
 
   std::vector<std::vector<uint8_t>> fragments;      // конечные фрагменты для отправки
 
@@ -121,7 +129,7 @@ void TxModule::loop() {
       size_t pieces = (conv.size() + MAX_FRAGMENT_LEN - 1) / MAX_FRAGMENT_LEN;
       PacketSplitter frag_splitter(PayloadMode::SMALL, MAX_FRAGMENT_LEN);
       MessageBuffer fb(pieces);
-      frag_splitter.splitAndEnqueue(fb, conv.data(), conv.size());
+      frag_splitter.splitAndEnqueue(fb, conv.data(), conv.size(), false);
       LOG_WARN_VAL("TxModule: фрагмент превышает лимит, частей=", pieces);
       while (fb.hasPending()) {
         std::vector<uint8_t> sub;
@@ -160,6 +168,9 @@ void TxModule::loop() {
     }
     radio_.send(frame.data(), frame.size());                // отправка кадра
     DEBUG_LOG_VAL("TxModule: отправлен фрагмент=", idx);
+  }
+  if (!prefix.empty()) {
+    SimpleLogger::logStatus(prefix + " GO");
   }
   last_send_ = std::chrono::steady_clock::now();
 }
