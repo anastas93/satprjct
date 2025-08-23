@@ -13,8 +13,23 @@ body.dark {
 /* Простейшие стили для навигации и вкладок */
 nav {
   display: flex;
-  gap: 10px;
+  align-items: center;
   margin-bottom: 20px;
+}
+
+/* Контейнер ссылок навигации */
+#nav-links {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+}
+
+/* Кнопка вызова мобильного меню */
+#menu-toggle {
+  display: none; /* скрыта на широких экранах */
+  background: none;
+  border: none;
+  font-size: 24px;
 }
 
 body.dark nav {
@@ -32,6 +47,29 @@ body.dark nav {
 #security-link {
   margin-left: auto; /* отделяем ссылку безопасности справа */
   align-self: center;
+}
+
+/* Адаптация меню под мобильные устройства */
+@media (max-width: 600px) {
+  nav {
+    flex-direction: column; /* вертикальное расположение */
+    align-items: flex-start;
+  }
+  #menu-toggle {
+    display: block; /* показываем кнопку меню */
+  }
+  #nav-links {
+    display: none; /* скрываем ссылки пока меню закрыто */
+    flex-direction: column;
+    width: 100%;
+    gap: 5px;
+  }
+  nav.open #nav-links {
+    display: flex; /* показываем при открытии */
+  }
+  #security-link {
+    margin-left: 0; /* убираем отступ справа */
+  }
 }
 
 /* Стили для чата */
