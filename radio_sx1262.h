@@ -22,6 +22,8 @@ public:
   // Получение параметров последнего принятого пакета
   float getLastSnr() const;  // последний SNR
   float getLastRssi() const; // последний RSSI
+  // Получить случайный байт
+  uint8_t randomByte();
   // Выбор банка каналов (EAST, WEST, TEST)
   bool setBank(ChannelBank bank);
   // Выбор канала 0-9 из текущего банка

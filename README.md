@@ -89,6 +89,7 @@
 - `void setReceiveCallback(IRadio::RxCallback cb)` — регистрация обработчика приёма.
 - `float getLastSnr() const` — получить SNR последнего принятого пакета.
 - `float getLastRssi() const` — получить RSSI последнего принятого пакета.
+- `uint8_t randomByte()` — получить случайный байт от радиомодуля.
 - `bool setBank(ChannelBank bank)` — выбрать банк каналов (`EAST`, `WEST`, `TEST`).
 - `bool setChannel(uint8_t ch)` — выбрать номер канала 0…9 и установить частоту приёма.
 - `bool setBandwidth(float bw)` — задать ширину полосы в кГц.
@@ -192,6 +193,7 @@ rs255223::decode -> PacketGatherer -> обработка сообщения
 - Реализована команда PI для пинга с выводом RSSI и SNR.
 - Добавлена команда SEAR для последовательного пинга всех каналов с выводом RSSI и SNR.
 - Добавлены методы `getLastRssi()` и `getLastSnr()` в `RadioSX1262`.
+- Добавлен метод `randomByte()` в `RadioSX1262`.
 - Введена константа `PING_WAIT_MS`, задающая время ожидания ответа на пинг.
 - Пример `serial_radio_control.ino` использует 160-слотовые очереди, что позволяет хранить несколько сообщений по 5000 байт.
 - Файл `default_settings.h` с параметрами радиомодуля, размером блока `PacketGatherer`,
