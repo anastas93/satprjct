@@ -73,11 +73,11 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos) {
 }
 
 // Пытаемся отправить первое сообщение
-void TxModule::loop() {
+bool TxModule::loop() {
   auto now = std::chrono::steady_clock::now();
   if (pause_ms_ && now - last_send_ < std::chrono::milliseconds(pause_ms_)) {
     DEBUG_LOG("TxModule: пауза");
-    return; // ждём паузу
+    return false; // ждём паузу
   }
   // ищем первую непустую очередь QoS
   MessageBuffer* buf = nullptr;
@@ -86,13 +86,13 @@ void TxModule::loop() {
   }
   if (!buf) {                                     // все очереди пусты
     DEBUG_LOG("TxModule: очереди пусты");
-    return;
+    return false;
   }
   std::vector<uint8_t> msg;
   uint32_t id = 0;                      // получаемый идентификатор сообщения
   if (!buf->pop(id, msg)) {
     DEBUG_LOG("TxModule: ошибка извлечения");
-    return;
+    return false;
   }
   std::string prefix;                   // извлечём префикс [ID|n]
   auto it = std::find(msg.begin(), msg.end(), ']');
@@ -107,6 +107,7 @@ void TxModule::loop() {
   rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size(), false);
 
   std::vector<std::vector<uint8_t>> fragments;      // конечные фрагменты для отправки
+  bool sent = false;                                // флаг успешной передачи
 
   while (tmp.hasPending()) {
     std::vector<uint8_t> part;
@@ -184,11 +185,15 @@ void TxModule::loop() {
     }
     radio_.send(frame.data(), frame.size());                // отправка кадра
     DEBUG_LOG_VAL("TxModule: отправлен фрагмент=", idx);
+    sent = true;
   }
   if (!prefix.empty()) {
     SimpleLogger::logStatus(prefix + " GO");
   }
-  last_send_ = std::chrono::steady_clock::now();
+  if (sent) {
+    last_send_ = std::chrono::steady_clock::now();
+  }
+  return sent;
 }
 
 // Установка паузы между отправками
