@@ -1,18 +1,24 @@
 #include <Arduino.h>
 #include <array>
 #include <vector>
+#include <cstring> // для strlen
+
+// --- Радио и модули ---
 #include "radio_sx1262.h"
 #include "tx_module.h"
-#include "rx_module.h"                             // модуль приёма
+#include "rx_module.h" // модуль приёма
 #include "default_settings.h"
-#include "libs/text_converter/text_converter.h" // конвертер UTF-8 -> CP1251
-#include "libs/simple_logger/simple_logger.h"    // журнал статусов
-#include "libs/received_buffer/received_buffer.h"// буфер принятых сообщений
+
+// --- Вспомогательные библиотеки ---
+#include "libs/text_converter/text_converter.h"   // конвертер UTF-8 -> CP1251
+#include "libs/simple_logger/simple_logger.h"     // журнал статусов
+#include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
 #include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
-#include <cstring>                                 // для strlen
-#include <WiFi.h>                                   // работа с Wi-Fi
-#include <WebServer.h>                              // встроенный HTTP-сервер
-#include "web/web_content.h"                        // встроенные файлы веб-интерфейса
+
+// --- Сеть и веб-интерфейс ---
+#include <WiFi.h>        // работа с Wi-Fi
+#include <WebServer.h>   // встроенный HTTP-сервер
+#include "web/web_content.h" // встроенные файлы веб-интерфейса
 
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
