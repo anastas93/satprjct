@@ -126,6 +126,24 @@
 - `bool encrypt_ccm(const uint8_t* key, size_t key_len, const uint8_t* nonce, size_t nonce_len, const uint8_t* aad, size_t aad_len, const uint8_t* input, size_t input_len, std::vector<uint8_t>& output, std::vector<uint8_t>& tag, size_t tag_len)` — шифрует данные и формирует тег.
 - `bool decrypt_ccm(const uint8_t* key, size_t key_len, const uint8_t* nonce, size_t nonce_len, const uint8_t* aad, size_t aad_len, const uint8_t* input, size_t input_len, const uint8_t* tag, size_t tag_len, std::vector<uint8_t>& output)` — проверяет тег и расшифровывает данные.
 
+## Команда ENCT
+
+Тестовая команда для проверки шифрования AES-CCM. Формирует короткое сообщение,
+зашифровывает его, расшифровывает обратно и выводит результат сравнения.
+
+Пример запуска теста на ПК:
+
+```
+g++ -I. tests/test_enct.cpp libs_includes.cpp -std=c++17 && ./a.out
+```
+
+В `serial_radio_control.ino` команду можно вызвать через Serial:
+
+```
+ENCT
+ENCT: успех
+```
+
 ## Пример последовательности вызовов
 ```
 // Передача
