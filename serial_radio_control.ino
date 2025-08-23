@@ -179,6 +179,25 @@ void loop() {
         } else {
           Serial.println("ENCT: ошибка");
         }
+      } else if (line.equalsIgnoreCase("PI")) {
+        // отправляем пинг случайными байтами и ждём эха
+        std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> pkt;
+        for (auto &b : pkt) {
+          b = radio.randomByte();              // заполняем случайностями
+        }
+        tx.queue(pkt.data(), pkt.size());      // ставим пакет в очередь
+        tx.loop();                             // отправляем сразу
+        delay(DefaultSettings::PING_WAIT_MS);  // ждём ответ
+        radio.loop();                          // обрабатываем возможное получение
+        ReceivedBuffer::Item item;
+        if (recvBuf.popRaw(item)) {
+          Serial.print("RSSI: ");
+          Serial.print(radio.getLastRssi());
+          Serial.print(" SNR: ");
+          Serial.println(radio.getLastSnr());
+        } else {
+          Serial.println("Пинг: тайм-аут");
+        }
       }
     }
 }

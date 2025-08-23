@@ -19,6 +19,9 @@ public:
   void loop();
   // Установка колбэка приёма
   void setReceiveCallback(RxCallback cb) override;
+  // Получение параметров последнего принятого пакета
+  float getLastSnr() const;  // последний SNR
+  float getLastRssi() const; // последний RSSI
   // Выбор банка каналов (EAST, WEST, TEST)
   bool setBank(ChannelBank bank);
   // Выбор канала 0-9 из текущего банка
@@ -62,6 +65,9 @@ private:
   int sf_preset_ = 2;
   int cr_preset_ = 0;
   float tcxo_ = 0;
+
+  float lastSnr_ = 0.0f;     // SNR последнего пакета
+  float lastRssi_ = 0.0f;    // RSSI последнего пакета
 
   static const float fRX_bank_[3][10];
   static const float fTX_bank_[3][10];
