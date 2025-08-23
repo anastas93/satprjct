@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const buttons = document.querySelectorAll('.tab-btn'); // кнопки вкладок
   const sections = document.querySelectorAll('.tab-content'); // содержимое вкладок
   const securityLink = document.getElementById('security-link'); // отдельная ссылка безопасности
+  const allLinks = [...buttons, securityLink]; // все ссылки навигации
   const nav = document.getElementById('main-nav'); // контейнер навигации
   const menuToggle = document.getElementById('menu-toggle'); // кнопка меню для мобильных
 
@@ -18,6 +19,10 @@ document.addEventListener('DOMContentLoaded', () => {
     sections.forEach(sec => sec.classList.remove('active')); // скрываем все разделы
     const target = document.getElementById(id);
     if (target) target.classList.add('active'); // показываем нужный
+    // отмечаем активную ссылку и снимаем отметку с остальных
+    allLinks.forEach(link => link.removeAttribute('aria-current')); // убираем прошлые пометки
+    const current = allLinks.find(link => link.dataset.tab === id); // ищем текущую ссылку
+    if (current) current.setAttribute('aria-current', 'page'); // помечаем активную
   };
 
   // обработка кликов по вкладкам

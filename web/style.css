@@ -55,6 +55,11 @@ nav li:last-child {
   align-self: center;
 }
 
+/* Ссылка текущей страницы */
+[aria-current="page"] {
+  font-weight: bold; /* активная ссылка отображается жирным */
+}
+
 /* Кнопка вызова мобильного меню */
 #menu-toggle {
   display: none; /* скрыта на широких экранах */
