@@ -12,6 +12,7 @@
 #include <cstring>                                 // для strlen
 #include <WiFi.h>                                   // работа с Wi-Fi
 #include <WebServer.h>                              // встроенный HTTP-сервер
+#include "web/web_content.h"                        // встроенные файлы веб-интерфейса
 
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
@@ -26,20 +27,28 @@ ReceivedBuffer recvBuf;     // буфер полученных сообщени�
 bool ackEnabled = DefaultSettings::USE_ACK; // флаг автоматической отправки ACK
 
 WebServer server(80);       // HTTP-сервер для веб-интерфейса
-// Простая HTML-страница для проверки работы точки доступа
-const char INDEX_HTML[] PROGMEM =
-  "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Radio</title></head>"
-  "<body>Устройство готово.</body></html>";
 
-// Отправка заглушки при обращении к корню
+// Отдаём страницу index.html
 void handleRoot() {
-  server.send(200, "text/html", INDEX_HTML);
+  server.send_P(200, "text/html", INDEX_HTML);
+}
+
+// Отдаём статический файл app.js
+void handleAppJs() {
+  server.send_P(200, "application/javascript", APP_JS);
+}
+
+// Отдаём стили style.css
+void handleStyleCss() {
+  server.send_P(200, "text/css", STYLE_CSS);
 }
 
 // Настройка Wi-Fi точки доступа и запуск сервера
 void setupWifi() {
   WiFi.softAP(DefaultSettings::WIFI_SSID, DefaultSettings::WIFI_PASS); // создаём AP
   server.on("/", handleRoot);                                         // обработчик страницы
+  server.on("/app.js", handleAppJs);                                 // JS веб-интерфейса
+  server.on("/style.css", handleStyleCss);                           // CSS веб-интерфейса
   server.begin();                                                      // старт сервера
   Serial.print("AP IP: ");
   Serial.println(WiFi.softAPIP());                                     // выводим адрес
