@@ -64,6 +64,9 @@ float RadioSX1262::getLastSnr() const { return lastSnr_; }
 // Получить RSSI последнего принятого пакета
 float RadioSX1262::getLastRssi() const { return lastRssi_; }
 
+// Получить случайный байт из встроенного генератора
+uint8_t RadioSX1262::randomByte() { return radio_.randomByte(); }
+
 bool RadioSX1262::setBank(ChannelBank bank) {
   bank_ = bank;
   channel_ = 0;
@@ -168,8 +171,8 @@ void RadioSX1262::loop() {
   std::array<uint8_t, 256> buf;            // статический буфер на стеке
   int state = radio_.readData(buf.data(), len);
   if (state == RADIOLIB_ERR_NONE) {
-    lastSnr_ = radio_.getPacketSNR();       // сохраняем SNR
-    lastRssi_ = radio_.getPacketRSSI();     // сохраняем RSSI
+    lastSnr_ = radio_.getSNR();             // сохраняем SNR
+    lastRssi_ = radio_.getRSSI();           // сохраняем RSSI
     if (rx_cb_) {
       rx_cb_(buf.data(), len);              // передаём данные пользователю
     }
@@ -180,8 +183,8 @@ void RadioSX1262::loop() {
 
 void RadioSX1262::sendBeacon() {
   uint8_t beacon[15]{0};                  // буфер маяка
-  beacon[1] = radio_.randomByte();        // случайный байт 1
-  beacon[2] = radio_.randomByte();        // случайный байт 2
+  beacon[1] = randomByte();               // случайный байт 1
+  beacon[2] = randomByte();               // случайный байт 2
   beacon[0] = beacon[1] ^ beacon[2];      // идентификатор = XOR
   const char text[6] = {'B','E','A','C','O','N'}; // надпись "BEACON"
   memcpy(&beacon[9], text, 6);            // вставка текста
