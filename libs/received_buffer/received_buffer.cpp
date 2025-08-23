@@ -72,3 +72,25 @@ bool ReceivedBuffer::hasRaw() const { return !raw_.empty(); }
 bool ReceivedBuffer::hasSplit() const { return !split_.empty(); }
 bool ReceivedBuffer::hasReady() const { return !ready_.empty(); }
 
+// Сформировать список имён элементов (ограничение по count)
+std::vector<std::string> ReceivedBuffer::list(size_t count) const {
+  std::vector<std::string> out;                // результирующий список имён
+  size_t produced = 0;                         // сколько имён добавлено
+  for (const auto& it : raw_) {                // перебор сырых пакетов
+    if (produced >= count) break;              // достигнут лимит
+    out.push_back(makeRawName(it.id, it.part));
+    ++produced;
+  }
+  for (const auto& it : split_) {              // перебор объединённых данных
+    if (produced >= count) break;              // проверка лимита
+    out.push_back(makeSplitName(it.id));
+    ++produced;
+  }
+  for (const auto& it : ready_) {              // перебор готовых данных
+    if (produced >= count) break;              // проверка лимита
+    out.push_back(makeReadyName(it.id));
+    ++produced;
+  }
+  return out;                                  // возвращаем список имён
+}
+
