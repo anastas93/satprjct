@@ -191,5 +191,64 @@ document.addEventListener('DOMContentLoaded', () => {
     URL.revokeObjectURL(link.href);
   });
 
+  // --- Логика настроек ---
+  const settingsSection = document.getElementById('settings'); // блок настроек
+
+  // список названий параметров и сортировка по алфавиту
+  const settingsNames = ['BF', 'SF', 'CR', 'BANK', 'CH', 'PW', 'INFO', 'STS', 'ACK'];
+  settingsNames.sort(); // сортируем названия
+
+  // создаём поле ввода для каждого параметра
+  settingsNames.forEach(name => {
+    const wrap = document.createElement('div');
+    const label = document.createElement('label');
+    label.htmlFor = `setting-${name}`;
+    label.textContent = name;
+    const inp = document.createElement('input');
+    inp.id = `setting-${name}`;
+    inp.value = localStorage.getItem(name) || '';
+    // сохраняем значение в localStorage при изменении
+    inp.addEventListener('change', () => {
+      localStorage.setItem(name, inp.value);
+    });
+    wrap.appendChild(label);
+    wrap.appendChild(inp);
+    settingsSection.appendChild(wrap);
+  });
+
+  // кнопка переключения темы
+  const themeBtn = document.createElement('button');
+  themeBtn.id = 'theme-btn';
+  settingsSection.appendChild(themeBtn);
+
+  // функция применения темы
+  const applyTheme = (theme) => {
+    document.body.classList.toggle('dark', theme === 'dark');
+    localStorage.setItem('theme', theme);
+    themeBtn.textContent = theme === 'dark' ? 'Светлая тема' : 'Тёмная тема';
+  };
+
+  // восстанавливаем сохранённую тему
+  applyTheme(localStorage.getItem('theme') || 'light');
+  themeBtn.addEventListener('click', () => {
+    const next = document.body.classList.contains('dark') ? 'light' : 'dark';
+    applyTheme(next);
+  });
+
+  // кнопка очистки кеша (localStorage и IndexedDB)
+  const clearBtn = document.createElement('button');
+  clearBtn.id = 'clear-cache-btn';
+  clearBtn.textContent = 'Очистить кеш';
+  clearBtn.addEventListener('click', () => {
+    localStorage.clear(); // очищаем localStorage
+    // удаляем все базы IndexedDB, если доступно API
+    if (indexedDB && indexedDB.databases) {
+      indexedDB.databases().then(dbs => {
+        dbs.forEach(db => indexedDB.deleteDatabase(db.name));
+      });
+    }
+  });
+  settingsSection.appendChild(clearBtn);
+
   renderTable(); // первоначальное заполнение таблицы
 });

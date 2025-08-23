@@ -1,8 +1,24 @@
+/* Базовые цвета страницы */
+body {
+  background: #fff; /* светлый фон по умолчанию */
+  color: #000; /* чёрный текст */
+}
+
+/* Тёмная тема */
+body.dark {
+  background: #121212; /* тёмный фон */
+  color: #f0f0f0; /* светлый текст */
+}
+
 /* Простейшие стили для навигации и вкладок */
 nav {
   display: flex;
   gap: 10px;
   margin-bottom: 20px;
+}
+
+body.dark nav {
+  background: #1e1e1e; /* фон панели в тёмной теме */
 }
 
 .tab-content {
@@ -58,6 +74,11 @@ nav {
   text-align: center; /* выравнивание по центру */
 }
 
+body.dark #channel-table th,
+body.dark #channel-table td {
+  border-color: #555; /* границы таблицы в тёмной теме */
+}
+
 #channel-table tr.selected {
   outline: 2px solid #000; /* выделение выбранной строки */
 }
@@ -77,4 +98,21 @@ nav {
 
 .status-timeout {
   background: lightgray; /* серый — нет ответа */
+}
+
+/* Блок настроек */
+#settings div {
+  margin-bottom: 5px; /* отступ между параметрами */
+}
+
+#settings label {
+  margin-right: 5px; /* расстояние между подписью и полем */
+}
+
+body.dark input,
+body.dark button,
+body.dark table {
+  background: #333; /* фон элементов управления в тёмной теме */
+  color: #f0f0f0; /* текст в тёмной теме */
+  border-color: #555; /* границы элементов */
 }
