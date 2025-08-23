@@ -18,6 +18,7 @@ static constexpr size_t MAX_FRAGMENT_LEN =
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
 static constexpr size_t RS_ENC_LEN = 255;         // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
+static constexpr bool USE_RS = DefaultSettings::USE_RS; // включение кода RS(255,223)
 
 // Вставка пилотов каждые 64 байта
 static std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
@@ -102,10 +103,14 @@ void TxModule::loop() {
 
     std::vector<uint8_t> conv;                      // закодированный блок
     if (part.size() == RS_DATA_LEN) {
-      uint8_t rs_buf[RS_ENC_LEN];
-      rs255223::encode(part.data(), rs_buf);               // кодируем блок
-      byte_interleaver::interleave(rs_buf, RS_ENC_LEN);    // байтовый интерливинг
-      conv_codec::encodeBits(rs_buf, RS_ENC_LEN, conv);    // свёрточное кодирование
+      if (USE_RS) {
+        uint8_t rs_buf[RS_ENC_LEN];
+        rs255223::encode(part.data(), rs_buf);            // кодируем блок RS
+        byte_interleaver::interleave(rs_buf, RS_ENC_LEN); // байтовый интерливинг
+        conv_codec::encodeBits(rs_buf, RS_ENC_LEN, conv); // свёрточное кодирование
+      } else {
+        conv_codec::encodeBits(part.data(), part.size(), conv); // только свёрточный кодер
+      }
       if (USE_BIT_INTERLEAVER)
         bit_interleaver::interleave(conv.data(), conv.size()); // битовый интерливинг
     } else {
