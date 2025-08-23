@@ -21,17 +21,32 @@ TxModule tx(radio, std::array<size_t,4>{
   DefaultSettings::TX_QUEUE_CAPACITY});
 RxModule rx;                // модуль приёма
 ReceivedBuffer recvBuf;     // буфер полученных сообщений
+bool ackEnabled = DefaultSettings::USE_ACK; // флаг автоматической отправки ACK
 
 void setup() {
   Serial.begin(115200);
   while (!Serial) {}
   radio.begin();
   rx.setBuffer(&recvBuf);                                   // сохраняем принятые пакеты
-  rx.setCallback([](const uint8_t*, size_t){});              // заглушка колбэка
+  // обработка входящих данных с учётом ACK
+  rx.setCallback([&](const uint8_t* d, size_t l){
+    if (l == 3 && d[0]=='A' && d[1]=='C' && d[2]=='K') { // пришёл ACK
+      Serial.println("ACK: получен");
+      return;
+    }
+    Serial.print("RX: ");
+    for (size_t i = 0; i < l; ++i) Serial.write(d[i]);
+    Serial.println();
+    if (ackEnabled) {                                     // отправляем подтверждение
+      const uint8_t ack_msg[3] = {'A','C','K'};
+      tx.queue(ack_msg, sizeof(ack_msg));
+      tx.loop();
+    }
+  });
   radio.setReceiveCallback([&](const uint8_t* d, size_t l){  // привязка приёма
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, PI, SEAR");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], PI, SEAR");
 }
 
 void loop() {
@@ -183,6 +198,14 @@ void loop() {
         } else {
           Serial.println("ENCT: ошибка");
         }
+      } else if (line.startsWith("ACK")) {
+        if (line.length() > 3) {                          // установка явного значения
+          ackEnabled = line.substring(4).toInt() != 0;
+        } else {
+          ackEnabled = !ackEnabled;                       // переключение
+        }
+        Serial.print("ACK: ");
+        Serial.println(ackEnabled ? "включён" : "выключен");
       } else if (line.equalsIgnoreCase("PI")) {
         // отправляем пинг случайными байтами и ждём эха
         std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> pkt;
