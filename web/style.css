@@ -1,0 +1,19 @@
+/* Простейшие стили для навигации и вкладок */
+nav {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.tab-content {
+  display: none; /* скрываем все вкладки по умолчанию */
+}
+
+.tab-content.active {
+  display: block; /* показываем выбранную вкладку */
+}
+
+#security-link {
+  margin-left: auto; /* отделяем ссылку безопасности справа */
+  align-self: center;
+}
