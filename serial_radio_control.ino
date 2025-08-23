@@ -29,7 +29,7 @@ void setup() {
   radio.setReceiveCallback([&](const uint8_t* d, size_t l){  // привязка приёма
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, STSR <n>");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>");
 }
 
 void loop() {
@@ -111,11 +111,11 @@ void loop() {
         for (const auto& s : logs) {
           Serial.println(s.c_str());
         }
-      } else if (line.startsWith("STSR")) {
+      } else if (line.startsWith("RSTS")) {
         int cnt = line.length() > 4 ? line.substring(5).toInt() : 10; // ограничение выводимых имён
         if (cnt <= 0) cnt = 10;                                       // значение по умолчанию
-        auto names = recvBuf.list(cnt);                               // получаем список имён
-        for (const auto& n : names) {                                  
+        auto names = recvBuf.list(cnt);                               // получаем список имён из буфера
+        for (const auto& n : names) {
           Serial.println(n.c_str());
         }
       } else if (line.startsWith("TX ")) {
