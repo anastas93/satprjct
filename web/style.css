@@ -40,3 +40,41 @@ nav {
 .incoming {
   text-align: left; /* входящие слева */
 }
+
+/* Стили для таблицы каналов */
+#channel-controls {
+  margin-bottom: 10px; /* отступ снизу от панели управления */
+}
+
+#channel-table {
+  border-collapse: collapse; /* схлопываем границы */
+  width: 100%; /* ширина на всю вкладку */
+}
+
+#channel-table th,
+#channel-table td {
+  border: 1px solid #ccc; /* простая рамка */
+  padding: 5px; /* внутренний отступ */
+  text-align: center; /* выравнивание по центру */
+}
+
+#channel-table tr.selected {
+  outline: 2px solid #000; /* выделение выбранной строки */
+}
+
+/* Цветовые статусы каналов */
+.status-pinging {
+  background: lightblue; /* голубой — пинг выполняется */
+}
+
+.status-ok {
+  background: lightgreen; /* зелёный — получен ответ */
+}
+
+.status-crc {
+  background: orange; /* оранжевый — ошибка CRC */
+}
+
+.status-timeout {
+  background: lightgray; /* серый — нет ответа */
+}
