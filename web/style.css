@@ -17,3 +17,26 @@ nav {
   margin-left: auto; /* отделяем ссылку безопасности справа */
   align-self: center;
 }
+
+/* Стили для чата */
+#chat-messages {
+  list-style: none; /* убираем маркеры списка */
+  padding: 0;
+}
+
+.message {
+  margin-bottom: 5px; /* расстояние между сообщениями */
+}
+
+.message .time {
+  font-size: 0.8em; /* уменьшаем размер времени */
+  color: #666; /* серый цвет времени */
+}
+
+.outgoing {
+  text-align: right; /* исходящие справа */
+}
+
+.incoming {
+  text-align: left; /* входящие слева */
+}
