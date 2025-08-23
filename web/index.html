@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sat Project Web</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Панель навигации с тремя вкладками и отдельной ссылкой на безопасность -->
+  <nav>
+    <button class="tab-btn" data-tab="chat">Chat</button>
+    <button class="tab-btn" data-tab="channels">Channels/Ping</button>
+    <button class="tab-btn" data-tab="settings">Settings</button>
+    <a href="#" id="security-link" data-tab="security">Security</a>
+  </nav>
+
+  <!-- Области содержимого для каждой вкладки -->
+  <section id="chat" class="tab-content">
+    <!-- Здесь будет реализован чат -->
+    <h2>Chat</h2>
+  </section>
+  <section id="channels" class="tab-content">
+    <!-- Здесь будут отображаться каналы и отправка ping -->
+    <h2>Channels / Ping</h2>
+  </section>
+  <section id="settings" class="tab-content">
+    <!-- Здесь будут параметры настройки -->
+    <h2>Settings</h2>
+  </section>
+  <section id="security" class="tab-content">
+    <!-- Отдельная страница для параметров безопасности -->
+    <h2>Security</h2>
+  </section>
+
+  <!-- Подключение пользовательского скрипта -->
+  <script src="app.js"></script>
+</body>
+</html>
