@@ -7,12 +7,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const nav = document.getElementById('main-nav'); // контейнер навигации
   const menuToggle = document.getElementById('menu-toggle'); // кнопка меню для мобильных
 
-  // переключение отображения меню на мобильных и aria-атрибута
-  menuToggle.addEventListener('click', () => {
-    const expanded = menuToggle.getAttribute('aria-expanded') === 'true'; // текущее состояние
-    menuToggle.setAttribute('aria-expanded', String(!expanded)); // переключаем aria-expanded
-    nav.classList.toggle('open', !expanded); // отображаем или скрываем ссылки
-  });
+  // функция переключения мобильного меню
+  const toggleMenu = () => {
+    const opened = nav.classList.toggle('open'); // меняем класс .open у навигации
+    menuToggle.setAttribute('aria-expanded', String(opened)); // обновляем aria-expanded
+  };
+
+  // обработчик клика по кнопке меню
+  menuToggle.addEventListener('click', toggleMenu);
 
   // функция активации вкладки
   const activate = (id) => {
