@@ -3,6 +3,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const buttons = document.querySelectorAll('.tab-btn'); // кнопки вкладок
   const sections = document.querySelectorAll('.tab-content'); // содержимое вкладок
   const securityLink = document.getElementById('security-link'); // отдельная ссылка безопасности
+  const nav = document.getElementById('main-nav'); // контейнер навигации
+  const menuToggle = document.getElementById('menu-toggle'); // кнопка меню для мобильных
+
+  // переключение отображения меню на мобильных
+  menuToggle.addEventListener('click', () => {
+    nav.classList.toggle('open');
+  });
 
   // функция активации вкладки
   const activate = (id) => {
