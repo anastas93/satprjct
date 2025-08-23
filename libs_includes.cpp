@@ -12,7 +12,7 @@
 #include "libs/scrambler/scrambler.cpp"             // скремблер
 #include "libs/simple_logger/simple_logger.cpp"     // журнал статусов
 #include "libs/received_buffer/received_buffer.cpp" // буфер принятых сообщений
-#include "libs/key_loader/key_loader.cpp"           // загрузка ключа из файла
+#include "libs/key_loader/key_loader.cpp"           // загрузка и сохранение ключа
 #include "libs/crypto/aes_ccm.cpp"            // AES-CCM шифрование
 #include "libs/mbedtls/aes.c"                 // упрощённый AES
 #include "libs/mbedtls/ccm.c"                 // реализация CCM
