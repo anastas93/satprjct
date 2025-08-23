@@ -3,9 +3,11 @@
 #include <vector>
 #include "radio_sx1262.h"
 #include "tx_module.h"
+#include "rx_module.h"                             // модуль приёма
 #include "default_settings.h"
 #include "libs/text_converter/text_converter.h" // конвертер UTF-8 -> CP1251
 #include "libs/simple_logger/simple_logger.h"    // журнал статусов
+#include "libs/received_buffer/received_buffer.h"// буфер принятых сообщений
 
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
@@ -15,12 +17,19 @@ TxModule tx(radio, std::array<size_t,4>{
   DefaultSettings::TX_QUEUE_CAPACITY,
   DefaultSettings::TX_QUEUE_CAPACITY,
   DefaultSettings::TX_QUEUE_CAPACITY});
+RxModule rx;                // модуль приёма
+ReceivedBuffer recvBuf;     // буфер полученных сообщений
 
 void setup() {
   Serial.begin(115200);
   while (!Serial) {}
   radio.begin();
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>");
+  rx.setBuffer(&recvBuf);                                   // сохраняем принятые пакеты
+  rx.setCallback([](const uint8_t*, size_t){});              // заглушка колбэка
+  radio.setReceiveCallback([&](const uint8_t* d, size_t l){  // привязка приёма
+    rx.onReceive(d, l);
+  });
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t>, CH <0-9>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, STSR <n>");
 }
 
 void loop() {
@@ -101,6 +110,13 @@ void loop() {
         auto logs = SimpleLogger::getLast(cnt);
         for (const auto& s : logs) {
           Serial.println(s.c_str());
+        }
+      } else if (line.startsWith("STSR")) {
+        int cnt = line.length() > 4 ? line.substring(5).toInt() : 10; // ограничение выводимых имён
+        if (cnt <= 0) cnt = 10;                                       // значение по умолчанию
+        auto names = recvBuf.list(cnt);                               // получаем список имён
+        for (const auto& n : names) {                                  
+          Serial.println(n.c_str());
         }
       } else if (line.startsWith("TX ")) {
         String msg = line.substring(3);                     // исходный текст

@@ -7,6 +7,7 @@
 #include "libs/scrambler/scrambler.h" // скремблер
 #include "default_settings.h"         // параметры по умолчанию
 #include <vector>
+#include <algorithm>
 
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
 static constexpr size_t RS_ENC_LEN = 255;      // длина закодированного блока
@@ -82,10 +83,19 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   }
 
   // Сборка сообщения из фрагментов
+  if (!result.empty() && result[0] == '[') {            // удаляем префикс [ID|n]
+    auto it = std::find(result.begin(), result.end(), ']');
+    if (it != result.end()) {
+      result.erase(result.begin(), it + 1);
+    }
+  }
   gatherer_.add(result.data(), result.size());
   if (hdr.frag_idx + 1 == hdr.frag_cnt) { // последний фрагмент
     const auto& full = gatherer_.get();
-    cb_(full.data(), full.size());
+    if (buf_) { // при наличии внешнего буфера сохраняем данные
+      buf_->pushReady(hdr.msg_id, full.data(), full.size());
+    }
+    cb_(full.data(), full.size());          // передаём сообщение пользователю
     gatherer_.reset();
   }
 }
@@ -93,4 +103,9 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
 // Установка колбэка для обработки сообщений
 void RxModule::setCallback(Callback cb) {
   cb_ = cb;
+}
+
+// Указание внешнего буфера для сохранения готовых сообщений
+void RxModule::setBuffer(ReceivedBuffer* buf) {
+  buf_ = buf;
 }

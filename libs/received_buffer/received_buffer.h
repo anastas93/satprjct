@@ -31,6 +31,9 @@ public:
   bool hasSplit() const;
   bool hasReady() const;
 
+  // Получить список имён первых элементов (максимум count)
+  std::vector<std::string> list(size_t count) const;
+
 private:
   std::string makeRawName(uint32_t id, uint32_t part) const;   // генерация имени R-
   std::string makeSplitName(uint32_t id) const;                // генерация имени SP-

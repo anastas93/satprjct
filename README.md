@@ -12,7 +12,7 @@
 - `IRadio` описан в `radio_interface.h`.
 - `RadioSX1262` — конкретная реализация интерфейса на базе модуля SX1262.
 - `SerialProgramCollector` — библиотека для приёма строк по Serial и сборки их в один буфер (`libs/serial_program_collector/`).
-  - `serial_radio_control.ino` — пример настройки банков каналов, BW, SF, CR и мощности через Serial, вывода текущих параметров и отправки тестовых пакетов через `TxModule`, включая команду `TXL` для больших сообщений и `STS <n>` для просмотра журнала.
+  - `serial_radio_control.ino` — пример настройки банков каналов, BW, SF, CR и мощности через Serial, вывода текущих параметров и отправки тестовых пакетов через `TxModule`, включая команды `TXL` для больших сообщений, `STS <n>` для просмотра журнала и `STSR <n>` для просмотра содержимого `ReceivedBuffer`.
 - `TextConverter` — библиотека (`libs/text_converter/`) для преобразования UTF-8 текста в байты CP1251, используемая командой `TX`.
 - `rs255223` — библиотека (`libs/rs255223/`) с обёртками `encode()` и `decode()` для кода Рида–Соломона RS(255,223).
 - `byte_interleaver` — библиотека (`libs/byte_interleaver/`) с функциями `interleave()` и `deinterleave()` для байтового перемежения.
@@ -41,6 +41,7 @@
 - `std::string pushSplit(uint32_t id, const uint8_t* data, size_t len)` — сохранить объединённые данные с именем `SP-00000`.
 - `std::string pushReady(uint32_t id, const uint8_t* data, size_t len)` — сохранить готовые данные `GO-00000`.
 - `bool popRaw(Item& out)`, `bool popSplit(Item& out)`, `bool popReady(Item& out)` — извлечь данные соответствующего типа.
+- `std::vector<std::string> list(size_t count)` — получить имена первых элементов (не более `count`).
 
 ### PacketSplitter
 - `PacketSplitter(PayloadMode mode, size_t custom = 0)` — создать делитель с выбранным режимом или произвольным размером блока.
@@ -71,6 +72,7 @@
 ### RxModule
 - `void setCallback(RxModule::Callback cb)` — установить обработчик входящих данных.
 - `void onReceive(const uint8_t* data, size_t len)` — принять кадр, проверить CRC и передать полезные данные обработчику.
+- `void setBuffer(ReceivedBuffer* buf)` — привязать буфер для автоматического сохранения готовых сообщений.
 - Перед декодером RS выполняется обратная цепочка: `scrambler::descramble()`,
   `bit_interleaver::deinterleave()`, `conv_codec::viterbiDecode()`,
   затем `byte_interleaver::deinterleave()`.
