@@ -4,7 +4,11 @@
 #include "default_settings.h"
 
 namespace KeyLoader {
-// Считывает ключ из файла key_storage/key.bin.
-// При отсутствии файла возвращает DefaultSettings::DEFAULT_KEY.
+// Загружает ключ из памяти (NVS на ESP32 или файл на ПК).
+// При отсутствии значения возвращает DefaultSettings::DEFAULT_KEY.
 std::array<uint8_t,16> loadKey();
+
+// Сохраняет ключ в память (NVS или файл).
+// Возвращает true при успешной записи.
+bool saveKey(const std::array<uint8_t,16>& key);
 }
