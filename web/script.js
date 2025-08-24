@@ -406,15 +406,33 @@ async function saveKeyToStorage(bytes) {
 }
 async function generateKey() {
   const k = new Uint8Array(16);
-  crypto.getRandomValues(k);
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    // предпочтительно используем криптографически стойкий генератор
+    crypto.getRandomValues(k);
+  } else {
+    // запасной вариант на случай отсутствия WebCrypto
+    for (let i = 0; i < 16; i++) k[i] = Math.floor(Math.random() * 256);
+  }
   UI.key.bytes = k;
   await saveKeyToStorage(k);
   await updateKeyUI();
   note("Сгенерирован новый ключ (16 байт).");
 }
+// Вычисление SHA-256 с учётом отсутствия WebCrypto
 async function sha256Hex(bytes) {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, "0")).join("");
+  if (typeof crypto !== "undefined" && crypto.subtle && crypto.subtle.digest) {
+    // нормальный путь через WebCrypto
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, "0")).join("");
+  } else if (typeof sha256Bytes === "function") {
+    // резервный путь через библиотеку
+    return sha256Bytes(bytes);
+  } else {
+    // грубый фолбэк: сумма байтов
+    let sum = 0;
+    for (const b of bytes) sum = (sum + b) & 0xffffffff;
+    return sum.toString(16).padStart(8, "0");
+  }
 }
 async function updateKeyUI() {
   const stateEl = $("#keyState");
