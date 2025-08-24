@@ -39,11 +39,6 @@ void handleRoot() {
   server.send_P(200, "text/html", INDEX_HTML);
 }
 
-// Отдаём статический файл app.js
-void handleAppJs() {
-  server.send_P(200, "application/javascript", APP_JS);
-}
-
 // Отдаём стили style.css
 void handleStyleCss() {
   server.send_P(200, "text/css", STYLE_CSS);
@@ -80,7 +75,6 @@ void setupWifi() {
   WiFi.softAPConfig(local_ip, gateway, subnet);
   WiFi.softAP(DefaultSettings::WIFI_SSID, DefaultSettings::WIFI_PASS); // создаём AP
   server.on("/", handleRoot);                                         // обработчик страницы
-  server.on("/app.js", handleAppJs);                                 // JS веб-интерфейса
   server.on("/style.css", handleStyleCss);                           // CSS веб-интерфейса
   server.on("/api/tx", handleApiTx);                                 // отправка текста по радио
   server.begin();                                                      // старт сервера
