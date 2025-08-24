@@ -73,6 +73,16 @@ const float* RadioSX1262::fRX_bank_[4] = {fRX_east_, fRX_west_, fRX_test_, fRX_a
 const float* RadioSX1262::fTX_bank_[4] = {fTX_east_, fTX_west_, fTX_test_, fTX_all_};
 const uint16_t RadioSX1262::BANK_CHANNELS_[4] = {10, 10, 10, 167};
 
+uint16_t RadioSX1262::bankSize(ChannelBank bank) {
+  // Возвращаем количество каналов для указанного банка
+  return BANK_CHANNELS_[static_cast<int>(bank)];
+}
+
+float RadioSX1262::bankRx(ChannelBank bank, uint16_t ch) {
+  // Возвращаем частоту приёма для канала в выбранном банке
+  return fRX_bank_[static_cast<int>(bank)][ch];
+}
+
 const int8_t RadioSX1262::Pwr_[10] = {-5, -2, 1, 4, 7, 10, 13, 16, 19, 22};
 const float RadioSX1262::BW_[5] = {7.81, 10.42, 15.63, 20.83, 31.25};
 const int8_t RadioSX1262::SF_[8] = {5, 6, 7, 8, 9, 10, 11, 12};

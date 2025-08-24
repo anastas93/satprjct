@@ -76,6 +76,202 @@ void handleApiTx() {
   }
 }
 
+// Преобразование символа в значение перечисления банка каналов
+ChannelBank parseBankChar(char b) {
+  switch (b) {
+    case 'e': case 'E': return ChannelBank::EAST;
+    case 'w': case 'W': return ChannelBank::WEST;
+    case 't': case 'T': return ChannelBank::TEST;
+    case 'a': case 'A': return ChannelBank::ALL;
+    default: return radio.getBank();
+  }
+}
+
+// Выполнение одиночного пинга и получение результата
+String cmdPing() {
+  // очищаем буфер от прежних пакетов
+  ReceivedBuffer::Item dump;
+  while (recvBuf.popReady(dump)) {}
+  // формируем пинг
+  std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> ping{};
+  ping[1] = radio.randomByte();
+  ping[2] = radio.randomByte();
+  ping[0] = ping[1] ^ ping[2];
+  ping[3] = 0;
+  ping[4] = 0;
+  tx.queue(ping.data(), ping.size());
+  while (!tx.loop()) { delay(1); }
+  uint32_t t_start = micros();
+  bool ok = false;
+  ReceivedBuffer::Item resp;
+  while (micros() - t_start < DefaultSettings::PING_WAIT_MS * 1000UL) {
+    radio.loop();
+    if (recvBuf.popReady(resp)) {
+      if (resp.data.size() == ping.size() &&
+          memcmp(resp.data.data(), ping.data(), ping.size()) == 0) {
+        ok = true;
+      }
+      break;
+    }
+    delay(1);
+  }
+  if (ok) {
+    uint32_t t_end = micros() - t_start;
+    float dist_km = ((t_end * 0.000001f) * 299792458.0f / 2.0f) / 1000.0f;
+    String out = "Ping: RSSI ";
+    out += String(radio.getLastRssi());
+    out += " dBm SNR ";
+    out += String(radio.getLastSnr());
+    out += " dB distance:~";
+    out += String(dist_km);
+    out += "km time:";
+    out += String(t_end * 0.001f);
+    out += "ms";
+    return out;
+  } else {
+    return String("Ping: timeout");
+  }
+}
+
+// Перебор всех каналов с пингом
+String cmdSear() {
+  uint8_t prevCh = radio.getChannel();
+  String out;
+  for (int ch = 0; ch < radio.getBankSize(); ++ch) {
+    if (!radio.setChannel(ch)) {
+      out += "CH "; out += String(ch); out += ": ошибка\n";
+      continue;
+    }
+    ReceivedBuffer::Item d;
+    while (recvBuf.popReady(d)) {}
+    std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> pkt{};
+    pkt[1] = radio.randomByte();
+    pkt[2] = radio.randomByte();
+    pkt[0] = pkt[1] ^ pkt[2];
+    pkt[3] = 0; pkt[4] = 0;
+    tx.queue(pkt.data(), pkt.size());
+    while (!tx.loop()) { delay(1); }
+    uint32_t t_start = micros();
+    bool ok_ch = false;
+    ReceivedBuffer::Item res;
+    while (micros() - t_start < DefaultSettings::PING_WAIT_MS * 1000UL) {
+      radio.loop();
+      if (recvBuf.popReady(res)) {
+        if (res.data.size() == pkt.size() &&
+            memcmp(res.data.data(), pkt.data(), pkt.size()) == 0) {
+          ok_ch = true;
+        }
+        break;
+      }
+      delay(1);
+    }
+    if (ok_ch) {
+      out += "CH "; out += String(ch); out += ": RSSI ";
+      out += String(radio.getLastRssi()); out += " SNR ";
+      out += String(radio.getLastSnr()); out += "\n";
+    } else {
+      out += "CH "; out += String(ch); out += ": тайм-аут\n";
+    }
+  }
+  radio.setChannel(prevCh);
+  return out;
+}
+
+// Список частот для выбранного банка в формате CSV
+String cmdChlist(ChannelBank bank) {
+  String out = "ch,freq,bw,sf,cr,pw,rssi,snr,st\n";
+  uint16_t n = RadioSX1262::bankSize(bank);
+  for (uint16_t i = 0; i < n; ++i) {
+    out += String(i);
+    out += ',';
+    out += String(RadioSX1262::bankRx(bank, i), 3);
+    out += ",0,0,0,0,0,0,\n";
+  }
+  return out;
+}
+
+// Вывод текущих настроек радиомодуля
+String cmdInfo() {
+  String s;
+  s += "Bank: ";
+  switch (radio.getBank()) {
+    case ChannelBank::EAST: s += "Восток"; break;
+    case ChannelBank::WEST: s += "Запад"; break;
+    case ChannelBank::TEST: s += "Тест"; break;
+    case ChannelBank::ALL: s += "All"; break;
+  }
+  s += "\nChannel: "; s += String(radio.getChannel());
+  s += "\nRX: "; s += String(radio.getRxFrequency(), 3); s += " MHz";
+  s += "\nTX: "; s += String(radio.getTxFrequency(), 3); s += " MHz";
+  s += "\nBW: "; s += String(radio.getBandwidth(), 2); s += " kHz";
+  s += "\nSF: "; s += String(radio.getSpreadingFactor());
+  s += "\nCR: "; s += String(radio.getCodingRate());
+  s += "\nPower: "; s += String(radio.getPower()); s += " dBm";
+  return s;
+}
+
+// Последние записи журнала
+String cmdSts(int cnt) {
+  if (cnt <= 0) cnt = 10;
+  auto logs = SimpleLogger::getLast(cnt);
+  String s;
+  for (const auto& l : logs) {
+    s += l.c_str(); s += '\n';
+  }
+  return s;
+}
+
+// Список имён из буфера приёма
+String cmdRsts(int cnt) {
+  if (cnt <= 0) cnt = 10;
+  auto names = recvBuf.list(cnt);
+  String s;
+  for (const auto& n : names) {
+    s += n.c_str(); s += '\n';
+  }
+  return s;
+}
+
+// Обработка HTTP-команды вида /cmd?c=PI
+void handleCmdHttp() {
+  String cmd = server.arg("c");
+  if (cmd.length() == 0) cmd = server.arg("cmd");
+  cmd.trim();
+  cmd.toUpperCase();
+  String resp;
+  if (cmd == "PI") {
+    resp = cmdPing();
+  } else if (cmd == "SEAR") {
+    resp = cmdSear();
+  } else if (cmd == "BANK") {
+    if (server.hasArg("v")) {
+      char b = server.arg("v")[0];
+      radio.setBank(parseBankChar(b));
+    }
+    resp = "OK";
+  } else if (cmd == "CH") {
+    int ch = server.arg("v").toInt();
+    resp = radio.setChannel(ch) ? "OK" : "ERR";
+  } else if (cmd == "CHLIST") {
+    ChannelBank b = radio.getBank();
+    if (server.hasArg("bank")) {
+      b = parseBankChar(server.arg("bank")[0]);
+    }
+    resp = cmdChlist(b);
+  } else if (cmd == "INFO") {
+    resp = cmdInfo();
+  } else if (cmd == "STS") {
+    int cnt = server.hasArg("n") ? server.arg("n").toInt() : 10;
+    resp = cmdSts(cnt);
+  } else if (cmd == "RSTS") {
+    int cnt = server.hasArg("n") ? server.arg("n").toInt() : 10;
+    resp = cmdRsts(cnt);
+  } else {
+    resp = "UNKNOWN";
+  }
+  server.send(200, "text/plain", resp);
+}
+
 // Настройка Wi-Fi точки доступа и запуск сервера
 void setupWifi() {
   // Задаём статический IP 192.168.4.1 для точки доступа
@@ -89,6 +285,8 @@ void setupWifi() {
   server.on("/script.js", handleScriptJs);                           // JS логика
   server.on("/libs/sha256.js", handleSha256Js);                      // библиотека SHA-256
   server.on("/api/tx", handleApiTx);                                 // отправка текста по радио
+  server.on("/cmd", handleCmdHttp);                                  // обработка команд
+  server.on("/api/cmd", handleCmdHttp);                              // совместимый эндпоинт
   server.begin();                                                      // старт сервера
   Serial.print("AP IP: ");
   Serial.println(WiFi.softAPIP());                                     // выводим адрес
