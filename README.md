@@ -41,6 +41,8 @@
 ### HTTP API
 - `POST /api/tx` — принимает текст в теле запроса и отправляет его через `TxModule`.
 - В веб-интерфейсе добавлена кнопка «Отправить по радио», использующая этот эндпоинт.
+- `GET /cmd?c=<CMD>` — выполнение команды (`PI`, `SEAR`, `BANK`, `CH`, `CHLIST`, `STS`, `RSTS`, `INFO`). Параметры передаются через `v` или `bank`.
+- `GET /api/cmd?cmd=<CMD>` — совместимый адрес для тех же команд.
 
 ## Хранилище ключей
 На ESP32 ключ сохраняется во внутренней памяти NVS и считывается функцией `KeyLoader::loadKey()`.
@@ -119,6 +121,8 @@
 - `bool setPower(uint8_t preset)` — установить уровень мощности из таблицы (-5…22 дБм).
 - `void sendBeacon()` — отправить служебный пакет-маяк.
 - `ChannelBank getBank() const`, `uint8_t getChannel() const`, `uint16_t getBankSize() const`, `float getBandwidth() const`, `int getSpreadingFactor() const`, `int getCodingRate() const`, `int getPower() const`, `float getRxFrequency() const`, `float getTxFrequency() const` — получить текущие параметры.
+- `static uint16_t bankSize(ChannelBank bank)` — количество каналов в указанном банке.
+- `static float bankRx(ChannelBank bank, uint16_t ch)` — частота приёма канала в банке.
   - `bool resetToDefaults()` — вернуть параметры радиомодуля к значениям по умолчанию.
   - Значения параметров по умолчанию (размер блока для `PacketGatherer`, пауза между отправками и т.д.) заданы в файле `default_settings.h`.
 
