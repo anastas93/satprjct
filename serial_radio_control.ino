@@ -73,6 +73,11 @@ void handleApiTx() {
 
 // Настройка Wi-Fi точки доступа и запуск сервера
 void setupWifi() {
+  // Задаём статический IP 192.168.4.1 для точки доступа
+  IPAddress local_ip(192, 168, 4, 1);
+  IPAddress gateway(192, 168, 4, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  WiFi.softAPConfig(local_ip, gateway, subnet);
   WiFi.softAP(DefaultSettings::WIFI_SSID, DefaultSettings::WIFI_PASS); // создаём AP
   server.on("/", handleRoot);                                         // обработчик страницы
   server.on("/app.js", handleAppJs);                                 // JS веб-интерфейса
