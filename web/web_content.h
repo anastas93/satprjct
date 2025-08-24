@@ -1,86 +1,8 @@
 #pragma once
 // Содержимое веб-интерфейса, встроенное в прошивку
 // index.html
-const char INDEX_HTML[] PROGMEM = R"~~~(
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sat Project Web</title>
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-  <!-- Ссылка для перехода к основному содержимому -->
-  <a href="#main" class="sr-only focusable">К контенту</a>
-  <!-- Панель навигации с тремя вкладками и отдельной ссылкой на безопасность -->
-  <nav>
-    <button class="tab-btn" data-tab="chat">Chat</button>
-    <button class="tab-btn" data-tab="channels">Channels/Ping</button>
-    <button class="tab-btn" data-tab="settings">Settings</button>
-    <a href="#" id="security-link" data-tab="security">Security</a>
-  </nav>
-  <!-- Основное содержимое страницы -->
-  <main id="main">
-    <!-- Области содержимого для каждой вкладки -->
-    <section id="chat" class="tab-content">
-      <!-- Заголовок чата -->
-      <h2>Chat</h2>
-      <!-- Окно с историей сообщений -->
-      <div id="chat-window"><ul id="chat-messages"></ul></div>
-      <!-- Блок ввода нового сообщения -->
-      <div class="chat-input">
-        <input type="text" id="chat-input" placeholder="Введите сообщение" />
-        <button id="send-btn">Отправить</button>
-      </div>
-      <!-- Блок кнопок команд -->
-      <div id="cmd-buttons">
-        <button class="cmd-btn" data-cmd="INFO">INFO</button>
-        <button class="cmd-btn" data-cmd="STS">STS</button>
-        <button class="cmd-btn" data-cmd="RSTS">RSTS</button>
-      </div>
-    </section>
-    <section id="channels" class="tab-content">
-      <!-- Вкладка отображения банка каналов и отправки пингов -->
-      <h2>Channels / Ping</h2>
-      <!-- Панель управления каналами -->
-      <div id="channel-controls">
-        <button id="ping-btn">Ping</button>
-        <button id="search-btn">Search</button>
-        <button id="export-btn">Выгрузить CSV</button>
-      </div>
-      <!-- Таблица активного банка каналов -->
-      <table id="channel-table">
-        <thead>
-          <tr><th>Канал</th><th>Частота, МГц</th><th>Замеры приёма</th></tr>
-        </thead>
-        <tbody id="channel-table-body"></tbody>
-      </table>
-    </section>
-    <section id="settings" class="tab-content">
-      <!-- Здесь будут параметры настройки -->
-      <h2>Settings</h2>
-    </section>
-    <section id="security" class="tab-content">
-      <!-- Отдельная страница для параметров безопасности -->
-      <h2>Security</h2>
-      <!-- Отображение текущего состояния ключа -->
-      <div id="key-info"></div>
-      <!-- Кнопка генерации нового ключа -->
-      <button id="keygen-btn">KEYGEN</button>
-      <!-- Отправка текущего ключа на другое устройство -->
-      <button id="keysend-btn">KEYTRANSFER SEND</button>
-      <!-- Получение ключа от другого устройства -->
-      <button id="keyrecv-btn">KEYTRANSFER RECEIVE</button>
-    </section>
-  </main>
-
-  <!-- Подключение пользовательского скрипта -->
-  <script src="app.js"></script>
-</body>
-</html>
-
-)~~~";
+// Подключаем сгенерированный массив из index.html
+#include "index_html.h"
 
 // app.js
 const char APP_JS[] PROGMEM = R"~~~(
