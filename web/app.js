@@ -85,8 +85,10 @@ async function init() {
   $("#btnExportSettings")?.addEventListener("click", exportSettings);
   $("#btnImportSettings")?.addEventListener("click", importSettings);
   $("#btnClearCache")?.addEventListener("click", clearCaches);
-  // Initialize forms from localStorage
+  // инициализация форм из localStorage
   loadSettings();
+  // при смене банка каналов сразу обновляем таблицу
+  $("#BANK")?.addEventListener("change", refreshChannels);
 
   // Security
   $("#btnKeyGen")?.addEventListener("click", generateKey);
@@ -257,12 +259,13 @@ function renderChannels() {
 }
 
 async function refreshChannels() {
-  // If device supports a channels dump endpoint, attempt to fetch it.
-  // Fallback to mock display.
+  // перед запросом списка каналов выставляем выбранный банк
   try {
+    const bank = $("#BANK")?.value;
+    if (bank) await deviceFetch("BANK", { v: bank });
     const r = await deviceFetch("CHLIST");
     if (r && r.ok && r.text) {
-      // Expect CSV-like lines, parse heuristically
+      // ожидаем строки CSV, разбираем их
       channels = parseChannels(r.text);
     } else if (!channels.length) {
       mockChannels();
@@ -303,7 +306,8 @@ function exportChannelsCsv() {
 }
 
 /* Settings */
-const SETTINGS_KEYS = ["ACK","BANK","BF","CH","CR","INFO","PW","SF","STS"];
+// ключи настроек, сохраняемые локально
+const SETTINGS_KEYS = ["ACK","BANK","BF","CH","CR","PW","SF","STS"]; // INFO вызывается отдельной кнопкой
 function loadSettings() {
   for (const k of SETTINGS_KEYS) {
     const el = $("#"+k);
@@ -325,7 +329,7 @@ function saveSettingsLocal() {
   note("Сохранено локально.");
 }
 async function applySettingsToDevice() {
-  // Push each field as individual command, e.g. "PW 14" etc.
+  // отправляем каждое поле отдельной командой, например "PW 14"
   for (const k of SETTINGS_KEYS) {
     const el = $("#"+k);
     if (!el) continue;

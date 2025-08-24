@@ -302,6 +302,14 @@ tbody tr:nth-child(odd) { background: color-mix(in oklab, var(--panel-2) 90%, wh
   100% { opacity: 0; transform: translate(-50%, 0); }
 }
 
+/* Общие блоки действий */
+.actions { display:flex; flex-wrap:wrap; gap:.5rem; margin:.5rem 0; }
+
+/* Форма настроек радиомодуля */
+.settings-form { display:grid; gap:.75rem; max-width:420px; }
+.settings-form label { display:flex; flex-direction:column; gap:.25rem; font-weight:600; }
+.settings-actions { margin-top:.5rem; }
+
 /* Mobile dock */
 .dock {
   position: fixed; left: 0; right: 0; bottom: 0;
