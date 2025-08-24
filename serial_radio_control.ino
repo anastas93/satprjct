@@ -44,6 +44,16 @@ void handleStyleCss() {
   server.send_P(200, "text/css", STYLE_CSS);
 }
 
+// Отдаём скрипт script.js
+void handleScriptJs() {
+  server.send_P(200, "application/javascript", SCRIPT_JS);
+}
+
+// Отдаём библиотеку SHA-256
+void handleSha256Js() {
+  server.send_P(200, "application/javascript", SHA256_JS);
+}
+
 // Принимаем текст и отправляем его по радио
 void handleApiTx() {
   if (server.method() != HTTP_POST) {                       // разрешаем только POST
@@ -76,6 +86,8 @@ void setupWifi() {
   WiFi.softAP(DefaultSettings::WIFI_SSID, DefaultSettings::WIFI_PASS); // создаём AP
   server.on("/", handleRoot);                                         // обработчик страницы
   server.on("/style.css", handleStyleCss);                           // CSS веб-интерфейса
+  server.on("/script.js", handleScriptJs);                           // JS логика
+  server.on("/libs/sha256.js", handleSha256Js);                      // библиотека SHA-256
   server.on("/api/tx", handleApiTx);                                 // отправка текста по радио
   server.begin();                                                      // старт сервера
   Serial.print("AP IP: ");
