@@ -6,6 +6,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sat Project Web</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -25,12 +26,13 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <section id="chat" class="tab-content">
       <!-- Заголовок чата -->
       <h2>Chat</h2>
-      <!-- Список сообщений -->
-      <ul id="chat-messages"></ul>
-      <!-- Поле ввода нового сообщения -->
-      <input type="text" id="chat-input" placeholder="Введите сообщение" />
-      <!-- Кнопка отправки текстового сообщения -->
-      <button id="send-btn">Отправить</button>
+      <!-- Окно с историей сообщений -->
+      <div id="chat-window"><ul id="chat-messages"></ul></div>
+      <!-- Блок ввода нового сообщения -->
+      <div class="chat-input">
+        <input type="text" id="chat-input" placeholder="Введите сообщение" />
+        <button id="send-btn">Отправить</button>
+      </div>
       <!-- Блок кнопок команд -->
       <div id="cmd-buttons">
         <button class="cmd-btn" data-cmd="INFO">INFO</button>
@@ -127,10 +129,19 @@ document.addEventListener('DOMContentLoaded', () => {
     messageList.innerHTML = '';
     messages.forEach(msg => {
       const li = document.createElement('li');
-      li.className = `message ${msg.type}`; // исходящее или входящее
-      li.innerHTML = `<span class="time">${msg.time}</span> (<span>${msg.type === 'outgoing' ? 'Исходящее' : 'Входящее'}</span>) ${msg.text}`;
+      li.className = `message ${msg.type}`;             // исходящее или входящее
+      const bubble = document.createElement('span');    // текст сообщения
+      bubble.className = 'bubble';
+      bubble.textContent = msg.text;
+      const time = document.createElement('span');      // время отправки
+      time.className = 'time';
+      time.textContent = msg.time;
+      li.appendChild(bubble);
+      li.appendChild(time);
       messageList.appendChild(li);
     });
+    // прокрутка к последнему сообщению
+    messageList.parentElement.scrollTop = messageList.parentElement.scrollHeight;
   };
 
   renderMessages(); // восстанавливаем историю при загрузке
@@ -394,16 +405,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // style.css
 const char STYLE_CSS[] PROGMEM = R"~~~(
-/* Базовые цвета страницы */
+/* Базовые цвета страницы и типографика */
 body {
   background: #fff; /* светлый фон по умолчанию */
-  color: #000; /* чёрный текст */
+  color: #000;       /* чёрный текст */
+  font-family: system-ui, sans-serif; /* читаемый шрифт */
+  font-size: 18px;   /* увеличенный базовый размер */
+  margin: 0;
+  padding: 10px;
 }
 
 /* Тёмная тема */
 body.dark {
   background: #121212; /* тёмный фон */
-  color: #f0f0f0; /* светлый текст */
+  color: #f0f0f0;      /* светлый текст */
 }
 
 /* Простейшие стили для навигации и вкладок */
@@ -430,27 +445,94 @@ body.dark nav {
   align-self: center;
 }
 
+@media (max-width:600px){ /* адаптация под мобильные устройства */
+  body{font-size:16px;}
+  nav{flex-wrap:wrap;}
+}
+
 /* Стили для чата */
+#chat-window {
+  height: 50vh;                 /* ограничиваем высоту окна */
+  overflow-y: auto;             /* прокрутка при переполнении */
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #f5f5f5;
+}
+
+body.dark #chat-window {
+  background: #1e1e1e;
+  border-color: #555;
+}
+
 #chat-messages {
-  list-style: none; /* убираем маркеры списка */
+  list-style: none;
   padding: 0;
+  margin: 0;
+}
+
+.chat-input {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.chat-input input {
+  flex: 1;
+}
+
+#cmd-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#cmd-buttons .cmd-btn {
+  flex: 1;
 }
 
 .message {
-  margin-bottom: 5px; /* расстояние между сообщениями */
+  display: flex;
+  margin-bottom: 8px;
+}
+
+.message.outgoing {
+  justify-content: flex-end;    /* исходящие справа */
+}
+
+.message.incoming {
+  justify-content: flex-start;  /* входящие слева */
+}
+
+.message .bubble {
+  padding: 8px 12px;
+  border-radius: 12px;
+  max-width: 70%;
+  background: #e0e0e0;
+}
+
+.message.outgoing .bubble {
+  background: #2563eb;
+  color: #fff;
+}
+
+body.dark .message .bubble {
+  background: #333;
+}
+
+body.dark .message.outgoing .bubble {
+  background: #1e40af;
 }
 
 .message .time {
-  font-size: 0.8em; /* уменьшаем размер времени */
+  font-size: 0.75em;
+  margin-top: 4px;
   color: #666; /* серый цвет времени */
 }
 
-.outgoing {
-  text-align: right; /* исходящие справа */
-}
-
-.incoming {
-  text-align: left; /* входящие слева */
+body.dark .message .time {
+  color: #aaa; /* светлый оттенок времени в тёмной теме */
 }
 
 /* Стили для таблицы каналов */
