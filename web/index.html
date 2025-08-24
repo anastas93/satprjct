@@ -16,6 +16,7 @@
       <a href="#" data-tab="channels">Channels/Ping</a>
       <a href="#" data-tab="settings">Settings</a>
       <a href="#" data-tab="security">Security</a>
+      <a href="#" data-tab="debug">Debug</a>
     </nav>
     <div class="header-actions">
       <div class="chip"><input id="endpoint" placeholder="endpoint" /></div>
@@ -72,12 +73,21 @@
         </label>
         <label>BW (kHz)
           <select id="BF">
+            <option value="7.8">7.8</option>
+            <option value="10.4">10.4</option>
+            <option value="15.6">15.6</option>
+            <option value="20.8">20.8</option>
+            <option value="31.25">31.25</option>
+            <option value="41.7">41.7</option>
+            <option value="62.5">62.5</option>
             <option value="125">125</option>
             <option value="250">250</option>
             <option value="500">500</option>
           </select>
         </label>
-        <label>Channel <input type="number" id="CH" min="0" /></label>
+        <label>Channel
+          <select id="CH"></select>
+        </label>
         <label>CR
           <select id="CR">
             <option value="5">4/5</option>
@@ -86,13 +96,20 @@
             <option value="8">4/8</option>
           </select>
         </label>
-        <label>Power <input type="number" id="PW" min="2" max="20" /></label>
+        <label>Power
+          <select id="PW">
+            <option>2</option><option>3</option><option>4</option><option>5</option>
+            <option>6</option><option>7</option><option>8</option><option>9</option>
+            <option>10</option><option>11</option><option>12</option><option>13</option>
+            <option>14</option><option>15</option><option>16</option><option>17</option>
+            <option>18</option><option>19</option><option>20</option>
+          </select>
+        </label>
         <label>SF
           <select id="SF">
             <option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option>
           </select>
         </label>
-        <label>STS <input type="number" id="STS" min="1" value="10" /></label>
         <div class="settings-actions actions">
           <button type="button" id="btnSaveSettings" class="btn">Сохранить</button>
           <button type="button" id="btnApplySettings" class="btn btn-primary">Применить</button>
@@ -114,6 +131,11 @@
         <button id="btnKeySend" class="btn">KEYTRANSFER SEND</button>
         <button id="btnKeyRecv" class="btn">KEYTRANSFER RECEIVE</button>
       </div>
+    </section>
+    <!-- Вкладка отладочных логов -->
+    <section id="tab-debug" class="tab" hidden>
+      <h2>Debug</h2>
+      <div id="debugLog" class="debug-log"></div>
     </section>
   </main>
   <footer>

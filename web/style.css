@@ -335,10 +335,27 @@ tbody tr:nth-child(odd) { background: color-mix(in oklab, var(--panel-2) 90%, wh
 /* Responsive */
 @media (max-width: 860px) {
   .only-mobile { display:block; }
-  .nav { position: fixed; inset: 3.25rem .75rem auto .75rem; z-index: 50; }
+  .nav { position: fixed; inset: 3.25rem .75rem auto .75rem; z-index: 50;
+         background: var(--panel); border-radius:.7rem; padding:.5rem;
+         border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); }
   .nav { display:none; flex-direction:column; }
   .nav.open { display:flex; }
   .chip input { width: 42vw; }
   table { min-width: 640px; }
   .key-grid { grid-template-columns: 1fr; }
+}
+
+/* Отладочный вывод */
+.debug-log {
+  height: min(52vh, 560px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  padding: .5rem;
+  border-radius: .8rem;
+  background: var(--panel-2);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: .85rem;
 }
