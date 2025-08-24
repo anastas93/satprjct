@@ -280,23 +280,53 @@ void loop() {
         Serial.print("ACK: ");
         Serial.println(ackEnabled ? "включён" : "выключен");
       } else if (line.equalsIgnoreCase("PI")) {
-        // отправляем пинг случайными байтами и ждём эха
-        std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> pkt;
-        for (auto &b : pkt) {
-          b = radio.randomByte();              // заполняем случайностями
+        // очистка буфера от прежних пакетов
+        ReceivedBuffer::Item dump;
+        while (recvBuf.popReady(dump)) {}
+
+        // формируем 5-байтовый пинг из двух случайных байт
+        std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> ping{};
+        ping[1] = radio.randomByte();
+        ping[2] = radio.randomByte();       // ID пакета
+        ping[0] = ping[1] ^ ping[2];        // идентификатор = XOR
+        ping[3] = 0;                        // адрес (пока не используется)
+        ping[4] = 0;
+
+        tx.queue(ping.data(), ping.size()); // ставим пакет в очередь
+        while (!tx.loop()) {                // ждём фактической отправки
+          delay(1);                         // небольшая пауза
         }
-        tx.queue(pkt.data(), pkt.size());      // ставим пакет в очередь
-        while (!tx.loop()) {                   // ждём подтверждения отправки
-          delay(1);                            // короткая пауза
+
+        uint32_t t_start = micros();       // время отправки
+        bool ok = false;                   // флаг получения
+        ReceivedBuffer::Item resp;
+
+        // ждём ответ, регулярно вызывая обработчик приёма
+        while (micros() - t_start < DefaultSettings::PING_WAIT_MS * 1000UL) {
+          radio.loop();
+          if (recvBuf.popReady(resp)) {
+            if (resp.data.size() == ping.size() &&
+                memcmp(resp.data.data(), ping.data(), ping.size()) == 0) {
+              ok = true;                   // получено корректное эхо
+            }
+            break;
+          }
+          delay(1);
         }
-        delay(DefaultSettings::PING_WAIT_MS);  // отсчёт после отправки
-        radio.loop();                          // обрабатываем возможное получение
-        ReceivedBuffer::Item item;
-        if (recvBuf.popRaw(item)) {
-          Serial.print("RSSI: ");
+
+        if (ok) {
+          uint32_t t_end = micros() - t_start;               // время прохождения
+          float dist_km =
+              ((t_end * 0.000001f) * 299792458.0f / 2.0f) / 1000.0f; // оценка дистанции
+          Serial.print("Ping: RSSI ");
           Serial.print(radio.getLastRssi());
-          Serial.print(" SNR: ");
-          Serial.println(radio.getLastSnr());
+          Serial.print(" dBm SNR ");
+          Serial.print(radio.getLastSnr());
+          Serial.print(" dB distance:~");
+          Serial.print(dist_km);
+          Serial.print("km time:");
+          Serial.print(t_end * 0.001f);
+          Serial.println("ms");
         } else {
           Serial.println("Пинг: тайм-аут");
         }
@@ -311,21 +341,34 @@ void loop() {
             continue;
           }
           // очищаем буфер перед новым запросом
-          ReceivedBuffer::Item dump;
-          while (recvBuf.popRaw(dump)) {}
+          ReceivedBuffer::Item d;
+          while (recvBuf.popReady(d)) {}
           // формируем и отправляем пинг
-          std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> pkt2;
-          for (auto &b : pkt2) {
-            b = radio.randomByte();                 // случайные данные
-          }
+          std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> pkt2{};
+          pkt2[1] = radio.randomByte();
+          pkt2[2] = radio.randomByte();         // ID пакета
+          pkt2[0] = pkt2[1] ^ pkt2[2];          // идентификатор
+          pkt2[3] = 0;
+          pkt2[4] = 0;
           tx.queue(pkt2.data(), pkt2.size());
-          while (!tx.loop()) {                     // подтверждаем отправку
-            delay(1);                               // короткая пауза
+          while (!tx.loop()) {                  // подтверждаем отправку
+            delay(1);
           }
-          delay(DefaultSettings::PING_WAIT_MS);     // отсчёт после отправки
-          radio.loop();                             // обрабатываем приём
+          uint32_t t_start = micros();
+          bool ok_ch = false;
           ReceivedBuffer::Item res;
-          if (recvBuf.popRaw(res)) {
+          while (micros() - t_start < DefaultSettings::PING_WAIT_MS * 1000UL) {
+            radio.loop();
+            if (recvBuf.popReady(res)) {
+              if (res.data.size() == pkt2.size() &&
+                  memcmp(res.data.data(), pkt2.data(), pkt2.size()) == 0) {
+                ok_ch = true;
+              }
+              break;
+            }
+            delay(1);
+          }
+          if (ok_ch) {
             Serial.print("CH ");
             Serial.print(ch);
             Serial.print(": RSSI ");

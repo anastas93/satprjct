@@ -24,7 +24,7 @@ namespace DefaultSettings {
   constexpr size_t GATHER_BLOCK_SIZE = 110;       // Размер блока для PacketGatherer
   constexpr uint32_t SEND_PAUSE_MS = 80;           // Ожидание между отправками и приёмом (мс)
   constexpr uint32_t PING_WAIT_MS = 500;           // Ожидание ответа на пинг (мс)
-  constexpr size_t PING_PACKET_SIZE = 8;           // Размер пинг-пакета (байты)
+  constexpr size_t PING_PACKET_SIZE = 5;           // Размер пинг-пакета (байты)
   constexpr size_t SERIAL_BUFFER_LIMIT = 500UL * 1024UL; // Максимальный размер буфера приёма по Serial (байты)
   constexpr size_t TX_QUEUE_CAPACITY = 160;        // Ёмкость очередей TxModule (до четырёх сообщений по 5000 байт)
   constexpr bool USE_RS = false;                   // использовать кодирование RS(255,223)
