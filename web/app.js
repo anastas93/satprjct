@@ -102,3 +102,15 @@ document.getElementById('copyAll').onclick = async ()=>{
   const code = getCurrentCode();
   await navigator.clipboard.writeText(code);
 };
+
+// Отправка текста из поля prompt по радио через API
+document.getElementById('sendRadio').addEventListener('click', async ()=>{
+  const msg = document.getElementById('prompt').value;            // берём текст
+  const res = await fetch('/api/tx', {                           // POST-запрос к устройству
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: msg
+  });
+  const txt = await res.text();                                  // ответ сервера
+  appendText('\n[' + txt + ']\n');                              // выводим в поток
+});
