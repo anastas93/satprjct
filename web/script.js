@@ -203,6 +203,11 @@ async function deviceFetch(cmd, params = {}, timeoutMs = 4000) {
       clearTimeout(id);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
+      // Если устройство не ответило и сервер вернул HTML-страницу,
+      // помечаем такой ответ как ошибку, чтобы не выводить разметку в чат.
+      if (/<!DOCTYPE|<html/i.test(text)) {
+        throw new Error("HTML response");
+      }
       return { ok: true, text, url };
     } catch (e) {
       lastErr = e;
