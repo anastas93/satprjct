@@ -1,199 +1,48 @@
-/* Глобальные переменные цветов */
-:root {
-  --menu-fg: #000; /* цвет контуров и ссылок */
+/* Базовые переменные оформления и типографика */
+:root{
+  --maxw: 88rem; --gap: 1rem; --r: 14px;
+  --bg: #fff; --card:#fff; --ink:#0a0a0a; --muted:#6b7280;
+  --brand:#2563eb; --ok:#10b981; --err:#ef4444;
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.08);
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0b0d; --card:#0f1012; --ink:#e5e7eb; --muted:#9ca3af; }
+}
+html{color-scheme:light dark}
+body{margin:0;background:var(--bg);color:var(--ink);
+     font:400 16px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif}
+.container{max-width:var(--maxw);margin:0 auto;padding:0 12px}
+h1,h2{line-height:1.1}
+
+/* Сетка IDE: три панели на десктопе, степпер на мобиле */
+.ide{display:grid;grid-template-columns:1.1fr 1.6fr 1.3fr;gap:var(--gap);margin:12px 0 80px}
+.card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:12px}
+#prompt{min-height:160px}
+#editor,#stream{min-height:320px}
+@media (max-width: 900px){
+  .ide{grid-template-columns:1fr}
+  .pane{display:none}
+  .pane[data-active="1"]{display:block}
 }
 
-/* Базовые цвета страницы */
-body {
-  background: #fff; /* светлый фон по умолчанию */
-  color: #000; /* чёрный текст */
+/* Нижний степпер для мобильной навигации и безопасные зоны */
+.stepper{
+  position:fixed;left:0;right:0;bottom:0;
+  padding:8px max(8px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  display:grid;grid-template-columns:repeat(3,1fr);gap:6px;background:var(--card);
+  border-top:1px solid rgba(0,0,0,.08)
 }
+.stepper a{display:flex;justify-content:center;align-items:center;height:44px;border-radius:10px;color:var(--muted);text-decoration:none}
+.stepper a[aria-selected="true"]{color:var(--ink);font-weight:600;background:color-mix(in oklab, var(--ink) 6%, transparent)}
 
-/* Скрываем элементы визуально, оставляя их доступными для скринридеров */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  border: 0;
-}
+/* Кнопки, поля и дифф */
+.btn{display:inline-flex;align-items:center;gap:.5rem;padding:.6rem .9rem;border-radius:10px;border:1px solid color-mix(in oklab,var(--ink) 12%,transparent);background:transparent}
+.btn-primary{background:var(--brand);color:#fff;border-color:transparent}
+textarea, input, select{width:100%;min-height:44px;border-radius:10px;border:1px solid color-mix(in oklab,var(--ink) 12%,transparent);background:transparent;color:inherit;padding:.6rem .7rem}
+pre, code{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px}
+.diff .ins{background:rgba(16,185,129,.18)}
+.diff .del{background:rgba(239,68,68,.18); text-decoration:line-through}
 
-/* Отображение скрытого элемента при получении фокуса */
-.sr-only.focusable:focus {
-  position: static;
-  width: auto;
-  height: auto;
-  margin: 0;
-  overflow: visible;
-  clip: auto;
-}
-
-/* Тёмная тема */
-body.dark {
-  background: #121212; /* тёмный фон */
-  color: #f0f0f0; /* светлый текст */
-  --menu-fg: #f0f0f0; /* контуры и ссылки в тёмной теме */
-}
-
-/* Видимая рамка при фокусе на ссылках и кнопках */
-a:focus-visible,
-button:focus-visible {
-  outline: 2px solid var(--menu-fg);
-}
-
-/* Простейшие стили для навигации и вкладок */
-nav {
-  display: flex;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-/* Список ссылок навигации */
-nav ul {
-  display: flex;
-  gap: 10px;
-  flex: 1;
-  list-style: none; /* убираем маркеры списка */
-  margin: 0; /* убираем внешние отступы */
-  padding: 0; /* убираем внутренние отступы */
-}
-
-/* Последний пункт списка — ссылка безопасности */
-nav li:last-child {
-  margin-left: auto; /* отделяем ссылку безопасности справа */
-  align-self: center;
-}
-
-/* Ссылка текущей страницы */
-[aria-current="page"] {
-  font-weight: bold; /* активная ссылка отображается жирным */
-}
-
-/* Кнопка вызова мобильного меню */
-#menu-toggle {
-  display: none; /* скрыта на широких экранах */
-  background: none;
-  border: none;
-  font-size: 24px;
-}
-
-body.dark nav {
-  background: #1e1e1e; /* фон панели в тёмной теме */
-}
-
-.tab-content {
-  display: none; /* скрываем все вкладки по умолчанию */
-}
-
-.tab-content.active {
-  display: block; /* показываем выбранную вкладку */
-}
-
-/* Адаптация меню под мобильные устройства */
-@media (max-width: 600px) {
-  nav {
-    flex-direction: column; /* вертикальное расположение */
-    align-items: flex-start;
-  }
-  #menu-toggle {
-    display: block; /* показываем кнопку меню */
-  }
-  nav ul {
-    display: none; /* скрываем ссылки пока меню закрыто */
-    flex-direction: column;
-    width: 100%;
-    gap: 5px;
-  }
-  nav.open ul {
-    display: flex; /* показываем при открытии */
-  }
-  nav li:last-child {
-    margin-left: 0; /* убираем отступ справа */
-  }
-}
-
-/* Стили для чата */
-#chat-messages {
-  list-style: none; /* убираем маркеры списка */
-  padding: 0;
-}
-
-.message {
-  margin-bottom: 5px; /* расстояние между сообщениями */
-}
-
-.message .time {
-  font-size: 0.8em; /* уменьшаем размер времени */
-  color: #666; /* серый цвет времени */
-}
-
-.outgoing {
-  text-align: right; /* исходящие справа */
-}
-
-.incoming {
-  text-align: left; /* входящие слева */
-}
-
-/* Стили для таблицы каналов */
-#channel-controls {
-  margin-bottom: 10px; /* отступ снизу от панели управления */
-}
-
-#channel-table {
-  border-collapse: collapse; /* схлопываем границы */
-  width: 100%; /* ширина на всю вкладку */
-}
-
-#channel-table th,
-#channel-table td {
-  border: 1px solid #ccc; /* простая рамка */
-  padding: 5px; /* внутренний отступ */
-  text-align: center; /* выравнивание по центру */
-}
-
-body.dark #channel-table th,
-body.dark #channel-table td {
-  border-color: #555; /* границы таблицы в тёмной теме */
-}
-
-#channel-table tr.selected {
-  outline: 2px solid #000; /* выделение выбранной строки */
-}
-
-/* Цветовые статусы каналов */
-.status-pinging {
-  background: lightblue; /* голубой — пинг выполняется */
-}
-
-.status-ok {
-  background: lightgreen; /* зелёный — получен ответ */
-}
-
-.status-crc {
-  background: orange; /* оранжевый — ошибка CRC */
-}
-
-.status-timeout {
-  background: lightgray; /* серый — нет ответа */
-}
-
-/* Блок настроек */
-#settings div {
-  margin-bottom: 5px; /* отступ между параметрами */
-}
-
-#settings label {
-  margin-right: 5px; /* расстояние между подписью и полем */
-}
-
-body.dark input,
-body.dark button,
-body.dark table {
-  background: #333; /* фон элементов управления в тёмной теме */
-  color: #f0f0f0; /* текст в тёмной теме */
-  border-color: #555; /* границы элементов */
-}
+/* Анимации и доступность */
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:8px}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}

@@ -1,83 +1,81 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <title>Sat Project Web</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="UTF-8">
+  <title>Codex IDE</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Ссылка для перехода к основному содержимому -->
-  <a href="#main" class="sr-only focusable">К контенту</a>
-  <!-- Панель навигации с кнопкой для мобильного меню -->
-  <nav id="main-nav">
-    <!-- Кнопка отображения пунктов меню на узких экранах и управления aria-атрибутами -->
-    <button id="menu-toggle" aria-controls="nav-links" aria-expanded="false">☰</button>
-    <!-- Основные ссылки навигации -->
-    <nav aria-label="Главное меню">
-      <ul id="nav-links">
-        <li><a class="tab-btn" data-tab="chat" href="#chat">Chat</a></li>
-        <li><a class="tab-btn" data-tab="channels" href="#channels">Channels/Ping</a></li>
-        <li><a class="tab-btn" data-tab="settings" href="#settings">Settings</a></li>
-        <li><a id="security-link" data-tab="security" href="#security">Security</a></li>
-      </ul>
-    </nav>
-  </nav>
+  <!-- Верхняя панель с управлением и выбором модели -->
+  <header class="topbar container">
+    <div class="brand">codex</div>
+    <div class="controls">
+      <select id="model">
+        <option>codex-1</option>
+        <option>gpt-5</option>
+      </select>
+      <button id="newRun" class="btn btn-primary" aria-label="Запустить">Run</button>
+      <button id="stopRun" class="btn btn-ghost" aria-label="Остановить">Stop</button>
+    </div>
+  </header>
 
-  <!-- Основное содержимое страницы -->
-  <main id="main">
-    <!-- Области содержимого для каждой вкладки -->
-    <section id="chat" class="tab-content">
-      <!-- Заголовок чата -->
-      <h2>Chat</h2>
-      <!-- Список сообщений -->
-      <ul id="chat-messages"></ul>
-      <!-- Поле ввода нового сообщения -->
-      <input type="text" id="chat-input" placeholder="Введите сообщение" />
-      <!-- Кнопка отправки текстового сообщения -->
-      <button id="send-btn">Отправить</button>
-      <!-- Блок кнопок команд -->
-      <div id="cmd-buttons">
-        <button class="cmd-btn" data-cmd="INFO">INFO</button>
-        <button class="cmd-btn" data-cmd="STS">STS</button>
-        <button class="cmd-btn" data-cmd="RSTS">RSTS</button>
+  <!-- Основная область из трёх панелей: запрос, редактор, результат -->
+  <main class="container ide">
+    <section id="pane-prompt" class="card pane" aria-labelledby="tab-prompt">
+      <h2 id="tab-prompt" class="sr-only">Запрос</h2>
+      <textarea id="prompt" placeholder="Опиши задачу…"></textarea>
+      <div class="prompt-actions">
+        <label><input type="checkbox" id="applyPatch"> применить как патч</label>
+        <button id="send" class="btn btn-primary">Сгенерировать</button>
+      </div>
+      <details>
+        <summary>Параметры</summary>
+        <label>Макс. токены <input id="maxTokens" type="number" min="128" step="128" value="2048"></label>
+        <label>Температура <input id="temp" type="number" min="0" max="2" step="0.1" value="0.2"></label>
+      </details>
+    </section>
+
+    <section id="pane-editor" class="card pane" aria-labelledby="tab-editor">
+      <h2 id="tab-editor" class="sr-only">Редактор</h2>
+      <div id="editor" data-fallback="textarea"></div>
+      <div class="editor-actions">
+        <button id="insert" class="btn">Insert</button>
+        <button id="replace" class="btn">Replace</button>
+        <button id="copyAll" class="btn">Copy</button>
       </div>
     </section>
-    <section id="channels" class="tab-content">
-      <!-- Вкладка отображения банка каналов и отправки пингов -->
-      <h2>Channels / Ping</h2>
-      <!-- Панель управления каналами -->
-      <div id="channel-controls">
-        <button id="ping-btn">Ping</button>
-        <button id="search-btn">Search</button>
-        <button id="export-btn">Выгрузить CSV</button>
+
+    <section id="pane-result" class="card pane" aria-labelledby="tab-result">
+      <h2 id="tab-result" class="sr-only">Результат</h2>
+      <div id="stream"></div>
+      <div id="diff" class="diff"></div>
+      <div class="result-actions">
+        <button id="apply" class="btn btn-primary">Apply patch</button>
+        <button id="save" class="btn btn-ghost">Save .txt</button>
       </div>
-      <!-- Таблица активного банка каналов -->
-      <table id="channel-table">
-        <thead>
-          <tr><th>Канал</th><th>Частота, МГц</th><th>Замеры приёма</th></tr>
-        </thead>
-        <tbody id="channel-table-body"></tbody>
-      </table>
-    </section>
-    <section id="settings" class="tab-content">
-      <!-- Здесь будут параметры настройки -->
-      <h2>Settings</h2>
-    </section>
-    <section id="security" class="tab-content">
-      <!-- Отдельная страница для параметров безопасности -->
-      <h2>Security</h2>
-      <!-- Отображение текущего состояния ключа -->
-      <div id="key-info"></div>
-      <!-- Кнопка генерации нового ключа -->
-      <button id="keygen-btn">KEYGEN</button>
-      <!-- Отправка текущего ключа на другое устройство -->
-      <button id="keysend-btn">KEYTRANSFER SEND</button>
-      <!-- Получение ключа от другого устройства -->
-      <button id="keyrecv-btn">KEYTRANSFER RECEIVE</button>
     </section>
   </main>
 
-  <!-- Подключение пользовательского скрипта -->
+  <!-- Нижний степпер для мобильной навигации -->
+  <nav class="stepper" role="tablist" aria-label="Шаги">
+    <a href="#prompt" data-pane="pane-prompt" aria-selected="true">Запрос</a>
+    <a href="#editor" data-pane="pane-editor">Редактор</a>
+    <a href="#result" data-pane="pane-result">Результат</a>
+  </nav>
+
+  <!-- Опциональная загрузка Monaco только на десктопе -->
+  <script type="module">
+    const isMobile = matchMedia('(max-width: 700px)').matches;
+    if (!isMobile) {
+      import('./libs/monaco/loader.js').then(({loadMonaco}) => loadMonaco('#editor'));
+    } else {
+      // Подстановка простого textarea при отсутствии Monaco
+      const ed = document.querySelector('#editor');
+      ed.innerHTML = '<textarea id="editorTA" spellcheck="false"></textarea>';
+    }
+  </script>
   <script src="app.js"></script>
 </body>
 </html>
