@@ -1,7 +1,8 @@
 /* satprjct web/app.js — vanilla JS only */
 /* State */
 const UI = {
-  tabs: ["chat", "channels", "settings", "security"],
+  // список вкладок интерфейса
+  tabs: ["chat", "channels", "settings", "security", "debug"],
   els: {},
   cfg: {
     endpoint: localStorage.getItem("endpoint") || "http://192.168.4.1",
@@ -25,6 +26,7 @@ async function init() {
   UI.els.themeToggle = $("#themeToggle");
   UI.els.status = $("#statusLine");
   UI.els.toast = $("#toast");
+  UI.els.debugLog = $("#debugLog");
 
   // Tabs
   for (const tab of UI.tabs) {
@@ -92,6 +94,8 @@ async function init() {
   loadSettings();
   // при смене банка каналов сразу обновляем таблицу
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", refreshChannels);
+  // начальная загрузка списка каналов
+  refreshChannels().catch(()=>{});
 
   // Security
   const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", generateKey);
@@ -224,6 +228,7 @@ async function sendCommand(cmd, params={}) {
     note(`${cmd}: ${res.text.slice(0, 200)}`);
     persistChat(`${cmd}: ${res.text}`, "dev");
     addChatMessage({ t: Date.now(), a: "dev", m: `${res.text}` });
+    debugLog(`${cmd}: ${res.text}`);
     if (cmd === "SEAR" || cmd === "PI") {
       // naive refresh
       refreshChannels();
@@ -232,6 +237,7 @@ async function sendCommand(cmd, params={}) {
   } else {
     status(`✗ ${cmd}`);
     note(`Ошибка: ${res.error}`);
+    debugLog(`ERR ${cmd}: ${res.error}`);
     return null;
   }
 }
@@ -266,13 +272,29 @@ function renderChannels() {
   });
 }
 
+// обновление выпадающего списка каналов в настройках
+function updateChannelSelect() {
+  const sel = $("#CH");
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  channels.forEach(c => {
+    const o = document.createElement("option");
+    o.value = c.ch;
+    o.textContent = c.ch;
+    sel.appendChild(o);
+  });
+  if (channels.some(c => String(c.ch) === prev)) sel.value = prev;
+}
+
 async function refreshChannels() {
   // перед запросом списка каналов выставляем выбранный банк
   try {
     const bankSel = $("#BANK");
     const bank = bankSel ? bankSel.value : null; // поддержка старых браузеров
     if (bank) await deviceFetch("BANK", { v: bank });
-    const r = await deviceFetch("CHLIST");
+    // запрашиваем список каналов с учётом выбранного банка
+    const r = await deviceFetch("CHLIST", bank ? { bank } : {});
     if (r && r.ok && r.text) {
       // ожидаем строки CSV, разбираем их
       channels = parseChannels(r.text);
@@ -283,6 +305,7 @@ async function refreshChannels() {
     if (!channels.length) mockChannels();
   }
   renderChannels();
+  updateChannelSelect();
 }
 
 function parseChannels(text) {
@@ -320,7 +343,8 @@ function exportChannelsCsv() {
 
 /* Settings */
 // ключи настроек, сохраняемые локально
-const SETTINGS_KEYS = ["ACK","BANK","BF","CH","CR","PW","SF","STS"]; // INFO вызывается отдельной кнопкой
+// список настроек, сохраняемых локально
+const SETTINGS_KEYS = ["ACK","BANK","BF","CH","CR","PW","SF"]; // INFO вызывается отдельной кнопкой
 function loadSettings() {
   for (const k of SETTINGS_KEYS) {
     const el = $("#"+k);
@@ -465,4 +489,14 @@ function note(text) {
   t.classList.remove("show"); void t.offsetWidth; // restart animation
   t.classList.add("show");
   setTimeout(() => { t.hidden = true; }, 2200);
+}
+
+// вывод строки в окно отладочных логов
+function debugLog(text) {
+  const d = UI.els.debugLog;
+  if (!d) return;
+  const line = document.createElement("div");
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+  d.appendChild(line);
+  d.scrollTop = d.scrollHeight;
 }

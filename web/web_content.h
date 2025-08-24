@@ -23,6 +23,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
       <a href="#" data-tab="channels">Channels/Ping</a>
       <a href="#" data-tab="settings">Settings</a>
       <a href="#" data-tab="security">Security</a>
+      <a href="#" data-tab="debug">Debug</a>
     </nav>
     <div class="header-actions">
       <div class="chip"><input id="endpoint" placeholder="endpoint" /></div>
@@ -79,12 +80,21 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         </label>
         <label>BW (kHz)
           <select id="BF">
+            <option value="7.8">7.8</option>
+            <option value="10.4">10.4</option>
+            <option value="15.6">15.6</option>
+            <option value="20.8">20.8</option>
+            <option value="31.25">31.25</option>
+            <option value="41.7">41.7</option>
+            <option value="62.5">62.5</option>
             <option value="125">125</option>
             <option value="250">250</option>
             <option value="500">500</option>
           </select>
         </label>
-        <label>Channel <input type="number" id="CH" min="0" /></label>
+        <label>Channel
+          <select id="CH"></select>
+        </label>
         <label>CR
           <select id="CR">
             <option value="5">4/5</option>
@@ -93,13 +103,20 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             <option value="8">4/8</option>
           </select>
         </label>
-        <label>Power <input type="number" id="PW" min="2" max="20" /></label>
+        <label>Power
+          <select id="PW">
+            <option>2</option><option>3</option><option>4</option><option>5</option>
+            <option>6</option><option>7</option><option>8</option><option>9</option>
+            <option>10</option><option>11</option><option>12</option><option>13</option>
+            <option>14</option><option>15</option><option>16</option><option>17</option>
+            <option>18</option><option>19</option><option>20</option>
+          </select>
+        </label>
         <label>SF
           <select id="SF">
             <option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option>
           </select>
         </label>
-        <label>STS <input type="number" id="STS" min="1" value="10" /></label>
         <div class="settings-actions actions">
           <button type="button" id="btnSaveSettings" class="btn">Сохранить</button>
           <button type="button" id="btnApplySettings" class="btn btn-primary">Применить</button>
@@ -121,6 +138,11 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         <button id="btnKeySend" class="btn">KEYTRANSFER SEND</button>
         <button id="btnKeyRecv" class="btn">KEYTRANSFER RECEIVE</button>
       </div>
+    </section>
+    <!-- Вкладка отладочных логов -->
+    <section id="tab-debug" class="tab" hidden>
+      <h2>Debug</h2>
+      <div id="debugLog" class="debug-log"></div>
     </section>
   </main>
   <footer>
@@ -473,12 +495,29 @@ tbody tr:nth-child(odd) { background: color-mix(in oklab, var(--panel-2) 90%, wh
 /* Responsive */
 @media (max-width: 860px) {
   .only-mobile { display:block; }
-  .nav { position: fixed; inset: 3.25rem .75rem auto .75rem; z-index: 50; }
+  .nav { position: fixed; inset: 3.25rem .75rem auto .75rem; z-index: 50;
+         background: var(--panel); border-radius:.7rem; padding:.5rem;
+         border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); }
   .nav { display:none; flex-direction:column; }
   .nav.open { display:flex; }
   .chip input { width: 42vw; }
   table { min-width: 640px; }
   .key-grid { grid-template-columns: 1fr; }
+}
+
+/* Отладочный вывод */
+.debug-log {
+  height: min(52vh, 560px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  padding: .5rem;
+  border-radius: .8rem;
+  background: var(--panel-2);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: .85rem;
 }
 
 )~~~";
@@ -488,7 +527,8 @@ const char SCRIPT_JS[] PROGMEM = R"~~~(
 /* satprjct web/app.js — vanilla JS only */
 /* State */
 const UI = {
-  tabs: ["chat", "channels", "settings", "security"],
+  // список вкладок интерфейса
+  tabs: ["chat", "channels", "settings", "security", "debug"],
   els: {},
   cfg: {
     endpoint: localStorage.getItem("endpoint") || "http://192.168.4.1",
@@ -512,6 +552,7 @@ async function init() {
   UI.els.themeToggle = $("#themeToggle");
   UI.els.status = $("#statusLine");
   UI.els.toast = $("#toast");
+  UI.els.debugLog = $("#debugLog");
 
   // Tabs
   for (const tab of UI.tabs) {
@@ -579,6 +620,8 @@ async function init() {
   loadSettings();
   // при смене банка каналов сразу обновляем таблицу
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", refreshChannels);
+  // начальная загрузка списка каналов
+  refreshChannels().catch(()=>{});
 
   // Security
   const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", generateKey);
@@ -690,6 +733,11 @@ async function deviceFetch(cmd, params = {}, timeoutMs = 4000) {
       clearTimeout(id);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
+      // Если устройство не ответило и сервер вернул HTML-страницу,
+      // помечаем такой ответ как ошибку, чтобы не выводить разметку в чат.
+      if (/<!DOCTYPE|<html/i.test(text)) {
+        throw new Error("HTML response");
+      }
       return { ok: true, text, url };
     } catch (e) {
       lastErr = e;
@@ -706,6 +754,7 @@ async function sendCommand(cmd, params={}) {
     note(`${cmd}: ${res.text.slice(0, 200)}`);
     persistChat(`${cmd}: ${res.text}`, "dev");
     addChatMessage({ t: Date.now(), a: "dev", m: `${res.text}` });
+    debugLog(`${cmd}: ${res.text}`);
     if (cmd === "SEAR" || cmd === "PI") {
       // naive refresh
       refreshChannels();
@@ -714,6 +763,7 @@ async function sendCommand(cmd, params={}) {
   } else {
     status(`✗ ${cmd}`);
     note(`Ошибка: ${res.error}`);
+    debugLog(`ERR ${cmd}: ${res.error}`);
     return null;
   }
 }
@@ -748,13 +798,29 @@ function renderChannels() {
   });
 }
 
+// обновление выпадающего списка каналов в настройках
+function updateChannelSelect() {
+  const sel = $("#CH");
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  channels.forEach(c => {
+    const o = document.createElement("option");
+    o.value = c.ch;
+    o.textContent = c.ch;
+    sel.appendChild(o);
+  });
+  if (channels.some(c => String(c.ch) === prev)) sel.value = prev;
+}
+
 async function refreshChannels() {
   // перед запросом списка каналов выставляем выбранный банк
   try {
     const bankSel = $("#BANK");
     const bank = bankSel ? bankSel.value : null; // поддержка старых браузеров
     if (bank) await deviceFetch("BANK", { v: bank });
-    const r = await deviceFetch("CHLIST");
+    // запрашиваем список каналов с учётом выбранного банка
+    const r = await deviceFetch("CHLIST", bank ? { bank } : {});
     if (r && r.ok && r.text) {
       // ожидаем строки CSV, разбираем их
       channels = parseChannels(r.text);
@@ -765,6 +831,7 @@ async function refreshChannels() {
     if (!channels.length) mockChannels();
   }
   renderChannels();
+  updateChannelSelect();
 }
 
 function parseChannels(text) {
@@ -802,7 +869,8 @@ function exportChannelsCsv() {
 
 /* Settings */
 // ключи настроек, сохраняемые локально
-const SETTINGS_KEYS = ["ACK","BANK","BF","CH","CR","PW","SF","STS"]; // INFO вызывается отдельной кнопкой
+// список настроек, сохраняемых локально
+const SETTINGS_KEYS = ["ACK","BANK","BF","CH","CR","PW","SF"]; // INFO вызывается отдельной кнопкой
 function loadSettings() {
   for (const k of SETTINGS_KEYS) {
     const el = $("#"+k);
@@ -949,10 +1017,20 @@ function note(text) {
   setTimeout(() => { t.hidden = true; }, 2200);
 }
 
+// вывод строки в окно отладочных логов
+function debugLog(text) {
+  const d = UI.els.debugLog;
+  if (!d) return;
+  const line = document.createElement("div");
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+  d.appendChild(line);
+  d.scrollTop = d.scrollHeight;
+}
+
 )~~~";
 
 // libs/sha256.js
-const char SHA256_JS[] PROGMEM = R"~~~(
+const char SHA_JS[] PROGMEM = R"~~~(
 /* Простая реализация SHA-256 на чистом JS.
  * Используется, когда WebCrypto недоступен (например, на HTTP).
  */
@@ -1010,4 +1088,3 @@ const char SHA256_JS[] PROGMEM = R"~~~(
 })(this);
 
 )~~~";
-
