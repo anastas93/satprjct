@@ -210,27 +210,65 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- Логика настроек ---
   const settingsSection = document.getElementById('settings'); // блок настроек
 
-  // список названий параметров и сортировка по алфавиту
-  const settingsNames = ['BF', 'SF', 'CR', 'BANK', 'CH', 'PW', 'INFO', 'STS', 'ACK'];
-  settingsNames.sort(); // сортируем названия
-
-  // создаём поле ввода для каждого параметра
-  settingsNames.forEach(name => {
+  // вспомогательная функция создания выпадающего списка
+  const createSelect = (name, options) => {
     const wrap = document.createElement('div');
     const label = document.createElement('label');
     label.htmlFor = `setting-${name}`;
-    label.textContent = name;
-    const inp = document.createElement('input');
-    inp.id = `setting-${name}`;
-    inp.value = localStorage.getItem(name) || '';
-    // сохраняем значение в localStorage при изменении
-    inp.addEventListener('change', () => {
-      localStorage.setItem(name, inp.value);
+    label.textContent = name; // подпись параметра
+    const select = document.createElement('select');
+    select.id = `setting-${name}`;
+    options.forEach(opt => {
+      const option = document.createElement('option');
+      if (typeof opt === 'object') {
+        option.value = opt.value;
+        option.textContent = opt.label;
+      } else {
+        option.value = opt;
+        option.textContent = opt;
+      }
+      select.appendChild(option);
+    });
+    const saved = localStorage.getItem(name);
+    if (saved) select.value = saved;
+    select.addEventListener('change', () => {
+      localStorage.setItem(name, select.value); // сохранение выбранного значения
     });
     wrap.appendChild(label);
-    wrap.appendChild(inp);
+    wrap.appendChild(select);
     settingsSection.appendChild(wrap);
-  });
+  };
+
+  // вспомогательная функция создания чекбокса
+  const createCheckbox = (name, text) => {
+    const wrap = document.createElement('div');
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.id = `setting-${name}`;
+    cb.checked = localStorage.getItem(name) === '1';
+    cb.addEventListener('change', () => {
+      localStorage.setItem(name, cb.checked ? '1' : '0');
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(text));
+    wrap.appendChild(label);
+    settingsSection.appendChild(wrap);
+  };
+
+  // параметры радиомодуля
+  createSelect('BF', ['433.05', '433.25', '433.45', '433.65', '433.85']); // базовая частота
+  createSelect('BANK', ['EAST', 'WEST', 'TEST', 'ALL']); // банк каналов
+  createSelect('SF', [5, 6, 7, 8, 9, 10, 11, 12]); // фактор расширения
+  createSelect('CR', [
+    { value: '5', label: '4/5' },
+    { value: '6', label: '4/6' },
+    { value: '7', label: '4/7' },
+    { value: '8', label: '4/8' }
+  ]); // коэффициент кодирования
+  createSelect('SR', ['125', '250', '500', '1000']); // скорость символов (кГц)
+  createSelect('PW', [-5, -2, 1, 4, 7, 10, 13, 16, 19, 22]); // мощность в дБм
+  createCheckbox('ACK', 'ACK'); // использовать подтверждения
 
   // кнопка переключения темы
   const themeBtn = document.createElement('button');
