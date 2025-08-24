@@ -148,6 +148,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const text = input.value.trim();
     if (text) {
       addMessage(text, 'outgoing');
+      fetch('/api/tx', {                                  // отправляем текст на устройство
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: text
+      });
       input.value = '';
     }
   });

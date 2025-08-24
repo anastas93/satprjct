@@ -49,12 +49,35 @@ void handleStyleCss() {
   server.send_P(200, "text/css", STYLE_CSS);
 }
 
+// Принимаем текст и отправляем его по радио
+void handleApiTx() {
+  if (server.method() != HTTP_POST) {                       // разрешаем только POST
+    server.send(405, "text/plain", "Method Not Allowed");
+    return;
+  }
+  String body = server.arg("plain");                       // получаем сырой текст
+  body.trim();
+  if (body.length() == 0) {                                 // пустое сообщение
+    server.send(400, "text/plain", "empty");
+    return;
+  }
+  std::vector<uint8_t> data = utf8ToCp1251(body.c_str());   // конвертация в CP1251
+  uint32_t id = tx.queue(data.data(), data.size());         // ставим в очередь
+  if (id != 0) {
+    tx.loop();                                              // отправляем сразу
+    server.send(200, "text/plain", "ok");
+  } else {
+    server.send(500, "text/plain", "fail");
+  }
+}
+
 // Настройка Wi-Fi точки доступа и запуск сервера
 void setupWifi() {
   WiFi.softAP(DefaultSettings::WIFI_SSID, DefaultSettings::WIFI_PASS); // создаём AP
   server.on("/", handleRoot);                                         // обработчик страницы
   server.on("/app.js", handleAppJs);                                 // JS веб-интерфейса
   server.on("/style.css", handleStyleCss);                           // CSS веб-интерфейса
+  server.on("/api/tx", handleApiTx);                                 // отправка текста по радио
   server.begin();                                                      // старт сервера
   Serial.print("AP IP: ");
   Serial.println(WiFi.softAPIP());                                     // выводим адрес
