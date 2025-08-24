@@ -29,13 +29,16 @@ async function init() {
   // Tabs
   for (const tab of UI.tabs) {
     const link = UI.els.nav.querySelector(`[data-tab="${tab}"]`);
-    link?.addEventListener("click", (e) => {
+    // Проверяем существование ссылки, чтобы избежать ошибок в старых браузерах
+    if (link) link.addEventListener("click", (e) => {
       e.preventDefault();
       setTab(tab);
       history.replaceState(null, "", `#${tab}`);
     });
   }
-  const initialTab = (location.hash?.replace("#","") && UI.tabs.includes(location.hash.slice(1))) ? location.hash.slice(1) : (localStorage.getItem("activeTab") || "chat");
+  // Определяем стартовую вкладку без использования optional chaining
+  const hash = location.hash ? location.hash.slice(1) : "";
+  const initialTab = UI.tabs.includes(hash) ? hash : (localStorage.getItem("activeTab") || "chat");
   setTab(initialTab);
 
   // Menu toggle
@@ -74,26 +77,26 @@ async function init() {
   loadChatHistory();
 
   // Channels page
-  $("#btnPing")?.addEventListener("click", () => sendCommand("PI"));
-  $("#btnSearch")?.addEventListener("click", () => sendCommand("SEAR"));
-  $("#btnRefresh")?.addEventListener("click", refreshChannels);
-  $("#btnExportCsv")?.addEventListener("click", exportChannelsCsv);
+  const btnPing = $("#btnPing"); if (btnPing) btnPing.addEventListener("click", () => sendCommand("PI"));
+  const btnSearch = $("#btnSearch"); if (btnSearch) btnSearch.addEventListener("click", () => sendCommand("SEAR"));
+  const btnRefresh = $("#btnRefresh"); if (btnRefresh) btnRefresh.addEventListener("click", refreshChannels);
+  const btnExportCsv = $("#btnExportCsv"); if (btnExportCsv) btnExportCsv.addEventListener("click", exportChannelsCsv);
 
   // Settings
-  $("#btnSaveSettings")?.addEventListener("click", saveSettingsLocal);
-  $("#btnApplySettings")?.addEventListener("click", applySettingsToDevice);
-  $("#btnExportSettings")?.addEventListener("click", exportSettings);
-  $("#btnImportSettings")?.addEventListener("click", importSettings);
-  $("#btnClearCache")?.addEventListener("click", clearCaches);
+  const btnSaveSettings = $("#btnSaveSettings"); if (btnSaveSettings) btnSaveSettings.addEventListener("click", saveSettingsLocal);
+  const btnApplySettings = $("#btnApplySettings"); if (btnApplySettings) btnApplySettings.addEventListener("click", applySettingsToDevice);
+  const btnExportSettings = $("#btnExportSettings"); if (btnExportSettings) btnExportSettings.addEventListener("click", exportSettings);
+  const btnImportSettings = $("#btnImportSettings"); if (btnImportSettings) btnImportSettings.addEventListener("click", importSettings);
+  const btnClearCache = $("#btnClearCache"); if (btnClearCache) btnClearCache.addEventListener("click", clearCaches);
   // инициализация форм из localStorage
   loadSettings();
   // при смене банка каналов сразу обновляем таблицу
-  $("#BANK")?.addEventListener("change", refreshChannels);
+  const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", refreshChannels);
 
   // Security
-  $("#btnKeyGen")?.addEventListener("click", generateKey);
-  $("#btnKeySend")?.addEventListener("click", () => note("KEYTRANSFER SEND: заглушка"));
-  $("#btnKeyRecv")?.addEventListener("click", () => note("KEYTRANSFER RECEIVE: заглушка"));
+  const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", generateKey);
+  const btnKeySend = $("#btnKeySend"); if (btnKeySend) btnKeySend.addEventListener("click", () => note("KEYTRANSFER SEND: заглушка"));
+  const btnKeyRecv = $("#btnKeyRecv"); if (btnKeyRecv) btnKeyRecv.addEventListener("click", () => note("KEYTRANSFER RECEIVE: заглушка"));
   await loadKeyFromStorage();
   await updateKeyUI();
 
@@ -109,7 +112,7 @@ function setTab(tab) {
     const is = (t === tab);
     panel.hidden = !is;
     panel.classList.toggle("current", is);
-    link?.setAttribute("aria-current", is ? "page" : "false");
+    if (link) link.setAttribute("aria-current", is ? "page" : "false"); // избегаем optional chaining
   }
   localStorage.setItem("activeTab", tab);
 }
@@ -261,7 +264,8 @@ function renderChannels() {
 async function refreshChannels() {
   // перед запросом списка каналов выставляем выбранный банк
   try {
-    const bank = $("#BANK")?.value;
+    const bankSel = $("#BANK");
+    const bank = bankSel ? bankSel.value : null; // поддержка старых браузеров
     if (bank) await deviceFetch("BANK", { v: bank });
     const r = await deviceFetch("CHLIST");
     if (r && r.ok && r.text) {
@@ -287,7 +291,11 @@ function parseChannels(text) {
     const [ch, f, bw, sf, cr, pw, rssi, snr, st] = parts;
     out.push({
       ch: Number(ch), f: Number(f), bw: Number(bw), sf: Number(sf),
-      cr: cr || "4/5", pw: Number(pw ?? 14), rssi: Number(rssi ?? 0), snr: Number(snr ?? 0), st: st || ""
+      cr: cr || "4/5",
+      pw: Number(pw !== undefined ? pw : 14), // без оператора ?? для совместимости
+      rssi: Number(rssi !== undefined ? rssi : 0),
+      snr: Number(snr !== undefined ? snr : 0),
+      st: st || ""
     });
   });
   return out;
