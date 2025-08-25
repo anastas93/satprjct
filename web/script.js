@@ -10,6 +10,9 @@ const UI = {
   },
   key: {
     bytes: null, // Uint8Array(16) or null
+  },
+  state: {
+    channel: null // текущий активный канал
   }
 };
 
@@ -264,9 +267,14 @@ function mockChannels() {
 
 function renderChannels() {
   const tbody = $("#channelsTable tbody");
+  if (!tbody) return;
   tbody.innerHTML = "";
   channels.forEach((c, i) => {
     const tr = document.createElement("tr");
+    // класс строки в зависимости от статуса канала
+    const stCls = { tx: "busy", listen: "busy", idle: "free" }[c.st] || "unknown";
+    if (UI.state.channel === c.ch) tr.classList.add("active");
+    tr.classList.add(stCls);
     tr.innerHTML = `<td>${i+1}</td><td>${c.ch}</td><td>${c.f.toFixed(3)}</td><td>${c.bw}</td><td>${c.sf}</td><td>${c.cr}</td><td>${c.pw}</td><td>${c.rssi}</td><td>${c.snr}</td><td>${c.st}</td>`;
     tbody.appendChild(tr);
   });
@@ -276,7 +284,7 @@ function renderChannels() {
 function updateChannelSelect() {
   const sel = $("#CH");
   if (!sel) return;
-  const prev = sel.value;
+  const prev = UI.state.channel != null ? String(UI.state.channel) : sel.value;
   sel.innerHTML = "";
   channels.forEach(c => {
     const o = document.createElement("option");
@@ -300,6 +308,17 @@ async function refreshChannels() {
       channels = parseChannels(r.text);
     } else if (!channels.length) {
       mockChannels();
+    }
+    // узнаём текущий канал через команды CH/CHANNEL
+    const chRes = await deviceFetch("CH");
+    let chTxt = chRes.ok ? chRes.text : null;
+    if (!chTxt) {
+      const chRes2 = await deviceFetch("CHANNEL");
+      chTxt = chRes2.ok ? chRes2.text : null;
+    }
+    if (chTxt) {
+      const n = parseInt(chTxt, 10);
+      if (!isNaN(n)) UI.state.channel = n;
     }
   } catch (e) {
     if (!channels.length) mockChannels();
@@ -375,6 +394,8 @@ async function applySettingsToDevice() {
     await sendCommand(k, { v });
   }
   note("Применение завершено.");
+  // обновляем список и активный канал после применения настроек
+  await refreshChannels().catch(()=>{});
 }
 function exportSettings() {
   const obj = {};
