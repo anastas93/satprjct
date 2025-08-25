@@ -307,6 +307,10 @@ async function refreshChannels() {
     if (r && r.ok && r.text) {
       // ожидаем строки CSV, разбираем их
       channels = parseChannels(r.text);
+      // если устройство ответило, но список пуст, подставляем заглушку
+      if (!channels.length) {
+        mockChannels();
+      }
     } else if (!channels.length) {
       mockChannels();
     }
