@@ -394,9 +394,11 @@ function parseChannels(text) {
   return out;
 }
 function exportChannelsCsv() {
-  // Экспорт таблицы каналов с новыми полями TX/RX/Scan
-  const lines = [["idx","ch","tx","rx","bw","sf","cr","pw","rssi","snr","status","scan"]];
-  channels.forEach((c,i) => lines.push([i+1,c.ch,c.tx,c.rx,c.bw,c.sf,c.cr,c.pw,c.rssi,c.snr,c.st,c.scan]));
+  // Экспорт таблицы каналов с учетом полей TX/RX/Scan
+  const lines = [["idx","ch","tx","rx","scan","bw","sf","cr","pw","rssi","snr","status"]];
+  channels.forEach((c,i) =>
+    lines.push([i+1,c.ch,c.tx,c.rx,c.scan,c.bw,c.sf,c.cr,c.pw,c.rssi,c.snr,c.st])
+  );
   const csv = lines.map(a => a.join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
