@@ -257,11 +257,11 @@ async function probe() {
 /* Channels table (mock updater until device responds) */
 let channels = [];
 function mockChannels() {
-  // simple placeholder data
+  // простые данные-заглушки для отображения таблицы
   channels = [
-    { idx: 0, ch: 1, f: 868.1, bw:125, sf:7, cr:"4/5", pw:14, rssi:-92, snr:8.5, st:"idle" },
-    { idx: 1, ch: 2, f: 868.3, bw:125, sf:9, cr:"4/6", pw:14, rssi:-97, snr:7.1, st:"listen" },
-    { idx: 2, ch: 3, f: 868.5, bw:250, sf:7, cr:"4/5", pw:20, rssi:-88, snr:10.2, st:"tx" },
+    { idx: 0, ch: 1, tx: 868.1, rx: 868.1, bw:125, sf:7, cr:"4/5", pw:14, rssi:-92, snr:8.5, st:"idle", scan:"" },
+    { idx: 1, ch: 2, tx: 868.3, rx: 868.3, bw:125, sf:9, cr:"4/6", pw:14, rssi:-97, snr:7.1, st:"listen", scan:"" },
+    { idx: 2, ch: 3, tx: 868.5, rx: 868.5, bw:250, sf:7, cr:"4/5", pw:20, rssi:-88, snr:10.2, st:"tx", scan:"" },
   ];
 }
 
@@ -275,7 +275,8 @@ function renderChannels() {
     const stCls = { tx: "busy", listen: "busy", idle: "free" }[c.st] || "unknown";
     if (UI.state.channel === c.ch) tr.classList.add("active");
     tr.classList.add(stCls);
-    tr.innerHTML = `<td>${i+1}</td><td>${c.ch}</td><td>${c.f.toFixed(3)}</td><td>${c.bw}</td><td>${c.sf}</td><td>${c.cr}</td><td>${c.pw}</td><td>${c.rssi}</td><td>${c.snr}</td><td>${c.st}</td>`;
+    // выводим новые поля TX/RX/Scan
+    tr.innerHTML = `<td>${i+1}</td><td>${c.ch}</td><td>${c.tx.toFixed(3)}</td><td>${c.rx.toFixed(3)}</td><td>${c.bw}</td><td>${c.sf}</td><td>${c.cr}</td><td>${c.pw}</td><td>${c.rssi}</td><td>${c.snr}</td><td>${c.st}</td><td>${c.scan || ""}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -328,29 +329,42 @@ async function refreshChannels() {
 }
 
 function parseChannels(text) {
-  // Very tolerant parser: lines like "ch,freq,bw,sf,cr,pw,rssi,snr,status"
+  // Парсер формата "ch,tx,rx,bw,sf,cr,pw,rssi,snr,status,scan"
+  // При отсутствии rx/scan поддерживается старый вариант с одной частотой.
   const out = [];
   text.split(/\r?\n/).forEach(line => {
     const t = line.trim();
     if (!t || /ch\s*,/i.test(t)) return;
     const parts = t.split(/\s*[,;|\t]\s*/);
     if (parts.length < 5) return;
-    const [ch, f, bw, sf, cr, pw, rssi, snr, st] = parts;
+    let ch, tx, rx, bw, sf, cr, pw, rssi, snr, st, scan;
+    if (parts.length >= 10) {
+      [ch, tx, rx, bw, sf, cr, pw, rssi, snr, st, scan] = parts;
+    } else {
+      [ch, tx, bw, sf, cr, pw, rssi, snr, st] = parts;
+      rx = tx;
+      scan = "";
+    }
     out.push({
-      ch: Number(ch), f: Number(f), bw: Number(bw), sf: Number(sf),
+      ch: Number(ch),
+      tx: Number(tx),
+      rx: Number(rx),
+      bw: Number(bw),
+      sf: Number(sf),
       cr: cr || "4/5",
-      pw: Number(pw !== undefined ? pw : 14), // без оператора ?? для совместимости
+      pw: Number(pw !== undefined ? pw : 14),
       rssi: Number(rssi !== undefined ? rssi : 0),
       snr: Number(snr !== undefined ? snr : 0),
-      st: st || ""
+      st: st || "",
+      scan: scan || "",
     });
   });
   return out;
 }
-
 function exportChannelsCsv() {
-  const lines = [["idx","ch","freq","bw","sf","cr","pw","rssi","snr","status"]];
-  channels.forEach((c,i) => lines.push([i+1,c.ch,c.f,c.bw,c.sf,c.cr,c.pw,c.rssi,c.snr,c.st]));
+  // Экспорт таблицы каналов с новыми полями TX/RX/Scan
+  const lines = [["idx","ch","tx","rx","bw","sf","cr","pw","rssi","snr","status","scan"]];
+  channels.forEach((c,i) => lines.push([i+1,c.ch,c.tx,c.rx,c.bw,c.sf,c.cr,c.pw,c.rssi,c.snr,c.st,c.scan]));
   const csv = lines.map(a => a.join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
