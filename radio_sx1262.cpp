@@ -83,6 +83,11 @@ float RadioSX1262::bankRx(ChannelBank bank, uint16_t ch) {
   return fRX_bank_[static_cast<int>(bank)][ch];
 }
 
+float RadioSX1262::bankTx(ChannelBank bank, uint16_t ch) {
+  // Возвращаем частоту передачи для канала в выбранном банке
+  return fTX_bank_[static_cast<int>(bank)][ch];
+}
+
 const int8_t RadioSX1262::Pwr_[10] = {-5, -2, 1, 4, 7, 10, 13, 16, 19, 22};
 const float RadioSX1262::BW_[5] = {7.81, 10.42, 15.63, 20.83, 31.25};
 const int8_t RadioSX1262::SF_[8] = {5, 6, 7, 8, 9, 10, 11, 12};

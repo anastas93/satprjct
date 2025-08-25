@@ -179,13 +179,16 @@ String cmdSear() {
 
 // Список частот для выбранного банка в формате CSV
 String cmdChlist(ChannelBank bank) {
-  String out = "ch,freq,bw,sf,cr,pw,rssi,snr,st\n";
+  // Формируем CSV в формате ch,tx,rx,rssi,snr,st,scan
+  String out = "ch,tx,rx,rssi,snr,st,scan\n";
   uint16_t n = RadioSX1262::bankSize(bank);
   for (uint16_t i = 0; i < n; ++i) {
-    out += String(i);
+    out += String(i);                               // номер канала
     out += ',';
-    out += String(RadioSX1262::bankRx(bank, i), 3);
-    out += ",0,0,0,0,0,0,\n";
+    out += String(RadioSX1262::bankTx(bank, i), 3); // частота передачи
+    out += ',';
+    out += String(RadioSX1262::bankRx(bank, i), 3); // частота приёма
+    out += ",0,0,,\n";                             // пустые поля rssi/snr/st/scan
   }
   return out;
 }
