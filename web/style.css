@@ -246,6 +246,11 @@ tbody tr.active { background: color-mix(in oklab, var(--accent-2) 35%, transpare
 tbody tr.busy { background: color-mix(in oklab, var(--danger) 25%, transparent); }
 tbody tr.free { background: color-mix(in oklab, var(--good) 20%, transparent); }
 tbody tr.unknown { opacity:.6; }
+/* подсветка процесса и итогов сканирования */
+tbody tr.scanning { background: color-mix(in oklab, var(--accent) 25%, transparent); }
+tbody tr.signal { background: color-mix(in oklab, var(--good) 25%, transparent); }
+tbody tr.crc { background: color-mix(in oklab, var(--danger) 25%, transparent); }
+tbody tr.noresp { opacity:.4; }
 .status-chip {
   display:inline-block; padding:.15rem .45rem; border-radius:.6rem; font-size:.78rem; font-weight:700;
   border:1px solid transparent;
