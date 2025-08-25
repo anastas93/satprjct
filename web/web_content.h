@@ -401,6 +401,16 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
 table { border-collapse: collapse; width: 100%; min-width: 760px; }
 th, td { text-align: left; padding: .6rem .7rem; border-bottom: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); }
 tbody tr:nth-child(odd) { background: color-mix(in oklab, var(--panel-2) 90%, white 10%); }
+/* подсветка статусов каналов */
+tbody tr.active { background: color-mix(in oklab, var(--accent-2) 35%, transparent); }
+tbody tr.busy { background: color-mix(in oklab, var(--danger) 25%, transparent); }
+tbody tr.free { background: color-mix(in oklab, var(--good) 20%, transparent); }
+tbody tr.unknown { opacity:.6; }
+/* подсветка процесса и итогов сканирования */
+tbody tr.scanning { background: color-mix(in oklab, var(--accent-2) 15%, white); /* ~#e0f2fe, голубой фон */ }
+tbody tr.signal { background: color-mix(in oklab, var(--good) 15%, white); /* ~#dcfce7, зелёный фон */ }
+tbody tr.crc-error { background: color-mix(in oklab, #f97316 20%, white); /* ~#fed7aa, оранжевый фон */ }
+tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white); color:#374151; /* ~#e5e7eb, серый фон и тёмный текст */ }
 .status-chip {
   display:inline-block; padding:.15rem .45rem; border-radius:.6rem; font-size:.78rem; font-weight:700;
   border:1px solid transparent;

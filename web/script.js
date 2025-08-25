@@ -255,9 +255,9 @@ let channels = [];
 function mockChannels() {
   // простые данные-заглушки для отображения таблицы
   channels = [
-    { idx: 0, ch: 1, tx: 868.1, rx: 868.1, bw:125, sf:7, cr:"4/5", pw:14, rssi:-92, snr:8.5, st:"idle", scan:"", scanClass:"" },
-    { idx: 1, ch: 2, tx: 868.3, rx: 868.3, bw:125, sf:9, cr:"4/6", pw:14, rssi:-97, snr:7.1, st:"listen", scan:"", scanClass:"" },
-    { idx: 2, ch: 3, tx: 868.5, rx: 868.5, bw:250, sf:7, cr:"4/5", pw:20, rssi:-88, snr:10.2, st:"tx", scan:"", scanClass:"" },
+    { idx: 0, ch: 1, tx: 868.1, rx: 868.1, bw:125, sf:7, cr:"4/5", pw:14, rssi:-92, snr:8.5, st:"idle", scan:"" },
+    { idx: 1, ch: 2, tx: 868.3, rx: 868.3, bw:125, sf:9, cr:"4/6", pw:14, rssi:-97, snr:7.1, st:"listen", scan:"" },
+    { idx: 2, ch: 3, tx: 868.5, rx: 868.5, bw:250, sf:7, cr:"4/5", pw:20, rssi:-88, snr:10.2, st:"tx", scan:"" },
   ];
 }
 
@@ -271,7 +271,9 @@ function renderChannels() {
     const stCls = { tx: "busy", listen: "busy", idle: "free" }[c.st] || "unknown";
     if (UI.state.channel === c.ch) tr.classList.add("active");
     tr.classList.add(stCls);
-    if (c.scanClass) tr.classList.add(c.scanClass);
+    // подсветка результатов сканирования по полю scan
+    const scCls = c.scan ? (/crc/i.test(c.scan) ? "crc-error" : /timeout|noresp/i.test(c.scan) ? "no-response" : "signal") : "";
+    if (scCls) tr.classList.add(scCls);
     // выводим новые поля TX/RX/Scan
     tr.innerHTML = `<td>${i+1}</td><td>${c.ch}</td><td>${c.tx.toFixed(3)}</td><td>${c.rx.toFixed(3)}</td><td>${c.bw}</td><td>${c.sf}</td><td>${c.cr}</td><td>${c.pw}</td><td>${c.rssi}</td><td>${c.snr}</td><td>${c.st}</td><td>${c.scan || ""}</td>`;
     tbody.appendChild(tr);
@@ -342,17 +344,16 @@ async function scanChannels(type) {
     let cls = "";
     if (res && res.ok) {
       txt = res.text.trim();
-      if (/crc/i.test(txt)) cls = "crc";
-      else if (/timeout|noresp/i.test(txt)) cls = "noresp";
+      if (/crc/i.test(txt)) cls = "crc-error";
+      else if (/timeout|noresp/i.test(txt)) cls = "no-response";
       else cls = "signal";
     } else {
       txt = res ? res.error : "";
-      cls = "noresp";
+      cls = "no-response";
     }
-    c.scan = txt;
-    c.scanClass = cls;
+    c.scan = txt; // сохраняем текст результата
     tr.classList.remove("scanning");
-    if (cls) tr.classList.add(cls);
+    if (cls) tr.classList.add(cls); // подсветка результата
     if (cell) cell.textContent = txt;
   }
   renderChannels();
@@ -376,7 +377,6 @@ function parseChannels(text) {
       scan = "";
     }
     const sc = scan || "";
-    const scCls = /crc/i.test(sc) ? "crc" : /timeout|noresp/i.test(sc) ? "noresp" : (sc ? "signal" : "");
     out.push({
       ch: Number(ch),
       tx: Number(tx),
@@ -389,7 +389,6 @@ function parseChannels(text) {
       snr: Number(snr !== undefined ? snr : 0),
       st: st || "",
       scan: sc,
-      scanClass: scCls,
     });
   });
   return out;
