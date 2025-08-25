@@ -59,7 +59,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
       <div class="table-wrap pretty">
         <table id="channelsTable">
           <thead>
-            <tr><th>#</th><th>CH</th><th>F,MHz</th><th>BW</th><th>SF</th><th>CR</th><th>PW</th><th>RSSI</th><th>SNR</th><th>ST</th></tr>
+            <tr><th>#</th><th>CH</th><th>TX,MHz</th><th>RX,MHz</th><th>RSSI</th><th>SNR</th><th>ST</th><th>SCAN</th></tr>
           </thead>
           <tbody></tbody>
         </table>
@@ -849,20 +849,30 @@ async function probe() {
 /* Channels table (mock updater until device responds) */
 let channels = [];
 function mockChannels() {
-  // simple placeholder data
+  // простые данные-заглушки без параметров BW/SF/CR/PW
   channels = [
-    { idx: 0, ch: 1, f: 868.1, bw:125, sf:7, cr:"4/5", pw:14, rssi:-92, snr:8.5, st:"idle" },
-    { idx: 1, ch: 2, f: 868.3, bw:125, sf:9, cr:"4/6", pw:14, rssi:-97, snr:7.1, st:"listen" },
-    { idx: 2, ch: 3, f: 868.5, bw:250, sf:7, cr:"4/5", pw:20, rssi:-88, snr:10.2, st:"tx" },
+    { idx: 0, ch: 1, tx: 868.1, rx: 868.1, rssi:-92, snr:8.5, st:"idle",   scan:"" },
+    { idx: 1, ch: 2, tx: 868.3, rx: 868.3, rssi:-97, snr:7.1, st:"listen", scan:"" },
+    { idx: 2, ch: 3, tx: 868.5, rx: 868.5, rssi:-88, snr:10.2, st:"tx",    scan:"" },
   ];
 }
 
 function renderChannels() {
   const tbody = $("#channelsTable tbody");
+  if (!tbody) return;
   tbody.innerHTML = "";
   channels.forEach((c, i) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${i+1}</td><td>${c.ch}</td><td>${c.f.toFixed(3)}</td><td>${c.bw}</td><td>${c.sf}</td><td>${c.cr}</td><td>${c.pw}</td><td>${c.rssi}</td><td>${c.snr}</td><td>${c.st}</td>`;
+    // класс строки в зависимости от статуса канала (регистр не важен)
+    const st = (c.st || "").toLowerCase();
+    const stCls = { tx: "busy", listen: "busy", idle: "free" }[st] || "unknown";
+    if (UI.state.channel === c.ch) tr.classList.add("active");
+    tr.classList.add(stCls);
+    // подсветка результатов сканирования
+    const scCls = c.scan ? (/crc/i.test(c.scan) ? "crc-error" : /timeout|noresp/i.test(c.scan) ? "no-response" : "signal") : "";
+    if (scCls) tr.classList.add(scCls);
+    // вывод таблицы без BW/SF/CR/PW
+    tr.innerHTML = `<td>${i+1}</td><td>${c.ch}</td><td>${c.tx.toFixed(3)}</td><td>${c.rx.toFixed(3)}</td><td>${c.rssi}</td><td>${c.snr}</td><td>${c.st}</td><td>${c.scan || ""}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -896,6 +906,17 @@ async function refreshChannels() {
     } else if (!channels.length) {
       mockChannels();
     }
+    // узнаём текущий канал через команды CH/CHANNEL
+    const chRes = await deviceFetch("CH");
+    let chTxt = chRes.ok ? chRes.text : null;
+    if (!chTxt) {
+      const chRes2 = await deviceFetch("CHANNEL");
+      chTxt = chRes2.ok ? chRes2.text : null;
+    }
+    if (chTxt) {
+      const n = parseInt(chTxt, 10);
+      if (!isNaN(n)) UI.state.channel = n;
+    }
   } catch (e) {
     if (!channels.length) mockChannels();
   }
@@ -904,29 +925,47 @@ async function refreshChannels() {
 }
 
 function parseChannels(text) {
-  // Very tolerant parser: lines like "ch,freq,bw,sf,cr,pw,rssi,snr,status"
+  // Парсер CSV "ch,tx,rx,rssi,snr,status,scan" с поддержкой старых форматов
   const out = [];
   text.split(/\r?\n/).forEach(line => {
     const t = line.trim();
     if (!t || /ch\s*,/i.test(t)) return;
-    const parts = t.split(/\s*[,;|\t]\s*/);
-    if (parts.length < 5) return;
-    const [ch, f, bw, sf, cr, pw, rssi, snr, st] = parts;
+    const p = t.split(/\s*[,;|\t]\s*/);
+    if (p.length < 3) return;
+    let ch, tx, rx, rssi, snr, st, scan;
+    if (p.length >= 10) {
+      // старый формат: ch,tx,rx,bw,sf,cr,pw,rssi,snr,st,scan
+      [ch, tx, rx, , , , , rssi, snr, st, scan] = p;
+    } else if (p.length >= 7) {
+      // новый формат с отдельным RX и результатом сканирования
+      [ch, tx, rx, rssi, snr, st, scan] = p;
+    } else if (p.length >= 5) {
+      // самый старый формат без RX/Scan
+      [ch, tx, rssi, snr, st] = p;
+      rx = tx;
+      scan = "";
+    } else {
+      return;
+    }
     out.push({
-      ch: Number(ch), f: Number(f), bw: Number(bw), sf: Number(sf),
-      cr: cr || "4/5",
-      pw: Number(pw !== undefined ? pw : 14), // без оператора ?? для совместимости
-      rssi: Number(rssi !== undefined ? rssi : 0),
-      snr: Number(snr !== undefined ? snr : 0),
-      st: st || ""
+      ch: Number(ch),
+      tx: Number(tx),
+      rx: Number(rx),
+      rssi: Number(rssi ?? 0),
+      snr: Number(snr ?? 0),
+      st: st || "",
+      scan: scan || ""
     });
   });
   return out;
 }
 
 function exportChannelsCsv() {
-  const lines = [["idx","ch","freq","bw","sf","cr","pw","rssi","snr","status"]];
-  channels.forEach((c,i) => lines.push([i+1,c.ch,c.f,c.bw,c.sf,c.cr,c.pw,c.rssi,c.snr,c.st]));
+  // Экспорт таблицы каналов без столбцов BW/SF/CR/PW
+  const lines = [["idx","ch","tx","rx","rssi","snr","status","scan"]];
+  channels.forEach((c,i) =>
+    lines.push([i+1,c.ch,c.tx,c.rx,c.rssi,c.snr,c.st,c.scan])
+  );
   const csv = lines.map(a => a.join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
