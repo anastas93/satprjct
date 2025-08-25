@@ -267,8 +267,9 @@ function renderChannels() {
   tbody.innerHTML = "";
   channels.forEach((c, i) => {
     const tr = document.createElement("tr");
-    // класс строки в зависимости от статуса канала
-    const stCls = { tx: "busy", listen: "busy", idle: "free" }[c.st] || "unknown";
+    // класс строки в зависимости от статуса канала (учитываем регистр)
+    const st = (c.st || "").toLowerCase();
+    const stCls = { tx: "busy", listen: "busy", idle: "free" }[st] || "unknown";
     if (UI.state.channel === c.ch) tr.classList.add("active");
     tr.classList.add(stCls);
     // подсветка результатов сканирования по полю scan
