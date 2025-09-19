@@ -1,5 +1,6 @@
 #include "radio_sx1262.h"
 #include "default_settings.h"
+#include <Arduino.h>
 #include <cmath>
 #include <array>
 #include <cstring>
@@ -121,6 +122,74 @@ void RadioSX1262::send(const uint8_t* data, size_t len) {
   radio_.setFrequency(freq_rx);              // возвращаем частоту приёма
   radio_.startReceive();                     // и продолжаем слушать эфир
   DEBUG_LOG("RadioSX1262: передача завершена");
+}
+
+bool RadioSX1262::ping(const uint8_t* data, size_t len,
+                       uint8_t* response, size_t responseCapacity,
+                       size_t& receivedLen, uint32_t timeoutUs,
+                       uint32_t& elapsedUs) {
+  receivedLen = 0;                                        // сбрасываем длину ответа
+  elapsedUs = 0;                                          // сбрасываем время
+  if (!data || len == 0 || !response || responseCapacity == 0) {
+    return false;                                         // некорректные аргументы
+  }
+
+  float freq_tx = fTX_bank_[static_cast<int>(bank_)][channel_];
+  float freq_rx = fRX_bank_[static_cast<int>(bank_)][channel_];
+
+  if (!setFrequency(freq_tx)) {                           // не удалось установить TX
+    return false;
+  }
+  int state = radio_.transmit((uint8_t*)data, len);       // отправляем пакет
+  if (state != RADIOLIB_ERR_NONE) {                       // ошибка передачи
+    setFrequency(freq_rx);
+    radio_.startReceive();
+    return false;
+  }
+  if (!setFrequency(freq_rx)) {                           // возвращаем RX частоту
+    radio_.startReceive();
+    return false;
+  }
+
+  packetReady_ = false;                                   // очищаем флаг готовности
+  radio_.startReceive();                                  // слушаем эфир
+  uint32_t start = micros();                              // стартовое время ожидания
+  std::array<uint8_t, 256> buf{};                         // временный буфер
+
+  while ((micros() - start) < timeoutUs) {                // ждём ответ с таймаутом
+    if (!packetReady_) {                                  // пакета пока нет
+      delay(1);
+      continue;
+    }
+    packetReady_ = false;                                 // сбрасываем флаг
+    size_t pktLen = radio_.getPacketLength();             // длина принятого пакета
+    if (pktLen == 0 || pktLen > buf.size()) {             // защита от мусора
+      radio_.startReceive();
+      continue;
+    }
+    int readState = radio_.readData(buf.data(), pktLen);  // читаем данные
+    radio_.startReceive();                                // сразу возобновляем приём
+    if (readState != RADIOLIB_ERR_NONE) {                 // не удалось прочитать
+      continue;
+    }
+    lastSnr_ = radio_.getSNR();                           // сохраняем параметры
+    lastRssi_ = radio_.getRSSI();
+    if (pktLen == len && std::memcmp(buf.data(), data, len) == 0) {
+      if (pktLen <= responseCapacity) {                   // помещается в буфер ответа
+        std::memcpy(response, buf.data(), pktLen);
+        receivedLen = pktLen;
+        elapsedUs = micros() - start;                     // фиксируем время пролёта
+        return true;                                      // пинг отработал
+      }
+      break;                                              // буфер мал, считаем тайм-аутом
+    }
+    if (rx_cb_) {                                         // чужой пакет передаём дальше
+      rx_cb_(buf.data(), pktLen);
+    }
+  }
+
+  elapsedUs = micros() - start;                           // время ожидания на выходе
+  return false;                                           // пинг не удался
 }
 
 void RadioSX1262::setReceiveCallback(RxCallback cb) { rx_cb_ = cb; }
