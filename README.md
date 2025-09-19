@@ -112,6 +112,7 @@
 ### RadioSX1262
   - `bool begin()` — инициализация радиомодуля с автоматическим возвратом параметров к значениям по умолчанию.
 - `void send(const uint8_t* data, size_t len)` — отправка пакета.
+- `bool ping(const uint8_t* data, size_t len, uint8_t* response, size_t responseCapacity, size_t& receivedLen, uint32_t timeoutUs, uint32_t& elapsedUs)` — отправка служебного пакета и ожидание эха с возвратом параметров приёма.
 - `void loop()` — обработка готовности пакета и вызов колбэка в основном цикле.
 - `void setReceiveCallback(IRadio::RxCallback cb)` — регистрация обработчика приёма.
 - `float getLastSnr() const` — получить SNR последнего принятого пакета.

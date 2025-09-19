@@ -89,35 +89,22 @@ ChannelBank parseBankChar(char b) {
 
 // Выполнение одиночного пинга и получение результата
 String cmdPing() {
-  // очищаем буфер от прежних пакетов
-  ReceivedBuffer::Item dump;
-  while (recvBuf.popReady(dump)) {}
-  // формируем пинг
   std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> ping{};
   ping[1] = radio.randomByte();
   ping[2] = radio.randomByte();
   ping[0] = ping[1] ^ ping[2];
   ping[3] = 0;
   ping[4] = 0;
-  tx.queue(ping.data(), ping.size());
-  while (!tx.loop()) { delay(1); }
-  uint32_t t_start = micros();
-  bool ok = false;
-  ReceivedBuffer::Item resp;
-  while (micros() - t_start < DefaultSettings::PING_WAIT_MS * 1000UL) {
-    radio.loop();
-    if (recvBuf.popReady(resp)) {
-      if (resp.data.size() == ping.size() &&
-          memcmp(resp.data.data(), ping.data(), ping.size()) == 0) {
-        ok = true;
-      }
-      break;
-    }
-    delay(1);
-  }
-  if (ok) {
-    uint32_t t_end = micros() - t_start;
-    float dist_km = ((t_end * 0.000001f) * 299792458.0f / 2.0f) / 1000.0f;
+  std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> resp{};
+  size_t respLen = 0;
+  uint32_t elapsed = 0;
+  bool ok = radio.ping(ping.data(), ping.size(),
+                       resp.data(), resp.size(),
+                       respLen, DefaultSettings::PING_WAIT_MS * 1000UL,
+                       elapsed);
+  if (ok && respLen == ping.size() &&
+      memcmp(resp.data(), ping.data(), ping.size()) == 0) {
+    float dist_km = ((elapsed * 0.000001f) * 299792458.0f / 2.0f) / 1000.0f;
     String out = "Ping: RSSI ";
     out += String(radio.getLastRssi());
     out += " dBm SNR ";
@@ -125,7 +112,7 @@ String cmdPing() {
     out += " dB distance:~";
     out += String(dist_km);
     out += "km time:";
-    out += String(t_end * 0.001f);
+    out += String(elapsed * 0.001f);
     out += "ms";
     return out;
   } else {
@@ -149,22 +136,15 @@ String cmdSear() {
     pkt[2] = radio.randomByte();
     pkt[0] = pkt[1] ^ pkt[2];
     pkt[3] = 0; pkt[4] = 0;
-    tx.queue(pkt.data(), pkt.size());
-    while (!tx.loop()) { delay(1); }
-    uint32_t t_start = micros();
-    bool ok_ch = false;
-    ReceivedBuffer::Item res;
-    while (micros() - t_start < DefaultSettings::PING_WAIT_MS * 1000UL) {
-      radio.loop();
-      if (recvBuf.popReady(res)) {
-        if (res.data.size() == pkt.size() &&
-            memcmp(res.data.data(), pkt.data(), pkt.size()) == 0) {
-          ok_ch = true;
-        }
-        break;
-      }
-      delay(1);
-    }
+    std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> resp{};
+    size_t respLen = 0;
+    uint32_t elapsed = 0;
+    bool ok_ch = radio.ping(pkt.data(), pkt.size(),
+                            resp.data(), resp.size(),
+                            respLen, DefaultSettings::PING_WAIT_MS * 1000UL,
+                            elapsed);
+    (void)respLen; // длина не нужна при проверке ок
+    (void)elapsed; // время в поиске не используется
     if (ok_ch) {
       out += "CH "; out += String(ch); out += ": RSSI ";
       out += String(radio.getLastRssi()); out += " SNR ";

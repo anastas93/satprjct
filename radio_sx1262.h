@@ -13,6 +13,11 @@ public:
   bool begin();
   // Отправка данных
   void send(const uint8_t* data, size_t len) override;
+  // Выполнение пинга с ожиданием эха
+  bool ping(const uint8_t* data, size_t len,
+            uint8_t* response, size_t responseCapacity,
+            size_t& receivedLen, uint32_t timeoutUs,
+            uint32_t& elapsedUs);
   // Отправка служебного маяка
   void sendBeacon();
   // Обработка готовности пакета в основном цикле
