@@ -2,6 +2,7 @@
 #include <array>
 #include <vector>
 #include <cstring> // для strlen
+#include <algorithm> // для std::equal
 
 // --- Радио и модули ---
 #include "radio_sx1262.h"
@@ -61,18 +62,14 @@ void handleApiTx() {
     return;
   }
   String body = server.arg("plain");                       // получаем сырой текст
-  body.trim();
-  if (body.length() == 0) {                                 // пустое сообщение
-    server.send(400, "text/plain", "empty");
-    return;
-  }
-  std::vector<uint8_t> data = utf8ToCp1251(body.c_str());   // конвертация в CP1251
-  uint32_t id = tx.queue(data.data(), data.size());         // ставим в очередь
-  if (id != 0) {
-    tx.loop();                                              // отправляем сразу
-    server.send(200, "text/plain", "ok");
+  uint32_t id = 0;
+  String err;
+  if (enqueueTextMessage(body, id, err)) {                  // повторно используем логику Serial-команды
+    String resp = "ok:";
+    resp += String(id);
+    server.send(200, "text/plain", resp);
   } else {
-    server.send(500, "text/plain", "fail");
+    server.send(400, "text/plain", err);                   // читаемая причина ошибки
   }
 }
 
@@ -173,6 +170,114 @@ String cmdChlist(ChannelBank bank) {
   return out;
 }
 
+// Преобразование текущего банка в букву для ответов HTTP
+String bankToLetter(ChannelBank bank) {
+  switch (bank) {
+    case ChannelBank::EAST: return "e";
+    case ChannelBank::WEST: return "w";
+    case ChannelBank::TEST: return "t";
+    case ChannelBank::ALL:  return "a";
+    default:                return "";
+  }
+}
+
+// Краткое текстовое представление состояния ACK
+String ackStateText() {
+  return ackEnabled ? String("ACK:1") : String("ACK:0");
+}
+
+// Общая функция постановки текстового сообщения в очередь
+bool enqueueTextMessage(const String& payload, uint32_t& outId, String& err) {
+  String trimmed = payload;
+  trimmed.trim();
+  if (trimmed.length() == 0) {
+    err = "пустое сообщение";
+    return false;
+  }
+  std::vector<uint8_t> data = utf8ToCp1251(trimmed.c_str());
+  if (data.empty()) {
+    err = "пустое сообщение";
+    return false;
+  }
+  uint32_t id = tx.queue(data.data(), data.size());
+  if (id == 0) {
+    err = "очередь заполнена";
+    return false;
+  }
+  tx.loop();
+  outId = id;
+  return true;
+}
+
+// Команда TX с возвратом результата для HTTP-интерфейса
+String cmdTx(const String& payload) {
+  uint32_t id = 0;
+  String err;
+  if (enqueueTextMessage(payload, id, err)) {
+    String ok = "TX:OK id=";
+    ok += String(id);
+    return ok;
+  }
+  String out = "TX:ERR ";
+  out += err;
+  return out;
+}
+
+// Команда TXL формирует тестовый пакет указанного размера
+String cmdTxl(size_t sz) {
+  if (sz == 0 || sz > 8192) {
+    return String("TXL: неверный размер");
+  }
+  std::vector<uint8_t> data(sz);
+  for (size_t i = 0; i < sz; ++i) {
+    data[i] = static_cast<uint8_t>(i & 0xFF);
+  }
+  tx.setPayloadMode(PayloadMode::LARGE);
+  uint32_t id = tx.queue(data.data(), data.size());
+  tx.setPayloadMode(PayloadMode::SMALL);
+  if (id == 0) {
+    return String("TXL: очередь занята");
+  }
+  tx.loop();
+  String out = "TXL:OK id=";
+  out += String(id);
+  out += " size=";
+  out += String(sz);
+  return out;
+}
+
+// Команда BCN отправляет служебный маяк
+String cmdBcn() {
+  radio.sendBeacon();
+  return String("BCN:OK");
+}
+
+// Команда ENCT повторяет тест шифрования
+String cmdEnct() {
+  const uint8_t key[16]   = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+  const uint8_t nonce[12] = {0,1,2,3,4,5,6,7,8,9,10,11};
+  const char* text = "Test ENCT";
+  size_t len = strlen(text);
+  std::vector<uint8_t> cipher, tag, plain;
+  bool enc = encrypt_ccm(key, sizeof(key), nonce, sizeof(nonce),
+                         nullptr, 0,
+                         reinterpret_cast<const uint8_t*>(text), len,
+                         cipher, tag, 8);
+  bool dec = false;
+  if (enc) {
+    dec = decrypt_ccm(key, sizeof(key), nonce, sizeof(nonce),
+                      nullptr, 0,
+                      cipher.data(), cipher.size(),
+                      tag.data(), tag.size(), plain);
+  }
+  if (enc && dec && plain.size() == len &&
+      std::equal(plain.begin(), plain.end(),
+                 reinterpret_cast<const uint8_t*>(text))) {
+    return String("ENCT:OK");
+  }
+  return String("ENCT:ERR");
+}
+
 // Вывод текущих настроек радиомодуля
 String cmdInfo() {
   String s;
@@ -226,15 +331,55 @@ void handleCmdHttp() {
     resp = cmdPing();
   } else if (cmd == "SEAR") {
     resp = cmdSear();
+  } else if (cmd == "BF" || cmd == "BW") {
+    if (server.hasArg("v")) {
+      float bw = server.arg("v").toFloat();
+      resp = radio.setBandwidth(bw) ? String("BF:OK") : String("BF:ERR");
+    } else {
+      resp = String(radio.getBandwidth(), 2);
+    }
+  } else if (cmd == "SF") {
+    if (server.hasArg("v")) {
+      int sf = server.arg("v").toInt();
+      resp = radio.setSpreadingFactor(sf) ? String("SF:OK") : String("SF:ERR");
+    } else {
+      resp = String(radio.getSpreadingFactor());
+    }
+  } else if (cmd == "CR") {
+    if (server.hasArg("v")) {
+      int cr = server.arg("v").toInt();
+      resp = radio.setCodingRate(cr) ? String("CR:OK") : String("CR:ERR");
+    } else {
+      resp = String(radio.getCodingRate());
+    }
+  } else if (cmd == "PW") {
+    if (server.hasArg("v")) {
+      int pw = server.arg("v").toInt();
+      resp = radio.setPower(pw) ? String("PW:OK") : String("PW:ERR");
+    } else {
+      resp = String(radio.getPower());
+    }
   } else if (cmd == "BANK") {
     if (server.hasArg("v")) {
       char b = server.arg("v")[0];
-      radio.setBank(parseBankChar(b));
+      if (!radio.setBank(parseBankChar(b))) {
+        resp = String("BANK:ERR");
+      }
     }
-    resp = "OK";
+    if (resp.length() == 0) {
+      resp = bankToLetter(radio.getBank());
+    }
   } else if (cmd == "CH") {
     int ch = server.arg("v").toInt();
-    resp = radio.setChannel(ch) ? "OK" : "ERR";
+    if (server.hasArg("v")) {
+      if (!radio.setChannel(ch)) {
+        resp = String("CH:ERR current=");
+        resp += String(radio.getChannel());
+      }
+    }
+    if (resp.length() == 0) {
+      resp = String(radio.getChannel());
+    }
   } else if (cmd == "CHLIST") {
     ChannelBank b = radio.getBank();
     if (server.hasArg("bank")) {
@@ -249,6 +394,29 @@ void handleCmdHttp() {
   } else if (cmd == "RSTS") {
     int cnt = server.hasArg("n") ? server.arg("n").toInt() : 10;
     resp = cmdRsts(cnt);
+  } else if (cmd == "ACK") {
+    if (server.hasArg("toggle")) {
+      ackEnabled = !ackEnabled;
+    } else if (server.hasArg("v")) {
+      ackEnabled = server.arg("v").toInt() != 0;
+    }
+    resp = ackStateText();
+  } else if (cmd == "BCN") {
+    resp = cmdBcn();
+  } else if (cmd == "TXL") {
+    String arg = server.hasArg("size") ? server.arg("size") :
+                 (server.hasArg("len") ? server.arg("len") : server.arg("v"));
+    size_t sz = static_cast<size_t>(arg.toInt());
+    resp = cmdTxl(sz);
+  } else if (cmd == "TX") {
+    String payload;
+    if (server.hasArg("data")) payload = server.arg("data");
+    else if (server.hasArg("msg")) payload = server.arg("msg");
+    else if (server.hasArg("plain")) payload = server.arg("plain");
+    else payload = server.arg("v");
+    resp = cmdTx(payload);
+  } else if (cmd == "ENCT") {
+    resp = cmdEnct();
   } else {
     resp = "UNKNOWN";
   }
