@@ -659,9 +659,11 @@ async function runSearch() {
     UI.els.searchBtn.textContent = "Stop";
     UI.els.searchBtn.classList.add("ghost");
   }
+  await uiYield();
   const prevChannel = UI.state.channel;
   let cancelled = false;
   status("Search: запуск...");
+  await uiYield();
   try {
     for (let i = 0; i < channels.length; i++) {
       if (searchState.cancel) {
@@ -671,12 +673,15 @@ async function runSearch() {
       const entry = channels[i];
       setChannelScanState(entry.ch, "scanning", "Проверка...");
       renderChannels();
+      await uiYield();
       status("Search: CH " + entry.ch + " (" + (i + 1) + "/" + channels.length + ")");
+      await uiYield();
       const chRes = await deviceFetch("CH", { v: String(entry.ch) }, 2500);
       if (!chRes.ok) {
         entry.scan = "ERR CH: " + chRes.error;
         entry.scanState = "no-response";
         renderChannels();
+        await uiYield();
         continue;
       }
       UI.state.channel = entry.ch;
@@ -694,6 +699,7 @@ async function runSearch() {
         entry.scanState = "no-response";
       }
       renderChannels();
+      await uiYield();
     }
   } catch (e) {
     cancelled = cancelled || searchState.cancel;
@@ -718,6 +724,7 @@ async function runSearch() {
       UI.els.searchBtn.classList.remove("ghost");
     }
     status(requestedCancel ? "Search: остановлено" : "Search: завершено");
+    await uiYield();
     if (requestedCancel) note("Сканирование остановлено.");
     else note("Сканирование завершено.");
   }
@@ -923,6 +930,16 @@ async function updateKeyUI() {
 }
 
 /* Утилиты */
+// Возвращает управление циклу отрисовки, чтобы элементы UI успевали обновляться
+function uiYield() {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+    } else {
+      setTimeout(() => resolve(), 0);
+    }
+  });
+}
 function status(text) {
   if (UI.els.status) UI.els.status.textContent = text;
 }
