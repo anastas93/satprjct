@@ -108,7 +108,7 @@ async function init() {
 
   // Вкладка каналов
   const btnPing = $("#btnPing"); if (btnPing) btnPing.addEventListener("click", runPing);
-  const btnSearch = $("#btnSearch"); if (btnSearch) btnSearch.addEventListener("click", runSearch);
+  const btnSearch = $("#btnSearch"); if (btnSearch) { UI.els.searchBtn = btnSearch; btnSearch.addEventListener("click", runSearch); }
   const btnRefresh = $("#btnRefresh"); if (btnRefresh) btnRefresh.addEventListener("click", () => refreshChannels());
   const btnExportCsv = $("#btnExportCsv"); if (btnExportCsv) btnExportCsv.addEventListener("click", exportChannelsCsv);
 
@@ -450,11 +450,13 @@ async function probe() {
 
 /* Таблица каналов */
 let channels = [];
+// Служебное состояние поиска по каналам
+const searchState = { running: false, cancel: false };
 function mockChannels() {
   channels = [
-    { ch: 1, tx: 868.1, rx: 868.1, rssi: -92, snr: 8.5, st: "idle", scan: "" },
-    { ch: 2, tx: 868.3, rx: 868.3, rssi: -97, snr: 7.1, st: "listen", scan: "" },
-    { ch: 3, tx: 868.5, rx: 868.5, rssi: -88, snr: 10.2, st: "tx", scan: "" },
+    { ch: 1, tx: 868.1, rx: 868.1, rssi: -92, snr: 8.5, st: "idle", scan: "", scanState: null },
+    { ch: 2, tx: 868.3, rx: 868.3, rssi: -97, snr: 7.1, st: "listen", scan: "", scanState: null },
+    { ch: 3, tx: 868.5, rx: 868.5, rssi: -88, snr: 10.2, st: "tx", scan: "", scanState: null },
   ];
 }
 function renderChannels() {
@@ -469,9 +471,15 @@ function renderChannels() {
     if (UI.state.channel === c.ch) tr.classList.add("active");
     const scanText = c.scan || "";
     const scanLower = scanText.toLowerCase();
-    if (scanLower.indexOf("crc") >= 0) tr.classList.add("crc-error");
-    else if (scanLower.indexOf("timeout") >= 0 || scanLower.indexOf("тайм") >= 0 || scanLower.indexOf("noresp") >= 0) tr.classList.add("no-response");
-    else if (scanLower) tr.classList.add("signal");
+    if (c.scanState) {
+      tr.classList.add(c.scanState);
+    } else if (scanLower.indexOf("crc") >= 0) {
+      tr.classList.add("crc-error");
+    } else if (scanLower.indexOf("timeout") >= 0 || scanLower.indexOf("тайм") >= 0 || scanLower.indexOf("noresp") >= 0) {
+      tr.classList.add("no-response");
+    } else if (scanLower) {
+      tr.classList.add("signal");
+    }
     tr.innerHTML = "<td>" + (idx + 1) + "</td>" +
                    "<td>" + c.ch + "</td>" +
                    "<td>" + c.tx.toFixed(3) + "</td>" +
@@ -548,6 +556,7 @@ function parseChannels(text) {
       snr: Number(snr || 0),
       st: st || "",
       scan: scan || "",
+      scanState: null,
     });
   }
   return out;
@@ -556,11 +565,7 @@ function applyPingResult(text) {
   if (UI.state.channel == null) return;
   const entry = channels.find((c) => c.ch === UI.state.channel);
   if (!entry) return;
-  const rssiMatch = text.match(/RSSI\s*(-?\d+(?:\.\d+)?)/i);
-  const snrMatch = text.match(/SNR\s*(-?\d+(?:\.\d+)?)/i);
-  if (rssiMatch) entry.rssi = Number(rssiMatch[1]);
-  if (snrMatch) entry.snr = Number(snrMatch[1]);
-  entry.scan = text.trim();
+  applyPingToEntry(entry, text);
   renderChannels();
 }
 function applySearchResult(text) {
@@ -580,14 +585,16 @@ function applySearchResult(text) {
     const snrMatch = info.match(/SNR\s*(-?\d+(?:\.\d+)?)/i);
     if (rssiMatch) entry.rssi = Number(rssiMatch[1]);
     if (snrMatch) entry.snr = Number(snrMatch[1]);
+    const state = detectScanState(info);
+    entry.scanState = state || entry.scanState;
     changed = true;
   }
   if (changed) renderChannels();
 }
 function exportChannelsCsv() {
-  const lines = [["idx","ch","tx","rx","rssi","snr","status","scan"]];
+  const lines = [["idx","ch","tx","rx","rssi","snr","status","scan_state","scan"]];
   channels.forEach((c, idx) => {
-    lines.push([idx + 1, c.ch, c.tx, c.rx, c.rssi, c.snr, c.st, c.scan]);
+    lines.push([idx + 1, c.ch, c.tx, c.rx, c.rssi, c.snr, c.st, c.scanState || "", c.scan]);
   });
   const csv = lines.map((row) => row.join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -599,10 +606,121 @@ function exportChannelsCsv() {
   URL.revokeObjectURL(url);
 }
 async function runPing() {
+  if (UI.state.channel != null) {
+    const entry = setChannelScanState(UI.state.channel, "scanning", "Проверка...");
+    if (entry) renderChannels();
+  }
   await sendCommand("PI");
 }
+// Определяем состояние строки по тексту ответа
+function detectScanState(text) {
+  if (!text) return null;
+  const low = text.toLowerCase();
+  if (low.indexOf("crc") >= 0) return "crc-error";
+  if (low.indexOf("timeout") >= 0 || low.indexOf("no resp") >= 0 || low.indexOf("noresp") >= 0 || low.indexOf("нет ответа") >= 0 || low.indexOf("тайм") >= 0 || (low.indexOf("error") >= 0 && low.indexOf("crc") < 0) || (low.indexOf("err") >= 0 && low.indexOf("crc") < 0) || low.indexOf("fail") >= 0) return "no-response";
+  if (low.indexOf("rssi") >= 0 || low.indexOf("snr") >= 0 || low.indexOf("ok") >= 0 || low.indexOf("ответ") >= 0) return "signal";
+  return null;
+}
+// Обновляем данные канала после пинга
+function applyPingToEntry(entry, text) {
+  if (!entry) return null;
+  const raw = (text || "").trim();
+  const rssiMatch = raw.match(/RSSI\s*(-?\d+(?:\.\d+)?)/i);
+  const snrMatch = raw.match(/SNR\s*(-?\d+(?:\.\d+)?)/i);
+  if (rssiMatch) entry.rssi = Number(rssiMatch[1]);
+  if (snrMatch) entry.snr = Number(snrMatch[1]);
+  entry.scan = raw;
+  const state = detectScanState(raw);
+  entry.scanState = state || "signal";
+  return entry.scanState;
+}
+// Устанавливаем служебный статус строки
+function setChannelScanState(ch, state, text) {
+  const num = Number(ch);
+  const entry = channels.find((c) => c.ch === (isNaN(num) ? ch : num));
+  if (!entry) return null;
+  entry.scanState = state || null;
+  if (typeof text === "string") entry.scan = text;
+  return entry;
+}
 async function runSearch() {
-  await sendCommand("SEAR");
+  if (!channels.length) {
+    note("Список каналов пуст, обновите данные.");
+    return;
+  }
+  if (searchState.running) {
+    searchState.cancel = true;
+    note("Останавливаю поиск...");
+    return;
+  }
+  searchState.running = true;
+  searchState.cancel = false;
+  if (UI.els.searchBtn) {
+    UI.els.searchBtn.textContent = "Stop";
+    UI.els.searchBtn.classList.add("ghost");
+  }
+  const prevChannel = UI.state.channel;
+  let cancelled = false;
+  status("Search: запуск...");
+  try {
+    for (let i = 0; i < channels.length; i++) {
+      if (searchState.cancel) {
+        cancelled = true;
+        break;
+      }
+      const entry = channels[i];
+      setChannelScanState(entry.ch, "scanning", "Проверка...");
+      renderChannels();
+      status("Search: CH " + entry.ch + " (" + (i + 1) + "/" + channels.length + ")");
+      const chRes = await deviceFetch("CH", { v: String(entry.ch) }, 2500);
+      if (!chRes.ok) {
+        entry.scan = "ERR CH: " + chRes.error;
+        entry.scanState = "no-response";
+        renderChannels();
+        continue;
+      }
+      UI.state.channel = entry.ch;
+      updateChannelSelect();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const pingRes = await deviceFetch("PI", {}, 5000);
+      if (searchState.cancel) {
+        cancelled = true;
+        break;
+      }
+      if (pingRes.ok) {
+        applyPingToEntry(entry, pingRes.text);
+      } else {
+        entry.scan = "ERR PI: " + pingRes.error;
+        entry.scanState = "no-response";
+      }
+      renderChannels();
+    }
+  } catch (e) {
+    cancelled = cancelled || searchState.cancel;
+    debugLog("ERR Search: " + e);
+  } finally {
+    const requestedCancel = searchState.cancel || cancelled;
+    searchState.running = false;
+    searchState.cancel = false;
+    if (requestedCancel) {
+      channels.forEach((c) => { if (c.scanState === "scanning") c.scanState = null; });
+    }
+    if (prevChannel != null) {
+      const revert = await deviceFetch("CH", { v: String(prevChannel) }, 2500);
+      if (revert.ok) {
+        UI.state.channel = prevChannel;
+        updateChannelSelect();
+      }
+    }
+    renderChannels();
+    if (UI.els.searchBtn) {
+      UI.els.searchBtn.textContent = "Search";
+      UI.els.searchBtn.classList.remove("ghost");
+    }
+    status(requestedCancel ? "Search: остановлено" : "Search: завершено");
+    if (requestedCancel) note("Сканирование остановлено.");
+    else note("Сканирование завершено.");
+  }
 }
 async function sendTxl() {
   if (!UI.els.txlInput) return;
