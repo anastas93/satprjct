@@ -1,4 +1,6 @@
 #pragma once
+#ifndef LIBS_FRAME_FRAME_HEADER_H
+#define LIBS_FRAME_FRAME_HEADER_H
 #include <cstddef>
 #include <cstdint>
 #include <array>
@@ -28,3 +30,5 @@ struct FrameHeader {
   // Проверка контрольной суммы кадра
   bool checkFrameCrc(const uint8_t* payload, size_t payload_len) const;
 };
+
+#endif // LIBS_FRAME_FRAME_HEADER_H
