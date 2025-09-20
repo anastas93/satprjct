@@ -24,6 +24,12 @@ public:
   bool loop();
   // Задать минимальную паузу между отправками (мс)
   void setSendPause(uint32_t pause_ms);
+  // Получить текущую паузу между отправками (мс)
+  uint32_t getSendPause() const;
+  // Задать тайм-аут ожидания ACK (мс)
+  void setAckTimeout(uint32_t timeout_ms);
+  // Получить тайм-аут ожидания ACK (мс)
+  uint32_t getAckTimeout() const;
   // Перечитать ключ из хранилища (после смены через веб-интерфейс)
   void reloadKey();
   // Управление режимами подтверждений и шифрования

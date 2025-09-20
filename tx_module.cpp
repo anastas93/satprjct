@@ -200,6 +200,21 @@ void TxModule::setSendPause(uint32_t pause_ms) {
   last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms);
 }
 
+uint32_t TxModule::getSendPause() const {
+  return pause_ms_;
+}
+
+void TxModule::setAckTimeout(uint32_t timeout_ms) {
+  ack_timeout_ms_ = timeout_ms;
+  if (waiting_ack_) {
+    last_attempt_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(timeout_ms);
+  }
+}
+
+uint32_t TxModule::getAckTimeout() const {
+  return ack_timeout_ms_;
+}
+
 void TxModule::reloadKey() {
   key_ = KeyLoader::loadKey();
   DEBUG_LOG("TxModule: ключ перечитан");

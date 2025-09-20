@@ -3,6 +3,7 @@
 #include <vector>
 #include <cstring> // для strlen
 #include <algorithm> // для std::equal
+#include <cstdio>    // для snprintf при подготовке JSON
 
 // --- Радио и модули ---
 #include "radio_sx1262.h"
@@ -45,6 +46,13 @@ uint8_t ackRetryLimit = DefaultSettings::ACK_RETRY_LIMIT; // число повт
 
 WebServer server(80);       // HTTP-сервер для веб-интерфейса
 
+// Состояние генератора тестовых входящих сообщений
+struct TestRxmState {
+  bool active = false;          // идёт ли генерация
+  uint8_t produced = 0;         // сколько сообщений создано
+  uint32_t nextAt = 0;          // когда запланировано следующее сообщение (millis)
+} testRxmState;
+
 // Состояние процесса обмена корневым ключом по LoRa
 struct KeyTransferRuntime {
   bool waiting = false;                 // ожидаем ли приём специального кадра
@@ -83,6 +91,62 @@ bool parseHex(const String& text, std::array<uint8_t, N>& out) {
     out[i] = static_cast<uint8_t>((hi << 4) | lo);
   }
   return true;
+}
+
+// Преобразование вектора байтов в hex-строку
+String toHex(const std::vector<uint8_t>& data) {
+  static const char kHex[] = "0123456789ABCDEF";
+  String out;
+  out.reserve(data.size() * 2);
+  for (uint8_t b : data) {
+    out += kHex[(b >> 4) & 0x0F];
+    out += kHex[b & 0x0F];
+  }
+  return out;
+}
+
+// Экранирование строки для включения в JSON
+String jsonEscape(const String& value) {
+  String out;
+  out.reserve(value.length() + 8);
+  for (size_t i = 0; i < value.length(); ++i) {
+    char c = value.charAt(static_cast<int>(i));
+    switch (c) {
+      case '"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '\t': out += "\\t"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          char buf[7];
+          std::snprintf(buf, sizeof(buf), "\\\u%04X", static_cast<unsigned>(static_cast<unsigned char>(c)));
+          out += buf;
+        } else {
+          out += c;
+        }
+        break;
+    }
+  }
+  return out;
+}
+
+// Преобразование буфера байтов в строку ASCII
+String vectorToString(const std::vector<uint8_t>& data) {
+  String out;
+  out.reserve(data.size());
+  for (uint8_t b : data) {
+    out += static_cast<char>(b);
+  }
+  return out;
+}
+
+// Выдача нового идентификатора для тестовых сообщений
+uint32_t nextTestRxmId() {
+  static uint32_t counter = 60000;
+  counter = (counter + 1) % 100000;
+  if (counter == 0) counter = 1;
+  return counter;
 }
 
 // Формирование JSON с состоянием ключа
@@ -318,6 +382,55 @@ ChannelBank parseBankChar(char b) {
   }
 }
 
+// Генерация сообщения для теста входящего буфера
+void processTestRxm() {
+  if (!testRxmState.active) return;                        // генерация не активна
+  uint32_t now = millis();
+  int32_t delta = static_cast<int32_t>(now - testRxmState.nextAt);
+  if (delta < 0) return;                                   // ещё рано
+
+  const uint8_t index = testRxmState.produced;
+  const size_t noise = 12 + (radio.randomByte() % 48);     // длина случайной части
+  String payload = "RXM тест ";
+  payload += String(static_cast<int>(index + 1));
+  payload += ": ";
+  payload.reserve(payload.length() + noise + 12);
+  for (size_t i = 0; i < noise; ++i) {
+    char c = static_cast<char>('A' + (radio.randomByte() % 26));
+    payload += c;
+  }
+  payload += " (len=";
+  payload += String(payload.length());
+  payload += ")";
+
+  const uint32_t id = nextTestRxmId();
+  recvBuf.pushReady(id, reinterpret_cast<const uint8_t*>(payload.c_str()), payload.length());
+  DEBUG_LOG("TESTRXM: создано входящее сообщение");
+  DEBUG_LOG_VAL("TESTRXM: id=", id);
+  DEBUG_LOG_VAL("TESTRXM: bytes=", static_cast<int>(payload.length()));
+
+  testRxmState.produced++;
+  if (testRxmState.produced >= 5) {
+    testRxmState.active = false;
+    testRxmState.nextAt = 0;
+    DEBUG_LOG("TESTRXM: серия завершена");
+  } else {
+    testRxmState.nextAt = now + 500;                       // следующее сообщение через 0.5 с
+  }
+}
+
+// Команда TESTRXM — запускает генерацию пяти тестовых входящих сообщений
+String cmdTestRxm() {
+  if (testRxmState.active) {
+    return String("{\"status\":\"busy\"}");
+  }
+  testRxmState.active = true;
+  testRxmState.produced = 0;
+  testRxmState.nextAt = millis();
+  DEBUG_LOG("TESTRXM: запуск генерации пяти сообщений");
+  return String("{\"status\":\"scheduled\",\"count\":5,\"intervalMs\":500}");
+}
+
 // Выполнение одиночного пинга и получение результата
 String cmdPing() {
   std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> ping{};
@@ -486,7 +599,7 @@ String cmdBcn() {
   return String("BCN:OK");
 }
 
-// Команда ENCT повторяет тест шифрования
+// Команда ENCT повторяет тест шифрования и возвращает подробности
 String cmdEnct() {
   const uint8_t key[16]   = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
   auto nonce = KeyLoader::makeNonce(0, 0);
@@ -507,9 +620,31 @@ String cmdEnct() {
   if (enc && dec && plain.size() == len &&
       std::equal(plain.begin(), plain.end(),
                  reinterpret_cast<const uint8_t*>(text))) {
-    return String("ENCT:OK");
+    String cipherHex = toHex(cipher);
+    String tagHex = toHex(tag);
+    String decoded = vectorToString(plain);
+    String json = "{\"status\":\"ok\",\"plain\":\"";
+    json += jsonEscape(String(text));
+    json += "\",\"cipher\":\"";
+    json += cipherHex;
+    json += "\",\"decoded\":\"";
+    json += jsonEscape(decoded);
+    json += "\",\"tag\":\"";
+    json += tagHex;
+    json += "\",\"nonce\":\"";
+    json += jsonEscape(toHex(nonce));
+    json += "\"}";
+
+    String logPlain = String("ENCT: plain=") + text;
+    String logCipher = String("ENCT: cipher=") + cipherHex;
+    String logDecoded = String("ENCT: decoded=") + decoded;
+    DEBUG_LOG(logPlain.c_str());
+    DEBUG_LOG(logCipher.c_str());
+    DEBUG_LOG(logDecoded.c_str());
+    return json;
   }
-  return String("ENCT:ERR");
+  DEBUG_LOG("ENCT: ошибка теста шифрования");
+  return String("{\"status\":\"error\"}");
 }
 
 // Вывод текущих настроек радиомодуля
@@ -529,6 +664,8 @@ String cmdInfo() {
   s += "\nSF: "; s += String(radio.getSpreadingFactor());
   s += "\nCR: "; s += String(radio.getCodingRate());
   s += "\nPower: "; s += String(radio.getPower()); s += " dBm";
+  s += "\nPause: "; s += String(tx.getSendPause()); s += " ms";
+  s += "\nACK timeout: "; s += String(tx.getAckTimeout()); s += " ms";
   s += "\nACK: "; s += ackEnabled ? "включён" : "выключен";
   return s;
 }
@@ -653,6 +790,22 @@ void handleCmdHttp() {
       tx.setAckRetryLimit(ackRetryLimit);
     }
     resp = String(ackRetryLimit);
+  } else if (cmd == "PAUSE") {
+    if (server.hasArg("v")) {
+      long raw = server.arg("v").toInt();
+      if (raw < 0) raw = 0;
+      if (raw > 60000) raw = 60000;
+      tx.setSendPause(static_cast<uint32_t>(raw));
+    }
+    resp = String(tx.getSendPause());
+  } else if (cmd == "ACKT") {
+    if (server.hasArg("v")) {
+      long raw = server.arg("v").toInt();
+      if (raw < 0) raw = 0;
+      if (raw > 60000) raw = 60000;
+      tx.setAckTimeout(static_cast<uint32_t>(raw));
+    }
+    resp = String(tx.getAckTimeout());
   } else if (cmd == "ENC") {
     if (server.hasArg("toggle")) {
       encryptionEnabled = !encryptionEnabled;
@@ -678,6 +831,8 @@ void handleCmdHttp() {
     resp = cmdTx(payload);
   } else if (cmd == "ENCT") {
     resp = cmdEnct();
+  } else if (cmd == "TESTRXM") {
+    resp = cmdTestRxm();
   } else if (cmd == "KEYSTATE") {
     resp = cmdKeyState();
   } else if (cmd == "KEYGEN") {
@@ -736,6 +891,8 @@ void setup() {
   radio.begin();
   tx.setAckEnabled(ackEnabled);
   tx.setAckRetryLimit(ackRetryLimit);
+  tx.setSendPause(DefaultSettings::SEND_PAUSE_MS);
+  tx.setAckTimeout(DefaultSettings::ACK_TIMEOUT_MS);
   tx.setEncryptionEnabled(encryptionEnabled);
   rx.setEncryptionEnabled(encryptionEnabled);
   rx.setBuffer(&recvBuf);                                   // сохраняем принятые пакеты
@@ -759,13 +916,14 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, ENC [0|1], PI, SEAR, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
 }
 
 void loop() {
     server.handleClient();                  // обработка HTTP-запросов
     radio.loop();                           // обработка входящих пакетов
     tx.loop();                              // обработка очередей передачи
+    processTestRxm();                       // генерация тестовых входящих сообщений
     if (Serial.available()) {
       String line = Serial.readStringUntil('\n');
       line.trim();
@@ -839,6 +997,9 @@ void loop() {
         Serial.print("SF: "); Serial.println(radio.getSpreadingFactor());
         Serial.print("CR: "); Serial.println(radio.getCodingRate());
         Serial.print("Power: "); Serial.print(radio.getPower()); Serial.println(" dBm");
+        Serial.print("Pause: "); Serial.print(tx.getSendPause()); Serial.println(" ms");
+        Serial.print("ACK timeout: "); Serial.print(tx.getAckTimeout()); Serial.println(" ms");
+        Serial.print("ACK: "); Serial.println(ackEnabled ? "включён" : "выключен");
       } else if (line.startsWith("STS")) {
         int cnt = line.length() > 3 ? line.substring(4).toInt() : 10;
         if (cnt <= 0) cnt = 10;                       // значение по умолчанию
@@ -912,6 +1073,8 @@ void loop() {
         } else {
           Serial.println("ENCT: ошибка");
         }
+      } else if (line.equalsIgnoreCase("TESTRXM")) {
+        Serial.println(cmdTestRxm());
       } else if (line.equalsIgnoreCase("KEYTRANSFER SEND")) {
         Serial.println(cmdKeyTransferSendLora());
       } else if (line.equalsIgnoreCase("KEYTRANSFER RECEIVE")) {
@@ -937,6 +1100,24 @@ void loop() {
         tx.setAckRetryLimit(ackRetryLimit);
         Serial.print("ACKR: ");
         Serial.println(ackRetryLimit);
+      } else if (line.startsWith("PAUSE")) {
+        long value = tx.getSendPause();
+        if (line.length() > 5) value = line.substring(6).toInt();
+        if (value < 0) value = 0;
+        if (value > 60000) value = 60000;
+        tx.setSendPause(static_cast<uint32_t>(value));
+        Serial.print("PAUSE: ");
+        Serial.print(value);
+        Serial.println(" ms");
+      } else if (line.startsWith("ACKT")) {
+        long value = tx.getAckTimeout();
+        if (line.length() > 4) value = line.substring(5).toInt();
+        if (value < 0) value = 0;
+        if (value > 60000) value = 60000;
+        tx.setAckTimeout(static_cast<uint32_t>(value));
+        Serial.print("ACKT: ");
+        Serial.print(value);
+        Serial.println(" ms");
       } else if (line.startsWith("ACK")) {
         if (line.length() > 3) {                          // установка явного значения
           ackEnabled = line.substring(4).toInt() != 0;
