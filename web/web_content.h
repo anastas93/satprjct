@@ -181,6 +181,13 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             <option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option>
           </select>
         </label>
+        <div class="settings-toggle">
+          <label class="chip switch" id="ackSettingControl">
+            <input type="checkbox" id="ACK" />
+            <span>ACK (подтверждения)</span>
+          </label>
+          <div id="ackSettingHint" class="field-hint">Состояние не загружено.</div>
+        </div>
         <div class="settings-actions actions">
           <button type="button" id="btnSaveSettings" class="btn">Сохранить</button>
           <button type="button" id="btnApplySettings" class="btn btn-primary">Применить</button>
@@ -373,6 +380,7 @@ a { color: inherit; }
 }
 .chip.switch { cursor: pointer; user-select: none; }
 .chip.switch input { width: auto; accent-color: var(--accent); cursor: pointer; }
+.chip[aria-busy="true"] { opacity:.65; pointer-events:none; }
 .chip.input-chip input {
   width: 4.5rem;
   max-width: 6rem;
@@ -816,6 +824,9 @@ tbody tr.scanning { color: #1f2937; font-weight:600; }
 /* Форма настроек радиомодуля */
 .settings-form { display:grid; gap:.75rem; max-width:420px; }
 .settings-form label { display:flex; flex-direction:column; gap:.25rem; font-weight:600; }
+.settings-form .settings-toggle { display:flex; flex-direction:column; gap:.25rem; }
+.settings-form .settings-toggle .chip { gap:.6rem; justify-content:flex-start; }
+.settings-form .settings-toggle .field-hint { margin:0; }
 .settings-actions { margin-top:.5rem; }
 
 /* Mobile dock */
@@ -1227,6 +1238,9 @@ async function init() {
   UI.els.sendBtn = $("#sendBtn");
   UI.els.ackChip = $("#ackStateChip");
   UI.els.ackText = $("#ackStateText");
+  UI.els.ackSetting = $("#ACK");
+  UI.els.ackSettingWrap = $("#ackSettingControl");
+  UI.els.ackSettingHint = $("#ackSettingHint");
   UI.els.channelSelect = $("#CH");
   UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
@@ -1363,6 +1377,12 @@ async function init() {
 
   // Управление ACK и тестами
   if (UI.els.ackChip) UI.els.ackChip.addEventListener("click", onAckChipToggle);
+  if (UI.els.ackSetting) {
+    UI.els.ackSetting.addEventListener("change", () => {
+      UI.els.ackSetting.indeterminate = false;
+      void withAckLock(() => setAck(UI.els.ackSetting.checked));
+    });
+  }
   const btnAckRefresh = $("#btnAckRefresh"); if (btnAckRefresh) btnAckRefresh.addEventListener("click", () => refreshAckState());
   const btnTxl = $("#btnTxlSend"); if (btnTxl) btnTxl.addEventListener("click", sendTxl);
 
@@ -2563,16 +2583,41 @@ async function sendTxl() {
 }
 
 /* ACK */
-// Обработчик клика по чипу состояния ACK: переключаем режим и блокируем повторные запросы
-async function onAckChipToggle() {
-  if (UI.state.ackBusy) return;
+// Унифицированная блокировка элементов управления ACK на время запроса
+async function withAckLock(task) {
+  if (UI.state.ackBusy) return null;
   UI.state.ackBusy = true;
   const chip = UI.els.ackChip;
+  const ackSwitch = UI.els.ackSetting;
+  const ackWrap = UI.els.ackSettingWrap;
   if (chip) {
     chip.disabled = true;
     chip.setAttribute("aria-busy", "true");
   }
+  if (ackSwitch) {
+    ackSwitch.disabled = true;
+    ackSwitch.setAttribute("aria-busy", "true");
+  }
+  if (ackWrap) ackWrap.setAttribute("aria-busy", "true");
   try {
+    return await task();
+  } finally {
+    UI.state.ackBusy = false;
+    if (chip) {
+      chip.removeAttribute("aria-busy");
+      chip.disabled = false;
+    }
+    if (ackSwitch) {
+      ackSwitch.removeAttribute("aria-busy");
+      ackSwitch.disabled = false;
+    }
+    if (ackWrap) ackWrap.removeAttribute("aria-busy");
+    updateAckUi();
+  }
+}
+// Обработчик клика по чипу состояния ACK: переключаем режим с учётом блокировки
+async function onAckChipToggle() {
+  await withAckLock(async () => {
     const current = UI.state.ack;
     if (current === true) {
       await setAck(false);
@@ -2582,13 +2627,7 @@ async function onAckChipToggle() {
       const result = await setAck(true);
       if (result === null) await toggleAck();
     }
-  } finally {
-    UI.state.ackBusy = false;
-    if (chip) {
-      chip.removeAttribute("aria-busy");
-      chip.disabled = false;
-    }
-  }
+  });
 }
 function parseAckResponse(text) {
   if (!text) return null;
@@ -2607,6 +2646,21 @@ function updateAckUi() {
     chip.setAttribute("aria-pressed", state === true ? "true" : state === false ? "false" : "mixed");
   }
   if (text) text.textContent = state === true ? "ON" : state === false ? "OFF" : "—";
+  const ackSwitch = UI.els.ackSetting;
+  if (ackSwitch) {
+    ackSwitch.indeterminate = !(state === true || state === false);
+    ackSwitch.checked = state === true;
+  }
+  const hint = UI.els.ackSettingHint;
+  if (hint) {
+    if (state === true) {
+      hint.textContent = "Автоподтверждения включены, устройство шлёт ACK автоматически.";
+    } else if (state === false) {
+      hint.textContent = "Автоподтверждения выключены, подтверждения нужно отправлять вручную.";
+    } else {
+      hint.textContent = "Состояние ACK неизвестно. Обновите данные или попробуйте снова.";
+    }
+  }
 }
 async function setAck(value) {
   const response = await sendCommand("ACK", { v: value ? "1" : "0" });
@@ -2642,11 +2696,13 @@ async function refreshAckState() {
       return state;
     }
   }
+  UI.state.ack = null;
+  updateAckUi();
   return null;
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","SF"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","SF","ACK"];
 function loadSettings() {
   for (let i = 0; i < SETTINGS_KEYS.length; i++) {
     const key = SETTINGS_KEYS[i];
@@ -2654,8 +2710,10 @@ function loadSettings() {
     if (!el) continue;
     const v = storage.get("set." + key);
     if (v === null) continue;
-    if (el.type === "checkbox") el.checked = v === "1";
-    else el.value = v;
+    if (el.type === "checkbox") {
+      el.checked = v === "1";
+      if (typeof el.indeterminate === "boolean") el.indeterminate = false;
+    } else el.value = v;
   }
 }
 function saveSettingsLocal() {
@@ -2663,6 +2721,10 @@ function saveSettingsLocal() {
     const key = SETTINGS_KEYS[i];
     const el = $("#" + key);
     if (!el) continue;
+    if (el.type === "checkbox" && typeof el.indeterminate === "boolean" && el.indeterminate) {
+      storage.remove("set." + key);
+      continue;
+    }
     const v = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
     storage.set("set." + key, v);
   }
@@ -2673,9 +2735,23 @@ async function applySettingsToDevice() {
     const key = SETTINGS_KEYS[i];
     const el = $("#" + key);
     if (!el) continue;
-    const value = el.type === "checkbox" ? (el.checked ? "1" : "0") : String(el.value || "").trim();
+    if (el.type === "checkbox" && typeof el.indeterminate === "boolean" && el.indeterminate) {
+      continue;
+    }
+    let value = el.type === "checkbox" ? (el.checked ? "1" : "0") : String(el.value || "").trim();
     if (!value) continue;
-    await sendCommand(key, { v: value });
+    if (key === "PW") {
+      const resolved = normalizePowerPreset(value);
+      if (!resolved) {
+        note("Некорректная мощность передачи");
+        continue;
+      }
+      await sendCommand(key, { v: String(resolved.index) });
+    } else if (key === "ACK") {
+      await withAckLock(() => setAck(value === "1"));
+    } else {
+      await sendCommand(key, { v: value });
+    }
   }
   note("Применение завершено.");
   await refreshChannels().catch(() => {});
@@ -2687,6 +2763,9 @@ function exportSettings() {
     const key = SETTINGS_KEYS[i];
     const el = $("#" + key);
     if (!el) continue;
+    if (el.type === "checkbox" && typeof el.indeterminate === "boolean" && el.indeterminate) {
+      continue;
+    }
     obj[key] = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
   }
   const json = JSON.stringify(obj, null, 2);
@@ -2718,8 +2797,10 @@ function importSettings() {
       if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
       const el = $("#" + key);
       if (!el) continue;
-      if (el.type === "checkbox") el.checked = obj[key] === "1";
-      else el.value = obj[key];
+      if (el.type === "checkbox") {
+        el.checked = obj[key] === "1";
+        if (typeof el.indeterminate === "boolean") el.indeterminate = false;
+      } else el.value = obj[key];
       storage.set("set." + key, String(obj[key]));
     }
     note("Импортировано.");
