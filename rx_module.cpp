@@ -94,12 +94,19 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   const uint8_t* cipher = result_buf_.data();
   size_t cipher_len = result_len - TAG_LEN;
   const uint8_t* tag = result_buf_.data() + cipher_len;
-  nonce_ = KeyLoader::makeNonce(hdr.msg_id, hdr.frag_idx);
-  if (!decrypt_ccm(key_.data(), key_.size(), nonce_.data(), nonce_.size(),
-                   nullptr, 0, cipher, cipher_len,
-                   tag, TAG_LEN, plain_buf_)) {
-    LOG_ERROR("RxModule: ошибка дешифрования");
-    return;                                           // прекращаем обработку
+  bool encrypted = (hdr.flags & FrameHeader::FLAG_ENCRYPTED) != 0;
+  if (!encrypted && encryption_forced_) encrypted = true; // совместимость со старыми кадрами
+
+  if (encrypted) {
+    nonce_ = KeyLoader::makeNonce(hdr.msg_id, hdr.frag_idx);
+    if (!decrypt_ccm(key_.data(), key_.size(), nonce_.data(), nonce_.size(),
+                     nullptr, 0, cipher, cipher_len,
+                     tag, TAG_LEN, plain_buf_)) {
+      LOG_ERROR("RxModule: ошибка дешифрования");
+      return;                                         // прекращаем обработку
+    }
+  } else {
+    plain_buf_.assign(result_buf_.begin(), result_buf_.begin() + cipher_len);
   }
 
   if (!plain_buf_.empty() && plain_buf_[0] == '[') {  // удаляем префикс [ID|n]
@@ -132,4 +139,9 @@ void RxModule::setBuffer(ReceivedBuffer* buf) {
 
 void RxModule::reloadKey() {
   key_ = KeyLoader::loadKey();
+  DEBUG_LOG("RxModule: ключ перечитан");
+}
+
+void RxModule::setEncryptionEnabled(bool enabled) {
+  encryption_forced_ = enabled;
 }

@@ -6,6 +6,7 @@
 #include <vector>
 #include "libs/packetizer/packet_gatherer.h" // сборщик пакетов
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
+#include "default_settings.h"
 
 // Модуль приёма данных
 class RxModule {
@@ -21,6 +22,8 @@ public:
   void setBuffer(ReceivedBuffer* buf);
   // Обновление ключа дешифрования (после смены в хранилище)
   void reloadKey();
+  // Управление режимом шифрования (fallback для старых кадров)
+  void setEncryptionEnabled(bool enabled);
 private:
   Callback cb_;
   PacketGatherer gatherer_; // внутренний сборщик фрагментов
@@ -32,4 +35,5 @@ private:
   std::vector<uint8_t> work_buf_;    // временный буфер для декодеров
   std::vector<uint8_t> result_buf_;  // буфер результата перед дешифрованием
   std::vector<uint8_t> plain_buf_;   // буфер расшифрованных данных
+  bool encryption_forced_ = DefaultSettings::USE_ENCRYPTION; // ожидание шифрования по умолчанию
 };

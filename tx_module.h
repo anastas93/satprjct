@@ -2,6 +2,9 @@
 #include <cstdint>
 #include <chrono>
 #include <array>
+#include <deque>
+#include <optional>
+#include <vector>
 #include "radio_interface.h"
 #include "message_buffer.h"
 #include "libs/packetizer/packet_splitter.h" // подключаем разделитель пакетов из каталога libs
@@ -23,12 +26,39 @@ public:
   void setSendPause(uint32_t pause_ms);
   // Перечитать ключ из хранилища (после смены через веб-интерфейс)
   void reloadKey();
+  // Управление режимами подтверждений и шифрования
+  void setAckEnabled(bool enabled);
+  void setAckRetryLimit(uint8_t retries);
+  void onAckReceived();
+  void setEncryptionEnabled(bool enabled);
 private:
+  struct PendingMessage {
+    uint32_t id = 0;                         // идентификатор сообщения
+    std::vector<uint8_t> data;               // данные сообщения с префиксом
+    uint8_t qos = 0;                         // очередь QoS
+    uint8_t attempts_left = 0;               // оставшиеся повторы
+    bool expect_ack = false;                 // требуется ли подтверждение
+  };
+
+  bool transmit(const PendingMessage& message);
+  static bool isAckPayload(const std::vector<uint8_t>& data);
+  void scheduleFromArchive();
+  void onSendSuccess();
+
   IRadio& radio_;
   std::array<MessageBuffer,4> buffers_;             // очереди сообщений по классам QoS
   PacketSplitter splitter_;
   std::array<uint8_t,16> key_{};                    // ключ шифрования
   uint32_t pause_ms_ = DefaultSettings::SEND_PAUSE_MS; // пауза между пакетами
   std::chrono::steady_clock::time_point last_send_; // время последней отправки
+  bool ack_enabled_ = DefaultSettings::USE_ACK;     // режим ожидания ACK
+  uint8_t ack_retry_limit_ = DefaultSettings::ACK_RETRY_LIMIT; // число повторов
+  uint32_t ack_timeout_ms_ = DefaultSettings::ACK_TIMEOUT_MS;  // тайм-аут ожидания
+  bool waiting_ack_ = false;                        // ждём ли ACK
+  std::chrono::steady_clock::time_point last_attempt_; // момент последней отправки
+  std::optional<PendingMessage> inflight_;          // текущий пакет в работе
+  std::optional<PendingMessage> delayed_;           // пакет из архива, готовый к отправке
+  std::deque<PendingMessage> archive_;              // архив сообщений без ACK
+  bool encryption_enabled_ = DefaultSettings::USE_ENCRYPTION; // текущий режим шифрования
 };
 
