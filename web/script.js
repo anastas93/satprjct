@@ -919,7 +919,10 @@ async function sendTextMessage(text, opts) {
   return null;
 }
 function handleCommandSideEffects(cmd, text) {
-  const upper = cmd.toUpperCase();
+  const upperRaw = cmd.toUpperCase();
+  const parts = upperRaw.trim().split(/\s+/);
+  const upper = parts[0] || "";
+  const upperArg = parts[1] || "";
   if (upper === "ACK") {
     const state = parseAckResponse(text);
     if (state !== null) {
@@ -942,14 +945,14 @@ function handleCommandSideEffects(cmd, text) {
       const bankSel = $("#BANK");
       if (bankSel) bankSel.value = text;
     }
-  } else if (upper === "KEYSTATE" || upper === "KEYGEN" || upper === "KEYRESTORE" || upper === "KEYSEND" || upper === "KEYRECV") {
+  } else if (upper === "KEYSTATE" || upper === "KEYGEN" || upper === "KEYRESTORE" || upper === "KEYSEND" || upper === "KEYRECV" || upper === "KEYTRANSFER") {
     try {
       const data = JSON.parse(text);
       UI.key.state = data;
       if (upper === "KEYGEN") UI.key.lastMessage = "Сгенерирован новый локальный ключ";
       else if (upper === "KEYRESTORE") UI.key.lastMessage = "Восстановлена резервная версия ключа";
-      else if (upper === "KEYSEND") UI.key.lastMessage = "Публичный ключ готов к передаче";
-      else if (upper === "KEYRECV") UI.key.lastMessage = "Получен внешний ключ";
+      else if (upper === "KEYSEND" || (upper === "KEYTRANSFER" && upperArg === "SEND")) UI.key.lastMessage = "Публичный ключ готов к передаче";
+      else if (upper === "KEYRECV" || (upper === "KEYTRANSFER" && upperArg === "RECEIVE")) UI.key.lastMessage = "Получен внешний ключ";
       renderKeyState(data);
     } catch (err) {
       console.warn("[key] не удалось разобрать ответ", err);
@@ -2022,18 +2025,18 @@ async function requestKeyRestore() {
 }
 
 async function requestKeySend() {
-  status("→ KEYSEND");
-  const res = await deviceFetch("KEYSEND", {}, 5000);
+  status("→ KEYTRANSFER SEND");
+  const res = await deviceFetch("KEYTRANSFER SEND", {}, 5000);
   if (!res.ok) {
-    status("✗ KEYSEND");
-    note("Ошибка KEYSEND: " + res.error);
+    status("✗ KEYTRANSFER SEND");
+    note("Ошибка KEYTRANSFER SEND: " + res.error);
     return;
   }
   try {
     const data = JSON.parse(res.text);
     if (data && data.error) {
-      note("KEYSEND: " + data.error);
-      status("✗ KEYSEND");
+      note("KEYTRANSFER SEND: " + data.error);
+      status("✗ KEYTRANSFER SEND");
       return;
     }
     UI.key.state = data;
@@ -2048,42 +2051,39 @@ async function requestKeySend() {
         console.warn("[key] clipboard", err);
       }
     }
-    status("✓ KEYSEND");
+    status("✓ KEYTRANSFER SEND");
   } catch (err) {
-    status("✗ KEYSEND");
-    note("Некорректный ответ KEYSEND");
+    status("✗ KEYTRANSFER SEND");
+    note("Некорректный ответ KEYTRANSFER SEND");
   }
 }
 
 async function requestKeyReceive() {
-  let input = window.prompt("Вставьте публичный ключ партнёра (64 hex-символа)");
-  if (!input) return;
-  input = input.trim();
-  if (!/^[0-9a-fA-F]{64}$/.test(input)) {
-    note("Неверный формат ключа");
-    return;
-  }
-  status("→ KEYRECV");
-  const res = await deviceFetch("KEYRECV", { pub: input }, 6000);
+  status("→ KEYTRANSFER RECEIVE");
+  UI.key.lastMessage = "Ожидание ключа по LoRa";
+  renderKeyState(UI.key.state);
+  const res = await deviceFetch("KEYTRANSFER RECEIVE", {}, 8000);
   if (!res.ok) {
-    status("✗ KEYRECV");
-    note("Ошибка KEYRECV: " + res.error);
+    status("✗ KEYTRANSFER RECEIVE");
+    note("Ошибка KEYTRANSFER RECEIVE: " + res.error);
     return;
   }
   try {
     const data = JSON.parse(res.text);
     if (data && data.error) {
-      note("KEYRECV: " + data.error);
-      status("✗ KEYRECV");
+      if (data.error === "timeout") note("KEYTRANSFER: тайм-аут ожидания ключа");
+      else if (data.error === "apply") note("KEYTRANSFER: ошибка применения ключа");
+      else note("KEYTRANSFER RECEIVE: " + data.error);
+      status("✗ KEYTRANSFER RECEIVE");
       return;
     }
     UI.key.state = data;
     UI.key.lastMessage = "Получен внешний ключ";
     renderKeyState(data);
-    status("✓ KEYRECV");
+    status("✓ KEYTRANSFER RECEIVE");
   } catch (err) {
-    status("✗ KEYRECV");
-    note("Некорректный ответ KEYRECV");
+    status("✗ KEYTRANSFER RECEIVE");
+    note("Некорректный ответ KEYTRANSFER RECEIVE");
   }
 }
 
