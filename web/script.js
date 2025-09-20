@@ -157,6 +157,32 @@ async function init() {
   };
   const infoClose = $("#channelInfoClose");
   if (infoClose) infoClose.addEventListener("click", hideChannelInfo);
+  const channelsTable = $("#channelsTable");
+  if (channelsTable) {
+    // Обрабатываем клики по строкам таблицы каналов, чтобы открыть карточку информации
+    channelsTable.addEventListener("click", (event) => {
+      const row = event.target ? event.target.closest("tbody tr") : null;
+      if (!row || !row.dataset) return;
+      const value = row.dataset.ch;
+      if (!value) return;
+      const num = Number(value);
+      if (!Number.isFinite(num)) return;
+      if (UI.state.infoChannel === num) hideChannelInfo();
+      else showChannelInfo(num);
+    });
+    channelsTable.addEventListener("keydown", (event) => {
+      if (!event || (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar")) return;
+      const row = event.target ? event.target.closest("tbody tr") : null;
+      if (!row || !row.dataset) return;
+      const value = row.dataset.ch;
+      if (!value) return;
+      const num = Number(value);
+      if (!Number.isFinite(num)) return;
+      event.preventDefault();
+      if (UI.state.infoChannel === num) hideChannelInfo();
+      else showChannelInfo(num);
+    });
+  }
 
   // Навигация по вкладкам
   const hash = location.hash ? location.hash.slice(1) : "";
@@ -741,7 +767,9 @@ function updateChannelInfoHighlight() {
   const rows = $all("#channelsTable tbody tr");
   rows.forEach((tr) => {
     const value = tr && tr.dataset ? Number(tr.dataset.ch) : NaN;
-    tr.classList.toggle("selected-info", UI.state.infoChannel != null && value === UI.state.infoChannel);
+    const selected = UI.state.infoChannel != null && value === UI.state.infoChannel;
+    tr.classList.toggle("selected-info", selected);
+    if (tr) tr.setAttribute("aria-pressed", selected ? "true" : "false");
   });
 }
 
@@ -912,6 +940,7 @@ function renderChannels() {
     const stCls = status === "tx" || status === "listen" ? "busy" : status === "idle" ? "free" : "unknown";
     tr.classList.add(stCls);
     if (UI.state.channel === c.ch) tr.classList.add("active");
+    const infoSelected = UI.state.infoChannel != null && UI.state.infoChannel === c.ch;
     const scanText = c.scan || "";
     const scanLower = scanText.toLowerCase();
     if (c.scanState) {
@@ -931,6 +960,10 @@ function renderChannels() {
                    "<td>" + (c.st || "") + "</td>" +
                    "<td>" + scanText + "</td>";
     tr.dataset.ch = String(c.ch);
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    tr.setAttribute("aria-pressed", infoSelected ? "true" : "false");
+    if (infoSelected) tr.classList.add("selected-info");
     tbody.appendChild(tr);
   });
   updateChannelInfoPanel();
