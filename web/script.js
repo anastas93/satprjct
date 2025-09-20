@@ -90,12 +90,17 @@ const UI = {
     infoChannel: null,
     chatHistory: [],
     version: null,
+    pauseMs: null,
+    ackTimeout: null,
+    encTest: null,
+    testRxmTimers: [],
   }
 };
 
 // Справочные данные по каналам из CSV
 const channelReference = {
   map: new Map(),
+  byTx: new Map(),
   ready: false,
   loading: false,
   error: null,
@@ -268,6 +273,10 @@ const CHANNEL_REFERENCE_FALLBACK = `,RX (MHz),TX (MHz),System,Band Plan,Purpose
 const POWER_PRESETS = [-5, -2, 1, 4, 7, 10, 13, 16, 19, 22];
 const ACK_RETRY_MAX = 10;
 const ACK_RETRY_DEFAULT = 3;
+const PAUSE_MIN_MS = 0;
+const PAUSE_MAX_MS = 60000;
+const ACK_TIMEOUT_MIN_MS = 0;
+const ACK_TIMEOUT_MAX_MS = 60000;
 
 /* Определяем предпочитаемую тему только при наличии поддержки matchMedia */
 function detectPreferredTheme() {
@@ -314,6 +323,10 @@ async function init() {
   UI.els.ackSettingHint = $("#ackSettingHint");
   UI.els.ackRetry = $("#ACKR");
   UI.els.ackRetryHint = $("#ackRetryHint");
+  UI.els.pauseInput = $("#PAUSE");
+  UI.els.pauseHint = $("#pauseHint");
+  UI.els.ackTimeout = $("#ACKT");
+  UI.els.ackTimeoutHint = $("#ackTimeoutHint");
   UI.els.channelSelect = $("#CH");
   UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
@@ -339,6 +352,15 @@ async function init() {
     system: $("#channelInfoSystem"),
     band: $("#channelInfoBand"),
     purpose: $("#channelInfoPurpose"),
+  };
+  UI.els.encTest = {
+    container: $("#encTest"),
+    status: $("#encTestStatus"),
+    plain: $("#encTestPlain"),
+    cipher: $("#encTestCipher"),
+    decoded: $("#encTestDecoded"),
+    tag: $("#encTestTag"),
+    nonce: $("#encTestNonce"),
   };
   const infoClose = $("#channelInfoClose");
   if (infoClose) infoClose.addEventListener("click", hideChannelInfo);
@@ -463,6 +485,8 @@ async function init() {
   }
   const btnAckRefresh = $("#btnAckRefresh"); if (btnAckRefresh) btnAckRefresh.addEventListener("click", () => refreshAckState());
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
+  if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
+  if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
   const btnTxl = $("#btnTxlSend"); if (btnTxl) btnTxl.addEventListener("click", sendTxl);
 
   // Вкладка каналов
@@ -479,6 +503,7 @@ async function init() {
   });
 
   loadChatHistory();
+  renderEncTest(UI.state.encTest);
 
   // Настройки
   const btnSaveSettings = $("#btnSaveSettings"); if (btnSaveSettings) btnSaveSettings.addEventListener("click", saveSettingsLocal);
@@ -487,6 +512,8 @@ async function init() {
   const btnImportSettings = $("#btnImportSettings"); if (btnImportSettings) btnImportSettings.addEventListener("click", importSettings);
   const btnClearCache = $("#btnClearCache"); if (btnClearCache) btnClearCache.addEventListener("click", clearCaches);
   loadSettings();
+  updatePauseUi();
+  updateAckTimeoutUi();
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels());
   if (UI.els.channelSelect) UI.els.channelSelect.addEventListener("change", onChannelSelectChange);
   updateChannelSelectHint();
@@ -972,6 +999,21 @@ function handleCommandSideEffects(cmd, text) {
       storage.set("set.ACKR", String(value));
       updateAckRetryUi();
     }
+  } else if (upper === "PAUSE") {
+    const value = parsePauseResponse(text);
+    if (value !== null) {
+      UI.state.pauseMs = value;
+      storage.set("set.PAUSE", String(value));
+      updatePauseUi();
+    }
+  } else if (upper === "ACKT") {
+    const value = parseAckTimeoutResponse(text);
+    if (value !== null) {
+      UI.state.ackTimeout = value;
+      storage.set("set.ACKT", String(value));
+      updateAckTimeoutUi();
+      updateAckRetryUi();
+    }
   } else if (upper === "ENC") {
     const state = parseEncResponse(text);
     if (state !== null) {
@@ -982,6 +1024,7 @@ function handleCommandSideEffects(cmd, text) {
     const value = parseInt(text, 10);
     if (!isNaN(value)) {
       UI.state.channel = value;
+      storage.set("set.CH", String(value));
       updateChannelSelect();
       renderChannels();
     }
@@ -993,6 +1036,22 @@ function handleCommandSideEffects(cmd, text) {
     if (text && text.length === 1) {
       const bankSel = $("#BANK");
       if (bankSel) bankSel.value = text;
+    }
+  } else if (upper === "ENCT") {
+    const info = parseEncTestResponse(text);
+    if (info) {
+      UI.state.encTest = info;
+      renderEncTest(info);
+    }
+  } else if (upper === "TESTRXM") {
+    const info = parseTestRxmResponse(text);
+    if (info) {
+      if (info.status === "scheduled") {
+        scheduleTestRxmRefresh(info);
+        refreshReceivedList({ silentError: true });
+      } else if (info.status === "busy") {
+        note("TESTRXM уже выполняется");
+      }
     }
   } else if (upper === "KEYSTATE" || upper === "KEYGEN" || upper === "KEYRESTORE" || upper === "KEYSEND" || upper === "KEYRECV" || upper === "KEYTRANSFER") {
     try {
@@ -1193,7 +1252,7 @@ function updateChannelInfoPanel() {
   if (UI.els.channelInfoTitle) UI.els.channelInfoTitle.textContent = String(UI.state.infoChannel);
 
   const entry = channels.find((c) => c.ch === UI.state.infoChannel);
-  const ref = channelReference.map.get(UI.state.infoChannel);
+  const ref = entry ? (findChannelReferenceByTx(entry) || channelReference.map.get(UI.state.infoChannel)) : channelReference.map.get(UI.state.infoChannel);
   const fields = UI.els.channelInfoFields || {};
 
   setChannelInfoText(fields.rxCurrent, entry ? formatChannelNumber(entry.rx, 3) : "—");
@@ -1258,7 +1317,7 @@ async function loadChannelReferenceData() {
             continue;
           }
           const text = await res.text();
-          channelReference.map = parseChannelReferenceCsv(text);
+          applyChannelReferenceData(parseChannelReferenceCsv(text));
           channelReference.ready = true;
           channelReference.error = null;
           return channelReference.map;
@@ -1268,7 +1327,7 @@ async function loadChannelReferenceData() {
       }
       if (CHANNEL_REFERENCE_FALLBACK) {
         if (lastErr) console.warn("[freq-info] основной источник недоступен, используем встроенные данные:", lastErr);
-        channelReference.map = parseChannelReferenceCsv(CHANNEL_REFERENCE_FALLBACK);
+        applyChannelReferenceData(parseChannelReferenceCsv(CHANNEL_REFERENCE_FALLBACK));
         channelReference.ready = true;
         channelReference.error = null;
         return channelReference.map;
@@ -1284,10 +1343,36 @@ async function loadChannelReferenceData() {
   return channelReference.promise;
 }
 
+function applyChannelReferenceData(data) {
+  const parsed = data || { byChannel: new Map(), byTx: new Map() };
+  channelReference.map = parsed.byChannel instanceof Map ? parsed.byChannel : new Map();
+  channelReference.byTx = parsed.byTx instanceof Map ? parsed.byTx : new Map();
+}
+
+function normalizeFrequencyKey(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  return Math.round(num * 1000);
+}
+
+function findChannelReferenceByTx(entry) {
+  if (!entry || entry.tx == null) return null;
+  const key = normalizeFrequencyKey(entry.tx);
+  if (key === null) return null;
+  const list = channelReference.byTx.get(key);
+  if (!list || !list.length) return null;
+  if (entry.ch != null) {
+    const match = list.find((item) => item && item.ch === entry.ch);
+    if (match) return match;
+  }
+  return list[0];
+}
+
 // Преобразуем CSV в таблицу каналов
 function parseChannelReferenceCsv(text) {
-  const map = new Map();
-  if (!text) return map;
+  const byChannel = new Map();
+  const byTx = new Map();
+  if (!text) return { byChannel, byTx };
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
@@ -1302,16 +1387,25 @@ function parseChannelReferenceCsv(text) {
     if (!Number.isFinite(ch)) continue;
     const rx = cells[1] ? Number(cells[1].trim()) : NaN;
     const tx = cells[2] ? Number(cells[2].trim()) : NaN;
-    map.set(ch, {
+    const entry = {
       ch,
       rx: Number.isFinite(rx) ? rx : null,
       tx: Number.isFinite(tx) ? tx : null,
       system: cells[3] ? cells[3].trim() : "",
       band: cells[4] ? cells[4].trim() : "",
       purpose: cells[5] ? cells[5].trim() : "",
-    });
+    };
+    byChannel.set(ch, entry);
+    if (entry.tx != null) {
+      const key = normalizeFrequencyKey(entry.tx);
+      if (key !== null) {
+        const list = byTx.get(key);
+        if (list) list.push(entry);
+        else byTx.set(key, [entry]);
+      }
+    }
   }
-  return map;
+  return { byChannel, byTx };
 }
 
 // Разбиваем строку CSV с учётом кавычек
@@ -1434,7 +1528,10 @@ async function onChannelSelectChange(event) {
         await refreshChannels().catch(() => {});
       }
     } else {
+      UI.state.channel = num;
       storage.set("set.CH", String(num));
+      updateChannelSelect();
+      renderChannels();
     }
   } finally {
     sel.disabled = false;
@@ -1484,7 +1581,10 @@ async function refreshChannels() {
     const current = await deviceFetch("CH", {}, 2000);
     if (current.ok && current.text) {
       const num = parseInt(current.text, 10);
-      if (!isNaN(num)) UI.state.channel = num;
+      if (!isNaN(num)) {
+        UI.state.channel = num;
+        storage.set("set.CH", String(num));
+      }
     }
   } catch (e) {
     if (!channels.length) mockChannels();
@@ -1767,11 +1867,37 @@ function clampAckRetry(value) {
   if (num > ACK_RETRY_MAX) return ACK_RETRY_MAX;
   return Math.round(num);
 }
+function clampPauseMs(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return PAUSE_MIN_MS;
+  if (num < PAUSE_MIN_MS) return PAUSE_MIN_MS;
+  if (num > PAUSE_MAX_MS) return PAUSE_MAX_MS;
+  return Math.round(num);
+}
+function clampAckTimeoutMs(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return ACK_TIMEOUT_MIN_MS;
+  if (num < ACK_TIMEOUT_MIN_MS) return ACK_TIMEOUT_MIN_MS;
+  if (num > ACK_TIMEOUT_MAX_MS) return ACK_TIMEOUT_MAX_MS;
+  return Math.round(num);
+}
 function parseAckRetryResponse(text) {
   if (!text) return null;
   const match = String(text).match(/-?\d+/);
   if (!match) return null;
   return clampAckRetry(Number(match[0]));
+}
+function parsePauseResponse(text) {
+  if (!text) return null;
+  const token = extractNumericToken(text);
+  if (token == null) return null;
+  return clampPauseMs(Number(token));
+}
+function parseAckTimeoutResponse(text) {
+  if (!text) return null;
+  const token = extractNumericToken(text);
+  if (token == null) return null;
+  return clampAckTimeoutMs(Number(token));
 }
 function updateAckRetryUi() {
   const input = UI.els.ackRetry;
@@ -1787,10 +1913,33 @@ function updateAckRetryUi() {
   if (hint) {
     if (UI.state.ack === true) {
       const attempts = state != null ? state : "—";
-      hint.textContent = "Повторные отправки: " + attempts + " раз.";
+      const timeout = UI.state.ackTimeout != null ? UI.state.ackTimeout + " мс" : "—";
+      hint.textContent = "Повторные отправки: " + attempts + " раз. Ожидание ACK: " + timeout + ".";
     } else {
       hint.textContent = "Доступно после включения ACK.";
     }
+  }
+}
+function updatePauseUi() {
+  const input = UI.els.pauseInput;
+  const value = UI.state.pauseMs;
+  if (input && document.activeElement !== input && value != null) {
+    input.value = String(value);
+  }
+  const hint = UI.els.pauseHint;
+  if (hint) {
+    hint.textContent = value != null ? ("Минимальная пауза между пакетами: " + value + " мс.") : "Пауза между пакетами не загружена.";
+  }
+}
+function updateAckTimeoutUi() {
+  const input = UI.els.ackTimeout;
+  const value = UI.state.ackTimeout;
+  if (input && document.activeElement !== input && value != null) {
+    input.value = String(value);
+  }
+  const hint = UI.els.ackTimeoutHint;
+  if (hint) {
+    hint.textContent = value != null ? ("Время ожидания ACK: " + value + " мс.") : "Время ожидания ACK не загружено.";
   }
 }
 function updateAckUi() {
@@ -1818,6 +1967,25 @@ function updateAckUi() {
       hint.textContent = "Состояние ACK неизвестно. Обновите данные или попробуйте снова.";
     }
   }
+  updateAckRetryUi();
+}
+function onPauseInputChange() {
+  if (!UI.els.pauseInput) return;
+  const raw = UI.els.pauseInput.value;
+  const num = clampPauseMs(parseInt(raw, 10));
+  UI.els.pauseInput.value = String(num);
+  UI.state.pauseMs = num;
+  storage.set("set.PAUSE", String(num));
+  updatePauseUi();
+}
+function onAckTimeoutInputChange() {
+  if (!UI.els.ackTimeout) return;
+  const raw = UI.els.ackTimeout.value;
+  const num = clampAckTimeoutMs(parseInt(raw, 10));
+  UI.els.ackTimeout.value = String(num);
+  UI.state.ackTimeout = num;
+  storage.set("set.ACKT", String(num));
+  updateAckTimeoutUi();
   updateAckRetryUi();
 }
 async function setAck(value) {
@@ -1903,6 +2071,107 @@ async function onAckRetryInput() {
   await setAckRetry(clamped);
 }
 
+/* ENCT визуализация */
+function parseEncTestResponse(text) {
+  const raw = typeof text === "string" ? text.trim() : "";
+  if (!raw) return null;
+  if (raw.startsWith("{")) {
+    try {
+      const data = JSON.parse(raw);
+      return {
+        status: data && typeof data.status === "string" ? data.status : "unknown",
+        plain: data && typeof data.plain === "string" ? data.plain : "",
+        decoded: data && typeof data.decoded === "string" ? data.decoded : "",
+        cipher: data && typeof data.cipher === "string" ? data.cipher : "",
+        tag: data && typeof data.tag === "string" ? data.tag : "",
+        nonce: data && typeof data.nonce === "string" ? data.nonce : "",
+        error: data && typeof data.error === "string" ? data.error : null,
+        legacy: false,
+      };
+    } catch (err) {
+      console.warn("[enct] parse", err);
+      return null;
+    }
+  }
+  if (/ENCT:OK/i.test(raw)) {
+    return { status: "ok", plain: "", decoded: "", cipher: "", tag: "", nonce: "", error: null, legacy: true };
+  }
+  if (/ENCT:ERR/i.test(raw)) {
+    return { status: "error", plain: "", decoded: "", cipher: "", tag: "", nonce: "", error: "legacy", legacy: true };
+  }
+  return null;
+}
+function renderEncTest(data) {
+  const els = UI.els.encTest || {};
+  const container = els.container;
+  const status = data && data.status ? String(data.status) : null;
+  if (container) {
+    if (!status) container.removeAttribute("data-status");
+    else container.setAttribute("data-status", status === "ok" ? "ok" : (status === "error" ? "error" : "idle"));
+  }
+  if (els.status) {
+    let text = "Нет данных";
+    if (data) {
+      if (status === "ok") text = data.legacy ? "Успех (ограниченный ответ)" : "Успех";
+      else if (status === "error") text = data.error ? "Ошибка: " + data.error : "Ошибка";
+      else text = status;
+    }
+    els.status.textContent = text;
+  }
+  const formatHex = (value) => {
+    if (!value) return "—";
+    return value.replace(/(.{2})/g, "$1 ").trim();
+  };
+  if (els.plain) {
+    if (data && data.plain) els.plain.textContent = data.plain;
+    else if (data && data.legacy) els.plain.textContent = "Недоступно";
+    else els.plain.textContent = "—";
+  }
+  if (els.decoded) {
+    if (data && data.decoded) els.decoded.textContent = data.decoded;
+    else if (data && data.legacy) els.decoded.textContent = "Недоступно";
+    else els.decoded.textContent = "—";
+  }
+  if (els.cipher) els.cipher.textContent = data ? formatHex(data.cipher) : "—";
+  if (els.tag) els.tag.textContent = data ? formatHex(data.tag) : "—";
+  if (els.nonce) els.nonce.textContent = data ? formatHex(data.nonce) : "—";
+}
+function parseTestRxmResponse(text) {
+  const raw = typeof text === "string" ? text.trim() : "";
+  if (!raw) return null;
+  if (raw.startsWith("{")) {
+    try {
+      const data = JSON.parse(raw);
+      return {
+        status: data && typeof data.status === "string" ? data.status : "unknown",
+        count: Number(data && data.count != null ? data.count : 0) || 0,
+        intervalMs: Number(data && data.intervalMs != null ? data.intervalMs : 0) || 0,
+      };
+    } catch (err) {
+      console.warn("[testrxm] parse", err);
+      return null;
+    }
+  }
+  if (/busy/i.test(raw)) return { status: "busy", count: 0, intervalMs: 0 };
+  return null;
+}
+function clearTestRxmTimers() {
+  if (!Array.isArray(UI.state.testRxmTimers)) UI.state.testRxmTimers = [];
+  for (const id of UI.state.testRxmTimers) {
+    clearTimeout(id);
+  }
+  UI.state.testRxmTimers = [];
+}
+function scheduleTestRxmRefresh(info) {
+  clearTestRxmTimers();
+  const count = Math.max(1, Number(info && info.count ? info.count : 5) || 5);
+  const interval = Math.max(200, Number(info && info.intervalMs ? info.intervalMs : 500) || 500);
+  for (let i = 1; i <= count + 1; ++i) {
+    const timer = setTimeout(() => refreshReceivedList({ silentError: true }), interval * i + 80);
+    UI.state.testRxmTimers.push(timer);
+  }
+}
+
 /* Encryption */
 async function withEncLock(task) {
   if (UI.state.encBusy) return null;
@@ -1984,7 +2253,7 @@ async function refreshEncryptionState() {
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","SF","ACKR"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","SF","PAUSE","ACKT","ACKR"];
 function normalizePowerPreset(raw) {
   if (raw == null) return null;
   const str = String(raw).trim();
@@ -2015,11 +2284,29 @@ function loadSettings() {
       if (resolved) {
         el.value = String(resolved.value);
       }
+    } else if (key === "CH") {
+      const num = parseInt(v, 10);
+      if (!isNaN(num)) {
+        UI.state.channel = num;
+        el.value = String(num);
+      } else {
+        el.value = v;
+      }
     } else if (key === "ACKR") {
       const num = clampAckRetry(parseInt(v, 10));
       if (UI.els.ackRetry) UI.els.ackRetry.value = String(num);
       UI.state.ackRetry = num;
       updateAckRetryUi();
+    } else if (key === "PAUSE") {
+      const num = clampPauseMs(parseInt(v, 10));
+      if (UI.els.pauseInput) UI.els.pauseInput.value = String(num);
+      UI.state.pauseMs = num;
+      updatePauseUi();
+    } else if (key === "ACKT") {
+      const num = clampAckTimeoutMs(parseInt(v, 10));
+      if (UI.els.ackTimeout) UI.els.ackTimeout.value = String(num);
+      UI.state.ackTimeout = num;
+      updateAckTimeoutUi();
     } else {
       el.value = v;
     }
@@ -2037,6 +2324,10 @@ function saveSettingsLocal() {
     let v = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
     if (key === "ACKR") {
       v = String(clampAckRetry(parseInt(v, 10)));
+    } else if (key === "PAUSE") {
+      v = String(clampPauseMs(parseInt(v, 10)));
+    } else if (key === "ACKT") {
+      v = String(clampAckTimeoutMs(parseInt(v, 10)));
     }
     storage.set("set." + key, v);
   }
@@ -2058,11 +2349,50 @@ async function applySettingsToDevice() {
         note("Некорректная мощность передачи");
         continue;
       }
-      await sendCommand(key, { v: String(resolved.index) });
+      const resp = await sendCommand(key, { v: String(resolved.index) });
+      if (resp !== null) {
+        storage.set("set.PW", String(resolved.value));
+        el.value = String(resolved.value);
+      }
     } else if (key === "ACKR") {
       await setAckRetry(parseInt(value, 10));
+    } else if (key === "CH") {
+      const resp = await sendCommand(key, { v: value });
+      if (resp !== null) {
+        const num = parseInt(value, 10);
+        if (!isNaN(num)) {
+          UI.state.channel = num;
+          storage.set("set.CH", String(num));
+          updateChannelSelect();
+          renderChannels();
+        }
+      }
+    } else if (key === "PAUSE") {
+      const parsed = clampPauseMs(parseInt(value, 10));
+      const resp = await sendCommand("PAUSE", { v: String(parsed) });
+      if (resp !== null) {
+        const applied = parsePauseResponse(resp);
+        const effective = applied != null ? applied : parsed;
+        UI.state.pauseMs = effective;
+        if (UI.els.pauseInput) UI.els.pauseInput.value = String(effective);
+        updatePauseUi();
+        storage.set("set.PAUSE", String(effective));
+      }
+    } else if (key === "ACKT") {
+      const parsed = clampAckTimeoutMs(parseInt(value, 10));
+      const resp = await sendCommand("ACKT", { v: String(parsed) });
+      if (resp !== null) {
+        const applied = parseAckTimeoutResponse(resp);
+        const effective = applied != null ? applied : parsed;
+        UI.state.ackTimeout = effective;
+        if (UI.els.ackTimeout) UI.els.ackTimeout.value = String(effective);
+        updateAckTimeoutUi();
+        updateAckRetryUi();
+        storage.set("set.ACKT", String(effective));
+      }
     } else {
-      await sendCommand(key, { v: value });
+      const resp = await sendCommand(key, { v: value });
+      if (resp !== null) storage.set("set." + key, value);
     }
   }
   note("Применение завершено.");
@@ -2080,6 +2410,10 @@ function exportSettings() {
     }
     if (key === "ACKR") {
       obj[key] = String(clampAckRetry(parseInt(el.value, 10)));
+    } else if (key === "PAUSE") {
+      obj[key] = String(clampPauseMs(parseInt(el.value, 10)));
+    } else if (key === "ACKT") {
+      obj[key] = String(clampAckTimeoutMs(parseInt(el.value, 10)));
     } else {
       obj[key] = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
     }
@@ -2119,6 +2453,23 @@ function importSettings() {
         UI.state.ackRetry = num;
         updateAckRetryUi();
         storage.set("set.ACKR", String(num));
+        continue;
+      }
+      if (key === "PAUSE") {
+        const num = clampPauseMs(parseInt(obj[key], 10));
+        if (UI.els.pauseInput) UI.els.pauseInput.value = String(num);
+        UI.state.pauseMs = num;
+        updatePauseUi();
+        storage.set("set.PAUSE", String(num));
+        continue;
+      }
+      if (key === "ACKT") {
+        const num = clampAckTimeoutMs(parseInt(obj[key], 10));
+        if (UI.els.ackTimeout) UI.els.ackTimeout.value = String(num);
+        UI.state.ackTimeout = num;
+        updateAckTimeoutUi();
+        updateAckRetryUi();
+        storage.set("set.ACKT", String(num));
         continue;
       }
       if (el.type === "checkbox") {
@@ -2225,6 +2576,35 @@ async function syncSettingsFromDevice() {
   } catch (err) {
     console.warn("[settings] PW", err);
   }
+  try {
+    const pauseRes = await deviceFetch("PAUSE", {}, 2000);
+    if (pauseRes.ok) {
+      const parsed = parsePauseResponse(pauseRes.text);
+      if (parsed !== null) {
+        UI.state.pauseMs = parsed;
+        if (UI.els.pauseInput) UI.els.pauseInput.value = String(parsed);
+        storage.set("set.PAUSE", String(parsed));
+        updatePauseUi();
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] PAUSE", err);
+  }
+  try {
+    const ackTRes = await deviceFetch("ACKT", {}, 2000);
+    if (ackTRes.ok) {
+      const parsed = parseAckTimeoutResponse(ackTRes.text);
+      if (parsed !== null) {
+        UI.state.ackTimeout = parsed;
+        if (UI.els.ackTimeout) UI.els.ackTimeout.value = String(parsed);
+        storage.set("set.ACKT", String(parsed));
+        updateAckTimeoutUi();
+        updateAckRetryUi();
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] ACKT", err);
+  }
 
   updateChannelSelect();
   updateChannelSelectHint();
@@ -2267,8 +2647,10 @@ function renderKeyState(state) {
 async function refreshKeyState(options) {
   const opts = options || {};
   if (!opts.silent) status("→ KEYSTATE");
+  debugLog("KEYSTATE → запрос состояния");
   const res = await deviceFetch("KEYSTATE", {}, 4000);
   if (res.ok) {
+    debugLog("KEYSTATE ← " + res.text);
     try {
       const data = JSON.parse(res.text);
       if (data && data.error) {
@@ -2287,17 +2669,21 @@ async function refreshKeyState(options) {
     status("✗ KEYSTATE");
     note("Ошибка KEYSTATE: " + res.error);
   }
+  if (!res.ok) debugLog("KEYSTATE ✗ " + res.error);
 }
 
 async function requestKeyGen() {
   status("→ KEYGEN");
+  debugLog("KEYGEN → запрос генерации");
   const res = await deviceFetch("KEYGEN", {}, 6000);
   if (!res.ok) {
+    debugLog("KEYGEN ✗ " + res.error);
     status("✗ KEYGEN");
     note("Ошибка KEYGEN: " + res.error);
     return;
   }
   try {
+    debugLog("KEYGEN ← " + res.text);
     const data = JSON.parse(res.text);
     if (data && data.error) {
       note("KEYGEN: " + data.error);
@@ -2316,13 +2702,16 @@ async function requestKeyGen() {
 
 async function requestKeyRestore() {
   status("→ KEYRESTORE");
+  debugLog("KEYRESTORE → запрос восстановления");
   const res = await deviceFetch("KEYRESTORE", {}, 6000);
   if (!res.ok) {
+    debugLog("KEYRESTORE ✗ " + res.error);
     status("✗ KEYRESTORE");
     note("Ошибка KEYRESTORE: " + res.error);
     return;
   }
   try {
+    debugLog("KEYRESTORE ← " + res.text);
     const data = JSON.parse(res.text);
     if (data && data.error) {
       note("KEYRESTORE: " + data.error);
@@ -2341,13 +2730,16 @@ async function requestKeyRestore() {
 
 async function requestKeySend() {
   status("→ KEYTRANSFER SEND");
+  debugLog("KEYTRANSFER SEND → запрос отправки ключа");
   const res = await deviceFetch("KEYTRANSFER SEND", {}, 5000);
   if (!res.ok) {
+    debugLog("KEYTRANSFER SEND ✗ " + res.error);
     status("✗ KEYTRANSFER SEND");
     note("Ошибка KEYTRANSFER SEND: " + res.error);
     return;
   }
   try {
+    debugLog("KEYTRANSFER SEND ← " + res.text);
     const data = JSON.parse(res.text);
     if (data && data.error) {
       note("KEYTRANSFER SEND: " + data.error);
@@ -2377,13 +2769,16 @@ async function requestKeyReceive() {
   status("→ KEYTRANSFER RECEIVE");
   UI.key.lastMessage = "Ожидание ключа по LoRa";
   renderKeyState(UI.key.state);
+  debugLog("KEYTRANSFER RECEIVE → ожидание ключа");
   const res = await deviceFetch("KEYTRANSFER RECEIVE", {}, 8000);
   if (!res.ok) {
+    debugLog("KEYTRANSFER RECEIVE ✗ " + res.error);
     status("✗ KEYTRANSFER RECEIVE");
     note("Ошибка KEYTRANSFER RECEIVE: " + res.error);
     return;
   }
   try {
+    debugLog("KEYTRANSFER RECEIVE ← " + res.text);
     const data = JSON.parse(res.text);
     if (data && data.error) {
       if (data.error === "timeout") note("KEYTRANSFER: тайм-аут ожидания ключа");
@@ -2447,7 +2842,7 @@ async function loadVersion() {
     const res = await fetch(url.toString(), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const text = (await res.text()).trim();
-    UI.state.version = text || "unknown";
+    UI.state.version = text || null;
     updateFooterVersion();
     return UI.state.version;
   } catch (err) {
@@ -2459,7 +2854,15 @@ async function loadVersion() {
 function updateFooterVersion() {
   const el = UI.els.version || $("#appVersion");
   if (!el) return;
-  el.textContent = UI.state.version ? String(UI.state.version) : "unknown";
+  let text = UI.state.version != null ? String(UI.state.version) : "";
+  if (text) {
+    text = text.trim();
+    if (/^v+/i.test(text)) {
+      text = text.replace(/^v+/i, "").trim();
+    }
+  }
+  if (!text) text = "—";
+  el.textContent = text;
 }
 async function resyncAfterEndpointChange() {
   try {
