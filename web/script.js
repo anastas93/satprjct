@@ -13,6 +13,7 @@ const UI = {
   state: {
     channel: null,
     ack: null,
+    ackBusy: false,
     recvAuto: false,
     recvTimer: null,
     receivedKnown: new Set(),
@@ -42,6 +43,7 @@ async function init() {
   UI.els.sendBtn = $("#sendBtn");
   UI.els.ackChip = $("#ackStateChip");
   UI.els.ackText = $("#ackStateText");
+  UI.els.channelSelect = $("#CH");
   UI.els.txlInput = $("#txlSize");
   UI.els.recvList = $("#recvList");
   UI.els.recvEmpty = $("#recvEmpty");
@@ -129,9 +131,7 @@ async function init() {
   refreshReceivedList({ silentError: true });
 
   // Управление ACK и тестами
-  const btnAckOn = $("#btnAckOn"); if (btnAckOn) btnAckOn.addEventListener("click", () => setAck(true));
-  const btnAckOff = $("#btnAckOff"); if (btnAckOff) btnAckOff.addEventListener("click", () => setAck(false));
-  const btnAckToggle = $("#btnAckToggle"); if (btnAckToggle) btnAckToggle.addEventListener("click", toggleAck);
+  if (UI.els.ackChip) UI.els.ackChip.addEventListener("click", onAckChipToggle);
   const btnAckRefresh = $("#btnAckRefresh"); if (btnAckRefresh) btnAckRefresh.addEventListener("click", () => refreshAckState());
   const btnTxl = $("#btnTxlSend"); if (btnTxl) btnTxl.addEventListener("click", sendTxl);
 
@@ -151,6 +151,7 @@ async function init() {
   const btnClearCache = $("#btnClearCache"); if (btnClearCache) btnClearCache.addEventListener("click", clearCaches);
   loadSettings();
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels());
+  if (UI.els.channelSelect) UI.els.channelSelect.addEventListener("change", onChannelSelectChange);
 
   // Безопасность
   const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", generateKey);
@@ -638,8 +639,9 @@ function renderChannels() {
   });
 }
 function updateChannelSelect() {
-  const sel = $("#CH");
+  const sel = UI.els.channelSelect || $("#CH");
   if (!sel) return;
+  UI.els.channelSelect = sel;
   const prev = UI.state.channel != null ? String(UI.state.channel) : sel.value;
   sel.innerHTML = "";
   channels.forEach((c) => {
@@ -649,6 +651,35 @@ function updateChannelSelect() {
     sel.appendChild(opt);
   });
   if (prev && channels.some((c) => String(c.ch) === prev)) sel.value = prev;
+}
+// Обработка выбора канала в выпадающем списке Settings с немедленным применением
+async function onChannelSelectChange(event) {
+  const sel = event && event.target ? event.target : (UI.els.channelSelect || $("#CH"));
+  if (!sel) return;
+  const raw = sel.value;
+  const num = parseInt(raw, 10);
+  if (isNaN(num)) {
+    note("Некорректный номер канала");
+    if (UI.state.channel != null) sel.value = String(UI.state.channel);
+    return;
+  }
+  if (UI.state.channel === num) return;
+  const prev = UI.state.channel;
+  sel.disabled = true;
+  try {
+    const res = await sendCommand("CH", { v: String(num) });
+    if (res === null) {
+      if (prev != null) {
+        sel.value = String(prev);
+      } else {
+        await refreshChannels().catch(() => {});
+      }
+    } else {
+      localStorage.setItem("set.CH", String(num));
+    }
+  } finally {
+    sel.disabled = false;
+  }
 }
 async function refreshChannels() {
   const bankSel = $("#BANK");
@@ -891,6 +922,25 @@ async function sendTxl() {
 }
 
 /* ACK */
+// Обработчик клика по чипу состояния ACK: переключаем режим и блокируем повторные запросы
+async function onAckChipToggle() {
+  if (UI.state.ackBusy) return;
+  UI.state.ackBusy = true;
+  const chip = UI.els.ackChip;
+  if (chip) {
+    chip.disabled = true;
+    chip.setAttribute("aria-busy", "true");
+  }
+  try {
+    await toggleAck();
+  } finally {
+    UI.state.ackBusy = false;
+    if (chip) {
+      chip.removeAttribute("aria-busy");
+      chip.disabled = false;
+    }
+  }
+}
 function parseAckResponse(text) {
   if (!text) return null;
   const low = text.toLowerCase();
@@ -903,7 +953,10 @@ function updateAckUi() {
   const text = UI.els.ackText;
   const state = UI.state.ack;
   const mode = state === true ? "on" : state === false ? "off" : "unknown";
-  if (chip) chip.setAttribute("data-state", mode);
+  if (chip) {
+    chip.setAttribute("data-state", mode);
+    chip.setAttribute("aria-pressed", state === true ? "true" : state === false ? "false" : "mixed");
+  }
   if (text) text.textContent = state === true ? "ON" : state === false ? "OFF" : "—";
   const ackInput = $("#ACK");
   if (ackInput && typeof state === "boolean") ackInput.checked = state;
