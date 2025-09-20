@@ -33,7 +33,7 @@ int main() {
   assert(applyRemotePublic(remote_pub));
   KeyRecord rec2;
   assert(loadKeyRecord(rec2));
-  assert(rec2.origin == KeyOrigin::EXTERNAL);
+  assert(rec2.origin == KeyOrigin::REMOTE);
   assert(rec2.peer_public == remote_pub);
 
   std::array<uint8_t,32> shared_remote{};
@@ -70,7 +70,7 @@ int main() {
   assert(restorePreviousKey());
   KeyRecord rec4;
   assert(loadKeyRecord(rec4));
-  assert(rec4.origin == KeyOrigin::EXTERNAL);
+  assert(rec4.origin == KeyOrigin::REMOTE);
   assert(rec4.peer_public == remote_pub);
 
   std::cout << "OK" << std::endl;

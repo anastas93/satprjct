@@ -76,14 +76,14 @@ String makeKeyStateJson() {
   json += "\"valid\":";
   json += st.valid ? "true" : "false";
   json += ",\"type\":\"";
-  json += (st.origin == KeyLoader::KeyOrigin::EXTERNAL ? "external" : "local");
+  json += (st.origin == KeyLoader::KeyOrigin::REMOTE ? "external" : "local");
   json += "\",\"id\":\"";
   json += toHex(idBytes);
   json += "\",\"public\":\"";
   json += toHex(st.root_public);
   json += "\",\"hasBackup\":";
   json += st.has_backup ? "true" : "false";
-  if (st.origin == KeyLoader::KeyOrigin::EXTERNAL) {
+  if (st.origin == KeyLoader::KeyOrigin::REMOTE) {
     json += ",\"peer\":\"";
     json += toHex(st.peer_public);
     json += "\"";

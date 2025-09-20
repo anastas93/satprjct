@@ -218,7 +218,7 @@ bool deserialize(const std::vector<uint8_t>& raw, KeyRecord& out) {
   uint8_t version = raw[offset++];
   if (version != VERSION) return false;
   uint8_t origin = raw[offset++];
-  if (origin > static_cast<uint8_t>(KeyOrigin::EXTERNAL)) return false;
+  if (origin > static_cast<uint8_t>(KeyOrigin::REMOTE)) return false;
   offset += 2; // reserved
   uint32_t salt = static_cast<uint32_t>(raw[offset]) |
                   (static_cast<uint32_t>(raw[offset + 1]) << 8) |
@@ -363,7 +363,7 @@ bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
   }
   rec.session_key = deriveSessionFromShared(shared, rec.root_public, remote_public);
   rec.nonce_salt = nonceSaltFromKey(rec.session_key);
-  rec.origin = KeyOrigin::EXTERNAL;
+  rec.origin = KeyOrigin::REMOTE;
   rec.peer_public = remote_public;
   rec.valid = true;
   if (!writeRecord(rec)) return false;
