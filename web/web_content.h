@@ -270,7 +270,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
   </main>
   <footer class="site-footer">
     <div id="statusLine" class="small muted"></div>
-    <div class="footer-meta" id="footerMeta">Powered by AS Systems · v<span id="appVersion">—</span></div>
+    <div class="footer-meta" id="footerMeta">Powered by AS Systems · <span id="appVersion">—</span></div>
   </footer>
   <div id="toast" class="toast" hidden></div>
   <script src="libs/sha256.js"></script>
