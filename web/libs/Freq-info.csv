@@ -1,0 +1,165 @@
+
+Channel,RX (MHz),TX (MHz),System,Band Plan,Purpose
+0,243.625,316.725,UHF military,225-328.6 MHz,Military communications
+1,243.625,300.400,UHF military,225-328.6 MHz,Military communications
+2,243.800,298.200,UHF military,225-328.6 MHz,Military communications
+3,244.135,296.075,UHF FO,Band Plan P,Tactical communications
+4,244.275,300.250,UHF military,225-328.6 MHz,Military communications
+5,245.200,312.850,UHF military,225-328.6 MHz,Military communications
+6,245.800,298.650,UHF military,225-328.6 MHz,Military communications
+7,245.850,314.230,UHF military,225-328.6 MHz,Military communications
+8,245.950,299.400,UHF military,225-328.6 MHz,Military communications
+9,247.450,298.800,UHF military,225-328.6 MHz,Military communications
+10,248.750,306.900,Marisat,B,Tactical voice/data
+11,248.825,294.375,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder
+12,249.375,316.975,UHF military,225-328.6 MHz,Military communications
+13,249.400,300.975,UHF military,225-328.6 MHz,Military communications
+14,249.450,299.000,UHF military,225-328.6 MHz,Military communications
+15,249.450,312.750,UHF military,225-328.6 MHz,Military communications
+16,249.490,313.950,UHF military,225-328.6 MHz,Military communications
+17,249.530,318.280,UHF military,225-328.6 MHz,Military communications
+18,249.850,316.250,UHF military,225-328.6 MHz,Military communications
+19,249.850,298.830,UHF military,225-328.6 MHz,Military communications
+20,249.890,300.500,UHF military,225-328.6 MHz,Military communications
+21,249.930,308.750,UHF FO,Q,Tactical communications
+22,250.090,312.600,UHF military,225-328.6 MHz,Military communications
+23,250.900,308.300,UHF FO,Q,Tactical communications
+24,251.275,296.500,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder
+25,251.575,308.450,UHF military,225-328.6 MHz,Military communications
+26,251.600,298.225,UHF military,225-328.6 MHz,Military communications
+27,251.850,292.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+28,251.900,292.900,FLTSATCOM/Leasat,A/X,Tactical communications
+29,251.950,292.950,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+30,252.000,293.100,FLTSATCOM,B,Tactical communications
+31,252.050,293.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+32,252.150,293.150,UHF military,225-328.6 MHz,Military communications
+33,252.200,299.150,UHF military,225-328.6 MHz,Military communications
+34,252.400,309.700,UHF FO,Q,Tactical communications
+35,252.450,309.750,UHF military,225-328.6 MHz,Military communications
+36,252.500,309.800,UHF military,225-328.6 MHz,Military communications
+37,252.550,309.850,UHF military,225-328.6 MHz,Military communications
+38,252.625,309.925,UHF military,225-328.6 MHz,Military communications
+39,253.550,294.550,UHF military,225-328.6 MHz,Military communications
+40,253.600,295.950,UHF military,225-328.6 MHz,Military communications
+41,253.650,294.650,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+42,253.700,294.700,FLTSATCOM/Leasat/UHF FO,A/X/O,Tactical communications
+43,253.750,294.750,UHF military,225-328.6 MHz,Military communications
+44,253.800,296.000,UHF military,225-328.6 MHz,Military communications
+45,253.850,294.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+46,253.850,294.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+47,253.900,307.500,UHF military,225-328.6 MHz,Military communications
+48,254.000,298.630,UHF military,225-328.6 MHz,Military communications
+49,254.730,312.550,UHF military,225-328.6 MHz,Military communications
+50,254.775,310.800,UHF military,225-328.6 MHz,Military communications
+51,254.830,296.200,UHF military,225-328.6 MHz,Military communications
+52,255.250,302.425,UHF military,225-328.6 MHz,Military communications
+53,255.350,296.350,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+54,255.400,296.400,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+55,255.450,296.450,UHF military,225-328.6 MHz,Military communications
+56,255.550,296.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+57,255.550,296.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+58,255.775,309.300,UHF military,225-328.6 MHz,Military communications
+59,256.450,313.850,UHF military,225-328.6 MHz,Military communications
+60,256.600,305.950,UHF military,225-328.6 MHz,Military communications
+61,256.850,297.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+62,256.900,296.100,UHF military,225-328.6 MHz,Military communications
+63,256.950,297.950,UHF military,225-328.6 MHz,Military communications
+64,257.000,297.675,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+65,257.050,298.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+66,257.100,295.650,UHF military,225-328.6 MHz,Military communications
+67,257.150,298.150,UHF military,225-328.6 MHz,Military communications
+68,257.200,308.800,UHF military,225-328.6 MHz,Military communications
+69,257.250,309.475,UHF military,225-328.6 MHz,Military communications
+70,257.300,309.725,UHF military,225-328.6 MHz,Military communications
+71,257.350,307.200,UHF military,225-328.6 MHz,Military communications
+72,257.500,311.350,UHF military,225-328.6 MHz,Military communications
+73,257.700,316.150,UHF military,225-328.6 MHz,Military communications
+74,257.775,311.375,UHF military,225-328.6 MHz,Military communications
+75,257.825,297.075,UHF military,225-328.6 MHz,Military communications
+76,257.900,298.000,UHF military,225-328.6 MHz,Military communications
+77,258.150,293.200,UHF military,225-328.6 MHz,Military communications
+78,258.350,299.350,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+79,258.450,299.450,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+80,258.500,299.500,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+81,258.550,299.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+82,258.650,299.650,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+83,259.000,317.925,UHF military,225-328.6 MHz,Military communications
+84,259.050,317.975,UHF military,225-328.6 MHz,Military communications
+85,259.975,310.050,UHF military,225-328.6 MHz,Military communications
+86,260.025,310.225,UHF military,225-328.6 MHz,Military communications
+87,260.075,310.275,UHF military,225-328.6 MHz,Military communications
+88,260.125,310.125,UHF military,225-328.6 MHz,Military communications
+89,260.175,310.325,UHF military,225-328.6 MHz,Military communications
+90,260.375,292.975,UHF military,225-328.6 MHz,Military communications
+91,260.425,297.575,UHF military,225-328.6 MHz,Military communications
+92,260.425,294.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+93,260.475,294.075,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+94,260.525,294.125,UHF military,225-328.6 MHz,Military communications
+95,260.550,296.775,UHF military,225-328.6 MHz,Military communications
+96,260.575,294.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+97,260.625,294.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+98,260.675,294.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+99,260.675,294.275,UHF military,225-328.6 MHz,Military communications
+100,260.725,294.325,UHF military,225-328.6 MHz,Military communications
+101,260.900,313.900,UHF military,225-328.6 MHz,Military communications
+102,261.100,298.380,UHF military,225-328.6 MHz,Military communications
+103,261.100,298.700,UHF military,225-328.6 MHz,Military communications
+104,261.200,294.950,UHF military,225-328.6 MHz,Military communications
+105,262.000,314.200,UHF military,225-328.6 MHz,Military communications
+106,262.040,307.075,UHF military,225-328.6 MHz,Military communications
+107,262.075,306.975,UHF military,225-328.6 MHz,Military communications
+108,262.125,295.725,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+109,262.175,297.025,UHF military,225-328.6 MHz,Military communications
+110,262.175,295.775,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+111,262.225,295.825,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+112,262.275,295.875,UHF military,225-328.6 MHz,Military communications
+113,262.275,300.275,UHF military,225-328.6 MHz,Military communications
+114,262.325,295.925,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+115,262.375,295.975,UHF military,225-328.6 MHz,Military communications
+116,262.425,296.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+117,263.450,311.400,UHF military,225-328.6 MHz,Military communications
+118,263.500,309.875,UHF military,225-328.6 MHz,Military communications
+119,263.575,297.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+120,263.625,297.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+121,263.675,297.275,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+122,263.725,297.325,UHF military,225-328.6 MHz,Military communications
+123,263.775,297.375,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+124,263.825,297.425,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+125,263.875,297.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+126,263.925,297.525,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+127,265.250,306.250,UHF military,225-328.6 MHz,Military communications
+128,265.350,306.350,UHF military,225-328.6 MHz,Military communications
+129,265.400,294.425,FLTSATCOM/Leasat,A/X,Tactical communications
+130,265.450,306.450,UHF military,225-328.6 MHz,Military communications
+131,265.500,302.525,UHF military,225-328.6 MHz,Military communications
+132,265.550,306.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+133,265.675,306.675,UHF military,225-328.6 MHz,Military communications
+134,265.850,306.850,UHF military,225-328.6 MHz,Military communications
+135,266.750,316.575,UHF military,225-328.6 MHz,Military communications
+136,266.850,307.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+137,266.900,297.625,UHF military,225-328.6 MHz,Military communications
+138,266.950,307.950,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+139,267.050,308.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+140,267.100,308.100,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+141,267.150,308.150,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+142,267.200,308.200,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+143,267.250,308.250,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+144,267.400,294.900,UHF military,225-328.6 MHz,Military communications
+145,267.875,310.375,UHF military,225-328.6 MHz,Military communications
+146,267.950,310.450,UHF military,225-328.6 MHz,Military communications
+147,268.000,310.475,UHF military,225-328.6 MHz,Military communications
+148,268.025,309.025,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+149,268.050,310.550,UHF military,225-328.6 MHz,Military communications
+150,268.100,310.600,UHF military,225-328.6 MHz,Military communications
+151,268.150,309.150,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+152,268.200,296.050,UHF military,225-328.6 MHz,Military communications
+153,268.250,309.250,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+154,268.300,309.300,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+155,268.350,309.350,UHF military,225-328.6 MHz,Military communications
+156,268.400,295.900,FLTSATCOM/Leasat,C/Z,Tactical communications
+157,268.450,309.450,UHF military,225-328.6 MHz,Military communications
+158,269.700,309.925,UHF military,225-328.6 MHz,Military communications
+159,269.750,310.750,UHF military,225-328.6 MHz,Military communications
+160,269.800,310.025,UHF military,225-328.6 MHz,Military communications
+161,269.850,310.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+162,269.950,310.950,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
