@@ -78,6 +78,7 @@ const UI = {
     lastMessage: "",
   },
   state: {
+    bank: null,
     channel: null,
     ack: null,
     ackRetry: null,
@@ -88,6 +89,8 @@ const UI = {
     recvTimer: null,
     receivedKnown: new Set(),
     infoChannel: null,
+    infoChannelTx: null,
+    infoChannelRx: null,
     chatHistory: [],
     version: null,
     pauseMs: null,
@@ -514,7 +517,7 @@ async function init() {
   loadSettings();
   updatePauseUi();
   updateAckTimeoutUi();
-  const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels());
+  const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels({ forceBank: true }));
   if (UI.els.channelSelect) UI.els.channelSelect.addEventListener("change", onChannelSelectChange);
   updateChannelSelectHint();
 
@@ -1033,9 +1036,15 @@ function handleCommandSideEffects(cmd, text) {
   } else if (upper === "SEAR") {
     applySearchResult(text);
   } else if (upper === "BANK") {
-    if (text && text.length === 1) {
-      const bankSel = $("#BANK");
-      if (bankSel) bankSel.value = text;
+    if (text && text.length >= 1) {
+      const letter = text.trim().charAt(0);
+      if (letter) {
+        const normalized = letter.toLowerCase();
+        UI.state.bank = normalized;
+        storage.set("set.BANK", normalized);
+        const bankSel = $("#BANK");
+        if (bankSel) bankSel.value = normalized;
+      }
     }
   } else if (upper === "ENCT") {
     const info = parseEncTestResponse(text);
@@ -1201,6 +1210,8 @@ const searchState = { running: false, cancel: false };
 // Скрываем панель информации о канале
 function hideChannelInfo() {
   UI.state.infoChannel = null;
+  UI.state.infoChannelTx = null;
+  UI.state.infoChannelRx = null;
   updateChannelInfoPanel();
 }
 
@@ -1209,6 +1220,12 @@ function showChannelInfo(ch) {
   const num = Number(ch);
   if (!Number.isFinite(num)) return;
   UI.state.infoChannel = num;
+  const entry = channels.find((c) => c.ch === num);
+  if (entry) {
+    // Сохраняем частоты выбранного канала, чтобы карточка не пустела после обновления списка
+    UI.state.infoChannelTx = entry.tx != null ? entry.tx : null;
+    UI.state.infoChannelRx = entry.rx != null ? entry.rx : null;
+  }
   updateChannelInfoPanel();
   if (!channelReference.ready && !channelReference.loading) {
     loadChannelReferenceData().then(() => {
@@ -1251,8 +1268,16 @@ function updateChannelInfoPanel() {
   if (body) body.hidden = false;
   if (UI.els.channelInfoTitle) UI.els.channelInfoTitle.textContent = String(UI.state.infoChannel);
 
-  const entry = channels.find((c) => c.ch === UI.state.infoChannel);
-  const ref = entry ? (findChannelReferenceByTx(entry) || channelReference.map.get(UI.state.infoChannel)) : channelReference.map.get(UI.state.infoChannel);
+  const actualEntry = channels.find((c) => c.ch === UI.state.infoChannel);
+  let entry = actualEntry;
+  if (!entry && (UI.state.infoChannelTx != null || UI.state.infoChannelRx != null)) {
+    entry = {
+      ch: UI.state.infoChannel,
+      tx: UI.state.infoChannelTx,
+      rx: UI.state.infoChannelRx,
+    };
+  }
+  const ref = entry ? (findChannelReferenceByTx(entry) || findChannelReferenceByTxValue(entry.tx)) : findChannelReferenceByTxValue(UI.state.infoChannelTx);
   const fields = UI.els.channelInfoFields || {};
 
   setChannelInfoText(fields.rxCurrent, entry ? formatChannelNumber(entry.rx, 3) : "—");
@@ -1275,7 +1300,7 @@ function updateChannelInfoPanel() {
     messages.push("Не удалось загрузить справочник: " + errText);
   }
   if (!channelReference.loading && !channelReference.error && !ref) messages.push("В справочнике нет данных для этого канала.");
-  if (!entry) messages.push("Канал отсутствует в текущем списке.");
+  if (!actualEntry) messages.push("Канал отсутствует в текущем списке.");
   if (statusEl) {
     const text = messages.join(" ");
     statusEl.textContent = text;
@@ -1357,15 +1382,44 @@ function normalizeFrequencyKey(value) {
 
 function findChannelReferenceByTx(entry) {
   if (!entry || entry.tx == null) return null;
-  const key = normalizeFrequencyKey(entry.tx);
+  const match = findChannelReferenceByTxValue(entry.tx, entry.ch);
+  if (match) return match;
+  if (entry.ch != null && channelReference.map.has(entry.ch)) {
+    return channelReference.map.get(entry.ch);
+  }
+  return null;
+}
+
+// Ищем сведения по частоте передачи с учётом допустимого отклонения
+function findChannelReferenceByTxValue(value, channelNumber) {
+  if (value == null) return null;
+  const key = normalizeFrequencyKey(value);
   if (key === null) return null;
   const list = channelReference.byTx.get(key);
-  if (!list || !list.length) return null;
-  if (entry.ch != null) {
-    const match = list.find((item) => item && item.ch === entry.ch);
-    if (match) return match;
+  if (list && list.length) {
+    if (channelNumber != null) {
+      const exact = list.find((item) => item && item.ch === channelNumber);
+      if (exact) return exact;
+    }
+    return list[0];
   }
-  return list[0];
+  let closest = null;
+  let closestDiff = Number.POSITIVE_INFINITY;
+  const limit = 0.005; // 5 кГц допуска
+  for (const items of channelReference.byTx.values()) {
+    if (!items || !items.length) continue;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!item || item.tx == null) continue;
+      const diff = Math.abs(Number(item.tx) - Number(value));
+      if (diff < closestDiff && diff <= limit) {
+        closest = item;
+        closestDiff = diff;
+        if (closestDiff === 0) return closest;
+      }
+    }
+  }
+  return closest;
 }
 
 // Преобразуем CSV в таблицу каналов
@@ -1476,6 +1530,13 @@ function renderChannels() {
     if (infoSelected) tr.classList.add("selected-info");
     tbody.appendChild(tr);
   });
+  if (UI.state.infoChannel != null) {
+    const current = channels.find((c) => c.ch === UI.state.infoChannel);
+    if (current) {
+      UI.state.infoChannelTx = current.tx != null ? current.tx : UI.state.infoChannelTx;
+      UI.state.infoChannelRx = current.rx != null ? current.rx : UI.state.infoChannelRx;
+    }
+  }
   updateChannelInfoPanel();
 }
 function updateChannelSelect() {
@@ -1562,11 +1623,19 @@ function updateChannelSelectHint() {
   hint.textContent = "RX " + rx + " · TX " + tx;
   hint.hidden = false;
 }
-async function refreshChannels() {
+async function refreshChannels(options) {
+  const opts = options || {};
   const bankSel = $("#BANK");
   const bank = bankSel ? bankSel.value : null;
   try {
-    if (bank) await deviceFetch("BANK", { v: bank }, 2500);
+    const shouldApplyBank = bank && (opts.forceBank === true || UI.state.bank !== bank);
+    if (shouldApplyBank) {
+      const res = await deviceFetch("BANK", { v: bank }, 2500);
+      if (res.ok) {
+        UI.state.bank = bank;
+        storage.set("set.BANK", bank);
+      }
+    }
     const list = await deviceFetch("CHLIST", bank ? { bank: bank } : {}, 4000);
     if (list.ok && list.text) {
       const parsed = parseChannels(list.text);
@@ -1914,7 +1983,8 @@ function updateAckRetryUi() {
     if (UI.state.ack === true) {
       const attempts = state != null ? state : "—";
       const timeout = UI.state.ackTimeout != null ? UI.state.ackTimeout + " мс" : "—";
-      hint.textContent = "Повторные отправки: " + attempts + " раз. Ожидание ACK: " + timeout + ".";
+      const pause = UI.state.pauseMs != null ? UI.state.pauseMs + " мс" : "—";
+      hint.textContent = "Повторные отправки: " + attempts + " раз. Пауза: " + pause + ". Ожидание ACK: " + timeout + ".";
     } else {
       hint.textContent = "Доступно после включения ACK.";
     }
@@ -2309,6 +2379,9 @@ function loadSettings() {
       updateAckTimeoutUi();
     } else {
       el.value = v;
+      if (key === "BANK") {
+        UI.state.bank = v;
+      }
     }
   }
 }
@@ -2508,6 +2581,7 @@ async function syncSettingsFromDevice() {
       if (letter) {
         const value = letter.toLowerCase();
         if (bankEl) bankEl.value = value;
+        UI.state.bank = value;
         storage.set("set.BANK", value);
       }
     }
@@ -2693,6 +2767,7 @@ async function requestKeyGen() {
     UI.key.state = data;
     UI.key.lastMessage = "Сгенерирован новый локальный ключ";
     renderKeyState(data);
+    debugLog("KEYGEN ✓ ключ обновлён на устройстве");
     status("✓ KEYGEN");
   } catch (err) {
     status("✗ KEYGEN");
@@ -2721,6 +2796,7 @@ async function requestKeyRestore() {
     UI.key.state = data;
     UI.key.lastMessage = "Восстановлена резервная версия ключа";
     renderKeyState(data);
+    debugLog("KEYRESTORE ✓ восстановление завершено");
     status("✓ KEYRESTORE");
   } catch (err) {
     status("✗ KEYRESTORE");
@@ -2754,10 +2830,13 @@ async function requestKeySend() {
         await navigator.clipboard.writeText(data.public);
         UI.key.lastMessage = "Публичный ключ скопирован";
         renderKeyState(data);
+        debugLog("KEYTRANSFER SEND ✓ ключ скопирован в буфер обмена");
       } catch (err) {
         console.warn("[key] clipboard", err);
+        debugLog("KEYTRANSFER SEND ⚠ не удалось скопировать ключ: " + String(err));
       }
     }
+    debugLog("KEYTRANSFER SEND ✓ данные отправлены");
     status("✓ KEYTRANSFER SEND");
   } catch (err) {
     status("✗ KEYTRANSFER SEND");
@@ -2790,6 +2869,7 @@ async function requestKeyReceive() {
     UI.key.state = data;
     UI.key.lastMessage = "Получен внешний ключ";
     renderKeyState(data);
+    debugLog("KEYTRANSFER RECEIVE ✓ ключ принят");
     status("✓ KEYTRANSFER RECEIVE");
   } catch (err) {
     status("✗ KEYTRANSFER RECEIVE");
@@ -2841,7 +2921,8 @@ async function loadVersion() {
   try {
     const res = await fetch(url.toString(), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const text = (await res.text()).trim();
+    const raw = await res.text();
+    const text = normalizeVersionText(raw);
     UI.state.version = text || null;
     updateFooterVersion();
     return UI.state.version;
@@ -2854,15 +2935,17 @@ async function loadVersion() {
 function updateFooterVersion() {
   const el = UI.els.version || $("#appVersion");
   if (!el) return;
-  let text = UI.state.version != null ? String(UI.state.version) : "";
-  if (text) {
-    text = text.trim();
-    if (/^v+/i.test(text)) {
-      text = text.replace(/^v+/i, "").trim();
-    }
-  }
-  if (!text) text = "—";
-  el.textContent = text;
+  const text = UI.state.version != null ? String(UI.state.version) : "";
+  el.textContent = text ? ("v" + text) : "—";
+}
+// Приводим текст версии к человеку понятному виду
+function normalizeVersionText(value) {
+  if (!value) return "";
+  let text = String(value).trim();
+  text = text.replace(/^v+/i, "").trim();
+  if (!text) return "";
+  if (/^(unknown|undefined|none)$/i.test(text)) return "";
+  return text;
 }
 async function resyncAfterEndpointChange() {
   try {
