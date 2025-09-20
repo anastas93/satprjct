@@ -13,6 +13,7 @@
 #include "libs/simple_logger/simple_logger.cpp"     // журнал статусов
 #include "libs/received_buffer/received_buffer.cpp" // буфер принятых сообщений
 #include "libs/key_loader/key_loader.cpp"           // загрузка и сохранение ключа
+#include "libs/key_transfer/key_transfer.cpp"       // передача корневого ключа по LoRa
 #include "libs/crypto/aes_ccm.cpp"            // AES-CCM шифрование
 #include "libs/crypto/sha256.cpp"             // SHA-256 для ключевого хранилища
 #include "libs/crypto/curve25519_donna.cpp"   // низкоуровневая математика Curve25519

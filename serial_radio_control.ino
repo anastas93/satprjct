@@ -16,6 +16,7 @@
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
 #include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
 #include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
+#include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
 
 // --- Сеть и веб-интерфейс ---
 #include <WiFi.h>        // работа с Wi-Fi
@@ -35,6 +36,14 @@ ReceivedBuffer recvBuf;     // буфер полученных сообщени�
 bool ackEnabled = DefaultSettings::USE_ACK; // флаг автоматической отправки ACK
 
 WebServer server(80);       // HTTP-сервер для веб-интерфейса
+
+// Состояние процесса обмена корневым ключом по LoRa
+struct KeyTransferRuntime {
+  bool waiting = false;                 // ожидаем ли приём специального кадра
+  bool completed = false;               // удалось ли применить ключ
+  String error;                         // код ошибки для ответа в HTTP/Serial
+  uint32_t last_msg_id = 0;             // идентификатор последнего пакета
+} keyTransferRuntime;
 
 // Преобразование массива байтов в hex-строку (верхний регистр)
 template <size_t N>
@@ -97,6 +106,46 @@ void reloadCryptoModules() {
   rx.reloadKey();
 }
 
+// Генерация случайного идентификатора сообщения для обмена ключами
+uint32_t generateKeyTransferMsgId() {
+  uint32_t id = 0;
+  id |= static_cast<uint32_t>(radio.randomByte());
+  id |= static_cast<uint32_t>(radio.randomByte()) << 8;
+  id |= static_cast<uint32_t>(radio.randomByte()) << 16;
+  id |= static_cast<uint32_t>(radio.randomByte()) << 24;
+  return id;
+}
+
+// Обработка специального кадра KEYTRANSFER; возвращает true, если пакет потреблён
+bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
+  std::array<uint8_t,32> remote_pub{};
+  std::array<uint8_t,4> remote_id{};
+  uint32_t msg_id = 0;
+  if (!KeyTransfer::parseFrame(data, len, remote_pub, remote_id, msg_id)) {
+    return false;                                  // кадр не относится к обмену ключами
+  }
+  keyTransferRuntime.last_msg_id = msg_id;
+  if (!keyTransferRuntime.waiting) {
+    SimpleLogger::logStatus("KEYTRANSFER IGN");   // пришёл неожиданный ключ
+    return true;                                   // не передаём дальше в RxModule
+  }
+  if (!KeyLoader::applyRemotePublic(remote_pub)) {
+    keyTransferRuntime.error = String("apply");
+    keyTransferRuntime.waiting = false;
+    keyTransferRuntime.completed = false;
+    SimpleLogger::logStatus("KEYTRANSFER ERR");
+    Serial.println("KEYTRANSFER: ошибка применения удалённого ключа");
+    return true;
+  }
+  reloadCryptoModules();                          // обновляем Tx/Rx новым ключом
+  keyTransferRuntime.completed = true;
+  keyTransferRuntime.waiting = false;
+  keyTransferRuntime.error = String();
+  SimpleLogger::logStatus("KEYTRANSFER OK");
+  Serial.println("KEYTRANSFER: получен корневой ключ по LoRa");
+  return true;
+}
+
 String cmdKeyState() {
   return makeKeyStateJson();
 }
@@ -118,7 +167,7 @@ String cmdKeyRestoreSecure() {
 }
 
 String cmdKeySendSecure() {
-  return makeKeyStateJson();
+  return cmdKeyTransferSendLora();                   // совместимый вызов через новый механизм
 }
 
 String cmdKeyReceiveSecure(const String& hex) {
@@ -131,6 +180,56 @@ String cmdKeyReceiveSecure(const String& hex) {
   }
   reloadCryptoModules();
   return makeKeyStateJson();
+}
+
+// Отправка корневого ключа через LoRa с использованием спецключа
+String cmdKeyTransferSendLora() {
+  auto state = KeyLoader::getState();
+  auto key_id = KeyLoader::keyId(state.session_key);
+  std::vector<uint8_t> frame;
+  uint32_t msg_id = generateKeyTransferMsgId();
+  if (!KeyTransfer::buildFrame(msg_id, state.root_public, key_id, frame)) {
+    return String("{\"error\":\"build\"}");
+  }
+  radio.send(frame.data(), frame.size());
+  keyTransferRuntime.last_msg_id = msg_id;
+  SimpleLogger::logStatus("KEYTRANSFER SEND");
+  Serial.println("KEYTRANSFER: отправлен публичный корневой ключ");
+  return makeKeyStateJson();
+}
+
+// Ожидание и приём корневого ключа через LoRa
+String cmdKeyTransferReceiveLora() {
+  keyTransferRuntime.waiting = true;
+  keyTransferRuntime.completed = false;
+  keyTransferRuntime.error = String();
+  keyTransferRuntime.last_msg_id = 0;
+  SimpleLogger::logStatus("KEYTRANSFER WAIT");
+  unsigned long start = millis();
+  const unsigned long timeout_ms = 8000;              // тайм-аут ожидания 8 секунд
+  while (millis() - start < timeout_ms) {
+    if (keyTransferRuntime.completed) {
+      keyTransferRuntime.completed = false;           // сбрасываем флаг на будущее
+      return makeKeyStateJson();
+    }
+    if (keyTransferRuntime.error.length()) {
+      String err = keyTransferRuntime.error;
+      keyTransferRuntime.error = String();
+      keyTransferRuntime.waiting = false;
+      return String("{\"error\":\"") + err + "\"}";
+    }
+    radio.loop();                                     // даём шанс обработать входящие пакеты
+    tx.loop();                                        // обрабатываем очередь передачи
+    delay(5);                                         // небольшая пауза, чтобы не блокировать CPU
+  }
+  keyTransferRuntime.waiting = false;
+  keyTransferRuntime.completed = false;
+  if (keyTransferRuntime.error.length()) {
+    String err = keyTransferRuntime.error;
+    keyTransferRuntime.error = String();
+    return String("{\"error\":\"") + err + "\"}";
+  }
+  return String("{\"error\":\"timeout\"}");
 }
 
 // Отдаём страницу index.html
@@ -425,6 +524,13 @@ void handleCmdHttp() {
   if (cmd.length() == 0) cmd = server.arg("cmd");
   cmd.trim();
   cmd.toUpperCase();
+  String cmdArg;
+  int spacePos = cmd.indexOf(' ');
+  if (spacePos > 0) {
+    cmdArg = cmd.substring(spacePos + 1);
+    cmdArg.trim();
+    cmd = cmd.substring(0, spacePos);
+  }
   String resp;
   if (cmd == "PI") {
     resp = cmdPing();
@@ -523,10 +629,18 @@ void handleCmdHttp() {
   } else if (cmd == "KEYRESTORE") {
     resp = cmdKeyRestoreSecure();
   } else if (cmd == "KEYSEND") {
-    resp = cmdKeySendSecure();
+    resp = cmdKeyTransferSendLora();
   } else if (cmd == "KEYRECV") {
     String hex = server.hasArg("pub") ? server.arg("pub") : String();
     resp = cmdKeyReceiveSecure(hex);
+  } else if (cmd == "KEYTRANSFER") {
+    if (cmdArg == "SEND") {
+      resp = cmdKeyTransferSendLora();
+    } else if (cmdArg == "RECEIVE") {
+      resp = cmdKeyTransferReceiveLora();
+    } else {
+      resp = String("{\"error\":\"mode\"}");
+    }
   } else {
     resp = "UNKNOWN";
   }
@@ -576,9 +690,10 @@ void setup() {
     }
   });
   radio.setReceiveCallback([&](const uint8_t* d, size_t l){  // привязка приёма
+    if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], PI, SEAR");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], PI, SEAR, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
 }
 
 void loop() {
@@ -731,6 +846,10 @@ void loop() {
         } else {
           Serial.println("ENCT: ошибка");
         }
+      } else if (line.equalsIgnoreCase("KEYTRANSFER SEND")) {
+        Serial.println(cmdKeyTransferSendLora());
+      } else if (line.equalsIgnoreCase("KEYTRANSFER RECEIVE")) {
+        Serial.println(cmdKeyTransferReceiveLora());
       } else if (line.startsWith("ACK")) {
         if (line.length() > 3) {                          // установка явного значения
           ackEnabled = line.substring(4).toInt() != 0;
