@@ -120,7 +120,7 @@ String jsonEscape(const String& value) {
       default:
         if (static_cast<unsigned char>(c) < 0x20) {
           char buf[7];
-          std::snprintf(buf, sizeof(buf), "\\\u%04X", static_cast<unsigned>(static_cast<unsigned char>(c)));
+          std::snprintf(buf, sizeof(buf), "\\u%04X", static_cast<unsigned>(static_cast<unsigned char>(c)));
           out += buf;
         } else {
           out += c;
