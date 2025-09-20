@@ -405,7 +405,7 @@ tbody tr.free { background: color-mix(in oklab, var(--good) 20%, transparent); }
 tbody tr.unknown { opacity:.6; }
 /* подсветка процесса и итогов сканирования */
 /* используем color-mix для согласования с темой */
-tbody tr.scanning { background: color-mix(in oklab, var(--accent-2) 15%, white); /* ~#e0f2fe, голубой фон */ }
+tbody tr.scanning { background: color-mix(in oklab, #f97316 25%, white); /* ~#fed7aa, оранжевый фон */ }
 tbody tr.signal { background: color-mix(in oklab, var(--good) 15%, white); /* ~#dcfce7, зелёный фон */ }
 tbody tr.crc-error { background: color-mix(in oklab, #f97316 20%, white); /* ~#fed7aa, оранжевый фон */ }
 tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white); color:#374151; /* ~#e5e7eb, серый фон и тёмный текст */ }
