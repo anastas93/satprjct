@@ -1,11 +1,76 @@
 /* satprjct web/app.js — vanilla JS only */
+/* Безопасная обёртка для localStorage: веб-приложение должно работать даже без постоянного хранилища */
+const storage = (() => {
+  const memory = new Map();
+  try {
+    const ls = window.localStorage;
+    const probeKey = "__sat_probe__";
+    ls.setItem(probeKey, "1");
+    ls.removeItem(probeKey);
+    return {
+      available: true,
+      get(key) {
+        try {
+          const value = ls.getItem(key);
+          return value === null && memory.has(key) ? memory.get(key) : value;
+        } catch (err) {
+          console.warn("[storage] ошибка чтения из localStorage:", err);
+          return memory.has(key) ? memory.get(key) : null;
+        }
+      },
+      set(key, value) {
+        const normalized = value == null ? "" : String(value);
+        memory.set(key, normalized);
+        try {
+          ls.setItem(key, normalized);
+        } catch (err) {
+          console.warn("[storage] не удалось сохранить значение, используется запасной буфер:", err);
+        }
+      },
+      remove(key) {
+        memory.delete(key);
+        try {
+          ls.removeItem(key);
+        } catch (err) {
+          console.warn("[storage] не удалось удалить значение:", err);
+        }
+      },
+      clear() {
+        memory.clear();
+        try {
+          ls.clear();
+        } catch (err) {
+          console.warn("[storage] не удалось очистить localStorage:", err);
+        }
+      },
+    };
+  } catch (err) {
+    console.warn("[storage] localStorage недоступен, используется временное хранилище в памяти:", err);
+    return {
+      available: false,
+      get(key) {
+        return memory.has(key) ? memory.get(key) : null;
+      },
+      set(key, value) {
+        memory.set(key, value == null ? "" : String(value));
+      },
+      remove(key) {
+        memory.delete(key);
+      },
+      clear() {
+        memory.clear();
+      },
+    };
+  }
+})();
+
 /* Состояние интерфейса */
 const UI = {
   tabs: ["chat", "channels", "settings", "security", "debug"],
   els: {},
   cfg: {
-    endpoint: localStorage.getItem("endpoint") || "http://192.168.4.1",
-    theme: localStorage.getItem("theme") || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"),
+    endpoint: storage.get("endpoint") || "http://192.168.4.1",
+    theme: storage.get("theme") || detectPreferredTheme(),
   },
   key: {
     bytes: null,
@@ -29,6 +94,18 @@ const channelReference = {
   error: null,
   promise: null,
 };
+
+/* Определяем предпочитаемую тему только при наличии поддержки matchMedia */
+function detectPreferredTheme() {
+  try {
+    if (typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: light)").matches) {
+      return "light";
+    }
+  } catch (err) {
+    console.warn("[theme] не удалось получить предпочтение системы:", err);
+  }
+  return "dark";
+}
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -83,7 +160,7 @@ async function init() {
 
   // Навигация по вкладкам
   const hash = location.hash ? location.hash.slice(1) : "";
-  const initialTab = UI.tabs.includes(hash) ? hash : (localStorage.getItem("activeTab") || "chat");
+  const initialTab = UI.tabs.includes(hash) ? hash : (storage.get("activeTab") || "chat");
   for (const tab of UI.tabs) {
     const link = UI.els.nav ? UI.els.nav.querySelector('[data-tab="' + tab + '"]') : null;
     if (link) {
@@ -122,7 +199,7 @@ async function init() {
     UI.els.endpoint.value = UI.cfg.endpoint;
     UI.els.endpoint.addEventListener("change", () => {
       UI.cfg.endpoint = UI.els.endpoint.value.trim();
-      localStorage.setItem("endpoint", UI.cfg.endpoint);
+      storage.set("endpoint", UI.cfg.endpoint);
       note("Endpoint: " + UI.cfg.endpoint);
     });
   }
@@ -140,7 +217,7 @@ async function init() {
   });
 
   // Список принятых сообщений
-  const savedLimitRaw = localStorage.getItem("recvLimit");
+  const savedLimitRaw = storage.get("recvLimit");
   let savedLimit = parseInt(savedLimitRaw || "", 10);
   if (!Number.isFinite(savedLimit) || savedLimit <= 0) savedLimit = 20;
   savedLimit = Math.min(Math.max(savedLimit, 1), 200);
@@ -148,7 +225,7 @@ async function init() {
     UI.els.recvLimit.value = String(savedLimit);
     UI.els.recvLimit.addEventListener("change", onRecvLimitChange);
   }
-  const savedAuto = localStorage.getItem("recvAuto") === "1";
+  const savedAuto = storage.get("recvAuto") === "1";
   UI.state.recvAuto = savedAuto;
   if (UI.els.recvAuto) {
     UI.els.recvAuto.checked = savedAuto;
@@ -216,7 +293,7 @@ function setTab(tab) {
     }
     if (link) link.setAttribute("aria-current", active ? "page" : "false");
   }
-  localStorage.setItem("activeTab", tab);
+  storage.set("activeTab", tab);
   if (tab !== "channels") hideChannelInfo();
 }
 
@@ -224,7 +301,7 @@ function setTab(tab) {
 function applyTheme(mode) {
   UI.cfg.theme = mode === "light" ? "light" : "dark";
   document.documentElement.classList.toggle("light", UI.cfg.theme === "light");
-  localStorage.setItem("theme", UI.cfg.theme);
+  storage.set("theme", UI.cfg.theme);
 }
 function toggleTheme() {
   applyTheme(UI.cfg.theme === "dark" ? "light" : "dark");
@@ -232,7 +309,7 @@ function toggleTheme() {
 
 /* Работа чата */
 function loadChatHistory() {
-  const raw = localStorage.getItem("chatHistory") || "[]";
+  const raw = storage.get("chatHistory") || "[]";
   let entries;
   try {
     entries = JSON.parse(raw);
@@ -244,7 +321,7 @@ function loadChatHistory() {
   entries.forEach((entry) => addChatMessage(entry));
 }
 function persistChat(message, author) {
-  const raw = localStorage.getItem("chatHistory") || "[]";
+  const raw = storage.get("chatHistory") || "[]";
   let entries;
   try {
     entries = JSON.parse(raw);
@@ -253,7 +330,7 @@ function persistChat(message, author) {
     entries = [];
   }
   entries.push({ t: Date.now(), a: author, m: message });
-  localStorage.setItem("chatHistory", JSON.stringify(entries.slice(-500)));
+  storage.set("chatHistory", JSON.stringify(entries.slice(-500)));
 }
 function addChatMessage(entry) {
   if (!UI.els.chatLog) return;
@@ -527,14 +604,14 @@ function getRecvLimit() {
 }
 function onRecvLimitChange() {
   const limit = getRecvLimit();
-  localStorage.setItem("recvLimit", String(limit));
+  storage.set("recvLimit", String(limit));
   if (UI.state.recvAuto) refreshReceivedList({ silentError: true });
 }
 function setRecvAuto(enabled, opts) {
   const options = opts || {};
   UI.state.recvAuto = enabled;
   if (UI.els.recvAuto) UI.els.recvAuto.checked = enabled;
-  localStorage.setItem("recvAuto", enabled ? "1" : "0");
+  storage.set("recvAuto", enabled ? "1" : "0");
   if (UI.state.recvTimer) {
     clearInterval(UI.state.recvTimer);
     UI.state.recvTimer = null;
@@ -895,7 +972,7 @@ async function onChannelSelectChange(event) {
         await refreshChannels().catch(() => {});
       }
     } else {
-      localStorage.setItem("set.CH", String(num));
+      storage.set("set.CH", String(num));
     }
   } finally {
     sel.disabled = false;
@@ -1207,7 +1284,7 @@ function loadSettings() {
     const key = SETTINGS_KEYS[i];
     const el = $("#" + key);
     if (!el) continue;
-    const v = localStorage.getItem("set." + key);
+    const v = storage.get("set." + key);
     if (v === null) continue;
     if (el.type === "checkbox") el.checked = v === "1";
     else el.value = v;
@@ -1219,7 +1296,7 @@ function saveSettingsLocal() {
     const el = $("#" + key);
     if (!el) continue;
     const v = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
-    localStorage.setItem("set." + key, v);
+    storage.set("set." + key, v);
   }
   note("Сохранено локально.");
 }
@@ -1275,14 +1352,14 @@ function importSettings() {
       if (!el) continue;
       if (el.type === "checkbox") el.checked = obj[key] === "1";
       else el.value = obj[key];
-      localStorage.setItem("set." + key, String(obj[key]));
+      storage.set("set." + key, String(obj[key]));
     }
     note("Импортировано.");
   };
   input.click();
 }
 async function clearCaches() {
-  localStorage.clear();
+  storage.clear();
   if (typeof indexedDB !== "undefined" && indexedDB.databases) {
     const dbs = await indexedDB.databases();
     await Promise.all(dbs.map((db) => new Promise((resolve) => {
@@ -1295,7 +1372,7 @@ async function clearCaches() {
 
 /* Безопасность */
 async function loadKeyFromStorage() {
-  const b64 = localStorage.getItem("sec.key");
+  const b64 = storage.get("sec.key");
   if (b64) {
     UI.key.bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).slice(0, 16);
   } else {
@@ -1303,7 +1380,7 @@ async function loadKeyFromStorage() {
   }
 }
 async function saveKeyToStorage(bytes) {
-  localStorage.setItem("sec.key", btoa(String.fromCharCode.apply(null, bytes)));
+  storage.set("sec.key", btoa(String.fromCharCode.apply(null, bytes)));
 }
 async function generateKey() {
   const buf = new Uint8Array(16);
