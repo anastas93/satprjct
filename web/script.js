@@ -17,7 +17,17 @@ const UI = {
     recvAuto: false,
     recvTimer: null,
     receivedKnown: new Set(),
+    infoChannel: null,
   }
+};
+
+// Справочные данные по каналам из CSV
+const channelReference = {
+  map: new Map(),
+  ready: false,
+  loading: false,
+  error: null,
+  promise: null,
 };
 
 document.addEventListener("DOMContentLoaded", init);
@@ -50,6 +60,26 @@ async function init() {
   UI.els.recvAuto = $("#recvAuto");
   UI.els.recvLimit = $("#recvLimit");
   UI.els.recvRefresh = $("#btnRecvRefresh");
+  UI.els.channelInfoPanel = $("#channelInfoPanel");
+  UI.els.channelInfoTitle = $("#channelInfoTitle");
+  UI.els.channelInfoBody = $("#channelInfoBody");
+  UI.els.channelInfoEmpty = $("#channelInfoEmpty");
+  UI.els.channelInfoStatus = $("#channelInfoStatus");
+  UI.els.channelInfoFields = {
+    rxCurrent: $("#channelInfoRxCurrent"),
+    txCurrent: $("#channelInfoTxCurrent"),
+    rssi: $("#channelInfoRssi"),
+    snr: $("#channelInfoSnr"),
+    status: $("#channelInfoStatusCurrent"),
+    scan: $("#channelInfoScan"),
+    rxRef: $("#channelInfoRxRef"),
+    txRef: $("#channelInfoTxRef"),
+    system: $("#channelInfoSystem"),
+    band: $("#channelInfoBand"),
+    purpose: $("#channelInfoPurpose"),
+  };
+  const infoClose = $("#channelInfoClose");
+  if (infoClose) infoClose.addEventListener("click", hideChannelInfo);
 
   // Навигация по вкладкам
   const hash = location.hash ? location.hash.slice(1) : "";
@@ -140,6 +170,13 @@ async function init() {
   const btnSearch = $("#btnSearch"); if (btnSearch) { UI.els.searchBtn = btnSearch; btnSearch.addEventListener("click", runSearch); }
   const btnRefresh = $("#btnRefresh"); if (btnRefresh) btnRefresh.addEventListener("click", () => refreshChannels());
   const btnExportCsv = $("#btnExportCsv"); if (btnExportCsv) btnExportCsv.addEventListener("click", exportChannelsCsv);
+  // Подгружаем справочник частот в фоне
+  loadChannelReferenceData().then(() => {
+    updateChannelInfoPanel();
+  }).catch((err) => {
+    console.warn("[freq-info] загрузка не удалась:", err);
+    updateChannelInfoPanel();
+  });
 
   loadChatHistory();
 
@@ -599,6 +636,187 @@ async function copyReceivedName(name) {
 let channels = [];
 // Служебное состояние поиска по каналам
 const searchState = { running: false, cancel: false };
+
+// Скрываем панель информации о канале
+function hideChannelInfo() {
+  UI.state.infoChannel = null;
+  updateChannelInfoPanel();
+}
+
+// Показываем сведения о выбранном канале и подгружаем справочник при необходимости
+function showChannelInfo(ch) {
+  const num = Number(ch);
+  if (!Number.isFinite(num)) return;
+  UI.state.infoChannel = num;
+  updateChannelInfoPanel();
+  if (!channelReference.ready && !channelReference.loading) {
+    loadChannelReferenceData().then(() => {
+      updateChannelInfoPanel();
+    }).catch(() => {
+      updateChannelInfoPanel();
+    });
+  }
+}
+
+// Обновляем визуальное выделение выбранной строки
+function updateChannelInfoHighlight() {
+  const rows = $all("#channelsTable tbody tr");
+  rows.forEach((tr) => {
+    const value = tr && tr.dataset ? Number(tr.dataset.ch) : NaN;
+    tr.classList.toggle("selected-info", UI.state.infoChannel != null && value === UI.state.infoChannel);
+  });
+}
+
+// Обновляем содержимое панели информации
+function updateChannelInfoPanel() {
+  const panel = UI.els.channelInfoPanel || $("#channelInfoPanel");
+  const body = UI.els.channelInfoBody || $("#channelInfoBody");
+  const empty = UI.els.channelInfoEmpty || $("#channelInfoEmpty");
+  const statusEl = UI.els.channelInfoStatus || $("#channelInfoStatus");
+  if (!panel) return;
+  if (UI.state.infoChannel == null) {
+    panel.hidden = true;
+    if (empty) empty.hidden = false;
+    if (body) body.hidden = true;
+    if (statusEl) { statusEl.textContent = ""; statusEl.hidden = true; }
+    updateChannelInfoHighlight();
+    return;
+  }
+
+  panel.hidden = false;
+  if (empty) empty.hidden = true;
+  if (body) body.hidden = false;
+  if (UI.els.channelInfoTitle) UI.els.channelInfoTitle.textContent = String(UI.state.infoChannel);
+
+  const entry = channels.find((c) => c.ch === UI.state.infoChannel);
+  const ref = channelReference.map.get(UI.state.infoChannel);
+  const fields = UI.els.channelInfoFields || {};
+
+  setChannelInfoText(fields.rxCurrent, entry ? formatChannelNumber(entry.rx, 3) : "—");
+  setChannelInfoText(fields.txCurrent, entry ? formatChannelNumber(entry.tx, 3) : "—");
+  setChannelInfoText(fields.rssi, entry && Number.isFinite(entry.rssi) ? String(entry.rssi) : "—");
+  setChannelInfoText(fields.snr, entry && Number.isFinite(entry.snr) ? formatChannelNumber(entry.snr, 1) : "—");
+  setChannelInfoText(fields.status, entry && entry.st ? entry.st : "—");
+  setChannelInfoText(fields.scan, entry && entry.scan ? entry.scan : "—");
+
+  setChannelInfoText(fields.rxRef, ref ? formatChannelNumber(ref.rx, 3) : "—");
+  setChannelInfoText(fields.txRef, ref ? formatChannelNumber(ref.tx, 3) : "—");
+  setChannelInfoText(fields.system, ref && ref.system ? ref.system : "—");
+  setChannelInfoText(fields.band, ref && ref.band ? ref.band : "—");
+  setChannelInfoText(fields.purpose, ref && ref.purpose ? ref.purpose : "—");
+
+  const messages = [];
+  if (channelReference.loading) messages.push("Загружаем справочник частот…");
+  if (channelReference.error) {
+    const errText = channelReference.error && channelReference.error.message ? channelReference.error.message : String(channelReference.error);
+    messages.push("Не удалось загрузить справочник: " + errText);
+  }
+  if (!channelReference.loading && !channelReference.error && !ref) messages.push("В справочнике нет данных для этого канала.");
+  if (!entry) messages.push("Канал отсутствует в текущем списке.");
+  if (statusEl) {
+    const text = messages.join(" ");
+    statusEl.textContent = text;
+    statusEl.hidden = !text;
+  }
+
+  updateChannelInfoHighlight();
+}
+
+// Записываем значение в элемент, если он существует
+function setChannelInfoText(el, text) {
+  if (!el) return;
+  el.textContent = text;
+}
+
+// Форматируем числовое значение с заданным количеством знаков после запятой
+function formatChannelNumber(value, digits) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  return typeof digits === "number" ? num.toFixed(digits) : String(num);
+}
+
+// Загружаем CSV со справочной информацией
+async function loadChannelReferenceData() {
+  if (channelReference.ready) return channelReference.map;
+  if (channelReference.promise) return channelReference.promise;
+  channelReference.loading = true;
+  channelReference.error = null;
+  channelReference.promise = (async () => {
+    try {
+      const res = await fetch("libs/freq-info.csv", { cache: "no-store" });
+      if (!res.ok) {
+        throw new Error("HTTP " + res.status);
+      }
+      const text = await res.text();
+      channelReference.map = parseChannelReferenceCsv(text);
+      channelReference.ready = true;
+      return channelReference.map;
+    } catch (err) {
+      channelReference.error = err;
+      throw err;
+    } finally {
+      channelReference.loading = false;
+      channelReference.promise = null;
+    }
+  })();
+  return channelReference.promise;
+}
+
+// Преобразуем CSV в таблицу каналов
+function parseChannelReferenceCsv(text) {
+  const map = new Map();
+  if (!text) return map;
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    if (!line) continue;
+    line = line.replace(/\ufeff/g, "").trim();
+    if (!line) continue;
+    const cells = splitCsvRow(line);
+    if (!cells.length) continue;
+    const rawCh = cells[0] ? cells[0].trim() : "";
+    if (!rawCh || /[^0-9]/.test(rawCh)) continue;
+    const ch = parseInt(rawCh, 10);
+    if (!Number.isFinite(ch)) continue;
+    const rx = cells[1] ? Number(cells[1].trim()) : NaN;
+    const tx = cells[2] ? Number(cells[2].trim()) : NaN;
+    map.set(ch, {
+      ch,
+      rx: Number.isFinite(rx) ? rx : null,
+      tx: Number.isFinite(tx) ? tx : null,
+      system: cells[3] ? cells[3].trim() : "",
+      band: cells[4] ? cells[4].trim() : "",
+      purpose: cells[5] ? cells[5].trim() : "",
+    });
+  }
+  return map;
+}
+
+// Разбиваем строку CSV с учётом кавычек
+function splitCsvRow(row) {
+  const out = [];
+  let current = "";
+  let quoted = false;
+  for (let i = 0; i < row.length; i++) {
+    const ch = row[i];
+    if (ch === '"') {
+      if (quoted && row[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (ch === "," && !quoted) {
+      out.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  out.push(current);
+  return out;
+}
+
 function mockChannels() {
   channels = [
     { ch: 1, tx: 868.1, rx: 868.1, rssi: -92, snr: 8.5, st: "idle", scan: "", scanState: null },
@@ -635,8 +853,11 @@ function renderChannels() {
                    "<td>" + (isNaN(c.snr) ? "" : c.snr) + "</td>" +
                    "<td>" + (c.st || "") + "</td>" +
                    "<td>" + scanText + "</td>";
+    tr.dataset.ch = String(c.ch);
+    tr.addEventListener("click", () => showChannelInfo(c.ch));
     tbody.appendChild(tr);
   });
+  updateChannelInfoPanel();
 }
 function updateChannelSelect() {
   const sel = UI.els.channelSelect || $("#CH");

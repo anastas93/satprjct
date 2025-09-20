@@ -89,13 +89,46 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         <button id="btnRefresh" class="btn">Обновить</button>
         <button id="btnExportCsv" class="btn">CSV</button>
       </div>
-      <div class="table-wrap pretty">
-        <table id="channelsTable">
-          <thead>
-            <tr><th>#</th><th>CH</th><th>TX,MHz</th><th>RX,MHz</th><th>RSSI</th><th>SNR</th><th>ST</th><th>SCAN</th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+      <div class="channel-layout">
+        <div class="table-wrap pretty">
+          <table id="channelsTable">
+            <thead>
+              <tr><th>#</th><th>CH</th><th>TX,MHz</th><th>RX,MHz</th><th>RSSI</th><th>SNR</th><th>ST</th><th>SCAN</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <aside id="channelInfoPanel" class="channel-info glass" hidden>
+          <div class="channel-info-header">
+            <div class="channel-info-title">Канал <span id="channelInfoTitle">—</span></div>
+            <button id="channelInfoClose" type="button" class="icon-btn ghost small" aria-label="Скрыть информацию">✕</button>
+          </div>
+          <div id="channelInfoEmpty" class="channel-info-placeholder small muted">Выберите канал в таблице, чтобы увидеть подробности.</div>
+          <div id="channelInfoStatus" class="channel-info-status small muted" hidden></div>
+          <div id="channelInfoBody" class="channel-info-body" hidden>
+            <div class="channel-info-block">
+              <div class="channel-info-caption">Текущие данные</div>
+              <dl class="channel-info-list">
+                <div><dt>RX (MHz)</dt><dd id="channelInfoRxCurrent">—</dd></div>
+                <div><dt>TX (MHz)</dt><dd id="channelInfoTxCurrent">—</dd></div>
+                <div><dt>RSSI</dt><dd id="channelInfoRssi">—</dd></div>
+                <div><dt>SNR</dt><dd id="channelInfoSnr">—</dd></div>
+                <div><dt>Статус</dt><dd id="channelInfoStatusCurrent">—</dd></div>
+                <div><dt>SCAN</dt><dd id="channelInfoScan">—</dd></div>
+              </dl>
+            </div>
+            <div class="channel-info-block">
+              <div class="channel-info-caption">Справочник</div>
+              <dl class="channel-info-list">
+                <div><dt>RX (MHz)</dt><dd id="channelInfoRxRef">—</dd></div>
+                <div><dt>TX (MHz)</dt><dd id="channelInfoTxRef">—</dd></div>
+                <div><dt>Система</dt><dd id="channelInfoSystem">—</dd></div>
+                <div><dt>План</dt><dd id="channelInfoBand">—</dd></div>
+                <div><dt>Назначение</dt><dd id="channelInfoPurpose">—</dd></div>
+              </dl>
+            </div>
+          </div>
+        </aside>
       </div>
     </section>
     <!-- Вкладка настроек -->
@@ -358,6 +391,14 @@ a { color: inherit; }
   padding: .45rem .6rem;
   cursor: pointer;
 }
+.icon-btn.ghost {
+  background: transparent;
+  border-color: color-mix(in oklab, var(--panel-2) 55%, white 45%);
+}
+.icon-btn.small {
+  padding: .25rem .45rem;
+  font-size: .85rem;
+}
 .only-mobile { display:none; }
 
 /* Hero */
@@ -594,6 +635,76 @@ tbody tr.scanning { background: color-mix(in oklab, var(--accent-2) 15%, white);
 tbody tr.signal { background: color-mix(in oklab, var(--good) 15%, white); /* ~#dcfce7, зелёный фон */ }
 tbody tr.crc-error { background: color-mix(in oklab, #f97316 20%, white); /* ~#fed7aa, оранжевый фон */ }
 tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white); color:#374151; /* ~#e5e7eb, серый фон и тёмный текст */ }
+.channel-layout {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.channel-info {
+  border-radius: .9rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+.channel-info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+}
+.channel-info-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+.channel-info-placeholder,
+.channel-info-status {
+  line-height: 1.4;
+}
+.channel-info-body {
+  display: grid;
+  gap: 1rem;
+}
+.channel-info-block {
+  display: grid;
+  gap: .6rem;
+}
+.channel-info-caption {
+  font-weight: 700;
+  font-size: .75rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.channel-info-list {
+  display: grid;
+  gap: .4rem;
+}
+.channel-info-list > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: .6rem;
+  align-items: baseline;
+}
+.channel-info-list dt {
+  margin: 0;
+  font-weight: 600;
+  color: var(--muted);
+}
+.channel-info-list dd {
+  margin: 0;
+  word-break: break-word;
+}
+tbody tr.selected-info {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+@media (min-width: 900px) {
+  .channel-layout {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
 .status-chip {
   display:inline-block; padding:.15rem .45rem; border-radius:.6rem; font-size:.78rem; font-weight:700;
   border:1px solid transparent;
