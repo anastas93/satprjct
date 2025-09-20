@@ -42,15 +42,12 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
       </div>
       <div class="group-title"><span>Состояние ACK</span><span class="line"></span></div>
       <div class="status-row">
-        <div class="chip state" id="ackStateChip" data-state="unknown">
+        <button type="button" class="chip state ack-chip" id="ackStateChip" data-state="unknown" title="Переключить ACK" aria-label="Переключить ACK">
           <span class="label">ACK</span>
           <span id="ackStateText">—</span>
-        </div>
+        </button>
         <div class="ack-actions">
-          <button class="btn ghost" id="btnAckOn">Включить</button>
-          <button class="btn ghost" id="btnAckOff">Выключить</button>
-          <button class="btn ghost" id="btnAckToggle">Переключить</button>
-          <button class="btn ghost" id="btnAckRefresh">Обновить</button>
+          <button class="icon-btn ghost" id="btnAckRefresh" title="Обновить состояние ACK" aria-label="Обновить состояние ACK">⟳</button>
         </div>
       </div>
       <div class="group-title"><span>Команды</span><span class="line"></span></div>
@@ -344,6 +341,15 @@ a { color: inherit; }
   width: 15rem; max-width: 40vw;
   background: transparent; border: none; outline: none; color: var(--text);
 }
+.chip.switch { cursor: pointer; user-select: none; }
+.chip.switch input { width: auto; accent-color: var(--accent); cursor: pointer; }
+.chip.input-chip input {
+  width: 4.5rem;
+  max-width: 6rem;
+  text-align: center;
+  font-family: 'JetBrains Mono','Fira Code','SFMono-Regular',monospace;
+  font-weight: 600;
+}
 .icon-btn {
   background: var(--panel-2);
   color: var(--text);
@@ -442,6 +448,21 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
   letter-spacing: .05em;
   font-weight: 700;
 }
+.ack-chip {
+  cursor: pointer;
+  transition: transform .12s ease, box-shadow .2s ease;
+}
+.ack-chip:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.ack-chip:disabled {
+  opacity: .65;
+  cursor: wait;
+}
+.ack-chip[aria-busy="true"] {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--panel-2) 50%, var(--ring) 50%);
+}
 .chip.state .label { font-size:.72rem; color: var(--muted); }
 .chip.state[data-state="on"] {
   background: color-mix(in oklab, var(--good) 28%, var(--panel-2) 72%);
@@ -456,8 +477,85 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
   background: var(--panel-2);
   border-color: color-mix(in oklab, var(--panel-2) 70%, black 30%);
 }
-.ack-actions { display:flex; flex-wrap:wrap; gap:.4rem; }
-.ack-actions .btn { padding:.45rem .75rem; }
+
+/* Монитор готовых сообщений */
+.received-panel {
+  display:flex;
+  flex-direction:column;
+  gap:.6rem;
+  padding:.75rem .85rem;
+  border-radius:.9rem;
+  border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  background: color-mix(in oklab, var(--panel) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+.received-controls {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:.5rem;
+}
+.received-controls .btn { min-width: unset; }
+.received-controls .chip { padding:.35rem .7rem; }
+.received-list {
+  list-style:none;
+  padding:0;
+  margin:0;
+  display:flex;
+  flex-direction:column;
+  gap:.35rem;
+  max-height:240px;
+  overflow-y:auto;
+}
+.received-list li {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.75rem;
+  padding:.45rem .65rem;
+  border-radius:.75rem;
+  background: color-mix(in oklab, var(--panel-2) 88%, black 12%);
+  border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.02);
+  transition: background .25s ease, transform .25s ease;
+}
+.received-list li:hover { background: color-mix(in oklab, var(--panel-2) 82%, var(--accent) 18%); }
+.received-list li.fresh {
+  background: color-mix(in oklab, var(--accent) 26%, var(--panel-2) 74%);
+  transform: translateX(4px);
+}
+.received-name {
+  font-family: 'JetBrains Mono','Fira Code','SFMono-Regular',monospace;
+  letter-spacing:.04em;
+  font-size:.9rem;
+}
+.received-actions { display:flex; gap:.35rem; }
+.received-actions .icon-btn {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius:999px;
+  display:grid;
+  place-items:center;
+  padding:0;
+}
+.received-actions .icon-btn.ghost {
+  border-color: color-mix(in oklab, var(--accent) 35%, var(--panel-2) 65%);
+}
+.ack-actions {
+  display:flex;
+  align-items:center;
+  gap:.45rem;
+  flex-wrap:wrap;
+}
+.ack-actions .icon-btn {
+  width:2.4rem;
+  height:2.4rem;
+  border-radius:999px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  font-size:1.1rem;
+}
 .cmd-inline {
   display:flex;
   flex-wrap:wrap;
@@ -596,6 +694,7 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   .nav { display:none; flex-direction:column; }
   .nav.open { display:flex; }
   .chip input { width: 42vw; }
+  .chip.input-chip input { width: min(6rem, 34vw); }
   table { min-width: 640px; }
   .key-grid { grid-template-columns: 1fr; }
 }
@@ -614,6 +713,7 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: .85rem;
 }
+
 )~~~";
 
 // libs/sha256.js — библиотека SHA-256 на чистом JavaScript
@@ -692,6 +792,10 @@ const UI = {
   state: {
     channel: null,
     ack: null,
+    ackBusy: false,
+    recvAuto: false,
+    recvTimer: null,
+    receivedKnown: new Set(),
   }
 };
 
@@ -718,7 +822,13 @@ async function init() {
   UI.els.sendBtn = $("#sendBtn");
   UI.els.ackChip = $("#ackStateChip");
   UI.els.ackText = $("#ackStateText");
+  UI.els.channelSelect = $("#CH");
   UI.els.txlInput = $("#txlSize");
+  UI.els.recvList = $("#recvList");
+  UI.els.recvEmpty = $("#recvEmpty");
+  UI.els.recvAuto = $("#recvAuto");
+  UI.els.recvLimit = $("#recvLimit");
+  UI.els.recvRefresh = $("#btnRecvRefresh");
 
   // Навигация по вкладкам
   const hash = location.hash ? location.hash.slice(1) : "";
@@ -778,16 +888,35 @@ async function init() {
     if (cmd) btn.addEventListener("click", () => sendCommand(cmd));
   });
 
+  // Список принятых сообщений
+  const savedLimitRaw = localStorage.getItem("recvLimit");
+  let savedLimit = parseInt(savedLimitRaw || "", 10);
+  if (!Number.isFinite(savedLimit) || savedLimit <= 0) savedLimit = 20;
+  savedLimit = Math.min(Math.max(savedLimit, 1), 200);
+  if (UI.els.recvLimit) {
+    UI.els.recvLimit.value = String(savedLimit);
+    UI.els.recvLimit.addEventListener("change", onRecvLimitChange);
+  }
+  const savedAuto = localStorage.getItem("recvAuto") === "1";
+  UI.state.recvAuto = savedAuto;
+  if (UI.els.recvAuto) {
+    UI.els.recvAuto.checked = savedAuto;
+    UI.els.recvAuto.addEventListener("change", () => setRecvAuto(UI.els.recvAuto.checked));
+  }
+  if (UI.els.recvRefresh) {
+    UI.els.recvRefresh.addEventListener("click", () => refreshReceivedList({ manual: true }));
+  }
+  setRecvAuto(savedAuto, { skipImmediate: true });
+  refreshReceivedList({ silentError: true });
+
   // Управление ACK и тестами
-  const btnAckOn = $("#btnAckOn"); if (btnAckOn) btnAckOn.addEventListener("click", () => setAck(true));
-  const btnAckOff = $("#btnAckOff"); if (btnAckOff) btnAckOff.addEventListener("click", () => setAck(false));
-  const btnAckToggle = $("#btnAckToggle"); if (btnAckToggle) btnAckToggle.addEventListener("click", toggleAck);
+  if (UI.els.ackChip) UI.els.ackChip.addEventListener("click", onAckChipToggle);
   const btnAckRefresh = $("#btnAckRefresh"); if (btnAckRefresh) btnAckRefresh.addEventListener("click", () => refreshAckState());
   const btnTxl = $("#btnTxlSend"); if (btnTxl) btnTxl.addEventListener("click", sendTxl);
 
   // Вкладка каналов
   const btnPing = $("#btnPing"); if (btnPing) btnPing.addEventListener("click", runPing);
-  const btnSearch = $("#btnSearch"); if (btnSearch) btnSearch.addEventListener("click", runSearch);
+  const btnSearch = $("#btnSearch"); if (btnSearch) { UI.els.searchBtn = btnSearch; btnSearch.addEventListener("click", runSearch); }
   const btnRefresh = $("#btnRefresh"); if (btnRefresh) btnRefresh.addEventListener("click", () => refreshChannels());
   const btnExportCsv = $("#btnExportCsv"); if (btnExportCsv) btnExportCsv.addEventListener("click", exportChannelsCsv);
 
@@ -801,6 +930,7 @@ async function init() {
   const btnClearCache = $("#btnClearCache"); if (btnClearCache) btnClearCache.addEventListener("click", clearCaches);
   loadSettings();
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels());
+  if (UI.els.channelSelect) UI.els.channelSelect.addEventListener("change", onChannelSelectChange);
 
   // Безопасность
   const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", generateKey);
@@ -1127,13 +1257,132 @@ async function probe() {
   }
 }
 
+/* Монитор принятых сообщений */
+function getRecvLimit() {
+  if (!UI.els.recvLimit) return 20;
+  let limit = parseInt(UI.els.recvLimit.value || "20", 10);
+  if (!Number.isFinite(limit) || limit <= 0) limit = 20;
+  limit = Math.min(Math.max(limit, 1), 200);
+  UI.els.recvLimit.value = String(limit);
+  return limit;
+}
+function onRecvLimitChange() {
+  const limit = getRecvLimit();
+  localStorage.setItem("recvLimit", String(limit));
+  if (UI.state.recvAuto) refreshReceivedList({ silentError: true });
+}
+function setRecvAuto(enabled, opts) {
+  const options = opts || {};
+  UI.state.recvAuto = enabled;
+  if (UI.els.recvAuto) UI.els.recvAuto.checked = enabled;
+  localStorage.setItem("recvAuto", enabled ? "1" : "0");
+  if (UI.state.recvTimer) {
+    clearInterval(UI.state.recvTimer);
+    UI.state.recvTimer = null;
+  }
+  if (enabled) {
+    if (!options.skipImmediate) {
+      refreshReceivedList({ silentError: true });
+    }
+    const every = options.interval || 5000;
+    UI.state.recvTimer = setInterval(() => refreshReceivedList({ silentError: true }), every);
+  }
+}
+async function refreshReceivedList(opts) {
+  if (!UI.els.recvList) return;
+  const options = opts || {};
+  const manual = options.manual === true;
+  if (manual) status("→ RSTS");
+  const limit = getRecvLimit();
+  const text = await sendCommand("RSTS", { n: limit }, { silent: true, timeoutMs: 2500 });
+  if (text === null) {
+    if (!options.silentError) {
+      if (manual) status("✗ RSTS");
+      note("Не удалось получить список принятых сообщений");
+    }
+    return;
+  }
+  const names = text.split(/\r?\n/)
+                    .map((line) => line.trim())
+                    .filter((line) => line.length > 0);
+  renderReceivedList(names);
+  if (manual) status("✓ RSTS (" + names.length + ")");
+}
+function renderReceivedList(names) {
+  if (!UI.els.recvList) return;
+  UI.els.recvList.innerHTML = "";
+  const prev = UI.state.receivedKnown instanceof Set ? UI.state.receivedKnown : new Set();
+  const next = new Set();
+  const frag = document.createDocumentFragment();
+  names.forEach((name) => {
+    next.add(name);
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    label.className = "received-name";
+    label.textContent = name;
+    li.appendChild(label);
+    const actions = document.createElement("div");
+    actions.className = "received-actions";
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "icon-btn ghost";
+    copyBtn.textContent = "⧉";
+    copyBtn.title = "Скопировать имя";
+    copyBtn.addEventListener("click", () => copyReceivedName(name));
+    actions.appendChild(copyBtn);
+    li.appendChild(actions);
+    if (!prev.has(name)) {
+      li.classList.add("fresh");
+      setTimeout(() => li.classList.remove("fresh"), 1600);
+    }
+    frag.appendChild(li);
+  });
+  UI.els.recvList.appendChild(frag);
+  UI.state.receivedKnown = next;
+  if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = names.length > 0;
+}
+async function copyReceivedName(name) {
+  if (!name) return;
+  let copied = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(name);
+      copied = true;
+    }
+  } catch (e) {
+    copied = false;
+  }
+  if (!copied) {
+    const area = document.createElement("textarea");
+    area.value = name;
+    area.setAttribute("readonly", "readonly");
+    area.style.position = "absolute";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      copied = document.execCommand("copy");
+    } catch (err) {
+      copied = false;
+    }
+    document.body.removeChild(area);
+  }
+  if (copied) {
+    note("Имя " + name + " скопировано в буфер обмена");
+  } else {
+    note("Не удалось скопировать имя \"" + name + "\"");
+  }
+}
+
 /* Таблица каналов */
 let channels = [];
+// Служебное состояние поиска по каналам
+const searchState = { running: false, cancel: false };
 function mockChannels() {
   channels = [
-    { ch: 1, tx: 868.1, rx: 868.1, rssi: -92, snr: 8.5, st: "idle", scan: "" },
-    { ch: 2, tx: 868.3, rx: 868.3, rssi: -97, snr: 7.1, st: "listen", scan: "" },
-    { ch: 3, tx: 868.5, rx: 868.5, rssi: -88, snr: 10.2, st: "tx", scan: "" },
+    { ch: 1, tx: 868.1, rx: 868.1, rssi: -92, snr: 8.5, st: "idle", scan: "", scanState: null },
+    { ch: 2, tx: 868.3, rx: 868.3, rssi: -97, snr: 7.1, st: "listen", scan: "", scanState: null },
+    { ch: 3, tx: 868.5, rx: 868.5, rssi: -88, snr: 10.2, st: "tx", scan: "", scanState: null },
   ];
 }
 function renderChannels() {
@@ -1148,9 +1397,15 @@ function renderChannels() {
     if (UI.state.channel === c.ch) tr.classList.add("active");
     const scanText = c.scan || "";
     const scanLower = scanText.toLowerCase();
-    if (scanLower.indexOf("crc") >= 0) tr.classList.add("crc-error");
-    else if (scanLower.indexOf("timeout") >= 0 || scanLower.indexOf("тайм") >= 0 || scanLower.indexOf("noresp") >= 0) tr.classList.add("no-response");
-    else if (scanLower) tr.classList.add("signal");
+    if (c.scanState) {
+      tr.classList.add(c.scanState);
+    } else if (scanLower.indexOf("crc") >= 0) {
+      tr.classList.add("crc-error");
+    } else if (scanLower.indexOf("timeout") >= 0 || scanLower.indexOf("тайм") >= 0 || scanLower.indexOf("noresp") >= 0) {
+      tr.classList.add("no-response");
+    } else if (scanLower) {
+      tr.classList.add("signal");
+    }
     tr.innerHTML = "<td>" + (idx + 1) + "</td>" +
                    "<td>" + c.ch + "</td>" +
                    "<td>" + c.tx.toFixed(3) + "</td>" +
@@ -1163,8 +1418,9 @@ function renderChannels() {
   });
 }
 function updateChannelSelect() {
-  const sel = $("#CH");
+  const sel = UI.els.channelSelect || $("#CH");
   if (!sel) return;
+  UI.els.channelSelect = sel;
   const prev = UI.state.channel != null ? String(UI.state.channel) : sel.value;
   sel.innerHTML = "";
   channels.forEach((c) => {
@@ -1174,6 +1430,35 @@ function updateChannelSelect() {
     sel.appendChild(opt);
   });
   if (prev && channels.some((c) => String(c.ch) === prev)) sel.value = prev;
+}
+// Обработка выбора канала в выпадающем списке Settings с немедленным применением
+async function onChannelSelectChange(event) {
+  const sel = event && event.target ? event.target : (UI.els.channelSelect || $("#CH"));
+  if (!sel) return;
+  const raw = sel.value;
+  const num = parseInt(raw, 10);
+  if (isNaN(num)) {
+    note("Некорректный номер канала");
+    if (UI.state.channel != null) sel.value = String(UI.state.channel);
+    return;
+  }
+  if (UI.state.channel === num) return;
+  const prev = UI.state.channel;
+  sel.disabled = true;
+  try {
+    const res = await sendCommand("CH", { v: String(num) });
+    if (res === null) {
+      if (prev != null) {
+        sel.value = String(prev);
+      } else {
+        await refreshChannels().catch(() => {});
+      }
+    } else {
+      localStorage.setItem("set.CH", String(num));
+    }
+  } finally {
+    sel.disabled = false;
+  }
 }
 async function refreshChannels() {
   const bankSel = $("#BANK");
@@ -1227,6 +1512,7 @@ function parseChannels(text) {
       snr: Number(snr || 0),
       st: st || "",
       scan: scan || "",
+      scanState: null,
     });
   }
   return out;
@@ -1235,11 +1521,7 @@ function applyPingResult(text) {
   if (UI.state.channel == null) return;
   const entry = channels.find((c) => c.ch === UI.state.channel);
   if (!entry) return;
-  const rssiMatch = text.match(/RSSI\s*(-?\d+(?:\.\d+)?)/i);
-  const snrMatch = text.match(/SNR\s*(-?\d+(?:\.\d+)?)/i);
-  if (rssiMatch) entry.rssi = Number(rssiMatch[1]);
-  if (snrMatch) entry.snr = Number(snrMatch[1]);
-  entry.scan = text.trim();
+  applyPingToEntry(entry, text);
   renderChannels();
 }
 function applySearchResult(text) {
@@ -1259,14 +1541,16 @@ function applySearchResult(text) {
     const snrMatch = info.match(/SNR\s*(-?\d+(?:\.\d+)?)/i);
     if (rssiMatch) entry.rssi = Number(rssiMatch[1]);
     if (snrMatch) entry.snr = Number(snrMatch[1]);
+    const state = detectScanState(info);
+    entry.scanState = state || entry.scanState;
     changed = true;
   }
   if (changed) renderChannels();
 }
 function exportChannelsCsv() {
-  const lines = [["idx","ch","tx","rx","rssi","snr","status","scan"]];
+  const lines = [["idx","ch","tx","rx","rssi","snr","status","scan_state","scan"]];
   channels.forEach((c, idx) => {
-    lines.push([idx + 1, c.ch, c.tx, c.rx, c.rssi, c.snr, c.st, c.scan]);
+    lines.push([idx + 1, c.ch, c.tx, c.rx, c.rssi, c.snr, c.st, c.scanState || "", c.scan]);
   });
   const csv = lines.map((row) => row.join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -1278,10 +1562,128 @@ function exportChannelsCsv() {
   URL.revokeObjectURL(url);
 }
 async function runPing() {
+  if (UI.state.channel != null) {
+    const entry = setChannelScanState(UI.state.channel, "scanning", "Проверка...");
+    if (entry) renderChannels();
+  }
   await sendCommand("PI");
 }
+// Определяем состояние строки по тексту ответа
+function detectScanState(text) {
+  if (!text) return null;
+  const low = text.toLowerCase();
+  if (low.indexOf("crc") >= 0) return "crc-error";
+  if (low.indexOf("timeout") >= 0 || low.indexOf("no resp") >= 0 || low.indexOf("noresp") >= 0 || low.indexOf("нет ответа") >= 0 || low.indexOf("тайм") >= 0 || (low.indexOf("error") >= 0 && low.indexOf("crc") < 0) || (low.indexOf("err") >= 0 && low.indexOf("crc") < 0) || low.indexOf("fail") >= 0) return "no-response";
+  if (low.indexOf("rssi") >= 0 || low.indexOf("snr") >= 0 || low.indexOf("ok") >= 0 || low.indexOf("ответ") >= 0) return "signal";
+  return null;
+}
+// Обновляем данные канала после пинга
+function applyPingToEntry(entry, text) {
+  if (!entry) return null;
+  const raw = (text || "").trim();
+  const rssiMatch = raw.match(/RSSI\s*(-?\d+(?:\.\d+)?)/i);
+  const snrMatch = raw.match(/SNR\s*(-?\d+(?:\.\d+)?)/i);
+  if (rssiMatch) entry.rssi = Number(rssiMatch[1]);
+  if (snrMatch) entry.snr = Number(snrMatch[1]);
+  entry.scan = raw;
+  const state = detectScanState(raw);
+  entry.scanState = state || "signal";
+  return entry.scanState;
+}
+// Устанавливаем служебный статус строки
+function setChannelScanState(ch, state, text) {
+  const num = Number(ch);
+  const entry = channels.find((c) => c.ch === (isNaN(num) ? ch : num));
+  if (!entry) return null;
+  entry.scanState = state || null;
+  if (typeof text === "string") entry.scan = text;
+  return entry;
+}
 async function runSearch() {
-  await sendCommand("SEAR");
+  if (!channels.length) {
+    note("Список каналов пуст, обновите данные.");
+    return;
+  }
+  if (searchState.running) {
+    searchState.cancel = true;
+    note("Останавливаю поиск...");
+    return;
+  }
+  searchState.running = true;
+  searchState.cancel = false;
+  if (UI.els.searchBtn) {
+    UI.els.searchBtn.textContent = "Stop";
+    UI.els.searchBtn.classList.add("ghost");
+  }
+  await uiYield();
+  const prevChannel = UI.state.channel;
+  let cancelled = false;
+  status("Search: запуск...");
+  await uiYield();
+  try {
+    for (let i = 0; i < channels.length; i++) {
+      if (searchState.cancel) {
+        cancelled = true;
+        break;
+      }
+      const entry = channels[i];
+      setChannelScanState(entry.ch, "scanning", "Проверка...");
+      renderChannels();
+      await uiYield();
+      status("Search: CH " + entry.ch + " (" + (i + 1) + "/" + channels.length + ")");
+      await uiYield();
+      const chRes = await deviceFetch("CH", { v: String(entry.ch) }, 2500);
+      if (!chRes.ok) {
+        entry.scan = "ERR CH: " + chRes.error;
+        entry.scanState = "no-response";
+        renderChannels();
+        await uiYield();
+        continue;
+      }
+      UI.state.channel = entry.ch;
+      updateChannelSelect();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const pingRes = await deviceFetch("PI", {}, 5000);
+      if (searchState.cancel) {
+        cancelled = true;
+        break;
+      }
+      if (pingRes.ok) {
+        applyPingToEntry(entry, pingRes.text);
+      } else {
+        entry.scan = "ERR PI: " + pingRes.error;
+        entry.scanState = "no-response";
+      }
+      renderChannels();
+      await uiYield();
+    }
+  } catch (e) {
+    cancelled = cancelled || searchState.cancel;
+    debugLog("ERR Search: " + e);
+  } finally {
+    const requestedCancel = searchState.cancel || cancelled;
+    searchState.running = false;
+    searchState.cancel = false;
+    if (requestedCancel) {
+      channels.forEach((c) => { if (c.scanState === "scanning") c.scanState = null; });
+    }
+    if (prevChannel != null) {
+      const revert = await deviceFetch("CH", { v: String(prevChannel) }, 2500);
+      if (revert.ok) {
+        UI.state.channel = prevChannel;
+        updateChannelSelect();
+      }
+    }
+    renderChannels();
+    if (UI.els.searchBtn) {
+      UI.els.searchBtn.textContent = "Search";
+      UI.els.searchBtn.classList.remove("ghost");
+    }
+    status(requestedCancel ? "Search: остановлено" : "Search: завершено");
+    await uiYield();
+    if (requestedCancel) note("Сканирование остановлено.");
+    else note("Сканирование завершено.");
+  }
 }
 async function sendTxl() {
   if (!UI.els.txlInput) return;
@@ -1299,6 +1701,25 @@ async function sendTxl() {
 }
 
 /* ACK */
+// Обработчик клика по чипу состояния ACK: переключаем режим и блокируем повторные запросы
+async function onAckChipToggle() {
+  if (UI.state.ackBusy) return;
+  UI.state.ackBusy = true;
+  const chip = UI.els.ackChip;
+  if (chip) {
+    chip.disabled = true;
+    chip.setAttribute("aria-busy", "true");
+  }
+  try {
+    await toggleAck();
+  } finally {
+    UI.state.ackBusy = false;
+    if (chip) {
+      chip.removeAttribute("aria-busy");
+      chip.disabled = false;
+    }
+  }
+}
 function parseAckResponse(text) {
   if (!text) return null;
   const low = text.toLowerCase();
@@ -1311,7 +1732,10 @@ function updateAckUi() {
   const text = UI.els.ackText;
   const state = UI.state.ack;
   const mode = state === true ? "on" : state === false ? "off" : "unknown";
-  if (chip) chip.setAttribute("data-state", mode);
+  if (chip) {
+    chip.setAttribute("data-state", mode);
+    chip.setAttribute("aria-pressed", state === true ? "true" : state === false ? "false" : "mixed");
+  }
   if (text) text.textContent = state === true ? "ON" : state === false ? "OFF" : "—";
   const ackInput = $("#ACK");
   if (ackInput && typeof state === "boolean") ackInput.checked = state;
@@ -1484,6 +1908,16 @@ async function updateKeyUI() {
 }
 
 /* Утилиты */
+// Возвращает управление циклу отрисовки, чтобы элементы UI успевали обновляться
+function uiYield() {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+    } else {
+      setTimeout(() => resolve(), 0);
+    }
+  });
+}
 function status(text) {
   if (UI.els.status) UI.els.status.textContent = text;
 }
@@ -1505,6 +1939,7 @@ function debugLog(text) {
   log.appendChild(line);
   log.scrollTop = log.scrollHeight;
 }
+
 )~~~";
 
 // libs/sha256.js
