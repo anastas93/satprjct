@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include "libs/crypto/aes_ccm.h"
+#include "libs/key_loader/key_loader.h"
 
 // Проверка команды ENCT: шифруем и расшифровываем тестовое сообщение
 #define TEST_CASE(name) void name()

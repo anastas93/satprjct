@@ -117,7 +117,8 @@ bool TxModule::loop() {
     // Шифруем блок и добавляем тег аутентичности
     std::vector<uint8_t> enc;
     std::vector<uint8_t> tag;
-    std::array<uint8_t,12> nonce{};                 // простой нонс
+    uint16_t current_idx = static_cast<uint16_t>(fragments.size());
+    auto nonce = KeyLoader::makeNonce(id, current_idx); // нонс уникален для каждого фрагмента
     if (!encrypt_ccm(key_.data(), key_.size(), nonce.data(), nonce.size(),
                      nullptr, 0, part.data(), part.size(), enc, tag, TAG_LEN)) {
       LOG_ERROR("TxModule: ошибка шифрования");
@@ -200,4 +201,8 @@ bool TxModule::loop() {
 void TxModule::setSendPause(uint32_t pause_ms) {
   pause_ms_ = pause_ms;
   last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms);
+}
+
+void TxModule::reloadKey() {
+  key_ = KeyLoader::loadKey();
 }

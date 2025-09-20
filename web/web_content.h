@@ -201,14 +201,20 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <!-- Вкладка безопасности -->
     <section id="tab-security" class="tab" hidden>
       <h2>Security</h2>
-      <div>Состояние: <span id="keyState"></span></div>
-      <div id="keyHash" class="small muted"></div>
-      <div id="keyHex" class="mono small"></div>
+      <div class="key-info">
+        <div>Состояние: <span id="keyState">—</span></div>
+        <div class="small muted">ID: <span id="keyId"></span></div>
+        <div id="keyPublic" class="mono small muted"></div>
+        <div id="keyPeer" class="mono small muted" hidden></div>
+        <div id="keyBackup" class="small muted"></div>
+      </div>
       <div class="actions">
         <button id="btnKeyGen" class="btn">KEYGEN</button>
+        <button id="btnKeyRestore" class="btn">KEY RESTORE</button>
         <button id="btnKeySend" class="btn">KEYTRANSFER SEND</button>
         <button id="btnKeyRecv" class="btn">KEYTRANSFER RECEIVE</button>
       </div>
+      <div id="keyMessage" class="small muted"></div>
     </section>
     <!-- Вкладка отладочных логов -->
     <section id="tab-debug" class="tab" hidden>
@@ -820,6 +826,8 @@ tbody tr.scanning { color: #1f2937; font-weight:600; }
 
 /* Общие блоки действий */
 .actions { display:flex; flex-wrap:wrap; gap:.5rem; margin:.5rem 0; }
+.key-info { margin-bottom:.75rem; }
+.key-info .mono { word-break: break-all; }
 
 /* Форма настроек радиомодуля */
 .settings-form { display:grid; gap:.75rem; max-width:420px; }
@@ -941,7 +949,8 @@ const char SHA256_JS[] PROGMEM = R"~~~(
 )~~~";
 
 // script.js
-const char SCRIPT_JS[] PROGMEM = R"~~~(/* satprjct web/app.js — vanilla JS only */
+const char SCRIPT_JS[] PROGMEM = R"~~~(
+/* satprjct web/app.js — vanilla JS only */
 /* Безопасная обёртка для localStorage: веб-приложение должно работать даже без постоянного хранилища */
 const storage = (() => {
   const memory = new Map();
@@ -1016,7 +1025,8 @@ const UI = {
     theme: storage.get("theme") || detectPreferredTheme(),
   },
   key: {
-    bytes: null,
+    state: null,
+    lastMessage: "",
   },
   state: {
     channel: null,
@@ -1202,6 +1212,7 @@ const CHANNEL_REFERENCE_FALLBACK = `,RX (MHz),TX (MHz),System,Band Plan,Purpose
 160,269.800,310.025,,,
 161,269.850,310.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 162,269.950,310.950,DOD 25 kHz,DOD 25K,Tactical communications (DoD)`;
+const POWER_PRESETS = [-5, -2, 1, 4, 7, 10, 13, 16, 19, 22];
 
 /* Определяем предпочитаемую тему только при наличии поддержки matchMedia */
 function detectPreferredTheme() {
@@ -1413,11 +1424,11 @@ async function init() {
   updateChannelSelectHint();
 
   // Безопасность
-  const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", generateKey);
-  const btnKeySend = $("#btnKeySend"); if (btnKeySend) btnKeySend.addEventListener("click", () => note("KEYTRANSFER SEND: заглушка"));
-  const btnKeyRecv = $("#btnKeyRecv"); if (btnKeyRecv) btnKeyRecv.addEventListener("click", () => note("KEYTRANSFER RECEIVE: заглушка"));
-  await loadKeyFromStorage();
-  await updateKeyUI();
+  const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", () => requestKeyGen());
+  const btnKeyRestore = $("#btnKeyRestore"); if (btnKeyRestore) btnKeyRestore.addEventListener("click", () => requestKeyRestore());
+  const btnKeySend = $("#btnKeySend"); if (btnKeySend) btnKeySend.addEventListener("click", () => requestKeySend());
+  const btnKeyRecv = $("#btnKeyRecv"); if (btnKeyRecv) btnKeyRecv.addEventListener("click", () => requestKeyReceive());
+  await refreshKeyState({ silent: true });
 
   await refreshChannels().catch(() => {});
   await refreshAckState();
@@ -1882,6 +1893,18 @@ function handleCommandSideEffects(cmd, text) {
     if (text && text.length === 1) {
       const bankSel = $("#BANK");
       if (bankSel) bankSel.value = text;
+    }
+  } else if (upper === "KEYSTATE" || upper === "KEYGEN" || upper === "KEYRESTORE" || upper === "KEYSEND" || upper === "KEYRECV") {
+    try {
+      const data = JSON.parse(text);
+      UI.key.state = data;
+      if (upper === "KEYGEN") UI.key.lastMessage = "Сгенерирован новый локальный ключ";
+      else if (upper === "KEYRESTORE") UI.key.lastMessage = "Восстановлена резервная версия ключа";
+      else if (upper === "KEYSEND") UI.key.lastMessage = "Публичный ключ готов к передаче";
+      else if (upper === "KEYRECV") UI.key.lastMessage = "Получен внешний ключ";
+      renderKeyState(data);
+    } catch (err) {
+      console.warn("[key] не удалось разобрать ответ", err);
     }
   }
 }
@@ -2703,6 +2726,21 @@ async function refreshAckState() {
 
 /* Настройки */
 const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","SF","ACK"];
+function normalizePowerPreset(raw) {
+  if (raw == null) return null;
+  const str = String(raw).trim();
+  if (!str) return null;
+  const num = Number(str);
+  if (!Number.isFinite(num)) return null;
+  const idxValue = POWER_PRESETS.indexOf(num);
+  if (idxValue >= 0) {
+    return { index: idxValue, value: POWER_PRESETS[idxValue] };
+  }
+  if (Number.isInteger(num) && num >= 0 && num < POWER_PRESETS.length) {
+    return { index: num, value: POWER_PRESETS[num] };
+  }
+  return null;
+}
 function loadSettings() {
   for (let i = 0; i < SETTINGS_KEYS.length; i++) {
     const key = SETTINGS_KEYS[i];
@@ -2713,7 +2751,14 @@ function loadSettings() {
     if (el.type === "checkbox") {
       el.checked = v === "1";
       if (typeof el.indeterminate === "boolean") el.indeterminate = false;
-    } else el.value = v;
+    } else if (key === "PW") {
+      const resolved = normalizePowerPreset(v);
+      if (resolved) {
+        el.value = String(resolved.value);
+      }
+    } else {
+      el.value = v;
+    }
   }
 }
 function saveSettingsLocal() {
@@ -2820,55 +2865,177 @@ async function clearCaches() {
 }
 
 /* Безопасность */
-async function loadKeyFromStorage() {
-  const b64 = storage.get("sec.key");
-  if (b64) {
-    UI.key.bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).slice(0, 16);
-  } else {
-    UI.key.bytes = null;
-  }
-}
-async function saveKeyToStorage(bytes) {
-  storage.set("sec.key", btoa(String.fromCharCode.apply(null, bytes)));
-}
-async function generateKey() {
-  const buf = new Uint8Array(16);
-  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-    crypto.getRandomValues(buf);
-  } else {
-    for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
-  }
-  UI.key.bytes = buf;
-  await saveKeyToStorage(buf);
-  await updateKeyUI();
-  note("Сгенерирован новый ключ (16 байт).");
-}
-async function sha256Hex(bytes) {
-  if (typeof crypto !== "undefined" && crypto.subtle && crypto.subtle.digest) {
-    const digest = await crypto.subtle.digest("SHA-256", bytes);
-    return Array.from(new Uint8Array(digest)).map((x) => x.toString(16).padStart(2, "0")).join("");
-  }
-  if (typeof sha256Bytes === "function") {
-    return sha256Bytes(bytes);
-  }
-  let sum = 0;
-  for (let i = 0; i < bytes.length; i++) sum = (sum + bytes[i]) & 0xffffffff;
-  return sum.toString(16).padStart(8, "0");
-}
-async function updateKeyUI() {
+function renderKeyState(state) {
+  const data = state || UI.key.state;
   const stateEl = $("#keyState");
-  const hashEl = $("#keyHash");
-  const hexEl = $("#keyHex");
-  if (!UI.key.bytes) {
-    if (stateEl) stateEl.textContent = "LOCAL";
-    if (hashEl) hashEl.textContent = "";
-    if (hexEl) hexEl.textContent = "";
+  const idEl = $("#keyId");
+  const pubEl = $("#keyPublic");
+  const peerEl = $("#keyPeer");
+  const backupEl = $("#keyBackup");
+  const messageEl = $("#keyMessage");
+  if (!data || typeof data !== "object") {
+    if (stateEl) stateEl.textContent = "—";
+    if (idEl) idEl.textContent = "";
+    if (pubEl) pubEl.textContent = "";
+    if (peerEl) peerEl.textContent = "";
+    if (backupEl) backupEl.textContent = "";
   } else {
-    const hex = Array.from(UI.key.bytes).map((x) => x.toString(16).padStart(2, "0")).join("");
-    const h = await sha256Hex(UI.key.bytes);
-    if (stateEl) stateEl.textContent = h.slice(0, 4).toUpperCase();
-    if (hashEl) hashEl.textContent = "SHA-256: " + h;
-    if (hexEl) hexEl.textContent = hex;
+    const type = data.type === "external" ? "EXTERNAL" : "LOCAL";
+    if (stateEl) stateEl.textContent = type;
+    if (idEl) idEl.textContent = data.id || "";
+    if (pubEl) pubEl.textContent = data.public ? ("PUB " + data.public) : "";
+    if (peerEl) {
+      if (data.peer) {
+        peerEl.textContent = "PEER " + data.peer;
+        peerEl.hidden = false;
+      } else {
+        peerEl.textContent = "";
+        peerEl.hidden = true;
+      }
+    }
+    if (backupEl) backupEl.textContent = data.hasBackup ? "Есть резерв" : "";
+  }
+  if (messageEl) messageEl.textContent = UI.key.lastMessage || "";
+}
+
+async function refreshKeyState(options) {
+  const opts = options || {};
+  if (!opts.silent) status("→ KEYSTATE");
+  const res = await deviceFetch("KEYSTATE", {}, 4000);
+  if (res.ok) {
+    try {
+      const data = JSON.parse(res.text);
+      if (data && data.error) {
+        if (!opts.silent) note("KEYSTATE: " + data.error);
+        return;
+      }
+      UI.key.state = data;
+      UI.key.lastMessage = "";
+      renderKeyState(data);
+      if (!opts.silent) status("✓ KEYSTATE");
+    } catch (err) {
+      console.warn("[key] parse error", err);
+      note("Не удалось разобрать состояние ключа");
+    }
+  } else if (!opts.silent) {
+    status("✗ KEYSTATE");
+    note("Ошибка KEYSTATE: " + res.error);
+  }
+}
+
+async function requestKeyGen() {
+  status("→ KEYGEN");
+  const res = await deviceFetch("KEYGEN", {}, 6000);
+  if (!res.ok) {
+    status("✗ KEYGEN");
+    note("Ошибка KEYGEN: " + res.error);
+    return;
+  }
+  try {
+    const data = JSON.parse(res.text);
+    if (data && data.error) {
+      note("KEYGEN: " + data.error);
+      status("✗ KEYGEN");
+      return;
+    }
+    UI.key.state = data;
+    UI.key.lastMessage = "Сгенерирован новый локальный ключ";
+    renderKeyState(data);
+    status("✓ KEYGEN");
+  } catch (err) {
+    status("✗ KEYGEN");
+    note("Некорректный ответ KEYGEN");
+  }
+}
+
+async function requestKeyRestore() {
+  status("→ KEYRESTORE");
+  const res = await deviceFetch("KEYRESTORE", {}, 6000);
+  if (!res.ok) {
+    status("✗ KEYRESTORE");
+    note("Ошибка KEYRESTORE: " + res.error);
+    return;
+  }
+  try {
+    const data = JSON.parse(res.text);
+    if (data && data.error) {
+      note("KEYRESTORE: " + data.error);
+      status("✗ KEYRESTORE");
+      return;
+    }
+    UI.key.state = data;
+    UI.key.lastMessage = "Восстановлена резервная версия ключа";
+    renderKeyState(data);
+    status("✓ KEYRESTORE");
+  } catch (err) {
+    status("✗ KEYRESTORE");
+    note("Некорректный ответ KEYRESTORE");
+  }
+}
+
+async function requestKeySend() {
+  status("→ KEYSEND");
+  const res = await deviceFetch("KEYSEND", {}, 5000);
+  if (!res.ok) {
+    status("✗ KEYSEND");
+    note("Ошибка KEYSEND: " + res.error);
+    return;
+  }
+  try {
+    const data = JSON.parse(res.text);
+    if (data && data.error) {
+      note("KEYSEND: " + data.error);
+      status("✗ KEYSEND");
+      return;
+    }
+    UI.key.state = data;
+    UI.key.lastMessage = "Публичный ключ готов к передаче";
+    renderKeyState(data);
+    if (data && data.public && navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(data.public);
+        UI.key.lastMessage = "Публичный ключ скопирован";
+        renderKeyState(data);
+      } catch (err) {
+        console.warn("[key] clipboard", err);
+      }
+    }
+    status("✓ KEYSEND");
+  } catch (err) {
+    status("✗ KEYSEND");
+    note("Некорректный ответ KEYSEND");
+  }
+}
+
+async function requestKeyReceive() {
+  let input = window.prompt("Вставьте публичный ключ партнёра (64 hex-символа)");
+  if (!input) return;
+  input = input.trim();
+  if (!/^[0-9a-fA-F]{64}$/.test(input)) {
+    note("Неверный формат ключа");
+    return;
+  }
+  status("→ KEYRECV");
+  const res = await deviceFetch("KEYRECV", { pub: input }, 6000);
+  if (!res.ok) {
+    status("✗ KEYRECV");
+    note("Ошибка KEYRECV: " + res.error);
+    return;
+  }
+  try {
+    const data = JSON.parse(res.text);
+    if (data && data.error) {
+      note("KEYRECV: " + data.error);
+      status("✗ KEYRECV");
+      return;
+    }
+    UI.key.state = data;
+    UI.key.lastMessage = "Получен внешний ключ";
+    renderKeyState(data);
+    status("✓ KEYRECV");
+  } catch (err) {
+    status("✗ KEYRECV");
+    note("Некорректный ответ KEYRECV");
   }
 }
 
@@ -2904,7 +3071,6 @@ function debugLog(text) {
   log.appendChild(line);
   log.scrollTop = log.scrollHeight;
 }
-
 )~~~";
 
 // libs/sha256.js
