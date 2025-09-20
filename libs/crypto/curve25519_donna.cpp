@@ -433,22 +433,22 @@ fsquare(limb *output, const limb *in) {
 /* Take a little-endian, 32-byte number and expand it into polynomial form */
 static void
 fexpand(limb *output, const u8 *input) {
-#define F(n,start,shift,mask) \
+#define F_EXPAND(n,start,shift,mask) \
   output[n] = ((((limb) input[start + 0]) | \
                 ((limb) input[start + 1]) << 8 | \
                 ((limb) input[start + 2]) << 16 | \
                 ((limb) input[start + 3]) << 24) >> shift) & mask;
-  F(0, 0, 0, 0x3ffffff);
-  F(1, 3, 2, 0x1ffffff);
-  F(2, 6, 3, 0x3ffffff);
-  F(3, 9, 5, 0x1ffffff);
-  F(4, 12, 6, 0x3ffffff);
-  F(5, 16, 0, 0x1ffffff);
-  F(6, 19, 1, 0x3ffffff);
-  F(7, 22, 3, 0x1ffffff);
-  F(8, 25, 4, 0x3ffffff);
-  F(9, 28, 6, 0x1ffffff);
-#undef F
+  F_EXPAND(0, 0, 0, 0x3ffffff);
+  F_EXPAND(1, 3, 2, 0x1ffffff);
+  F_EXPAND(2, 6, 3, 0x3ffffff);
+  F_EXPAND(3, 9, 5, 0x1ffffff);
+  F_EXPAND(4, 12, 6, 0x3ffffff);
+  F_EXPAND(5, 16, 0, 0x1ffffff);
+  F_EXPAND(6, 19, 1, 0x3ffffff);
+  F_EXPAND(7, 22, 3, 0x1ffffff);
+  F_EXPAND(8, 25, 4, 0x3ffffff);
+  F_EXPAND(9, 28, 6, 0x1ffffff);
+#undef F_EXPAND
 }
 
 #if (-32 >> 1) != -16
