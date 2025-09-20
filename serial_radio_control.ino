@@ -295,6 +295,7 @@ String cmdInfo() {
   s += "\nSF: "; s += String(radio.getSpreadingFactor());
   s += "\nCR: "; s += String(radio.getCodingRate());
   s += "\nPower: "; s += String(radio.getPower()); s += " dBm";
+  s += "\nACK: "; s += ackEnabled ? "включён" : "выключен";
   return s;
 }
 

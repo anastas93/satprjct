@@ -150,6 +150,7 @@ a { color: inherit; }
 }
 .chip.switch { cursor: pointer; user-select: none; }
 .chip.switch input { width: auto; accent-color: var(--accent); cursor: pointer; }
+.chip[aria-busy="true"] { opacity:.65; pointer-events:none; }
 .chip.input-chip input {
   width: 4.5rem;
   max-width: 6rem;
@@ -593,6 +594,9 @@ tbody tr.scanning { color: #1f2937; font-weight:600; }
 /* Форма настроек радиомодуля */
 .settings-form { display:grid; gap:.75rem; max-width:420px; }
 .settings-form label { display:flex; flex-direction:column; gap:.25rem; font-weight:600; }
+.settings-form .settings-toggle { display:flex; flex-direction:column; gap:.25rem; }
+.settings-form .settings-toggle .chip { gap:.6rem; justify-content:flex-start; }
+.settings-form .settings-toggle .field-hint { margin:0; }
 .settings-actions { margin-top:.5rem; }
 
 /* Mobile dock */
