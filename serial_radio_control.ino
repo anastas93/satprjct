@@ -15,6 +15,7 @@
 #include "libs/simple_logger/simple_logger.h"     // журнал статусов
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
 #include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
+#include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
 
 // --- Сеть и веб-интерфейс ---
 #include <WiFi.h>        // работа с Wi-Fi
@@ -34,6 +35,103 @@ ReceivedBuffer recvBuf;     // буфер полученных сообщени�
 bool ackEnabled = DefaultSettings::USE_ACK; // флаг автоматической отправки ACK
 
 WebServer server(80);       // HTTP-сервер для веб-интерфейса
+
+// Преобразование массива байтов в hex-строку (верхний регистр)
+template <size_t N>
+String toHex(const std::array<uint8_t, N>& data) {
+  static const char kHex[] = "0123456789ABCDEF";
+  String out;
+  out.reserve(N * 2);
+  for (size_t i = 0; i < N; ++i) {
+    out += kHex[data[i] >> 4];
+    out += kHex[data[i] & 0x0F];
+  }
+  return out;
+}
+
+// Парсинг hex-строки в массив байтов; допускаются строчные/прописные символы
+template <size_t N>
+bool parseHex(const String& text, std::array<uint8_t, N>& out) {
+  if (text.length() != static_cast<int>(N * 2)) return false;
+  auto hexVal = [](char c) -> int {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+    return -1;
+  };
+  for (size_t i = 0; i < N; ++i) {
+    int hi = hexVal(text[static_cast<int>(i * 2)]);
+    int lo = hexVal(text[static_cast<int>(i * 2 + 1)]);
+    if (hi < 0 || lo < 0) return false;
+    out[i] = static_cast<uint8_t>((hi << 4) | lo);
+  }
+  return true;
+}
+
+// Формирование JSON с состоянием ключа
+String makeKeyStateJson() {
+  KeyLoader::KeyState st = KeyLoader::getState();
+  auto idBytes = KeyLoader::keyId(st.session_key);
+  String json = "{";
+  json += "\"valid\":";
+  json += st.valid ? "true" : "false";
+  json += ",\"type\":\"";
+  json += (st.origin == KeyLoader::KeyOrigin::EXTERNAL ? "external" : "local");
+  json += "\",\"id\":\"";
+  json += toHex(idBytes);
+  json += "\",\"public\":\"";
+  json += toHex(st.root_public);
+  json += "\",\"hasBackup\":";
+  json += st.has_backup ? "true" : "false";
+  if (st.origin == KeyLoader::KeyOrigin::EXTERNAL) {
+    json += ",\"peer\":\"";
+    json += toHex(st.peer_public);
+    json += "\"";
+  }
+  json += "}";
+  return json;
+}
+
+void reloadCryptoModules() {
+  tx.reloadKey();
+  rx.reloadKey();
+}
+
+String cmdKeyState() {
+  return makeKeyStateJson();
+}
+
+String cmdKeyGenSecure() {
+  if (KeyLoader::generateLocalKey()) {
+    reloadCryptoModules();
+    return makeKeyStateJson();
+  }
+  return String("{\"error\":\"keygen\"}");
+}
+
+String cmdKeyRestoreSecure() {
+  if (KeyLoader::restorePreviousKey()) {
+    reloadCryptoModules();
+    return makeKeyStateJson();
+  }
+  return String("{\"error\":\"restore\"}");
+}
+
+String cmdKeySendSecure() {
+  return makeKeyStateJson();
+}
+
+String cmdKeyReceiveSecure(const String& hex) {
+  std::array<uint8_t,32> remote{};
+  if (!parseHex(hex, remote)) {
+    return String("{\"error\":\"format\"}");
+  }
+  if (!KeyLoader::applyRemotePublic(remote)) {
+    return String("{\"error\":\"apply\"}");
+  }
+  reloadCryptoModules();
+  return makeKeyStateJson();
+}
 
 // Отдаём страницу index.html
 void handleRoot() {
@@ -255,17 +353,17 @@ String cmdBcn() {
 // Команда ENCT повторяет тест шифрования
 String cmdEnct() {
   const uint8_t key[16]   = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
-  const uint8_t nonce[12] = {0,1,2,3,4,5,6,7,8,9,10,11};
+  auto nonce = KeyLoader::makeNonce(0, 0);
   const char* text = "Test ENCT";
   size_t len = strlen(text);
   std::vector<uint8_t> cipher, tag, plain;
-  bool enc = encrypt_ccm(key, sizeof(key), nonce, sizeof(nonce),
+  bool enc = encrypt_ccm(key, sizeof(key), nonce.data(), nonce.size(),
                          nullptr, 0,
                          reinterpret_cast<const uint8_t*>(text), len,
                          cipher, tag, 8);
   bool dec = false;
   if (enc) {
-    dec = decrypt_ccm(key, sizeof(key), nonce, sizeof(nonce),
+    dec = decrypt_ccm(key, sizeof(key), nonce.data(), nonce.size(),
                       nullptr, 0,
                       cipher.data(), cipher.size(),
                       tag.data(), tag.size(), plain);
@@ -418,6 +516,17 @@ void handleCmdHttp() {
     resp = cmdTx(payload);
   } else if (cmd == "ENCT") {
     resp = cmdEnct();
+  } else if (cmd == "KEYSTATE") {
+    resp = cmdKeyState();
+  } else if (cmd == "KEYGEN") {
+    resp = cmdKeyGenSecure();
+  } else if (cmd == "KEYRESTORE") {
+    resp = cmdKeyRestoreSecure();
+  } else if (cmd == "KEYSEND") {
+    resp = cmdKeySendSecure();
+  } else if (cmd == "KEYRECV") {
+    String hex = server.hasArg("pub") ? server.arg("pub") : String();
+    resp = cmdKeyReceiveSecure(hex);
   } else {
     resp = "UNKNOWN";
   }
@@ -447,6 +556,7 @@ void setupWifi() {
 void setup() {
   Serial.begin(115200);
   while (!Serial) {}
+  KeyLoader::ensureStorage();
   setupWifi();                                       // запускаем точку доступа
   radio.begin();
   rx.setBuffer(&recvBuf);                                   // сохраняем принятые пакеты

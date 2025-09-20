@@ -35,7 +35,7 @@ int main() {
   std::vector<uint8_t> tag(payload.end()-8, payload.end());
   std::vector<uint8_t> cipher(payload.begin(), payload.end()-8);
   std::array<uint8_t,16> key = KeyLoader::loadKey();
-  std::array<uint8_t,12> nonce{};
+  auto nonce = KeyLoader::makeNonce(1, 0);
   std::vector<uint8_t> plain;
   bool ok = decrypt_ccm(key.data(), key.size(), nonce.data(), nonce.size(),
                         nullptr, 0, cipher.data(), cipher.size(),

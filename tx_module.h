@@ -21,6 +21,8 @@ public:
   bool loop();
   // Задать минимальную паузу между отправками (мс)
   void setSendPause(uint32_t pause_ms);
+  // Перечитать ключ из хранилища (после смены через веб-интерфейс)
+  void reloadKey();
 private:
   IRadio& radio_;
   std::array<MessageBuffer,4> buffers_;             // очереди сообщений по классам QoS

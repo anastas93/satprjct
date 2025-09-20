@@ -14,5 +14,8 @@
 #include "libs/received_buffer/received_buffer.cpp" // буфер принятых сообщений
 #include "libs/key_loader/key_loader.cpp"           // загрузка и сохранение ключа
 #include "libs/crypto/aes_ccm.cpp"            // AES-CCM шифрование
+#include "libs/crypto/sha256.cpp"             // SHA-256 для ключевого хранилища
+#include "libs/crypto/curve25519_donna.cpp"   // низкоуровневая математика Curve25519
+#include "libs/crypto/x25519.cpp"             // ECDH на Curve25519
 #include "libs/mbedtls/aes.c"                 // упрощённый AES
 #include "libs/mbedtls/ccm.c"                 // реализация CCM

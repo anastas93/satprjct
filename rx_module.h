@@ -19,12 +19,14 @@ public:
   void setCallback(Callback cb);
   // Привязка внешнего буфера для хранения готовых сообщений
   void setBuffer(ReceivedBuffer* buf);
+  // Обновление ключа дешифрования (после смены в хранилище)
+  void reloadKey();
 private:
   Callback cb_;
   PacketGatherer gatherer_; // внутренний сборщик фрагментов
   ReceivedBuffer* buf_ = nullptr; // внешний буфер готовых данных
   std::array<uint8_t,16> key_{};   // ключ для дешифрования
-  std::array<uint8_t,12> nonce_{}; // фиксированный нонс для AES-CCM
+  std::array<uint8_t,12> nonce_{}; // буфер под вычисленный нонс
   std::vector<uint8_t> frame_buf_;   // рабочий буфер кадра без дополнительного выделения
   std::vector<uint8_t> payload_buf_; // буфер полезной нагрузки после удаления пилотов
   std::vector<uint8_t> work_buf_;    // временный буфер для декодеров
