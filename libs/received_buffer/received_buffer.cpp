@@ -1,5 +1,6 @@
 #include "received_buffer.h"
 #include <cstdio>
+#include <algorithm>
 
 // Формирование имени для сырого пакета
 std::string ReceivedBuffer::makeRawName(uint32_t id, uint32_t part) const {
@@ -25,22 +26,37 @@ std::string ReceivedBuffer::makeReadyName(uint32_t id) const {
 // Добавление сырого пакета
 std::string ReceivedBuffer::pushRaw(uint32_t id, uint32_t part, const uint8_t* data, size_t len) {
   if (!data || !len) return {};
-  raw_.push_back({id, part, std::vector<uint8_t>(data, data + len)});
-  return makeRawName(id, part);
+  raw_.emplace_back();
+  auto& item = raw_.back();
+  item.id = id;
+  item.part = part;
+  item.data.assign(data, data + len);
+  item.name = makeRawName(id, part);
+  return item.name;
 }
 
 // Добавление объединённых данных
 std::string ReceivedBuffer::pushSplit(uint32_t id, const uint8_t* data, size_t len) {
   if (!data || !len) return {};
-  split_.push_back({id, 0, std::vector<uint8_t>(data, data + len)});
-  return makeSplitName(id);
+  split_.emplace_back();
+  auto& item = split_.back();
+  item.id = id;
+  item.part = 0;
+  item.data.assign(data, data + len);
+  item.name = makeSplitName(id);
+  return item.name;
 }
 
 // Добавление готовых данных
 std::string ReceivedBuffer::pushReady(uint32_t id, const uint8_t* data, size_t len) {
   if (!data || !len) return {};
-  ready_.push_back({id, 0, std::vector<uint8_t>(data, data + len)});
-  return makeReadyName(id);
+  ready_.emplace_back();
+  auto& item = ready_.back();
+  item.id = id;
+  item.part = 0;
+  item.data.assign(data, data + len);
+  item.name = makeReadyName(id);
+  return item.name;
 }
 
 // Извлечение сырого пакета
@@ -75,22 +91,20 @@ bool ReceivedBuffer::hasReady() const { return !ready_.empty(); }
 // Сформировать список имён элементов (ограничение по count)
 std::vector<std::string> ReceivedBuffer::list(size_t count) const {
   std::vector<std::string> out;                // результирующий список имён
+  if (count == 0) return out;                  // сразу выходим при нулевом запросе
+  const size_t total = std::min(count, raw_.size() + split_.size() + ready_.size());
+  out.reserve(total);                          // резервируем место под итоговый объём
   size_t produced = 0;                         // сколько имён добавлено
-  for (const auto& it : raw_) {                // перебор сырых пакетов
-    if (produced >= count) break;              // достигнут лимит
-    out.push_back(makeRawName(it.id, it.part));
-    ++produced;
-  }
-  for (const auto& it : split_) {              // перебор объединённых данных
-    if (produced >= count) break;              // проверка лимита
-    out.push_back(makeSplitName(it.id));
-    ++produced;
-  }
-  for (const auto& it : ready_) {              // перебор готовых данных
-    if (produced >= count) break;              // проверка лимита
-    out.push_back(makeReadyName(it.id));
-    ++produced;
-  }
+  auto append = [&](const std::deque<Item>& queue) {
+    for (const auto& it : queue) {             // перебор элементов очереди
+      if (produced >= count) break;            // достигнут лимит выдачи
+      out.push_back(it.name);                  // используем готовое имя без форматирования
+      ++produced;
+    }
+  };
+  append(raw_);
+  append(split_);
+  append(ready_);
   return out;                                  // возвращаем список имён
 }
 

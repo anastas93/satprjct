@@ -66,6 +66,22 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         <input id="txlSize" type="number" min="1" max="8192" value="1024" />
         <button id="btnTxlSend" class="btn">Отправить тест</button>
       </div>
+      <div class="group-title"><span>Принятые сообщения</span><span class="line"></span></div>
+      <div class="received-panel">
+        <div class="received-controls">
+          <button id="btnRecvRefresh" class="btn ghost">Обновить список</button>
+          <label class="chip switch">
+            <input type="checkbox" id="recvAuto" />
+            <span>Автообновление</span>
+          </label>
+          <label class="chip input-chip">
+            <span>Предел</span>
+            <input id="recvLimit" type="number" min="1" max="200" value="20" />
+          </label>
+        </div>
+        <ul id="recvList" class="received-list"></ul>
+        <div id="recvEmpty" class="muted small" hidden>Нет готовых сообщений</div>
+      </div>
     </section>
     <!-- Вкладка каналов и пинга -->
     <section id="tab-channels" class="tab" hidden>

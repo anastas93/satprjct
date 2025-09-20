@@ -13,6 +13,9 @@ const UI = {
   state: {
     channel: null,
     ack: null,
+    recvAuto: false,
+    recvTimer: null,
+    receivedKnown: new Set(),
   }
 };
 
@@ -40,6 +43,11 @@ async function init() {
   UI.els.ackChip = $("#ackStateChip");
   UI.els.ackText = $("#ackStateText");
   UI.els.txlInput = $("#txlSize");
+  UI.els.recvList = $("#recvList");
+  UI.els.recvEmpty = $("#recvEmpty");
+  UI.els.recvAuto = $("#recvAuto");
+  UI.els.recvLimit = $("#recvLimit");
+  UI.els.recvRefresh = $("#btnRecvRefresh");
 
   // Навигация по вкладкам
   const hash = location.hash ? location.hash.slice(1) : "";
@@ -98,6 +106,27 @@ async function init() {
     const cmd = btn.dataset ? btn.dataset.cmd : null;
     if (cmd) btn.addEventListener("click", () => sendCommand(cmd));
   });
+
+  // Список принятых сообщений
+  const savedLimitRaw = localStorage.getItem("recvLimit");
+  let savedLimit = parseInt(savedLimitRaw || "", 10);
+  if (!Number.isFinite(savedLimit) || savedLimit <= 0) savedLimit = 20;
+  savedLimit = Math.min(Math.max(savedLimit, 1), 200);
+  if (UI.els.recvLimit) {
+    UI.els.recvLimit.value = String(savedLimit);
+    UI.els.recvLimit.addEventListener("change", onRecvLimitChange);
+  }
+  const savedAuto = localStorage.getItem("recvAuto") === "1";
+  UI.state.recvAuto = savedAuto;
+  if (UI.els.recvAuto) {
+    UI.els.recvAuto.checked = savedAuto;
+    UI.els.recvAuto.addEventListener("change", () => setRecvAuto(UI.els.recvAuto.checked));
+  }
+  if (UI.els.recvRefresh) {
+    UI.els.recvRefresh.addEventListener("click", () => refreshReceivedList({ manual: true }));
+  }
+  setRecvAuto(savedAuto, { skipImmediate: true });
+  refreshReceivedList({ silentError: true });
 
   // Управление ACK и тестами
   const btnAckOn = $("#btnAckOn"); if (btnAckOn) btnAckOn.addEventListener("click", () => setAck(true));
@@ -445,6 +474,123 @@ async function probe() {
     status("Подключено: " + UI.cfg.endpoint);
   } else {
     status("Оффлайн · endpoint: " + UI.cfg.endpoint);
+  }
+}
+
+/* Монитор принятых сообщений */
+function getRecvLimit() {
+  if (!UI.els.recvLimit) return 20;
+  let limit = parseInt(UI.els.recvLimit.value || "20", 10);
+  if (!Number.isFinite(limit) || limit <= 0) limit = 20;
+  limit = Math.min(Math.max(limit, 1), 200);
+  UI.els.recvLimit.value = String(limit);
+  return limit;
+}
+function onRecvLimitChange() {
+  const limit = getRecvLimit();
+  localStorage.setItem("recvLimit", String(limit));
+  if (UI.state.recvAuto) refreshReceivedList({ silentError: true });
+}
+function setRecvAuto(enabled, opts) {
+  const options = opts || {};
+  UI.state.recvAuto = enabled;
+  if (UI.els.recvAuto) UI.els.recvAuto.checked = enabled;
+  localStorage.setItem("recvAuto", enabled ? "1" : "0");
+  if (UI.state.recvTimer) {
+    clearInterval(UI.state.recvTimer);
+    UI.state.recvTimer = null;
+  }
+  if (enabled) {
+    if (!options.skipImmediate) {
+      refreshReceivedList({ silentError: true });
+    }
+    const every = options.interval || 5000;
+    UI.state.recvTimer = setInterval(() => refreshReceivedList({ silentError: true }), every);
+  }
+}
+async function refreshReceivedList(opts) {
+  if (!UI.els.recvList) return;
+  const options = opts || {};
+  const manual = options.manual === true;
+  if (manual) status("→ RSTS");
+  const limit = getRecvLimit();
+  const text = await sendCommand("RSTS", { n: limit }, { silent: true, timeoutMs: 2500 });
+  if (text === null) {
+    if (!options.silentError) {
+      if (manual) status("✗ RSTS");
+      note("Не удалось получить список принятых сообщений");
+    }
+    return;
+  }
+  const names = text.split(/\r?\n/)
+                    .map((line) => line.trim())
+                    .filter((line) => line.length > 0);
+  renderReceivedList(names);
+  if (manual) status("✓ RSTS (" + names.length + ")");
+}
+function renderReceivedList(names) {
+  if (!UI.els.recvList) return;
+  UI.els.recvList.innerHTML = "";
+  const prev = UI.state.receivedKnown instanceof Set ? UI.state.receivedKnown : new Set();
+  const next = new Set();
+  const frag = document.createDocumentFragment();
+  names.forEach((name) => {
+    next.add(name);
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    label.className = "received-name";
+    label.textContent = name;
+    li.appendChild(label);
+    const actions = document.createElement("div");
+    actions.className = "received-actions";
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "icon-btn ghost";
+    copyBtn.textContent = "⧉";
+    copyBtn.title = "Скопировать имя";
+    copyBtn.addEventListener("click", () => copyReceivedName(name));
+    actions.appendChild(copyBtn);
+    li.appendChild(actions);
+    if (!prev.has(name)) {
+      li.classList.add("fresh");
+      setTimeout(() => li.classList.remove("fresh"), 1600);
+    }
+    frag.appendChild(li);
+  });
+  UI.els.recvList.appendChild(frag);
+  UI.state.receivedKnown = next;
+  if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = names.length > 0;
+}
+async function copyReceivedName(name) {
+  if (!name) return;
+  let copied = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(name);
+      copied = true;
+    }
+  } catch (e) {
+    copied = false;
+  }
+  if (!copied) {
+    const area = document.createElement("textarea");
+    area.value = name;
+    area.setAttribute("readonly", "readonly");
+    area.style.position = "absolute";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      copied = document.execCommand("copy");
+    } catch (err) {
+      copied = false;
+    }
+    document.body.removeChild(area);
+  }
+  if (copied) {
+    note("Имя " + name + " скопировано в буфер обмена");
+  } else {
+    note("Не удалось скопировать имя \"" + name + "\"");
   }
 }
 
