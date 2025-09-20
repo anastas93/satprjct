@@ -1,4 +1,6 @@
 #pragma once
+#ifndef LIBS_SCRAMBLER_SCRAMBLER_H
+#define LIBS_SCRAMBLER_SCRAMBLER_H
 #include <cstddef>
 #include <cstdint>
 
@@ -15,3 +17,4 @@ inline void descramble(uint8_t* data, std::size_t len, uint16_t seed = 0xACE1) {
 
 } // namespace scrambler
 
+#endif // LIBS_SCRAMBLER_SCRAMBLER_H

@@ -601,24 +601,28 @@ fcontract(u8 *output, limb *input_limbs) {
   input[7] <<= 3;
   input[8] <<= 4;
   input[9] <<= 6;
-#define F(i, s) \
-  output[s+0] |=  input[i] & 0xff; \
-  output[s+1]  = (input[i] >> 8) & 0xff; \
-  output[s+2]  = (input[i] >> 16) & 0xff; \
-  output[s+3]  = (input[i] >> 24) & 0xff;
+
+  // Локальная лямбда заменяет макрос F, чтобы не конфликтовать с Arduino-хедером.
+  const auto append_limb = [&](int idx, int offset) {
+    output[offset + 0] = static_cast<u8>(output[offset + 0] |
+                                         static_cast<u8>(input[idx] & 0xff));
+    output[offset + 1] = static_cast<u8>((input[idx] >> 8) & 0xff);
+    output[offset + 2] = static_cast<u8>((input[idx] >> 16) & 0xff);
+    output[offset + 3] = static_cast<u8>((input[idx] >> 24) & 0xff);
+  };
+
   output[0] = 0;
   output[16] = 0;
-  F(0,0);
-  F(1,3);
-  F(2,6);
-  F(3,9);
-  F(4,12);
-  F(5,16);
-  F(6,19);
-  F(7,22);
-  F(8,25);
-  F(9,28);
-#undef F
+  append_limb(0, 0);
+  append_limb(1, 3);
+  append_limb(2, 6);
+  append_limb(3, 9);
+  append_limb(4, 12);
+  append_limb(5, 16);
+  append_limb(6, 19);
+  append_limb(7, 22);
+  append_limb(8, 25);
+  append_limb(9, 28);
 }
 
 /* Input: Q, Q', Q-Q'
