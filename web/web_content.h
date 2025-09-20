@@ -9,7 +9,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Sat Project Web</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -93,7 +93,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         <div class="table-wrap pretty">
           <table id="channelsTable">
             <thead>
-              <tr><th>#</th><th>CH</th><th>TX,MHz</th><th>RX,MHz</th><th>RSSI</th><th>SNR</th><th>ST</th><th>SCAN</th></tr>
+              <tr><th>CH</th><th>TX,MHz</th><th>RX,MHz</th><th>RSSI</th><th>SNR</th><th>ST</th><th>SCAN</th></tr>
             </thead>
             <tbody></tbody>
           </table>
@@ -135,7 +135,6 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <section id="tab-settings" class="tab" hidden>
       <h2>Settings</h2>
       <form id="settingsForm" class="settings-form">
-        <label><input type="checkbox" id="ACK" /> ACK</label>
         <label>Bank
           <select id="BANK">
             <option value="e">EAST</option>
@@ -631,7 +630,7 @@ tbody tr.free { background: color-mix(in oklab, var(--good) 20%, transparent); }
 tbody tr.unknown { opacity:.6; }
 /* подсветка процесса и итогов сканирования */
 /* используем color-mix для согласования с темой */
-tbody tr.scanning { background: color-mix(in oklab, var(--accent-2) 15%, white); /* ~#e0f2fe, голубой фон */ }
+tbody tr.scanning { background: color-mix(in oklab, #f97316 25%, white); /* ~#fed7aa, оранжевый фон */ }
 tbody tr.signal { background: color-mix(in oklab, var(--good) 15%, white); /* ~#dcfce7, зелёный фон */ }
 tbody tr.crc-error { background: color-mix(in oklab, #f97316 20%, white); /* ~#fed7aa, оранжевый фон */ }
 tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white); color:#374151; /* ~#e5e7eb, серый фон и тёмный текст */ }
@@ -1070,6 +1069,7 @@ function setTab(tab) {
     if (link) link.setAttribute("aria-current", active ? "page" : "false");
   }
   localStorage.setItem("activeTab", tab);
+  if (tab !== "channels") hideChannelInfo();
 }
 
 /* Тема */
@@ -1500,7 +1500,7 @@ function renderChannels() {
   const tbody = $("#channelsTable tbody");
   if (!tbody) return;
   tbody.innerHTML = "";
-  channels.forEach((c, idx) => {
+  channels.forEach((c) => {
     const tr = document.createElement("tr");
     const status = (c.st || "").toLowerCase();
     const stCls = status === "tx" || status === "listen" ? "busy" : status === "idle" ? "free" : "unknown";
@@ -1517,16 +1517,17 @@ function renderChannels() {
     } else if (scanLower) {
       tr.classList.add("signal");
     }
-    tr.innerHTML = "<td>" + (idx + 1) + "</td>" +
-                   "<td>" + c.ch + "</td>" +
+    tr.innerHTML = "<td>" + c.ch + "</td>" +
                    "<td>" + c.tx.toFixed(3) + "</td>" +
                    "<td>" + c.rx.toFixed(3) + "</td>" +
                    "<td>" + (isNaN(c.rssi) ? "" : c.rssi) + "</td>" +
                    "<td>" + (isNaN(c.snr) ? "" : c.snr) + "</td>" +
                    "<td>" + (c.st || "") + "</td>" +
                    "<td>" + scanText + "</td>";
+    tr.dataset.ch = String(c.ch);
     tbody.appendChild(tr);
   });
+  updateChannelInfoPanel();
 }
 function updateChannelSelect() {
   const sel = UI.els.channelSelect || $("#CH");
@@ -1659,9 +1660,9 @@ function applySearchResult(text) {
   if (changed) renderChannels();
 }
 function exportChannelsCsv() {
-  const lines = [["idx","ch","tx","rx","rssi","snr","status","scan_state","scan"]];
-  channels.forEach((c, idx) => {
-    lines.push([idx + 1, c.ch, c.tx, c.rx, c.rssi, c.snr, c.st, c.scanState || "", c.scan]);
+  const lines = [["ch","tx","rx","rssi","snr","status","scan_state","scan"]];
+  channels.forEach((c) => {
+    lines.push([c.ch, c.tx, c.rx, c.rssi, c.snr, c.st, c.scanState || "", c.scan]);
   });
   const csv = lines.map((row) => row.join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -1848,8 +1849,6 @@ function updateAckUi() {
     chip.setAttribute("aria-pressed", state === true ? "true" : state === false ? "false" : "mixed");
   }
   if (text) text.textContent = state === true ? "ON" : state === false ? "OFF" : "—";
-  const ackInput = $("#ACK");
-  if (ackInput && typeof state === "boolean") ackInput.checked = state;
 }
 async function setAck(value) {
   await sendCommand("ACK", { v: value ? "1" : "0" });
@@ -1873,7 +1872,7 @@ async function refreshAckState() {
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["ACK","BANK","BF","CH","CR","PW","SF"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","SF"];
 function loadSettings() {
   for (let i = 0; i < SETTINGS_KEYS.length; i++) {
     const key = SETTINGS_KEYS[i];
