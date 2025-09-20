@@ -23,12 +23,15 @@ namespace DefaultSettings {
   constexpr uint8_t CR_PRESET = 0;                // Индекс коэффициента кодирования
   constexpr size_t GATHER_BLOCK_SIZE = 110;       // Размер блока для PacketGatherer
   constexpr uint32_t SEND_PAUSE_MS = 80;           // Ожидание между отправками и приёмом (мс)
+  constexpr uint32_t ACK_TIMEOUT_MS = 1500;        // Тайм-аут ожидания ACK перед повтором (мс)
   constexpr uint32_t PING_WAIT_MS = 500;           // Ожидание ответа на пинг (мс)
   constexpr size_t PING_PACKET_SIZE = 5;           // Размер пинг-пакета (байты)
   constexpr size_t SERIAL_BUFFER_LIMIT = 500UL * 1024UL; // Максимальный размер буфера приёма по Serial (байты)
   constexpr size_t TX_QUEUE_CAPACITY = 160;        // Ёмкость очередей TxModule (до четырёх сообщений по 5000 байт)
   constexpr bool USE_RS = false;                   // использовать кодирование RS(255,223)
   constexpr bool USE_ACK = false;                  // использовать подтверждения ACK
+  constexpr uint8_t ACK_RETRY_LIMIT = 3;           // Количество повторных отправок при ожидании ACK
+  constexpr bool USE_ENCRYPTION = true;            // Использовать шифрование AES-CCM
   constexpr const char* WIFI_SSID = "sat_ap";      // SSID точки доступа
   constexpr const char* WIFI_PASS = "12345678";    // пароль точки доступа
   constexpr bool DEBUG = true;                    // Флаг отладочного вывода

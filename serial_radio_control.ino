@@ -22,6 +22,12 @@
 #include <WiFi.h>        // работа с Wi-Fi
 #include <WebServer.h>   // встроенный HTTP-сервер
 #include "web/web_content.h" // встроенные файлы веб-интерфейса
+#ifndef ARDUINO
+#include <fstream>
+#else
+#include <FS.h>
+#include <SPIFFS.h>
+#endif
 
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
@@ -34,6 +40,8 @@ TxModule tx(radio, std::array<size_t,4>{
 RxModule rx;                // модуль приёма
 ReceivedBuffer recvBuf;     // буфер полученных сообщений
 bool ackEnabled = DefaultSettings::USE_ACK; // флаг автоматической отправки ACK
+bool encryptionEnabled = DefaultSettings::USE_ENCRYPTION; // режим шифрования
+uint8_t ackRetryLimit = DefaultSettings::ACK_RETRY_LIMIT; // число повторов при ожидании ACK
 
 WebServer server(80);       // HTTP-сервер для веб-интерфейса
 
@@ -116,6 +124,29 @@ uint32_t generateKeyTransferMsgId() {
   return id;
 }
 
+String readVersionFile() {
+#ifndef ARDUINO
+  std::ifstream f("ver");
+  if (!f.good()) return String("unknown");
+  std::string line;
+  std::getline(f, line);
+  while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+  if (line.empty()) return String("unknown");
+  return String(line.c_str());
+#else
+  static bool spiffsMounted = false;
+  if (!spiffsMounted) spiffsMounted = SPIFFS.begin(true);
+  if (!spiffsMounted) return String("unknown");
+  File f = SPIFFS.open("/ver", "r");
+  if (!f) return String("unknown");
+  String text = f.readStringUntil('\n');
+  f.close();
+  text.trim();
+  if (!text.length()) text = String("unknown");
+  return text;
+#endif
+}
+
 // Обработка специального кадра KEYTRANSFER; возвращает true, если пакет потреблён
 bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
   std::array<uint8_t,32> remote_pub{};
@@ -147,10 +178,12 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
 }
 
 String cmdKeyState() {
+  DEBUG_LOG("Key: запрос состояния");
   return makeKeyStateJson();
 }
 
 String cmdKeyGenSecure() {
+  DEBUG_LOG("Key: генерация нового ключа");
   if (KeyLoader::generateLocalKey()) {
     reloadCryptoModules();
     return makeKeyStateJson();
@@ -159,6 +192,7 @@ String cmdKeyGenSecure() {
 }
 
 String cmdKeyRestoreSecure() {
+  DEBUG_LOG("Key: восстановление ключа из резервной копии");
   if (KeyLoader::restorePreviousKey()) {
     reloadCryptoModules();
     return makeKeyStateJson();
@@ -171,6 +205,7 @@ String cmdKeySendSecure() {
 }
 
 String cmdKeyReceiveSecure(const String& hex) {
+  DEBUG_LOG("Key: применение удалённого ключа");
   std::array<uint8_t,32> remote{};
   if (!parseHex(hex, remote)) {
     return String("{\"error\":\"format\"}");
@@ -184,6 +219,7 @@ String cmdKeyReceiveSecure(const String& hex) {
 
 // Отправка корневого ключа через LoRa с использованием спецключа
 String cmdKeyTransferSendLora() {
+  DEBUG_LOG("Key: отправка ключа по LoRa");
   auto state = KeyLoader::getState();
   auto key_id = KeyLoader::keyId(state.session_key);
   std::vector<uint8_t> frame;
@@ -200,6 +236,7 @@ String cmdKeyTransferSendLora() {
 
 // Ожидание и приём корневого ключа через LoRa
 String cmdKeyTransferReceiveLora() {
+  DEBUG_LOG("Key: ожидание ключа по LoRa");
   keyTransferRuntime.waiting = true;
   keyTransferRuntime.completed = false;
   keyTransferRuntime.error = String();
@@ -605,7 +642,26 @@ void handleCmdHttp() {
     } else if (server.hasArg("v")) {
       ackEnabled = server.arg("v").toInt() != 0;
     }
+    tx.setAckEnabled(ackEnabled);
     resp = ackStateText();
+  } else if (cmd == "ACKR") {
+    if (server.hasArg("v")) {
+      int raw = server.arg("v").toInt();
+      if (raw < 0) raw = 0;
+      if (raw > 10) raw = 10;
+      ackRetryLimit = static_cast<uint8_t>(raw);
+      tx.setAckRetryLimit(ackRetryLimit);
+    }
+    resp = String(ackRetryLimit);
+  } else if (cmd == "ENC") {
+    if (server.hasArg("toggle")) {
+      encryptionEnabled = !encryptionEnabled;
+    } else if (server.hasArg("v")) {
+      encryptionEnabled = server.arg("v").toInt() != 0;
+    }
+    tx.setEncryptionEnabled(encryptionEnabled);
+    rx.setEncryptionEnabled(encryptionEnabled);
+    resp = encryptionEnabled ? String("ENC:1") : String("ENC:0");
   } else if (cmd == "BCN") {
     resp = cmdBcn();
   } else if (cmd == "TXL") {
@@ -647,6 +703,10 @@ void handleCmdHttp() {
   server.send(200, "text/plain", resp);
 }
 
+void handleVer() {
+  server.send(200, "text/plain", readVersionFile());
+}
+
 // Настройка Wi-Fi точки доступа и запуск сервера
 void setupWifi() {
   // Задаём статический IP 192.168.4.1 для точки доступа
@@ -659,6 +719,7 @@ void setupWifi() {
   server.on("/style.css", handleStyleCss);                           // CSS веб-интерфейса
   server.on("/script.js", handleScriptJs);                           // JS логика
   server.on("/libs/sha256.js", handleSha256Js);                      // библиотека SHA-256
+  server.on("/ver", handleVer);                                      // версия приложения
   server.on("/api/tx", handleApiTx);                                 // отправка текста по радио
   server.on("/cmd", handleCmdHttp);                                  // обработка команд
   server.on("/api/cmd", handleCmdHttp);                              // совместимый эндпоинт
@@ -673,11 +734,16 @@ void setup() {
   KeyLoader::ensureStorage();
   setupWifi();                                       // запускаем точку доступа
   radio.begin();
+  tx.setAckEnabled(ackEnabled);
+  tx.setAckRetryLimit(ackRetryLimit);
+  tx.setEncryptionEnabled(encryptionEnabled);
+  rx.setEncryptionEnabled(encryptionEnabled);
   rx.setBuffer(&recvBuf);                                   // сохраняем принятые пакеты
   // обработка входящих данных с учётом ACK
   rx.setCallback([&](const uint8_t* d, size_t l){
     if (l == 3 && d[0]=='A' && d[1]=='C' && d[2]=='K') { // пришёл ACK
       Serial.println("ACK: получен");
+      tx.onAckReceived();
       return;
     }
     Serial.print("RX: ");
@@ -693,7 +759,7 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], PI, SEAR, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, ENC [0|1], PI, SEAR, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
 }
 
 void loop() {
@@ -850,12 +916,34 @@ void loop() {
         Serial.println(cmdKeyTransferSendLora());
       } else if (line.equalsIgnoreCase("KEYTRANSFER RECEIVE")) {
         Serial.println(cmdKeyTransferReceiveLora());
+      } else if (line.startsWith("ENC ")) {
+        encryptionEnabled = line.substring(4).toInt() != 0;
+        tx.setEncryptionEnabled(encryptionEnabled);
+        rx.setEncryptionEnabled(encryptionEnabled);
+        Serial.print("ENC: ");
+        Serial.println(encryptionEnabled ? "включено" : "выключено");
+      } else if (line.equalsIgnoreCase("ENC")) {
+        encryptionEnabled = !encryptionEnabled;
+        tx.setEncryptionEnabled(encryptionEnabled);
+        rx.setEncryptionEnabled(encryptionEnabled);
+        Serial.print("ENC: ");
+        Serial.println(encryptionEnabled ? "включено" : "выключено");
+      } else if (line.startsWith("ACKR")) {
+        int value = ackRetryLimit;
+        if (line.length() > 4) value = line.substring(5).toInt();
+        if (value < 0) value = 0;
+        if (value > 10) value = 10;
+        ackRetryLimit = static_cast<uint8_t>(value);
+        tx.setAckRetryLimit(ackRetryLimit);
+        Serial.print("ACKR: ");
+        Serial.println(ackRetryLimit);
       } else if (line.startsWith("ACK")) {
         if (line.length() > 3) {                          // установка явного значения
           ackEnabled = line.substring(4).toInt() != 0;
         } else {
           ackEnabled = !ackEnabled;                       // переключение
         }
+        tx.setAckEnabled(ackEnabled);
         Serial.print("ACK: ");
         Serial.println(ackEnabled ? "включён" : "выключен");
       } else if (line.equalsIgnoreCase("PI")) {

@@ -26,8 +26,8 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
       <a href="#" data-tab="debug">Debug</a>
     </nav>
     <div class="header-actions">
-      <div class="chip"><input id="endpoint" placeholder="endpoint" /></div>
       <button id="themeToggle" class="icon-btn" aria-label="Тема">🌓</button>
+      <button id="themeRedToggle" class="icon-btn" aria-label="Красная тема">🔴</button>
       <button id="menuToggle" class="icon-btn only-mobile" aria-label="Меню">☰</button>
     </div>
   </header>
@@ -42,9 +42,13 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
       </div>
       <div class="group-title"><span>Состояние ACK</span><span class="line"></span></div>
       <div class="status-row">
-        <button type="button" class="chip state ack-chip" id="ackStateChip" data-state="unknown" title="Переключить ACK" aria-label="Переключить ACK">
+        <button type="button" class="chip state state-chip" id="ackStateChip" data-state="unknown" title="Переключить ACK" aria-label="Переключить ACK">
           <span class="label">ACK</span>
           <span id="ackStateText">—</span>
+        </button>
+        <button type="button" class="chip state state-chip" id="encStateChip" data-state="unknown" title="Переключить шифрование" aria-label="Переключить шифрование">
+          <span class="label">ENC</span>
+          <span id="encStateText">—</span>
         </button>
         <div class="ack-actions">
           <button class="icon-btn ghost" id="btnAckRefresh" title="Обновить состояние ACK" aria-label="Обновить состояние ACK">⟳</button>
@@ -135,6 +139,9 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <section id="tab-settings" class="tab" hidden>
       <h2>Settings</h2>
       <form id="settingsForm" class="settings-form">
+        <label>Endpoint
+          <input id="endpoint" type="text" placeholder="http://192.168.4.1" />
+        </label>
         <label>Bank
           <select id="BANK">
             <option value="e">EAST</option>
@@ -181,13 +188,14 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             <option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option>
           </select>
         </label>
-        <div class="settings-toggle">
-          <label class="chip switch" id="ackSettingControl">
-            <input type="checkbox" id="ACK" />
-            <span>ACK (подтверждения)</span>
-          </label>
+        <div class="settings-toggle" id="ackSettingControl">
+          <div class="field-label">ACK (подтверждения)</div>
           <div id="ackSettingHint" class="field-hint">Состояние не загружено.</div>
         </div>
+        <label>ACK повторы
+          <input id="ACKR" type="number" min="0" max="10" value="3" />
+          <div id="ackRetryHint" class="field-hint">Доступно после включения ACK.</div>
+        </label>
         <div class="settings-actions actions">
           <button type="button" id="btnSaveSettings" class="btn">Сохранить</button>
           <button type="button" id="btnApplySettings" class="btn btn-primary">Применить</button>
@@ -222,8 +230,9 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
       <div id="debugLog" class="debug-log"></div>
     </section>
   </main>
-  <footer>
+  <footer class="site-footer">
     <div id="statusLine" class="small muted"></div>
+    <div class="footer-meta" id="footerMeta">Powered by AS Systems · v<span id="appVersion">—</span></div>
   </footer>
   <div id="toast" class="toast" hidden></div>
   <script src="libs/sha256.js"></script>
@@ -234,7 +243,8 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
 )~~~";
 
 // style.css
-const char STYLE_CSS[] PROGMEM = R"~~~(/* satprjct redesign (rev2): Aurora + glass + depth — responsive with mobile dock */
+const char STYLE_CSS[] PROGMEM = R"~~~(
+/* satprjct redesign (rev2): Aurora + glass + depth — responsive with mobile dock */
 /* Themes */
 :root {
   --bg: #0b1224;
@@ -264,6 +274,21 @@ const char STYLE_CSS[] PROGMEM = R"~~~(/* satprjct redesign (rev2): Aurora + gla
   --ring: rgba(14,165,233,.25);
   --ring-2: rgba(6,182,212,.15);
   color-scheme: light;
+}
+
+:root.red {
+  --bg: #1a0508;
+  --panel: #21060c;
+  --panel-2: #29070f;
+  --text: #fee2e2;
+  --muted: #fca5a5;
+  --accent: #fb7185;
+  --accent-2: #f43f5e;
+  --danger: #f87171;
+  --good: #facc15;
+  --ring: rgba(248,113,113,.35);
+  --ring-2: rgba(244,63,94,.25);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -402,6 +427,12 @@ a { color: inherit; }
   padding: .45rem .6rem;
   cursor: pointer;
 }
+.icon-btn[aria-pressed="true"] {
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  color: #0f172a;
+  border-color: transparent;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-2) 40%, black 10%);
+}
 .icon-btn.ghost {
   background: transparent;
   border-color: color-mix(in oklab, var(--panel-2) 55%, white 45%);
@@ -474,6 +505,11 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
   border-color: color-mix(in oklab, var(--accent-2) 30%, var(--panel-2) 70%);
   color: color-mix(in oklab, var(--text) 88%, white 12%);
 }
+.msg.system .bubble-text {
+  font-style: italic;
+  font-size: .92rem;
+  opacity: .88;
+}
 .msg.system time { color: color-mix(in oklab, var(--accent-2) 35%, var(--muted) 65%); }
 .bubble-text { line-height:1.55; }
 .bubble-meta {
@@ -539,19 +575,19 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
   letter-spacing: .05em;
   font-weight: 700;
 }
-.ack-chip {
+.state-chip {
   cursor: pointer;
   transition: transform .12s ease, box-shadow .2s ease;
 }
-.ack-chip:focus-visible {
+.state-chip:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 3px;
 }
-.ack-chip:disabled {
+.state-chip:disabled {
   opacity: .65;
   cursor: wait;
 }
-.ack-chip[aria-busy="true"] {
+.state-chip[aria-busy="true"] {
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--panel-2) 50%, var(--ring) 50%);
 }
 .chip.state .label { font-size:.72rem; color: var(--muted); }
@@ -757,6 +793,7 @@ tbody tr.scanning { color: #1f2937; font-weight:600; }
   font-size:.8rem;
   color: var(--muted);
 }
+.field-label { font-weight:600; color: var(--muted); }
 @media (min-width: 900px) {
   .channel-layout {
     grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
@@ -804,7 +841,14 @@ tbody tr.scanning { color: #1f2937; font-weight:600; }
   padding: .85rem clamp(.75rem, 2vw, 1rem) calc(.85rem + env(safe-area-inset-bottom));
   color: var(--muted);
   border-top: 1px solid color-mix(in oklab, var(--panel-2) 75%, black 25%);
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:.6rem;
+  font-size:.85rem;
 }
+.footer-meta { margin-left:auto; font-size:.75rem; color: color-mix(in oklab, var(--muted) 80%, var(--text) 20%); }
+.footer-meta strong { color: var(--accent); font-weight:600; }
 
 /* Toast */
 .toast {
@@ -826,12 +870,28 @@ tbody tr.scanning { color: #1f2937; font-weight:600; }
 
 /* Общие блоки действий */
 .actions { display:flex; flex-wrap:wrap; gap:.5rem; margin:.5rem 0; }
-.key-info { margin-bottom:.75rem; }
-.key-info .mono { word-break: break-all; }
 
 /* Форма настроек радиомодуля */
 .settings-form { display:grid; gap:.75rem; max-width:420px; }
 .settings-form label { display:flex; flex-direction:column; gap:.25rem; font-weight:600; }
+.settings-form label input,
+.settings-form label select {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: .7rem;
+  padding: .6rem .75rem;
+  outline: none;
+}
+.settings-form label input:focus,
+.settings-form label select:focus {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.settings-form label input[type="number"] {
+  max-width: 7rem;
+}
 .settings-form .settings-toggle { display:flex; flex-direction:column; gap:.25rem; }
 .settings-form .settings-toggle .chip { gap:.6rem; justify-content:flex-start; }
 .settings-form .settings-toggle .field-hint { margin:0; }
@@ -1023,6 +1083,7 @@ const UI = {
   cfg: {
     endpoint: storage.get("endpoint") || "http://192.168.4.1",
     theme: storage.get("theme") || detectPreferredTheme(),
+    accent: (storage.get("accent") === "red") ? "red" : "default",
   },
   key: {
     state: null,
@@ -1031,12 +1092,16 @@ const UI = {
   state: {
     channel: null,
     ack: null,
+    ackRetry: null,
     ackBusy: false,
+    encBusy: false,
+    encryption: null,
     recvAuto: false,
     recvTimer: null,
     receivedKnown: new Set(),
     infoChannel: null,
     chatHistory: [],
+    version: null,
   }
 };
 
@@ -1213,6 +1278,8 @@ const CHANNEL_REFERENCE_FALLBACK = `,RX (MHz),TX (MHz),System,Band Plan,Purpose
 161,269.850,310.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 162,269.950,310.950,DOD 25 kHz,DOD 25K,Tactical communications (DoD)`;
 const POWER_PRESETS = [-5, -2, 1, 4, 7, 10, 13, 16, 19, 22];
+const ACK_RETRY_MAX = 10;
+const ACK_RETRY_DEFAULT = 3;
 
 /* Определяем предпочитаемую тему только при наличии поддержки matchMedia */
 function detectPreferredTheme() {
@@ -1241,7 +1308,10 @@ async function init() {
   UI.els.nav = $("#siteNav");
   UI.els.endpoint = $("#endpoint");
   UI.els.themeToggle = $("#themeToggle");
+  UI.els.themeRedToggle = $("#themeRedToggle");
   UI.els.status = $("#statusLine");
+  UI.els.footerMeta = $("#footerMeta");
+  UI.els.version = $("#appVersion");
   UI.els.toast = $("#toast");
   UI.els.debugLog = $("#debugLog");
   UI.els.chatLog = $("#chatLog");
@@ -1249,9 +1319,13 @@ async function init() {
   UI.els.sendBtn = $("#sendBtn");
   UI.els.ackChip = $("#ackStateChip");
   UI.els.ackText = $("#ackStateText");
+  UI.els.encChip = $("#encStateChip");
+  UI.els.encText = $("#encStateText");
   UI.els.ackSetting = $("#ACK");
   UI.els.ackSettingWrap = $("#ackSettingControl");
   UI.els.ackSettingHint = $("#ackSettingHint");
+  UI.els.ackRetry = $("#ACKR");
+  UI.els.ackRetryHint = $("#ackRetryHint");
   UI.els.channelSelect = $("#CH");
   UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
@@ -1281,6 +1355,7 @@ async function init() {
   const infoClose = $("#channelInfoClose");
   if (infoClose) infoClose.addEventListener("click", hideChannelInfo);
   const channelsTable = $("#channelsTable");
+  updateFooterVersion();
   if (channelsTable) {
     // Обрабатываем клики по строкам таблицы каналов, чтобы открыть карточку информации
     channelsTable.addEventListener("click", (event) => {
@@ -1334,22 +1409,25 @@ async function init() {
 
   // Тема оформления
   applyTheme(UI.cfg.theme);
+  applyAccent(UI.cfg.accent);
   if (UI.els.themeToggle) {
+    UI.els.themeToggle.setAttribute("aria-pressed", UI.cfg.theme === "dark" ? "true" : "false");
     UI.els.themeToggle.addEventListener("click", () => toggleTheme());
   }
-  const themeSwitch = $("#themeSwitch");
-  if (themeSwitch) {
-    themeSwitch.checked = UI.cfg.theme === "dark" ? true : false;
-    themeSwitch.addEventListener("change", () => toggleTheme());
+  if (UI.els.themeRedToggle) {
+    UI.els.themeRedToggle.setAttribute("aria-pressed", UI.cfg.accent === "red" ? "true" : "false");
+    UI.els.themeRedToggle.addEventListener("click", () => toggleAccent());
   }
 
   // Настройка endpoint
   if (UI.els.endpoint) {
     UI.els.endpoint.value = UI.cfg.endpoint;
     UI.els.endpoint.addEventListener("change", () => {
-      UI.cfg.endpoint = UI.els.endpoint.value.trim();
+      const value = UI.els.endpoint.value.trim() || "http://192.168.4.1";
+      UI.cfg.endpoint = value;
       storage.set("endpoint", UI.cfg.endpoint);
       note("Endpoint: " + UI.cfg.endpoint);
+      resyncAfterEndpointChange().catch((err) => console.warn("[endpoint] resync", err));
     });
   }
 
@@ -1388,6 +1466,7 @@ async function init() {
 
   // Управление ACK и тестами
   if (UI.els.ackChip) UI.els.ackChip.addEventListener("click", onAckChipToggle);
+  if (UI.els.encChip) UI.els.encChip.addEventListener("click", onEncChipToggle);
   if (UI.els.ackSetting) {
     UI.els.ackSetting.addEventListener("change", () => {
       UI.els.ackSetting.indeterminate = false;
@@ -1395,6 +1474,7 @@ async function init() {
     });
   }
   const btnAckRefresh = $("#btnAckRefresh"); if (btnAckRefresh) btnAckRefresh.addEventListener("click", () => refreshAckState());
+  if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   const btnTxl = $("#btnTxlSend"); if (btnTxl) btnTxl.addEventListener("click", sendTxl);
 
   // Вкладка каналов
@@ -1430,10 +1510,12 @@ async function init() {
   const btnKeyRecv = $("#btnKeyRecv"); if (btnKeyRecv) btnKeyRecv.addEventListener("click", () => requestKeyReceive());
   await refreshKeyState({ silent: true });
 
-  await refreshChannels().catch(() => {});
+  await syncSettingsFromDevice();
   await refreshAckState();
+  await refreshAckRetry();
+  await refreshEncryptionState();
 
-  // Пробное подключение
+  await loadVersion().catch(() => {});
   probe().catch(() => {});
 }
 
@@ -1458,9 +1540,23 @@ function applyTheme(mode) {
   UI.cfg.theme = mode === "light" ? "light" : "dark";
   document.documentElement.classList.toggle("light", UI.cfg.theme === "light");
   storage.set("theme", UI.cfg.theme);
+  if (UI.els.themeToggle) {
+    UI.els.themeToggle.setAttribute("aria-pressed", UI.cfg.theme === "dark" ? "true" : "false");
+  }
 }
 function toggleTheme() {
   applyTheme(UI.cfg.theme === "dark" ? "light" : "dark");
+}
+function applyAccent(mode) {
+  UI.cfg.accent = mode === "red" ? "red" : "default";
+  document.documentElement.classList.toggle("red", UI.cfg.accent === "red");
+  storage.set("accent", UI.cfg.accent);
+  if (UI.els.themeRedToggle) {
+    UI.els.themeRedToggle.setAttribute("aria-pressed", UI.cfg.accent === "red" ? "true" : "false");
+  }
+}
+function toggleAccent() {
+  applyAccent(UI.cfg.accent === "red" ? "default" : "red");
 }
 
 /* Работа чата */
@@ -1880,6 +1976,19 @@ function handleCommandSideEffects(cmd, text) {
     if (state !== null) {
       UI.state.ack = state;
       updateAckUi();
+    }
+  } else if (upper === "ACKR") {
+    const value = parseAckRetryResponse(text);
+    if (value !== null) {
+      UI.state.ackRetry = value;
+      storage.set("set.ACKR", String(value));
+      updateAckRetryUi();
+    }
+  } else if (upper === "ENC") {
+    const state = parseEncResponse(text);
+    if (state !== null) {
+      UI.state.encryption = state;
+      updateEncryptionUi();
     }
   } else if (upper === "CH") {
     const value = parseInt(text, 10);
@@ -2613,6 +2722,7 @@ async function sendTxl() {
 async function withAckLock(task) {
   if (UI.state.ackBusy) return null;
   UI.state.ackBusy = true;
+  updateAckRetryUi();
   const chip = UI.els.ackChip;
   const ackSwitch = UI.els.ackSetting;
   const ackWrap = UI.els.ackSettingWrap;
@@ -2662,6 +2772,39 @@ function parseAckResponse(text) {
   if (low.indexOf("ack:0") >= 0 || /\b0\b/.test(low) || low.indexOf("off") >= 0 || low.indexOf("выключ") >= 0) return false;
   return null;
 }
+function clampAckRetry(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return ACK_RETRY_DEFAULT;
+  if (num < 0) return 0;
+  if (num > ACK_RETRY_MAX) return ACK_RETRY_MAX;
+  return Math.round(num);
+}
+function parseAckRetryResponse(text) {
+  if (!text) return null;
+  const match = String(text).match(/-?\d+/);
+  if (!match) return null;
+  return clampAckRetry(Number(match[0]));
+}
+function updateAckRetryUi() {
+  const input = UI.els.ackRetry;
+  const state = UI.state.ackRetry;
+  if (input) {
+    if (state != null && document.activeElement !== input) {
+      input.value = String(state);
+    }
+    const disabled = UI.state.ack !== true || UI.state.ackBusy;
+    input.disabled = disabled;
+  }
+  const hint = UI.els.ackRetryHint;
+  if (hint) {
+    if (UI.state.ack === true) {
+      const attempts = state != null ? state : "—";
+      hint.textContent = "Повторные отправки: " + attempts + " раз.";
+    } else {
+      hint.textContent = "Доступно после включения ACK.";
+    }
+  }
+}
 function updateAckUi() {
   const chip = UI.els.ackChip;
   const text = UI.els.ackText;
@@ -2687,6 +2830,7 @@ function updateAckUi() {
       hint.textContent = "Состояние ACK неизвестно. Обновите данные или попробуйте снова.";
     }
   }
+  updateAckRetryUi();
 }
 async function setAck(value) {
   const response = await sendCommand("ACK", { v: value ? "1" : "0" });
@@ -2699,6 +2843,23 @@ async function setAck(value) {
     }
   }
   return await refreshAckState();
+}
+async function setAckRetry(count) {
+  const clamped = clampAckRetry(count);
+  const response = await withAckLock(async () => {
+    const res = await sendCommand("ACKR", { v: String(clamped) });
+    if (typeof res === "string") {
+      const parsed = parseAckRetryResponse(res);
+      if (parsed !== null) {
+        UI.state.ackRetry = parsed;
+        storage.set("set.ACKR", String(parsed));
+        updateAckRetryUi();
+        return parsed;
+      }
+    }
+    return await refreshAckRetry();
+  });
+  return response;
 }
 async function toggleAck() {
   const response = await sendCommand("ACK", { toggle: "1" });
@@ -2726,9 +2887,116 @@ async function refreshAckState() {
   updateAckUi();
   return null;
 }
+async function refreshAckRetry() {
+  const res = await deviceFetch("ACKR", {}, 2000);
+  if (res.ok) {
+    const parsed = parseAckRetryResponse(res.text);
+    if (parsed !== null) {
+      UI.state.ackRetry = parsed;
+      storage.set("set.ACKR", String(parsed));
+      updateAckRetryUi();
+      return parsed;
+    }
+  }
+  UI.state.ackRetry = null;
+  updateAckRetryUi();
+  return null;
+}
+async function onAckRetryInput() {
+  if (!UI.els.ackRetry) return;
+  const raw = UI.els.ackRetry.value;
+  const clamped = clampAckRetry(parseInt(raw, 10));
+  UI.els.ackRetry.value = String(clamped);
+  storage.set("set.ACKR", String(clamped));
+  if (UI.state.ack !== true) {
+    updateAckRetryUi();
+    return;
+  }
+  await setAckRetry(clamped);
+}
+
+/* Encryption */
+async function withEncLock(task) {
+  if (UI.state.encBusy) return null;
+  UI.state.encBusy = true;
+  const chip = UI.els.encChip;
+  if (chip) {
+    chip.disabled = true;
+    chip.setAttribute("aria-busy", "true");
+  }
+  try {
+    return await task();
+  } finally {
+    UI.state.encBusy = false;
+    if (chip) {
+      chip.disabled = false;
+      chip.removeAttribute("aria-busy");
+    }
+    updateEncryptionUi();
+  }
+}
+function parseEncResponse(text) {
+  if (!text) return null;
+  const low = text.toLowerCase();
+  if (low.indexOf("enc:1") >= 0 || /\b1\b/.test(low) || low.indexOf("on") >= 0 || low.indexOf("включ") >= 0) return true;
+  if (low.indexOf("enc:0") >= 0 || /\b0\b/.test(low) || low.indexOf("off") >= 0 || low.indexOf("выключ") >= 0) return false;
+  return null;
+}
+function updateEncryptionUi() {
+  const chip = UI.els.encChip;
+  const text = UI.els.encText;
+  const state = UI.state.encryption;
+  const mode = state === true ? "on" : state === false ? "off" : "unknown";
+  if (chip) {
+    chip.setAttribute("data-state", mode);
+    chip.setAttribute("aria-pressed", state === true ? "true" : state === false ? "false" : "mixed");
+    if (UI.state.encBusy) chip.setAttribute("aria-busy", "true");
+    else chip.removeAttribute("aria-busy");
+    chip.disabled = UI.state.encBusy;
+  }
+  if (text) text.textContent = state === true ? "ON" : state === false ? "OFF" : "—";
+}
+async function setEncryption(enabled) {
+  const desired = enabled ? true : false;
+  const result = await withEncLock(async () => {
+    const response = await sendCommand("ENC", { v: desired ? "1" : "0" });
+    if (typeof response === "string") {
+      const parsed = parseEncResponse(response);
+      if (parsed !== null) {
+        UI.state.encryption = parsed;
+        updateEncryptionUi();
+        return parsed;
+      }
+    }
+    return await refreshEncryptionState();
+  });
+  return result;
+}
+async function toggleEncryption() {
+  const current = UI.state.encryption;
+  if (current === true) return await setEncryption(false);
+  return await setEncryption(true);
+}
+async function onEncChipToggle() {
+  await toggleEncryption();
+}
+async function refreshEncryptionState() {
+  const res = await deviceFetch("ENC", {}, 2000);
+  if (res.ok) {
+    const state = parseEncResponse(res.text);
+    if (state !== null) {
+      UI.state.encryption = state;
+      updateEncryptionUi();
+      return state;
+    }
+  }
+  UI.state.encryption = null;
+  updateEncryptionUi();
+  return null;
+}
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","SF","ACK"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","SF","ACKR"];
 function normalizePowerPreset(raw) {
   if (raw == null) return null;
   const str = String(raw).trim();
@@ -2759,6 +3027,11 @@ function loadSettings() {
       if (resolved) {
         el.value = String(resolved.value);
       }
+    } else if (key === "ACKR") {
+      const num = clampAckRetry(parseInt(v, 10));
+      if (UI.els.ackRetry) UI.els.ackRetry.value = String(num);
+      UI.state.ackRetry = num;
+      updateAckRetryUi();
     } else {
       el.value = v;
     }
@@ -2773,7 +3046,10 @@ function saveSettingsLocal() {
       storage.remove("set." + key);
       continue;
     }
-    const v = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
+    let v = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
+    if (key === "ACKR") {
+      v = String(clampAckRetry(parseInt(v, 10)));
+    }
     storage.set("set." + key, v);
   }
   note("Сохранено локально.");
@@ -2795,8 +3071,8 @@ async function applySettingsToDevice() {
         continue;
       }
       await sendCommand(key, { v: String(resolved.index) });
-    } else if (key === "ACK") {
-      await withAckLock(() => setAck(value === "1"));
+    } else if (key === "ACKR") {
+      await setAckRetry(parseInt(value, 10));
     } else {
       await sendCommand(key, { v: value });
     }
@@ -2814,7 +3090,11 @@ function exportSettings() {
     if (el.type === "checkbox" && typeof el.indeterminate === "boolean" && el.indeterminate) {
       continue;
     }
-    obj[key] = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
+    if (key === "ACKR") {
+      obj[key] = String(clampAckRetry(parseInt(el.value, 10)));
+    } else {
+      obj[key] = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
+    }
   }
   const json = JSON.stringify(obj, null, 2);
   const blob = new Blob([json], { type: "application/json" });
@@ -2845,6 +3125,14 @@ function importSettings() {
       if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
       const el = $("#" + key);
       if (!el) continue;
+      if (key === "ACKR") {
+        const num = clampAckRetry(parseInt(obj[key], 10));
+        if (UI.els.ackRetry) UI.els.ackRetry.value = String(num);
+        UI.state.ackRetry = num;
+        updateAckRetryUi();
+        storage.set("set.ACKR", String(num));
+        continue;
+      }
       if (el.type === "checkbox") {
         el.checked = obj[key] === "1";
         if (typeof el.indeterminate === "boolean") el.indeterminate = false;
@@ -2865,6 +3153,93 @@ async function clearCaches() {
     })));
   }
   note("Кеш очищен.");
+}
+
+function extractNumericToken(text) {
+  if (!text) return null;
+  const match = String(text).match(/-?\d+(?:\.\d+)?/);
+  return match ? match[0] : null;
+}
+async function syncSettingsFromDevice() {
+  const bankEl = $("#BANK");
+  try {
+    const bankRes = await deviceFetch("BANK", {}, 2000);
+    if (bankRes.ok && bankRes.text) {
+      const letter = bankRes.text.trim().charAt(0);
+      if (letter) {
+        const value = letter.toLowerCase();
+        if (bankEl) bankEl.value = value;
+        storage.set("set.BANK", value);
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] BANK", err);
+  }
+
+  await refreshChannels().catch((err) => console.warn("[settings] refreshChannels", err));
+  updateChannelSelect();
+  updateChannelSelectHint();
+
+  try {
+    const chRes = await deviceFetch("CH", {}, 2000);
+    if (chRes.ok && chRes.text) {
+      const num = parseInt(chRes.text, 10);
+      if (!isNaN(num)) {
+        UI.state.channel = num;
+        if (UI.els.channelSelect) UI.els.channelSelect.value = String(num);
+        storage.set("set.CH", String(num));
+        updateChannelSelect();
+        updateChannelSelectHint();
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] CH", err);
+  }
+
+  const applyNumeric = (id, raw) => {
+    const el = $("#" + id);
+    if (!el) return;
+    const token = extractNumericToken(raw);
+    if (!token) return;
+    if (id === "PW") {
+      const resolved = normalizePowerPreset(token);
+      if (resolved) {
+        el.value = String(resolved.value);
+        storage.set("set.PW", String(resolved.value));
+      }
+    } else {
+      el.value = token;
+      storage.set("set." + id, token);
+    }
+  };
+
+  try {
+    const bfRes = await deviceFetch("BF", {}, 2000);
+    if (bfRes.ok) applyNumeric("BF", bfRes.text);
+  } catch (err) {
+    console.warn("[settings] BF", err);
+  }
+  try {
+    const sfRes = await deviceFetch("SF", {}, 2000);
+    if (sfRes.ok) applyNumeric("SF", sfRes.text);
+  } catch (err) {
+    console.warn("[settings] SF", err);
+  }
+  try {
+    const crRes = await deviceFetch("CR", {}, 2000);
+    if (crRes.ok) applyNumeric("CR", crRes.text);
+  } catch (err) {
+    console.warn("[settings] CR", err);
+  }
+  try {
+    const pwRes = await deviceFetch("PW", {}, 2000);
+    if (pwRes.ok) applyNumeric("PW", pwRes.text);
+  } catch (err) {
+    console.warn("[settings] PW", err);
+  }
+
+  updateChannelSelect();
+  updateChannelSelectHint();
 }
 
 /* Безопасность */
@@ -3070,6 +3445,47 @@ function debugLog(text) {
   line.textContent = "[" + new Date().toLocaleTimeString() + "] " + text;
   log.appendChild(line);
   log.scrollTop = log.scrollHeight;
+}
+
+async function loadVersion() {
+  let base;
+  try {
+    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+  } catch (err) {
+    base = new URL("http://192.168.4.1");
+  }
+  const url = new URL("/ver", base);
+  try {
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const text = (await res.text()).trim();
+    UI.state.version = text || "unknown";
+    updateFooterVersion();
+    return UI.state.version;
+  } catch (err) {
+    UI.state.version = null;
+    updateFooterVersion();
+    throw err;
+  }
+}
+function updateFooterVersion() {
+  const el = UI.els.version || $("#appVersion");
+  if (!el) return;
+  el.textContent = UI.state.version ? String(UI.state.version) : "unknown";
+}
+async function resyncAfterEndpointChange() {
+  try {
+    await syncSettingsFromDevice();
+    await refreshAckState();
+    await refreshAckRetry();
+    await refreshEncryptionState();
+    await refreshKeyState({ silent: true });
+    await loadVersion().catch(() => {});
+    refreshReceivedList({ silentError: true });
+    probe().catch(() => {});
+  } catch (err) {
+    console.warn("[endpoint] resync error", err);
+  }
 }
 )~~~";
 

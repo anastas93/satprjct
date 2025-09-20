@@ -50,6 +50,7 @@ TxModule::TxModule(IRadio& radio, const std::array<size_t,4>& capacities, Payloa
     splitter_(mode), key_(KeyLoader::loadKey()) {
   // ключ считывается один раз и используется при шифровании
   last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms_);
+  last_attempt_ = last_send_;
 }
 
 // Смена режима пакета
@@ -77,73 +78,190 @@ bool TxModule::loop() {
   auto now = std::chrono::steady_clock::now();
   if (pause_ms_ && now - last_send_ < std::chrono::milliseconds(pause_ms_)) {
     DEBUG_LOG("TxModule: пауза");
-    return false; // ждём паузу
-  }
-  // ищем первую непустую очередь QoS
-  MessageBuffer* buf = nullptr;
-  for (auto& b : buffers_) {
-    if (b.hasPending()) { buf = &b; break; }
-  }
-  if (!buf) {                                     // все очереди пусты
-    DEBUG_LOG("TxModule: очереди пусты");
     return false;
-  }
-  std::vector<uint8_t> msg;
-  uint32_t id = 0;                      // получаемый идентификатор сообщения
-  if (!buf->pop(id, msg)) {
-    DEBUG_LOG("TxModule: ошибка извлечения");
-    return false;
-  }
-  std::string prefix;                   // извлечём префикс [ID|n]
-  auto it = std::find(msg.begin(), msg.end(), ']');
-  if (it != msg.end()) {
-    prefix.assign(msg.begin(), it + 1);
   }
 
-  // Шифруем сообщение по блокам перед кодированием и фрагментацией
+  if (ack_enabled_ && waiting_ack_) {
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_attempt_);
+    if (elapsed.count() < static_cast<long>(ack_timeout_ms_)) {
+      return false;
+    }
+    if (inflight_) {
+      if (inflight_->attempts_left > 0) {
+        --inflight_->attempts_left;
+        waiting_ack_ = false;
+        DEBUG_LOG("TxModule: повтор без ACK");
+      } else {
+        DEBUG_LOG("TxModule: ACK не получен, перенос в архив");
+        inflight_->attempts_left = ack_retry_limit_;
+        archive_.push_back(std::move(*inflight_));
+        inflight_.reset();
+        waiting_ack_ = false;
+      }
+    } else {
+      waiting_ack_ = false;
+    }
+  }
+
+  if (!ack_enabled_ && !delayed_ && !archive_.empty() && !inflight_) {
+    scheduleFromArchive();
+  }
+
+  PendingMessage* message = nullptr;
+  std::optional<PendingMessage> temp;
+
+  auto fetchNext = [&](PendingMessage& out) -> bool {
+    MessageBuffer* buf = nullptr;
+    uint8_t qos_idx = 0;
+    for (size_t i = 0; i < buffers_.size(); ++i) {
+      if (buffers_[i].hasPending()) { buf = &buffers_[i]; qos_idx = static_cast<uint8_t>(i); break; }
+    }
+    if (!buf) {
+      DEBUG_LOG("TxModule: очереди пусты");
+      return false;
+    }
+    std::vector<uint8_t> msg;
+    uint32_t id = 0;
+    if (!buf->pop(id, msg)) {
+      DEBUG_LOG("TxModule: ошибка извлечения");
+      return false;
+    }
+    out.id = id;
+    out.data = std::move(msg);
+    out.qos = qos_idx;
+    out.attempts_left = ack_retry_limit_;
+    out.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(out.data);
+    if (!ack_enabled_) out.expect_ack = false;
+    return true;
+  };
+
+  if (ack_enabled_) {
+    if (!inflight_) {
+      if (delayed_) {
+        inflight_.emplace(std::move(*delayed_));
+        delayed_.reset();
+      } else {
+        PendingMessage fresh;
+        if (!fetchNext(fresh)) return false;
+        inflight_.emplace(std::move(fresh));
+      }
+    }
+    if (!inflight_) return false;
+    message = &*inflight_;
+  } else {
+    if (delayed_) {
+      temp.emplace(std::move(*delayed_));
+      delayed_.reset();
+    } else {
+      PendingMessage fresh;
+      if (!fetchNext(fresh)) return false;
+      fresh.expect_ack = false;
+      temp.emplace(std::move(fresh));
+    }
+    if (!temp) return false;
+    message = &*temp;
+  }
+
+  if (!message) return false;
+  bool sent = transmit(*message);
+  if (!sent) {
+    DEBUG_LOG("TxModule: отправка не удалась");
+    if (ack_enabled_ && inflight_) {
+      inflight_->attempts_left = ack_retry_limit_;
+      archive_.push_back(std::move(*inflight_));
+      inflight_.reset();
+      waiting_ack_ = false;
+    }
+    return false;
+  }
+
+  last_send_ = now;
+  if (ack_enabled_) {
+    if (message->expect_ack) {
+      waiting_ack_ = true;
+      last_attempt_ = now;
+    } else {
+      waiting_ack_ = false;
+      if (inflight_) {
+        inflight_->attempts_left = ack_retry_limit_;
+        inflight_.reset();
+      }
+      onSendSuccess();
+    }
+  } else {
+    onSendSuccess();
+  }
+  return true;
+}
+
+// Установка паузы между отправками
+void TxModule::setSendPause(uint32_t pause_ms) {
+  pause_ms_ = pause_ms;
+  last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms);
+}
+
+void TxModule::reloadKey() {
+  key_ = KeyLoader::loadKey();
+  DEBUG_LOG("TxModule: ключ перечитан");
+}
+
+bool TxModule::transmit(const PendingMessage& message) {
+  const auto& msg = message.data;
+  if (msg.empty()) {
+    DEBUG_LOG("TxModule: пустой пакет");
+    return false;
+  }
+
+  std::string prefix;
+  auto it = std::find(msg.begin(), msg.end(), ']');
+  if (it != msg.end()) prefix.assign(msg.begin(), it + 1);
+
   PacketSplitter rs_splitter(PayloadMode::SMALL, RS_DATA_LEN - TAG_LEN);
-  MessageBuffer tmp((msg.size() + (RS_DATA_LEN - TAG_LEN) - 1) /
-                    (RS_DATA_LEN - TAG_LEN));
+  MessageBuffer tmp((msg.size() + (RS_DATA_LEN - TAG_LEN) - 1) / (RS_DATA_LEN - TAG_LEN));
   rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size(), false);
 
-  std::vector<std::vector<uint8_t>> fragments;      // конечные фрагменты для отправки
-  bool sent = false;                                // флаг успешной передачи
+  std::vector<std::vector<uint8_t>> fragments;
+  bool sent = false;
 
   while (tmp.hasPending()) {
     std::vector<uint8_t> part;
-    uint32_t dummy;
-    if (!tmp.pop(dummy, part)) break;               // защита от ошибок
+    uint32_t dummy = 0;
+    if (!tmp.pop(dummy, part)) break;
 
-    // Шифруем блок и добавляем тег аутентичности
     std::vector<uint8_t> enc;
     std::vector<uint8_t> tag;
     uint16_t current_idx = static_cast<uint16_t>(fragments.size());
-    auto nonce = KeyLoader::makeNonce(id, current_idx); // нонс уникален для каждого фрагмента
-    if (!encrypt_ccm(key_.data(), key_.size(), nonce.data(), nonce.size(),
-                     nullptr, 0, part.data(), part.size(), enc, tag, TAG_LEN)) {
-      LOG_ERROR("TxModule: ошибка шифрования");
-      continue;                                     // пропускаем при ошибке
+    auto nonce = KeyLoader::makeNonce(message.id, current_idx);
+    if (encryption_enabled_) {
+      if (!encrypt_ccm(key_.data(), key_.size(), nonce.data(), nonce.size(),
+                       nullptr, 0, part.data(), part.size(), enc, tag, TAG_LEN)) {
+        LOG_ERROR("TxModule: ошибка шифрования");
+        continue;
+      }
+      enc.insert(enc.end(), tag.begin(), tag.end());
+    } else {
+      enc.assign(part.begin(), part.end());
+      enc.insert(enc.end(), TAG_LEN, 0x00);              // добавляем пустой тег для выравнивания
     }
-    enc.insert(enc.end(), tag.begin(), tag.end());  // добавляем тег к данным
-    part.swap(enc);
 
-    std::vector<uint8_t> conv;                      // закодированный блок
-    if (part.size() == RS_DATA_LEN) {
+    std::vector<uint8_t> conv;
+    if (enc.size() == RS_DATA_LEN) {
       if (USE_RS) {
         uint8_t rs_buf[RS_ENC_LEN];
-        rs255223::encode(part.data(), rs_buf);            // кодируем блок RS
-        byte_interleaver::interleave(rs_buf, RS_ENC_LEN); // байтовый интерливинг
-        conv_codec::encodeBits(rs_buf, RS_ENC_LEN, conv); // свёрточное кодирование
+        rs255223::encode(enc.data(), rs_buf);
+        byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
+        conv_codec::encodeBits(rs_buf, RS_ENC_LEN, conv);
       } else {
-        conv_codec::encodeBits(part.data(), part.size(), conv); // только свёрточный кодер
+        conv_codec::encodeBits(enc.data(), enc.size(), conv);
       }
-      if (USE_BIT_INTERLEAVER)
-        bit_interleaver::interleave(conv.data(), conv.size()); // битовый интерливинг
+      if (USE_BIT_INTERLEAVER) {
+        bit_interleaver::interleave(conv.data(), conv.size());
+      }
     } else {
-      conv = part;                                       // короткий блок без кодирования
+      conv = enc;
     }
 
-    if (conv.size() > MAX_FRAGMENT_LEN) {                // проверяем лимит
+    if (conv.size() > MAX_FRAGMENT_LEN) {
       size_t pieces = (conv.size() + MAX_FRAGMENT_LEN - 1) / MAX_FRAGMENT_LEN;
       PacketSplitter frag_splitter(PayloadMode::SMALL, MAX_FRAGMENT_LEN);
       MessageBuffer fb(pieces);
@@ -163,10 +281,14 @@ bool TxModule::loop() {
   for (size_t idx = 0; idx < fragments.size(); ++idx) {
     auto& conv = fragments[idx];
     FrameHeader hdr;
-    hdr.msg_id = id;                                   // один ID для всех фрагментов
-    hdr.frag_idx = static_cast<uint16_t>(idx);         // номер фрагмента
-    hdr.frag_cnt = frag_cnt;                           // общее число фрагментов
+    hdr.msg_id = message.id;
+    hdr.frag_idx = static_cast<uint16_t>(idx);
+    hdr.frag_cnt = frag_cnt;
     hdr.payload_len = static_cast<uint16_t>(conv.size());
+    hdr.flags = 0;
+    if (encryption_enabled_) hdr.flags |= FrameHeader::FLAG_ENCRYPTED;
+    if (message.expect_ack) hdr.flags |= FrameHeader::FLAG_ACK_REQUIRED;
+
     uint8_t hdr_buf[FrameHeader::SIZE];
     if (!hdr.encode(hdr_buf, sizeof(hdr_buf), conv.data(), conv.size())) {
       DEBUG_LOG("TxModule: ошибка кодирования заголовка");
@@ -175,34 +297,94 @@ bool TxModule::loop() {
 
     std::vector<uint8_t> frame;
     frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE);
-    frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE); // повтор заголовка
+    frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE);
     auto payload = insertPilots(conv);
     frame.insert(frame.end(), payload.begin(), payload.end());
-    scrambler::scramble(frame.data(), frame.size());          // скремблируем кадр
+    scrambler::scramble(frame.data(), frame.size());
 
-    if (frame.size() > MAX_FRAME_SIZE) {                     // финальная проверка
+    if (frame.size() > MAX_FRAME_SIZE) {
       LOG_ERROR_VAL("TxModule: превышен размер кадра=", frame.size());
-      continue;                                             // пропускаем отправку
+      continue;
     }
-    radio_.send(frame.data(), frame.size());                // отправка кадра
+    radio_.send(frame.data(), frame.size());
     DEBUG_LOG_VAL("TxModule: отправлен фрагмент=", idx);
     sent = true;
   }
+
   if (!prefix.empty()) {
     SimpleLogger::logStatus(prefix + " GO");
-  }
-  if (sent) {
-    last_send_ = std::chrono::steady_clock::now();
   }
   return sent;
 }
 
-// Установка паузы между отправками
-void TxModule::setSendPause(uint32_t pause_ms) {
-  pause_ms_ = pause_ms;
-  last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms);
+bool TxModule::isAckPayload(const std::vector<uint8_t>& data) {
+  size_t offset = 0;
+  if (!data.empty() && data[0] == '[') {
+    auto it = std::find(data.begin(), data.end(), ']');
+    if (it != data.end()) offset = static_cast<size_t>(std::distance(data.begin(), it) + 1);
+  }
+  if (data.size() < offset + 3) return false;
+  return data[offset] == 'A' && data[offset + 1] == 'C' && data[offset + 2] == 'K';
 }
 
-void TxModule::reloadKey() {
-  key_ = KeyLoader::loadKey();
+void TxModule::scheduleFromArchive() {
+  if (delayed_ || archive_.empty()) return;
+  delayed_.emplace(std::move(archive_.front()));
+  archive_.pop_front();
+  delayed_->attempts_left = ack_retry_limit_;
+  delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(delayed_->data);
+  if (!ack_enabled_) delayed_->expect_ack = false;
+  DEBUG_LOG("TxModule: восстановлен пакет из архива");
+}
+
+void TxModule::onSendSuccess() {
+  scheduleFromArchive();
+}
+
+void TxModule::setAckEnabled(bool enabled) {
+  if (ack_enabled_ == enabled) return;
+  ack_enabled_ = enabled;
+  DEBUG_LOG(enabled ? "TxModule: ACK включён" : "TxModule: ACK выключен");
+  if (!ack_enabled_) {
+    waiting_ack_ = false;
+    if (inflight_) {
+      inflight_->expect_ack = false;
+      inflight_->attempts_left = ack_retry_limit_;
+      inflight_.reset();
+    }
+    scheduleFromArchive();
+  }
+}
+
+void TxModule::setAckRetryLimit(uint8_t retries) {
+  ack_retry_limit_ = retries;
+  if (inflight_) {
+    inflight_->attempts_left = std::min(inflight_->attempts_left, ack_retry_limit_);
+    if (ack_retry_limit_ == 0) inflight_->expect_ack = false;
+  }
+  if (delayed_) {
+    delayed_->attempts_left = ack_retry_limit_;
+    delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(delayed_->data);
+  }
+}
+
+void TxModule::onAckReceived() {
+  if (!ack_enabled_) {
+    scheduleFromArchive();
+    return;
+  }
+  if (!waiting_ack_) return;
+  waiting_ack_ = false;
+  DEBUG_LOG("TxModule: ACK получен");
+  if (inflight_) {
+    inflight_->attempts_left = ack_retry_limit_;
+    inflight_.reset();
+  }
+  scheduleFromArchive();
+}
+
+void TxModule::setEncryptionEnabled(bool enabled) {
+  if (encryption_enabled_ == enabled) return;
+  encryption_enabled_ = enabled;
+  DEBUG_LOG(enabled ? "TxModule: шифрование включено" : "TxModule: шифрование отключено");
 }
