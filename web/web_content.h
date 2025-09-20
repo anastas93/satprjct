@@ -159,6 +159,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         </label>
         <label>Channel
           <select id="CH"></select>
+          <div id="channelSelectHint" class="field-hint"></div>
         </label>
         <label>CR
           <select id="CR">
@@ -440,9 +441,31 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
   word-wrap: break-word;
   grid-column: 2/3;
   transition: transform .12s ease;
+  position: relative;
 }
 .msg.you .bubble { background: color-mix(in oklab, var(--accent) 16%, var(--panel) 84%); border-color: color-mix(in oklab, var(--accent) 35%, var(--panel) 65%); }
 .msg .bubble:active { transform: scale(.99); }
+.msg.system .bubble {
+  background: color-mix(in oklab, var(--panel-2) 88%, var(--accent-2) 12%);
+  border-color: color-mix(in oklab, var(--accent-2) 30%, var(--panel-2) 70%);
+  color: color-mix(in oklab, var(--text) 88%, white 12%);
+}
+.msg.system time { color: color-mix(in oklab, var(--accent-2) 35%, var(--muted) 65%); }
+.bubble-status-only {
+  display:flex;
+  justify-content:flex-end;
+  align-items:flex-end;
+  min-height: 2.4rem;
+}
+.bubble-status-text {
+  font-size:.72rem;
+  letter-spacing:.04em;
+  font-weight:600;
+  color: var(--muted);
+}
+.bubble-tx .bubble-status-text {
+  color: color-mix(in oklab, var(--accent) 55%, var(--muted) 45%);
+}
 
 .chat-input { display:flex; gap:.6rem; margin-top:.8rem; }
 .chat-input button { min-width: 7.5rem; }
@@ -695,8 +718,16 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   word-break: break-word;
 }
 tbody tr.selected-info {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
+  background: color-mix(in oklab, var(--accent-2) 22%, var(--panel-2) 78%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-2) 45%, var(--panel-2) 55%);
+  color: color-mix(in oklab, var(--text) 88%, white 12%);
+}
+tbody tr.selected-info td { font-weight:600; }
+tbody tr.scanning { color: #1f2937; font-weight:600; }
+.field-hint {
+  margin-top:.25rem;
+  font-size:.8rem;
+  color: var(--muted);
 }
 @media (min-width: 900px) {
   .channel-layout {
@@ -823,7 +854,6 @@ tbody tr.selected-info {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: .85rem;
 }
-
 )~~~";
 
 // libs/sha256.js — библиотека SHA-256 на чистом JavaScript
@@ -888,13 +918,78 @@ const char SHA256_JS[] PROGMEM = R"~~~(
 // script.js
 const char SCRIPT_JS[] PROGMEM = R"~~~(
 /* satprjct web/app.js — vanilla JS only */
+/* Безопасная обёртка для localStorage: веб-приложение должно работать даже без постоянного хранилища */
+const storage = (() => {
+  const memory = new Map();
+  try {
+    const ls = window.localStorage;
+    const probeKey = "__sat_probe__";
+    ls.setItem(probeKey, "1");
+    ls.removeItem(probeKey);
+    return {
+      available: true,
+      get(key) {
+        try {
+          const value = ls.getItem(key);
+          return value === null && memory.has(key) ? memory.get(key) : value;
+        } catch (err) {
+          console.warn("[storage] ошибка чтения из localStorage:", err);
+          return memory.has(key) ? memory.get(key) : null;
+        }
+      },
+      set(key, value) {
+        const normalized = value == null ? "" : String(value);
+        memory.set(key, normalized);
+        try {
+          ls.setItem(key, normalized);
+        } catch (err) {
+          console.warn("[storage] не удалось сохранить значение, используется запасной буфер:", err);
+        }
+      },
+      remove(key) {
+        memory.delete(key);
+        try {
+          ls.removeItem(key);
+        } catch (err) {
+          console.warn("[storage] не удалось удалить значение:", err);
+        }
+      },
+      clear() {
+        memory.clear();
+        try {
+          ls.clear();
+        } catch (err) {
+          console.warn("[storage] не удалось очистить localStorage:", err);
+        }
+      },
+    };
+  } catch (err) {
+    console.warn("[storage] localStorage недоступен, используется временное хранилище в памяти:", err);
+    return {
+      available: false,
+      get(key) {
+        return memory.has(key) ? memory.get(key) : null;
+      },
+      set(key, value) {
+        memory.set(key, value == null ? "" : String(value));
+      },
+      remove(key) {
+        memory.delete(key);
+      },
+      clear() {
+        memory.clear();
+      },
+    };
+  }
+})();
+
 /* Состояние интерфейса */
 const UI = {
   tabs: ["chat", "channels", "settings", "security", "debug"],
   els: {},
   cfg: {
-    endpoint: localStorage.getItem("endpoint") || "http://192.168.4.1",
-    theme: localStorage.getItem("theme") || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"),
+    endpoint: storage.get("endpoint") || "http://192.168.4.1",
+    theme: storage.get("theme") || detectPreferredTheme(),
   },
   key: {
     bytes: null,
@@ -906,8 +1001,30 @@ const UI = {
     recvAuto: false,
     recvTimer: null,
     receivedKnown: new Set(),
+    infoChannel: null,
   }
 };
+
+// Справочные данные по каналам из CSV
+const channelReference = {
+  map: new Map(),
+  ready: false,
+  loading: false,
+  error: null,
+  promise: null,
+};
+
+/* Определяем предпочитаемую тему только при наличии поддержки matchMedia */
+function detectPreferredTheme() {
+  try {
+    if (typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: light)").matches) {
+      return "light";
+    }
+  } catch (err) {
+    console.warn("[theme] не удалось получить предпочтение системы:", err);
+  }
+  return "dark";
+}
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -933,16 +1050,63 @@ async function init() {
   UI.els.ackChip = $("#ackStateChip");
   UI.els.ackText = $("#ackStateText");
   UI.els.channelSelect = $("#CH");
+  UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
   UI.els.recvList = $("#recvList");
   UI.els.recvEmpty = $("#recvEmpty");
   UI.els.recvAuto = $("#recvAuto");
   UI.els.recvLimit = $("#recvLimit");
   UI.els.recvRefresh = $("#btnRecvRefresh");
+  UI.els.channelInfoPanel = $("#channelInfoPanel");
+  UI.els.channelInfoTitle = $("#channelInfoTitle");
+  UI.els.channelInfoBody = $("#channelInfoBody");
+  UI.els.channelInfoEmpty = $("#channelInfoEmpty");
+  UI.els.channelInfoStatus = $("#channelInfoStatus");
+  UI.els.channelInfoFields = {
+    rxCurrent: $("#channelInfoRxCurrent"),
+    txCurrent: $("#channelInfoTxCurrent"),
+    rssi: $("#channelInfoRssi"),
+    snr: $("#channelInfoSnr"),
+    status: $("#channelInfoStatusCurrent"),
+    scan: $("#channelInfoScan"),
+    rxRef: $("#channelInfoRxRef"),
+    txRef: $("#channelInfoTxRef"),
+    system: $("#channelInfoSystem"),
+    band: $("#channelInfoBand"),
+    purpose: $("#channelInfoPurpose"),
+  };
+  const infoClose = $("#channelInfoClose");
+  if (infoClose) infoClose.addEventListener("click", hideChannelInfo);
+  const channelsTable = $("#channelsTable");
+  if (channelsTable) {
+    // Обрабатываем клики по строкам таблицы каналов, чтобы открыть карточку информации
+    channelsTable.addEventListener("click", (event) => {
+      const row = event.target ? event.target.closest("tbody tr") : null;
+      if (!row || !row.dataset) return;
+      const value = row.dataset.ch;
+      if (!value) return;
+      const num = Number(value);
+      if (!Number.isFinite(num)) return;
+      if (UI.state.infoChannel === num) hideChannelInfo();
+      else showChannelInfo(num);
+    });
+    channelsTable.addEventListener("keydown", (event) => {
+      if (!event || (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar")) return;
+      const row = event.target ? event.target.closest("tbody tr") : null;
+      if (!row || !row.dataset) return;
+      const value = row.dataset.ch;
+      if (!value) return;
+      const num = Number(value);
+      if (!Number.isFinite(num)) return;
+      event.preventDefault();
+      if (UI.state.infoChannel === num) hideChannelInfo();
+      else showChannelInfo(num);
+    });
+  }
 
   // Навигация по вкладкам
   const hash = location.hash ? location.hash.slice(1) : "";
-  const initialTab = UI.tabs.includes(hash) ? hash : (localStorage.getItem("activeTab") || "chat");
+  const initialTab = UI.tabs.includes(hash) ? hash : (storage.get("activeTab") || "chat");
   for (const tab of UI.tabs) {
     const link = UI.els.nav ? UI.els.nav.querySelector('[data-tab="' + tab + '"]') : null;
     if (link) {
@@ -981,7 +1145,7 @@ async function init() {
     UI.els.endpoint.value = UI.cfg.endpoint;
     UI.els.endpoint.addEventListener("change", () => {
       UI.cfg.endpoint = UI.els.endpoint.value.trim();
-      localStorage.setItem("endpoint", UI.cfg.endpoint);
+      storage.set("endpoint", UI.cfg.endpoint);
       note("Endpoint: " + UI.cfg.endpoint);
     });
   }
@@ -999,7 +1163,7 @@ async function init() {
   });
 
   // Список принятых сообщений
-  const savedLimitRaw = localStorage.getItem("recvLimit");
+  const savedLimitRaw = storage.get("recvLimit");
   let savedLimit = parseInt(savedLimitRaw || "", 10);
   if (!Number.isFinite(savedLimit) || savedLimit <= 0) savedLimit = 20;
   savedLimit = Math.min(Math.max(savedLimit, 1), 200);
@@ -1007,7 +1171,7 @@ async function init() {
     UI.els.recvLimit.value = String(savedLimit);
     UI.els.recvLimit.addEventListener("change", onRecvLimitChange);
   }
-  const savedAuto = localStorage.getItem("recvAuto") === "1";
+  const savedAuto = storage.get("recvAuto") === "1";
   UI.state.recvAuto = savedAuto;
   if (UI.els.recvAuto) {
     UI.els.recvAuto.checked = savedAuto;
@@ -1029,6 +1193,13 @@ async function init() {
   const btnSearch = $("#btnSearch"); if (btnSearch) { UI.els.searchBtn = btnSearch; btnSearch.addEventListener("click", runSearch); }
   const btnRefresh = $("#btnRefresh"); if (btnRefresh) btnRefresh.addEventListener("click", () => refreshChannels());
   const btnExportCsv = $("#btnExportCsv"); if (btnExportCsv) btnExportCsv.addEventListener("click", exportChannelsCsv);
+  // Подгружаем справочник частот в фоне
+  loadChannelReferenceData().then(() => {
+    updateChannelInfoPanel();
+  }).catch((err) => {
+    console.warn("[freq-info] загрузка не удалась:", err);
+    updateChannelInfoPanel();
+  });
 
   loadChatHistory();
 
@@ -1041,6 +1212,7 @@ async function init() {
   loadSettings();
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels());
   if (UI.els.channelSelect) UI.els.channelSelect.addEventListener("change", onChannelSelectChange);
+  updateChannelSelectHint();
 
   // Безопасность
   const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", generateKey);
@@ -1068,7 +1240,7 @@ function setTab(tab) {
     }
     if (link) link.setAttribute("aria-current", active ? "page" : "false");
   }
-  localStorage.setItem("activeTab", tab);
+  storage.set("activeTab", tab);
   if (tab !== "channels") hideChannelInfo();
 }
 
@@ -1076,7 +1248,7 @@ function setTab(tab) {
 function applyTheme(mode) {
   UI.cfg.theme = mode === "light" ? "light" : "dark";
   document.documentElement.classList.toggle("light", UI.cfg.theme === "light");
-  localStorage.setItem("theme", UI.cfg.theme);
+  storage.set("theme", UI.cfg.theme);
 }
 function toggleTheme() {
   applyTheme(UI.cfg.theme === "dark" ? "light" : "dark");
@@ -1084,7 +1256,7 @@ function toggleTheme() {
 
 /* Работа чата */
 function loadChatHistory() {
-  const raw = localStorage.getItem("chatHistory") || "[]";
+  const raw = storage.get("chatHistory") || "[]";
   let entries;
   try {
     entries = JSON.parse(raw);
@@ -1095,8 +1267,8 @@ function loadChatHistory() {
   if (UI.els.chatLog) UI.els.chatLog.innerHTML = "";
   entries.forEach((entry) => addChatMessage(entry));
 }
-function persistChat(message, author) {
-  const raw = localStorage.getItem("chatHistory") || "[]";
+function persistChat(message, author, meta) {
+  const raw = storage.get("chatHistory") || "[]";
   let entries;
   try {
     entries = JSON.parse(raw);
@@ -1104,21 +1276,32 @@ function persistChat(message, author) {
   } catch (e) {
     entries = [];
   }
-  entries.push({ t: Date.now(), a: author, m: message });
-  localStorage.setItem("chatHistory", JSON.stringify(entries.slice(-500)));
+  const record = { t: Date.now(), a: author, m: message };
+  if (meta && typeof meta === "object") {
+    if (meta.role) record.role = meta.role;
+    if (meta.tag) record.tag = meta.tag;
+    if (meta.status != null) record.status = meta.status;
+  }
+  if (!record.role) record.role = author === "you" ? "user" : "system";
+  entries.push(record);
+  storage.set("chatHistory", JSON.stringify(entries.slice(-500)));
 }
 function addChatMessage(entry) {
   if (!UI.els.chatLog) return;
   const data = typeof entry === "string" ? { t: Date.now(), a: "dev", m: entry } : entry;
   const wrap = document.createElement("div");
-  wrap.className = "msg " + (data.a === "you" ? "you" : "dev");
+  const author = data.a === "you" ? "you" : "dev";
+  wrap.className = "msg";
+  wrap.classList.add(author);
+  const role = data.role || (author === "you" ? "user" : "system");
+  if (role !== "user") wrap.classList.add("system");
   const time = document.createElement("time");
   const stamp = data.t ? new Date(data.t) : new Date();
   time.dateTime = stamp.toISOString();
   time.textContent = stamp.toLocaleTimeString();
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  setBubbleText(bubble, data.m);
+  applyChatBubbleContent(bubble, data);
   wrap.appendChild(time);
   wrap.appendChild(bubble);
   UI.els.chatLog.appendChild(wrap);
@@ -1132,6 +1315,28 @@ function setBubbleText(node, text) {
     if (i > 0) node.appendChild(document.createElement("br"));
     node.appendChild(document.createTextNode(parts[i]));
   }
+}
+// Наполняем пузырёк чата с учётом служебных статусов (TX и т.п.)
+function applyChatBubbleContent(node, entry) {
+  const raw = entry && entry.m != null ? String(entry.m) : "";
+  const trimmed = raw.trim();
+  const role = entry && entry.role ? entry.role : (entry && entry.a === "you" ? "user" : "system");
+  const tag = entry && entry.tag ? entry.tag : "";
+  const statusRaw = entry && entry.status != null ? entry.status : null;
+  const isSystem = role !== "user";
+  const isTxStatus = isSystem && (tag === "tx-status" || /^TX\s*:/i.test(trimmed));
+  if (isTxStatus) {
+    const value = statusRaw != null ? String(statusRaw) : trimmed.replace(/^TX\s*:\s*/i, "").trim();
+    const statusText = value ? "TX: " + value : (trimmed || "TX");
+    node.classList.add("bubble-status-only", "bubble-tx");
+    node.setAttribute("aria-label", statusText);
+    const corner = document.createElement("span");
+    corner.className = "bubble-status-text";
+    corner.textContent = statusText;
+    node.appendChild(corner);
+    return;
+  }
+  setBubbleText(node, raw);
 }
 async function onSendChat() {
   if (!UI.els.chatInput) return;
@@ -1261,9 +1466,11 @@ async function sendCommand(cmd, params, opts) {
   if (res.ok) {
     if (!silent) {
       status("✓ " + cmd);
-      note(cmd + ": " + res.text.slice(0, 200));
-      persistChat(cmd + ": " + res.text, "dev");
-      addChatMessage({ t: Date.now(), a: "dev", m: cmd + ": " + res.text });
+      const text = cmd + ": " + res.text;
+      note(text.slice(0, 200));
+      const meta = { role: "system" };
+      persistChat(text, "dev", meta);
+      addChatMessage({ t: Date.now(), a: "dev", m: text, role: "system" });
     }
     debugLog(cmd + ": " + res.text);
     handleCommandSideEffects(cmd, res.text);
@@ -1271,9 +1478,11 @@ async function sendCommand(cmd, params, opts) {
   }
   if (!silent) {
     status("✗ " + cmd);
+    const text = "ERR " + cmd + ": " + res.error;
     note("Ошибка: " + res.error);
-    persistChat("ERR " + cmd + ": " + res.error, "dev");
-    addChatMessage({ t: Date.now(), a: "dev", m: "ERR " + cmd + ": " + res.error });
+    const meta = { role: "system" };
+    persistChat(text, "dev", meta);
+    addChatMessage({ t: Date.now(), a: "dev", m: text, role: "system" });
   }
   debugLog("ERR " + cmd + ": " + res.error);
   return null;
@@ -1320,16 +1529,21 @@ async function sendTextMessage(text) {
   const res = await postTx(payload, 6000);
   if (res.ok) {
     status("✓ TX");
-    note("TX: " + res.text);
-    persistChat("TX: " + res.text, "dev");
-    addChatMessage({ t: Date.now(), a: "dev", m: "TX: " + res.text });
-    debugLog("TX: " + res.text);
-    return res.text;
+    const value = res.text != null ? String(res.text) : "";
+    const msg = "TX: " + value;
+    note(msg);
+    const meta = { role: "system", tag: "tx-status", status: value };
+    persistChat(msg, "dev", meta);
+    addChatMessage({ t: Date.now(), a: "dev", m: msg, role: "system", tag: "tx-status", status: value });
+    debugLog("TX: " + value);
+    return value;
   }
   status("✗ TX");
   note("Ошибка TX: " + res.error);
-  persistChat("TX ERR: " + res.error, "dev");
-  addChatMessage({ t: Date.now(), a: "dev", m: "TX ERR: " + res.error });
+  const errMsg = "TX ERR: " + res.error;
+  const meta = { role: "system" };
+  persistChat(errMsg, "dev", meta);
+  addChatMessage({ t: Date.now(), a: "dev", m: errMsg, role: "system" });
   debugLog("ERR TX: " + res.error);
   return null;
 }
@@ -1379,14 +1593,14 @@ function getRecvLimit() {
 }
 function onRecvLimitChange() {
   const limit = getRecvLimit();
-  localStorage.setItem("recvLimit", String(limit));
+  storage.set("recvLimit", String(limit));
   if (UI.state.recvAuto) refreshReceivedList({ silentError: true });
 }
 function setRecvAuto(enabled, opts) {
   const options = opts || {};
   UI.state.recvAuto = enabled;
   if (UI.els.recvAuto) UI.els.recvAuto.checked = enabled;
-  localStorage.setItem("recvAuto", enabled ? "1" : "0");
+  storage.set("recvAuto", enabled ? "1" : "0");
   if (UI.state.recvTimer) {
     clearInterval(UI.state.recvTimer);
     UI.state.recvTimer = null;
@@ -1489,6 +1703,189 @@ async function copyReceivedName(name) {
 let channels = [];
 // Служебное состояние поиска по каналам
 const searchState = { running: false, cancel: false };
+
+// Скрываем панель информации о канале
+function hideChannelInfo() {
+  UI.state.infoChannel = null;
+  updateChannelInfoPanel();
+}
+
+// Показываем сведения о выбранном канале и подгружаем справочник при необходимости
+function showChannelInfo(ch) {
+  const num = Number(ch);
+  if (!Number.isFinite(num)) return;
+  UI.state.infoChannel = num;
+  updateChannelInfoPanel();
+  if (!channelReference.ready && !channelReference.loading) {
+    loadChannelReferenceData().then(() => {
+      updateChannelInfoPanel();
+    }).catch(() => {
+      updateChannelInfoPanel();
+    });
+  }
+}
+
+// Обновляем визуальное выделение выбранной строки
+function updateChannelInfoHighlight() {
+  const rows = $all("#channelsTable tbody tr");
+  rows.forEach((tr) => {
+    const value = tr && tr.dataset ? Number(tr.dataset.ch) : NaN;
+    const selected = UI.state.infoChannel != null && value === UI.state.infoChannel;
+    tr.classList.toggle("selected-info", selected);
+    if (tr) tr.setAttribute("aria-pressed", selected ? "true" : "false");
+  });
+}
+
+// Обновляем содержимое панели информации
+function updateChannelInfoPanel() {
+  const panel = UI.els.channelInfoPanel || $("#channelInfoPanel");
+  const body = UI.els.channelInfoBody || $("#channelInfoBody");
+  const empty = UI.els.channelInfoEmpty || $("#channelInfoEmpty");
+  const statusEl = UI.els.channelInfoStatus || $("#channelInfoStatus");
+  if (!panel) return;
+  if (UI.state.infoChannel == null) {
+    panel.hidden = true;
+    if (empty) empty.hidden = false;
+    if (body) body.hidden = true;
+    if (statusEl) { statusEl.textContent = ""; statusEl.hidden = true; }
+    updateChannelInfoHighlight();
+    return;
+  }
+
+  panel.hidden = false;
+  if (empty) empty.hidden = true;
+  if (body) body.hidden = false;
+  if (UI.els.channelInfoTitle) UI.els.channelInfoTitle.textContent = String(UI.state.infoChannel);
+
+  const entry = channels.find((c) => c.ch === UI.state.infoChannel);
+  const ref = channelReference.map.get(UI.state.infoChannel);
+  const fields = UI.els.channelInfoFields || {};
+
+  setChannelInfoText(fields.rxCurrent, entry ? formatChannelNumber(entry.rx, 3) : "—");
+  setChannelInfoText(fields.txCurrent, entry ? formatChannelNumber(entry.tx, 3) : "—");
+  setChannelInfoText(fields.rssi, entry && Number.isFinite(entry.rssi) ? String(entry.rssi) : "—");
+  setChannelInfoText(fields.snr, entry && Number.isFinite(entry.snr) ? formatChannelNumber(entry.snr, 1) : "—");
+  setChannelInfoText(fields.status, entry && entry.st ? entry.st : "—");
+  setChannelInfoText(fields.scan, entry && entry.scan ? entry.scan : "—");
+
+  setChannelInfoText(fields.rxRef, ref ? formatChannelNumber(ref.rx, 3) : "—");
+  setChannelInfoText(fields.txRef, ref ? formatChannelNumber(ref.tx, 3) : "—");
+  setChannelInfoText(fields.system, ref && ref.system ? ref.system : "—");
+  setChannelInfoText(fields.band, ref && ref.band ? ref.band : "—");
+  setChannelInfoText(fields.purpose, ref && ref.purpose ? ref.purpose : "—");
+
+  const messages = [];
+  if (channelReference.loading) messages.push("Загружаем справочник частот…");
+  if (channelReference.error) {
+    const errText = channelReference.error && channelReference.error.message ? channelReference.error.message : String(channelReference.error);
+    messages.push("Не удалось загрузить справочник: " + errText);
+  }
+  if (!channelReference.loading && !channelReference.error && !ref) messages.push("В справочнике нет данных для этого канала.");
+  if (!entry) messages.push("Канал отсутствует в текущем списке.");
+  if (statusEl) {
+    const text = messages.join(" ");
+    statusEl.textContent = text;
+    statusEl.hidden = !text;
+  }
+
+  updateChannelInfoHighlight();
+}
+
+// Записываем значение в элемент, если он существует
+function setChannelInfoText(el, text) {
+  if (!el) return;
+  el.textContent = text;
+}
+
+// Форматируем числовое значение с заданным количеством знаков после запятой
+function formatChannelNumber(value, digits) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  return typeof digits === "number" ? num.toFixed(digits) : String(num);
+}
+
+// Загружаем CSV со справочной информацией
+async function loadChannelReferenceData() {
+  if (channelReference.ready) return channelReference.map;
+  if (channelReference.promise) return channelReference.promise;
+  channelReference.loading = true;
+  channelReference.error = null;
+  channelReference.promise = (async () => {
+    try {
+      const res = await fetch("libs/freq-info.csv", { cache: "no-store" });
+      if (!res.ok) {
+        throw new Error("HTTP " + res.status);
+      }
+      const text = await res.text();
+      channelReference.map = parseChannelReferenceCsv(text);
+      channelReference.ready = true;
+      return channelReference.map;
+    } catch (err) {
+      channelReference.error = err;
+      throw err;
+    } finally {
+      channelReference.loading = false;
+      channelReference.promise = null;
+    }
+  })();
+  return channelReference.promise;
+}
+
+// Преобразуем CSV в таблицу каналов
+function parseChannelReferenceCsv(text) {
+  const map = new Map();
+  if (!text) return map;
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    if (!line) continue;
+    line = line.replace(/\ufeff/g, "").trim();
+    if (!line) continue;
+    const cells = splitCsvRow(line);
+    if (!cells.length) continue;
+    const rawCh = cells[0] ? cells[0].trim() : "";
+    if (!rawCh || /[^0-9]/.test(rawCh)) continue;
+    const ch = parseInt(rawCh, 10);
+    if (!Number.isFinite(ch)) continue;
+    const rx = cells[1] ? Number(cells[1].trim()) : NaN;
+    const tx = cells[2] ? Number(cells[2].trim()) : NaN;
+    map.set(ch, {
+      ch,
+      rx: Number.isFinite(rx) ? rx : null,
+      tx: Number.isFinite(tx) ? tx : null,
+      system: cells[3] ? cells[3].trim() : "",
+      band: cells[4] ? cells[4].trim() : "",
+      purpose: cells[5] ? cells[5].trim() : "",
+    });
+  }
+  return map;
+}
+
+// Разбиваем строку CSV с учётом кавычек
+function splitCsvRow(row) {
+  const out = [];
+  let current = "";
+  let quoted = false;
+  for (let i = 0; i < row.length; i++) {
+    const ch = row[i];
+    if (ch === '"') {
+      if (quoted && row[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (ch === "," && !quoted) {
+      out.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  out.push(current);
+  return out;
+}
+
 function mockChannels() {
   channels = [
     { ch: 1, tx: 868.1, rx: 868.1, rssi: -92, snr: 8.5, st: "idle", scan: "", scanState: null },
@@ -1506,6 +1903,7 @@ function renderChannels() {
     const stCls = status === "tx" || status === "listen" ? "busy" : status === "idle" ? "free" : "unknown";
     tr.classList.add(stCls);
     if (UI.state.channel === c.ch) tr.classList.add("active");
+    const infoSelected = UI.state.infoChannel != null && UI.state.infoChannel === c.ch;
     const scanText = c.scan || "";
     const scanLower = scanText.toLowerCase();
     if (c.scanState) {
@@ -1525,6 +1923,10 @@ function renderChannels() {
                    "<td>" + (c.st || "") + "</td>" +
                    "<td>" + scanText + "</td>";
     tr.dataset.ch = String(c.ch);
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    tr.setAttribute("aria-pressed", infoSelected ? "true" : "false");
+    if (infoSelected) tr.classList.add("selected-info");
     tbody.appendChild(tr);
   });
   updateChannelInfoPanel();
@@ -1535,13 +1937,25 @@ function updateChannelSelect() {
   UI.els.channelSelect = sel;
   const prev = UI.state.channel != null ? String(UI.state.channel) : sel.value;
   sel.innerHTML = "";
-  channels.forEach((c) => {
+  if (!channels.length) {
     const opt = document.createElement("option");
-    opt.value = c.ch;
-    opt.textContent = c.ch;
+    opt.value = "";
+    opt.textContent = "—";
     sel.appendChild(opt);
-  });
-  if (prev && channels.some((c) => String(c.ch) === prev)) sel.value = prev;
+    sel.disabled = true;
+    sel.value = "";
+  } else {
+    sel.disabled = false;
+    channels.forEach((c) => {
+      const opt = document.createElement("option");
+      opt.value = c.ch;
+      opt.textContent = c.ch;
+      sel.appendChild(opt);
+    });
+    if (prev && channels.some((c) => String(c.ch) === prev)) sel.value = prev;
+    else if (sel.options.length) sel.value = sel.options[0].value;
+  }
+  updateChannelSelectHint();
 }
 // Обработка выбора канала в выпадающем списке Settings с немедленным применением
 async function onChannelSelectChange(event) {
@@ -1552,6 +1966,7 @@ async function onChannelSelectChange(event) {
   if (isNaN(num)) {
     note("Некорректный номер канала");
     if (UI.state.channel != null) sel.value = String(UI.state.channel);
+    updateChannelSelectHint();
     return;
   }
   if (UI.state.channel === num) return;
@@ -1566,11 +1981,36 @@ async function onChannelSelectChange(event) {
         await refreshChannels().catch(() => {});
       }
     } else {
-      localStorage.setItem("set.CH", String(num));
+      storage.set("set.CH", String(num));
     }
   } finally {
     sel.disabled = false;
+    updateChannelSelectHint();
   }
+}
+// Обновляем подпись с текущими частотами рядом с выпадающим списком каналов
+function updateChannelSelectHint() {
+  const hint = UI.els.channelSelectHint || $("#channelSelectHint");
+  if (!hint) return;
+  const sel = UI.els.channelSelect || $("#CH");
+  if (!sel) return;
+  const raw = sel.value;
+  if (!raw) {
+    hint.textContent = channels.length ? "Канал не выбран" : "Нет данных о каналах";
+    hint.hidden = false;
+    return;
+  }
+  const num = Number(raw);
+  const entry = channels.find((c) => c.ch === num);
+  if (!entry) {
+    hint.textContent = "Нет данных о частотах";
+    hint.hidden = false;
+    return;
+  }
+  const rx = formatChannelNumber(entry.rx, 3);
+  const tx = formatChannelNumber(entry.tx, 3);
+  hint.textContent = "RX " + rx + " · TX " + tx;
+  hint.hidden = false;
 }
 async function refreshChannels() {
   const bankSel = $("#BANK");
@@ -1823,7 +2263,15 @@ async function onAckChipToggle() {
     chip.setAttribute("aria-busy", "true");
   }
   try {
-    await toggleAck();
+    const current = UI.state.ack;
+    if (current === true) {
+      await setAck(false);
+    } else if (current === false) {
+      await setAck(true);
+    } else {
+      const result = await setAck(true);
+      if (result === null) await toggleAck();
+    }
   } finally {
     UI.state.ackBusy = false;
     if (chip) {
@@ -1851,12 +2299,28 @@ function updateAckUi() {
   if (text) text.textContent = state === true ? "ON" : state === false ? "OFF" : "—";
 }
 async function setAck(value) {
-  await sendCommand("ACK", { v: value ? "1" : "0" });
-  await refreshAckState();
+  const response = await sendCommand("ACK", { v: value ? "1" : "0" });
+  if (typeof response === "string") {
+    const parsed = parseAckResponse(response);
+    if (parsed !== null) {
+      UI.state.ack = parsed;
+      updateAckUi();
+      return parsed;
+    }
+  }
+  return await refreshAckState();
 }
 async function toggleAck() {
-  await sendCommand("ACK", { toggle: "1" });
-  await refreshAckState();
+  const response = await sendCommand("ACK", { toggle: "1" });
+  if (typeof response === "string") {
+    const parsed = parseAckResponse(response);
+    if (parsed !== null) {
+      UI.state.ack = parsed;
+      updateAckUi();
+      return parsed;
+    }
+  }
+  return await refreshAckState();
 }
 async function refreshAckState() {
   const res = await deviceFetch("ACK", {}, 2000);
@@ -1878,7 +2342,7 @@ function loadSettings() {
     const key = SETTINGS_KEYS[i];
     const el = $("#" + key);
     if (!el) continue;
-    const v = localStorage.getItem("set." + key);
+    const v = storage.get("set." + key);
     if (v === null) continue;
     if (el.type === "checkbox") el.checked = v === "1";
     else el.value = v;
@@ -1890,7 +2354,7 @@ function saveSettingsLocal() {
     const el = $("#" + key);
     if (!el) continue;
     const v = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
-    localStorage.setItem("set." + key, v);
+    storage.set("set." + key, v);
   }
   note("Сохранено локально.");
 }
@@ -1946,14 +2410,14 @@ function importSettings() {
       if (!el) continue;
       if (el.type === "checkbox") el.checked = obj[key] === "1";
       else el.value = obj[key];
-      localStorage.setItem("set." + key, String(obj[key]));
+      storage.set("set." + key, String(obj[key]));
     }
     note("Импортировано.");
   };
   input.click();
 }
 async function clearCaches() {
-  localStorage.clear();
+  storage.clear();
   if (typeof indexedDB !== "undefined" && indexedDB.databases) {
     const dbs = await indexedDB.databases();
     await Promise.all(dbs.map((db) => new Promise((resolve) => {
@@ -1966,7 +2430,7 @@ async function clearCaches() {
 
 /* Безопасность */
 async function loadKeyFromStorage() {
-  const b64 = localStorage.getItem("sec.key");
+  const b64 = storage.get("sec.key");
   if (b64) {
     UI.key.bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).slice(0, 16);
   } else {
@@ -1974,7 +2438,7 @@ async function loadKeyFromStorage() {
   }
 }
 async function saveKeyToStorage(bytes) {
-  localStorage.setItem("sec.key", btoa(String.fromCharCode.apply(null, bytes)));
+  storage.set("sec.key", btoa(String.fromCharCode.apply(null, bytes)));
 }
 async function generateKey() {
   const buf = new Uint8Array(16);
@@ -2049,7 +2513,6 @@ function debugLog(text) {
   log.appendChild(line);
   log.scrollTop = log.scrollHeight;
 }
-
 )~~~";
 
 // libs/sha256.js

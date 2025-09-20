@@ -131,6 +131,7 @@ async function init() {
   UI.els.ackChip = $("#ackStateChip");
   UI.els.ackText = $("#ackStateText");
   UI.els.channelSelect = $("#CH");
+  UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
   UI.els.recvList = $("#recvList");
   UI.els.recvEmpty = $("#recvEmpty");
@@ -292,6 +293,7 @@ async function init() {
   loadSettings();
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels());
   if (UI.els.channelSelect) UI.els.channelSelect.addEventListener("change", onChannelSelectChange);
+  updateChannelSelectHint();
 
   // Безопасность
   const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", generateKey);
@@ -346,7 +348,7 @@ function loadChatHistory() {
   if (UI.els.chatLog) UI.els.chatLog.innerHTML = "";
   entries.forEach((entry) => addChatMessage(entry));
 }
-function persistChat(message, author) {
+function persistChat(message, author, meta) {
   const raw = storage.get("chatHistory") || "[]";
   let entries;
   try {
@@ -355,21 +357,32 @@ function persistChat(message, author) {
   } catch (e) {
     entries = [];
   }
-  entries.push({ t: Date.now(), a: author, m: message });
+  const record = { t: Date.now(), a: author, m: message };
+  if (meta && typeof meta === "object") {
+    if (meta.role) record.role = meta.role;
+    if (meta.tag) record.tag = meta.tag;
+    if (meta.status != null) record.status = meta.status;
+  }
+  if (!record.role) record.role = author === "you" ? "user" : "system";
+  entries.push(record);
   storage.set("chatHistory", JSON.stringify(entries.slice(-500)));
 }
 function addChatMessage(entry) {
   if (!UI.els.chatLog) return;
   const data = typeof entry === "string" ? { t: Date.now(), a: "dev", m: entry } : entry;
   const wrap = document.createElement("div");
-  wrap.className = "msg " + (data.a === "you" ? "you" : "dev");
+  const author = data.a === "you" ? "you" : "dev";
+  wrap.className = "msg";
+  wrap.classList.add(author);
+  const role = data.role || (author === "you" ? "user" : "system");
+  if (role !== "user") wrap.classList.add("system");
   const time = document.createElement("time");
   const stamp = data.t ? new Date(data.t) : new Date();
   time.dateTime = stamp.toISOString();
   time.textContent = stamp.toLocaleTimeString();
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  setBubbleText(bubble, data.m);
+  applyChatBubbleContent(bubble, data);
   wrap.appendChild(time);
   wrap.appendChild(bubble);
   UI.els.chatLog.appendChild(wrap);
@@ -383,6 +396,28 @@ function setBubbleText(node, text) {
     if (i > 0) node.appendChild(document.createElement("br"));
     node.appendChild(document.createTextNode(parts[i]));
   }
+}
+// Наполняем пузырёк чата с учётом служебных статусов (TX и т.п.)
+function applyChatBubbleContent(node, entry) {
+  const raw = entry && entry.m != null ? String(entry.m) : "";
+  const trimmed = raw.trim();
+  const role = entry && entry.role ? entry.role : (entry && entry.a === "you" ? "user" : "system");
+  const tag = entry && entry.tag ? entry.tag : "";
+  const statusRaw = entry && entry.status != null ? entry.status : null;
+  const isSystem = role !== "user";
+  const isTxStatus = isSystem && (tag === "tx-status" || /^TX\s*:/i.test(trimmed));
+  if (isTxStatus) {
+    const value = statusRaw != null ? String(statusRaw) : trimmed.replace(/^TX\s*:\s*/i, "").trim();
+    const statusText = value ? "TX: " + value : (trimmed || "TX");
+    node.classList.add("bubble-status-only", "bubble-tx");
+    node.setAttribute("aria-label", statusText);
+    const corner = document.createElement("span");
+    corner.className = "bubble-status-text";
+    corner.textContent = statusText;
+    node.appendChild(corner);
+    return;
+  }
+  setBubbleText(node, raw);
 }
 async function onSendChat() {
   if (!UI.els.chatInput) return;
@@ -512,9 +547,11 @@ async function sendCommand(cmd, params, opts) {
   if (res.ok) {
     if (!silent) {
       status("✓ " + cmd);
-      note(cmd + ": " + res.text.slice(0, 200));
-      persistChat(cmd + ": " + res.text, "dev");
-      addChatMessage({ t: Date.now(), a: "dev", m: cmd + ": " + res.text });
+      const text = cmd + ": " + res.text;
+      note(text.slice(0, 200));
+      const meta = { role: "system" };
+      persistChat(text, "dev", meta);
+      addChatMessage({ t: Date.now(), a: "dev", m: text, role: "system" });
     }
     debugLog(cmd + ": " + res.text);
     handleCommandSideEffects(cmd, res.text);
@@ -522,9 +559,11 @@ async function sendCommand(cmd, params, opts) {
   }
   if (!silent) {
     status("✗ " + cmd);
+    const text = "ERR " + cmd + ": " + res.error;
     note("Ошибка: " + res.error);
-    persistChat("ERR " + cmd + ": " + res.error, "dev");
-    addChatMessage({ t: Date.now(), a: "dev", m: "ERR " + cmd + ": " + res.error });
+    const meta = { role: "system" };
+    persistChat(text, "dev", meta);
+    addChatMessage({ t: Date.now(), a: "dev", m: text, role: "system" });
   }
   debugLog("ERR " + cmd + ": " + res.error);
   return null;
@@ -571,16 +610,21 @@ async function sendTextMessage(text) {
   const res = await postTx(payload, 6000);
   if (res.ok) {
     status("✓ TX");
-    note("TX: " + res.text);
-    persistChat("TX: " + res.text, "dev");
-    addChatMessage({ t: Date.now(), a: "dev", m: "TX: " + res.text });
-    debugLog("TX: " + res.text);
-    return res.text;
+    const value = res.text != null ? String(res.text) : "";
+    const msg = "TX: " + value;
+    note(msg);
+    const meta = { role: "system", tag: "tx-status", status: value };
+    persistChat(msg, "dev", meta);
+    addChatMessage({ t: Date.now(), a: "dev", m: msg, role: "system", tag: "tx-status", status: value });
+    debugLog("TX: " + value);
+    return value;
   }
   status("✗ TX");
   note("Ошибка TX: " + res.error);
-  persistChat("TX ERR: " + res.error, "dev");
-  addChatMessage({ t: Date.now(), a: "dev", m: "TX ERR: " + res.error });
+  const errMsg = "TX ERR: " + res.error;
+  const meta = { role: "system" };
+  persistChat(errMsg, "dev", meta);
+  addChatMessage({ t: Date.now(), a: "dev", m: errMsg, role: "system" });
   debugLog("ERR TX: " + res.error);
   return null;
 }
@@ -974,13 +1018,25 @@ function updateChannelSelect() {
   UI.els.channelSelect = sel;
   const prev = UI.state.channel != null ? String(UI.state.channel) : sel.value;
   sel.innerHTML = "";
-  channels.forEach((c) => {
+  if (!channels.length) {
     const opt = document.createElement("option");
-    opt.value = c.ch;
-    opt.textContent = c.ch;
+    opt.value = "";
+    opt.textContent = "—";
     sel.appendChild(opt);
-  });
-  if (prev && channels.some((c) => String(c.ch) === prev)) sel.value = prev;
+    sel.disabled = true;
+    sel.value = "";
+  } else {
+    sel.disabled = false;
+    channels.forEach((c) => {
+      const opt = document.createElement("option");
+      opt.value = c.ch;
+      opt.textContent = c.ch;
+      sel.appendChild(opt);
+    });
+    if (prev && channels.some((c) => String(c.ch) === prev)) sel.value = prev;
+    else if (sel.options.length) sel.value = sel.options[0].value;
+  }
+  updateChannelSelectHint();
 }
 // Обработка выбора канала в выпадающем списке Settings с немедленным применением
 async function onChannelSelectChange(event) {
@@ -991,6 +1047,7 @@ async function onChannelSelectChange(event) {
   if (isNaN(num)) {
     note("Некорректный номер канала");
     if (UI.state.channel != null) sel.value = String(UI.state.channel);
+    updateChannelSelectHint();
     return;
   }
   if (UI.state.channel === num) return;
@@ -1009,7 +1066,32 @@ async function onChannelSelectChange(event) {
     }
   } finally {
     sel.disabled = false;
+    updateChannelSelectHint();
   }
+}
+// Обновляем подпись с текущими частотами рядом с выпадающим списком каналов
+function updateChannelSelectHint() {
+  const hint = UI.els.channelSelectHint || $("#channelSelectHint");
+  if (!hint) return;
+  const sel = UI.els.channelSelect || $("#CH");
+  if (!sel) return;
+  const raw = sel.value;
+  if (!raw) {
+    hint.textContent = channels.length ? "Канал не выбран" : "Нет данных о каналах";
+    hint.hidden = false;
+    return;
+  }
+  const num = Number(raw);
+  const entry = channels.find((c) => c.ch === num);
+  if (!entry) {
+    hint.textContent = "Нет данных о частотах";
+    hint.hidden = false;
+    return;
+  }
+  const rx = formatChannelNumber(entry.rx, 3);
+  const tx = formatChannelNumber(entry.tx, 3);
+  hint.textContent = "RX " + rx + " · TX " + tx;
+  hint.hidden = false;
 }
 async function refreshChannels() {
   const bankSel = $("#BANK");
@@ -1262,7 +1344,15 @@ async function onAckChipToggle() {
     chip.setAttribute("aria-busy", "true");
   }
   try {
-    await toggleAck();
+    const current = UI.state.ack;
+    if (current === true) {
+      await setAck(false);
+    } else if (current === false) {
+      await setAck(true);
+    } else {
+      const result = await setAck(true);
+      if (result === null) await toggleAck();
+    }
   } finally {
     UI.state.ackBusy = false;
     if (chip) {
@@ -1290,12 +1380,28 @@ function updateAckUi() {
   if (text) text.textContent = state === true ? "ON" : state === false ? "OFF" : "—";
 }
 async function setAck(value) {
-  await sendCommand("ACK", { v: value ? "1" : "0" });
-  await refreshAckState();
+  const response = await sendCommand("ACK", { v: value ? "1" : "0" });
+  if (typeof response === "string") {
+    const parsed = parseAckResponse(response);
+    if (parsed !== null) {
+      UI.state.ack = parsed;
+      updateAckUi();
+      return parsed;
+    }
+  }
+  return await refreshAckState();
 }
 async function toggleAck() {
-  await sendCommand("ACK", { toggle: "1" });
-  await refreshAckState();
+  const response = await sendCommand("ACK", { toggle: "1" });
+  if (typeof response === "string") {
+    const parsed = parseAckResponse(response);
+    if (parsed !== null) {
+      UI.state.ack = parsed;
+      updateAckUi();
+      return parsed;
+    }
+  }
+  return await refreshAckState();
 }
 async function refreshAckState() {
   const res = await deviceFetch("ACK", {}, 2000);
