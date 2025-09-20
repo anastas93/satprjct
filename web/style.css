@@ -198,7 +198,13 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
   background: var(--panel-2);
   border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
 }
-.msg { display:grid; grid-template-columns: auto 1fr; gap:.5rem; align-items:flex-start; }
+.msg {
+  display:grid;
+  gap:.35rem;
+  justify-items:flex-start;
+  align-items:flex-start;
+}
+.msg.you { justify-items:flex-end; }
 .msg .avatar {
   width: 30px; height: 30px; border-radius: 999px;
   display:grid; place-items:center;
@@ -207,17 +213,24 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
   color: #001018; border: none;
 }
 .msg.dev .avatar { background: linear-gradient(180deg, #64748b, #334155); color: #e2e8f0; }
-.msg time { color: var(--muted); font-size:.72rem; grid-column: 2/3; margin: .1rem 0 -.2rem; }
+.msg time { color: var(--muted); font-size:.72rem; margin: .1rem 0 0; }
+.msg.you time { justify-self:end; text-align:right; }
 .msg .bubble {
   background: color-mix(in oklab, var(--panel) 92%, black 8%);
   padding:.6rem .7rem; border-radius: .9rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
   max-width: 85%;
   word-wrap: break-word;
-  grid-column: 2/3;
   transition: transform .12s ease;
   position: relative;
+  margin-right:auto;
 }
-.msg.you .bubble { background: color-mix(in oklab, var(--accent) 16%, var(--panel) 84%); border-color: color-mix(in oklab, var(--accent) 35%, var(--panel) 65%); }
+.msg.you .bubble {
+  background: color-mix(in oklab, var(--accent) 16%, var(--panel) 84%);
+  border-color: color-mix(in oklab, var(--accent) 35%, var(--panel) 65%);
+  margin-left:auto;
+  margin-right:0;
+}
+.msg.you .bubble-meta { justify-content:flex-end; }
 .msg .bubble:active { transform: scale(.99); }
 .msg.system .bubble {
   background: color-mix(in oklab, var(--panel-2) 88%, var(--accent-2) 12%);
@@ -225,21 +238,25 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
   color: color-mix(in oklab, var(--text) 88%, white 12%);
 }
 .msg.system time { color: color-mix(in oklab, var(--accent-2) 35%, var(--muted) 65%); }
-.bubble-status-only {
+.bubble-text { line-height:1.55; }
+.bubble-meta {
   display:flex;
-  justify-content:flex-end;
-  align-items:flex-end;
-  min-height: 2.4rem;
-}
-.bubble-status-text {
-  font-size:.72rem;
-  letter-spacing:.04em;
-  font-weight:600;
+  align-items:center;
+  gap:.35rem;
+  margin-top:.45rem;
+  font-size:.78rem;
   color: var(--muted);
+  justify-content:flex-start;
 }
-.bubble-tx .bubble-status-text {
-  color: color-mix(in oklab, var(--accent) 55%, var(--muted) 45%);
+.bubble-tx.ok { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); }
+.bubble-tx.err { color: color-mix(in oklab, var(--danger) 65%, var(--muted) 35%); }
+.bubble-tx-label {
+  text-transform: uppercase;
+  letter-spacing:.05em;
+  font-weight:700;
+  font-size:.72rem;
 }
+.bubble-tx-detail { font-weight:600; }
 
 .chat-input { display:flex; gap:.6rem; margin-top:.8rem; }
 .chat-input button { min-width: 7.5rem; }

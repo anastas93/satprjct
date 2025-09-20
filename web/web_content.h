@@ -171,11 +171,9 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         </label>
         <label>Power
           <select id="PW">
-            <option>2</option><option>3</option><option>4</option><option>5</option>
-            <option>6</option><option>7</option><option>8</option><option>9</option>
-            <option>10</option><option>11</option><option>12</option><option>13</option>
-            <option>14</option><option>15</option><option>16</option><option>17</option>
-            <option>18</option><option>19</option><option>20</option>
+            <option value="-5">-5 dBm</option><option value="-2">-2 dBm</option><option value="1">1 dBm</option><option value="4">4 dBm</option>
+            <option value="7">7 dBm</option><option value="10">10 dBm</option><option value="13">13 dBm</option><option value="16">16 dBm</option>
+            <option value="19">19 dBm</option><option value="22">22 dBm</option>
           </select>
         </label>
         <label>SF
@@ -223,8 +221,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
 )~~~";
 
 // style.css
-const char STYLE_CSS[] PROGMEM = R"~~~(
-/* satprjct redesign (rev2): Aurora + glass + depth — responsive with mobile dock */
+const char STYLE_CSS[] PROGMEM = R"~~~(/* satprjct redesign (rev2): Aurora + glass + depth — responsive with mobile dock */
 /* Themes */
 :root {
   --bg: #0b1224;
@@ -424,7 +421,13 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
   background: var(--panel-2);
   border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
 }
-.msg { display:grid; grid-template-columns: auto 1fr; gap:.5rem; align-items:flex-start; }
+.msg {
+  display:grid;
+  gap:.35rem;
+  justify-items:flex-start;
+  align-items:flex-start;
+}
+.msg.you { justify-items:flex-end; }
 .msg .avatar {
   width: 30px; height: 30px; border-radius: 999px;
   display:grid; place-items:center;
@@ -433,17 +436,24 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
   color: #001018; border: none;
 }
 .msg.dev .avatar { background: linear-gradient(180deg, #64748b, #334155); color: #e2e8f0; }
-.msg time { color: var(--muted); font-size:.72rem; grid-column: 2/3; margin: .1rem 0 -.2rem; }
+.msg time { color: var(--muted); font-size:.72rem; margin: .1rem 0 0; }
+.msg.you time { justify-self:end; text-align:right; }
 .msg .bubble {
   background: color-mix(in oklab, var(--panel) 92%, black 8%);
   padding:.6rem .7rem; border-radius: .9rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
   max-width: 85%;
   word-wrap: break-word;
-  grid-column: 2/3;
   transition: transform .12s ease;
   position: relative;
+  margin-right:auto;
 }
-.msg.you .bubble { background: color-mix(in oklab, var(--accent) 16%, var(--panel) 84%); border-color: color-mix(in oklab, var(--accent) 35%, var(--panel) 65%); }
+.msg.you .bubble {
+  background: color-mix(in oklab, var(--accent) 16%, var(--panel) 84%);
+  border-color: color-mix(in oklab, var(--accent) 35%, var(--panel) 65%);
+  margin-left:auto;
+  margin-right:0;
+}
+.msg.you .bubble-meta { justify-content:flex-end; }
 .msg .bubble:active { transform: scale(.99); }
 .msg.system .bubble {
   background: color-mix(in oklab, var(--panel-2) 88%, var(--accent-2) 12%);
@@ -451,21 +461,25 @@ main { padding: 1rem clamp(.75rem, 2vw, 1rem) calc(1rem + env(safe-area-inset-bo
   color: color-mix(in oklab, var(--text) 88%, white 12%);
 }
 .msg.system time { color: color-mix(in oklab, var(--accent-2) 35%, var(--muted) 65%); }
-.bubble-status-only {
+.bubble-text { line-height:1.55; }
+.bubble-meta {
   display:flex;
-  justify-content:flex-end;
-  align-items:flex-end;
-  min-height: 2.4rem;
-}
-.bubble-status-text {
-  font-size:.72rem;
-  letter-spacing:.04em;
-  font-weight:600;
+  align-items:center;
+  gap:.35rem;
+  margin-top:.45rem;
+  font-size:.78rem;
   color: var(--muted);
+  justify-content:flex-start;
 }
-.bubble-tx .bubble-status-text {
-  color: color-mix(in oklab, var(--accent) 55%, var(--muted) 45%);
+.bubble-tx.ok { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); }
+.bubble-tx.err { color: color-mix(in oklab, var(--danger) 65%, var(--muted) 35%); }
+.bubble-tx-label {
+  text-transform: uppercase;
+  letter-spacing:.05em;
+  font-weight:700;
+  font-size:.72rem;
 }
+.bubble-tx-detail { font-weight:600; }
 
 .chat-input { display:flex; gap:.6rem; margin-top:.8rem; }
 .chat-input button { min-width: 7.5rem; }
@@ -916,8 +930,7 @@ const char SHA256_JS[] PROGMEM = R"~~~(
 )~~~";
 
 // script.js
-const char SCRIPT_JS[] PROGMEM = R"~~~(
-/* satprjct web/app.js — vanilla JS only */
+const char SCRIPT_JS[] PROGMEM = R"~~~(/* satprjct web/app.js — vanilla JS only */
 /* Безопасная обёртка для localStorage: веб-приложение должно работать даже без постоянного хранилища */
 const storage = (() => {
   const memory = new Map();
@@ -1002,6 +1015,7 @@ const UI = {
     recvTimer: null,
     receivedKnown: new Set(),
     infoChannel: null,
+    chatHistory: [],
   }
 };
 
@@ -1013,6 +1027,170 @@ const channelReference = {
   error: null,
   promise: null,
 };
+const CHANNEL_REFERENCE_FALLBACK = `,RX (MHz),TX (MHz),System,Band Plan,Purpose
+0,243.625,316.725,,,
+1,243.625,300.400,,,
+2,243.800,298.200,Unknown,,
+3,244.135,296.075,UHF FO,Band Plan P,Tactical communications
+4,244.275,300.250,Unknown,,
+5,245.200,312.850,,,
+6,245.800,298.650,,,
+7,245.850,314.230,,,
+8,245.950,299.400,,,
+9,247.450,298.800,Unknown,,
+10,248.750,306.900,Marisat,B,Tactical voice/data
+11,248.825,294.375,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder
+12,249.375,316.975,,,
+13,249.400,300.975,Unknown,,
+14,249.450,299.000,,,
+15,249.450,312.750,,,
+16,249.490,313.950,,,
+17,249.530,318.280,,,
+18,249.850,316.250,,,
+19,249.850,298.830,,,
+20,249.890,300.500,Unknown,,
+21,249.930,308.750,UHF FO,Q,Tactical communications
+22,250.090,312.600,Unknown,,
+23,250.900,308.300,UHF FO,Q,Tactical communications
+24,251.275,296.500,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder
+25,251.575,308.450,Unknown,,
+26,251.600,298.225,Unknown,,
+27,251.850,292.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+28,251.900,292.900,FLTSATCOM/Leasat,A/X,Tactical communications
+29,251.950,292.950,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+30,252.000,293.100,FLTSATCOM,B,Tactical communications
+31,252.050,293.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+32,252.150,293.150,,,
+33,252.200,299.150,,,
+34,252.400,309.700,UHF FO,Q,Tactical communications
+35,252.450,309.750,,,
+36,252.500,309.800,,,
+37,252.550,309.850,,,
+38,252.625,309.925,,,
+39,253.550,294.550,,,
+40,253.600,295.950,Unknown,,
+41,253.650,294.650,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+42,253.700,294.700,FLTSATCOM/Leasat/UHF FO,A/X/O,Tactical communications
+43,253.750,294.750,,,
+44,253.800,296.000,Unknown,,
+45,253.850,294.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+46,253.850,294.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+47,253.900,307.500,,,
+48,254.000,298.630,Unknown,,
+49,254.730,312.550,Unknown,,
+50,254.775,310.800,Unknown,,
+51,254.830,296.200,,,
+52,255.250,302.425,,,
+53,255.350,296.350,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+54,255.400,296.400,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+55,255.450,296.450,,,
+56,255.550,296.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+57,255.550,296.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+58,255.775,309.300,Unknown,,
+59,256.450,313.850,Unknown,,
+60,256.600,305.950,,,
+61,256.850,297.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+62,256.900,296.100,Unknown,,
+63,256.950,297.950,,,
+64,257.000,297.675,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+65,257.050,298.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+66,257.100,295.650,Unknown,,
+67,257.150,298.150,,,
+68,257.200,308.800,Unknown,,
+69,257.250,309.475,,,
+70,257.300,309.725,Unknown,,
+71,257.350,307.200,Unknown,,
+72,257.500,311.350,,,
+73,257.700,316.150,Unknown,,
+74,257.775,311.375,Unknown,,
+75,257.825,297.075,Unknown,,
+76,257.900,298.000,,,
+77,258.150,293.200,,,
+78,258.350,299.350,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+79,258.450,299.450,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+80,258.500,299.500,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+81,258.550,299.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+82,258.650,299.650,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+83,259.000,317.925,,,
+84,259.050,317.975,,,
+85,259.975,310.050,,,
+86,260.025,310.225,,,
+87,260.075,310.275,Unknown,,
+88,260.125,310.125,Unknown,,
+89,260.175,310.325,Unknown,,
+90,260.375,292.975,,,
+91,260.425,297.575,Unknown,,
+92,260.425,294.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+93,260.475,294.075,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+94,260.525,294.125,,,
+95,260.550,296.775,Unknown,,
+96,260.575,294.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+97,260.625,294.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+98,260.675,294.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+99,260.675,294.275,,,
+100,260.725,294.325,,,
+101,260.900,313.900,,,
+102,261.100,298.380,Unknown,,
+103,261.100,298.700,Unknown,,
+104,261.200,294.950,Unknown,,
+105,262.000,314.200,Unknown,,
+106,262.040,307.075,Unknown,,
+107,262.075,306.975,Unknown,,
+108,262.125,295.725,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+109,262.175,297.025,Unknown,,
+110,262.175,295.775,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+111,262.225,295.825,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+112,262.275,295.875,,,
+113,262.275,300.275,Unknown,,
+114,262.325,295.925,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+115,262.375,295.975,,,
+116,262.425,296.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+117,263.450,311.400,Unknown,,
+118,263.500,309.875,,,
+119,263.575,297.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+120,263.625,297.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+121,263.675,297.275,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+122,263.725,297.325,,,
+123,263.775,297.375,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+124,263.825,297.425,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+125,263.875,297.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+126,263.925,297.525,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+127,265.250,306.250,,,
+128,265.350,306.350,,,
+129,265.400,294.425,FLTSATCOM/Leasat,A/X,Tactical communications
+130,265.450,306.450,,,
+131,265.500,302.525,Unknown,,
+132,265.550,306.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+133,265.675,306.675,Unknown,,
+134,265.850,306.850,Unknown,,
+135,266.750,316.575,,,
+136,266.850,307.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+137,266.900,297.625,Unknown,,
+138,266.950,307.950,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+139,267.050,308.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+140,267.100,308.100,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+141,267.150,308.150,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+142,267.200,308.200,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+143,267.250,308.250,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+144,267.400,294.900,Unknown,,
+145,267.875,310.375,Unknown,,
+146,267.950,310.450,,,
+147,268.000,310.475,,,
+148,268.025,309.025,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+149,268.050,310.550,Unknown,,
+150,268.100,310.600,Unknown,,
+151,268.150,309.150,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+152,268.200,296.050,Unknown,,
+153,268.250,309.250,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+154,268.300,309.300,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+155,268.350,309.350,,,
+156,268.400,295.900,FLTSATCOM/Leasat,C/Z,Tactical communications
+157,268.450,309.450,,,
+158,269.700,309.925,,,
+159,269.750,310.750,,,
+160,269.800,310.025,,,
+161,269.850,310.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
+162,269.950,310.950,DOD 25 kHz,DOD 25K,Tactical communications (DoD)`;
 
 /* Определяем предпочитаемую тему только при наличии поддержки matchMedia */
 function detectPreferredTheme() {
@@ -1255,46 +1433,111 @@ function toggleTheme() {
 }
 
 /* Работа чата */
+function getChatHistory() {
+  if (!Array.isArray(UI.state.chatHistory)) UI.state.chatHistory = [];
+  return UI.state.chatHistory;
+}
+function saveChatHistory() {
+  const entries = getChatHistory();
+  try {
+    storage.set("chatHistory", JSON.stringify(entries.slice(-500)));
+  } catch (err) {
+    console.warn("[chat] не удалось сохранить историю:", err);
+  }
+}
+function normalizeChatEntries(rawEntries) {
+  const out = [];
+  if (!Array.isArray(rawEntries)) return out;
+  for (let i = 0; i < rawEntries.length; i++) {
+    const entry = rawEntries[i];
+    if (!entry) continue;
+    if (typeof entry === "string") {
+      out.push({ t: Date.now(), a: "dev", m: entry, role: "system" });
+      continue;
+    }
+    const obj = { ...entry };
+    if (!obj.role) obj.role = obj.a === "you" ? "user" : "system";
+    if (!obj.a) obj.a = obj.role === "user" ? "you" : "dev";
+    if (!obj.t) obj.t = Date.now();
+    const prev = out[out.length - 1];
+    if (obj.tag === "tx-status" && prev && prev.a === "you") {
+      const value = obj.status != null ? String(obj.status) : (typeof obj.m === "string" ? obj.m.replace(/^TX\s*:\s*/i, "").trim() : "");
+      prev.txStatus = {
+        ok: true,
+        text: value,
+        raw: value,
+        t: obj.t || Date.now(),
+      };
+      continue;
+    }
+    if (typeof obj.m === "string" && /^TX\s*ERR\s*:/i.test(obj.m.trim()) && prev && prev.a === "you") {
+      const detail = obj.m.replace(/^TX\s*ERR\s*:\s*/i, "").trim();
+      const payload = detail || obj.m.trim();
+      prev.txStatus = {
+        ok: false,
+        text: detail,
+        raw: payload,
+        t: obj.t || Date.now(),
+      };
+      continue;
+    }
+    if (obj.txStatus && prev && prev.a === "you" && !prev.txStatus) {
+      const status = obj.txStatus;
+      prev.txStatus = {
+        ok: status.ok === false ? false : true,
+        text: status.text != null ? String(status.text) : "",
+        raw: status.raw != null ? String(status.raw) : (status.text != null ? String(status.text) : ""),
+        t: status.t || obj.t || Date.now(),
+      };
+      continue;
+    }
+    out.push(obj);
+  }
+  return out;
+}
 function loadChatHistory() {
   const raw = storage.get("chatHistory") || "[]";
   let entries;
   try {
     entries = JSON.parse(raw);
-    if (!Array.isArray(entries)) entries = [];
   } catch (e) {
     entries = [];
   }
+  if (!Array.isArray(entries)) entries = [];
+  const normalized = normalizeChatEntries(entries);
+  UI.state.chatHistory = normalized;
   if (UI.els.chatLog) UI.els.chatLog.innerHTML = "";
-  entries.forEach((entry) => addChatMessage(entry));
+  for (let i = 0; i < normalized.length; i++) {
+    addChatMessage(normalized[i], i);
+  }
+  saveChatHistory();
 }
 function persistChat(message, author, meta) {
-  const raw = storage.get("chatHistory") || "[]";
-  let entries;
-  try {
-    entries = JSON.parse(raw);
-    if (!Array.isArray(entries)) entries = [];
-  } catch (e) {
-    entries = [];
-  }
+  const entries = getChatHistory();
   const record = { t: Date.now(), a: author, m: message };
   if (meta && typeof meta === "object") {
     if (meta.role) record.role = meta.role;
     if (meta.tag) record.tag = meta.tag;
     if (meta.status != null) record.status = meta.status;
+    if (meta.txStatus) record.txStatus = meta.txStatus;
   }
   if (!record.role) record.role = author === "you" ? "user" : "system";
   entries.push(record);
-  storage.set("chatHistory", JSON.stringify(entries.slice(-500)));
+  saveChatHistory();
+  return { record, index: entries.length - 1 };
 }
-function addChatMessage(entry) {
-  if (!UI.els.chatLog) return;
-  const data = typeof entry === "string" ? { t: Date.now(), a: "dev", m: entry } : entry;
+function addChatMessage(entry, index) {
+  if (!UI.els.chatLog) return null;
+  const data = typeof entry === "string" ? { t: Date.now(), a: "dev", m: entry, role: "system" } : entry;
   const wrap = document.createElement("div");
   const author = data.a === "you" ? "you" : "dev";
   wrap.className = "msg";
   wrap.classList.add(author);
   const role = data.role || (author === "you" ? "user" : "system");
   if (role !== "user") wrap.classList.add("system");
+  if (typeof index === "number" && index >= 0) {
+    wrap.dataset.index = String(index);
+  }
   const time = document.createElement("time");
   const stamp = data.t ? new Date(data.t) : new Date();
   time.dateTime = stamp.toISOString();
@@ -1302,10 +1545,11 @@ function addChatMessage(entry) {
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   applyChatBubbleContent(bubble, data);
-  wrap.appendChild(time);
   wrap.appendChild(bubble);
+  wrap.appendChild(time);
   UI.els.chatLog.appendChild(wrap);
   UI.els.chatLog.scrollTop = UI.els.chatLog.scrollHeight;
+  return wrap;
 }
 function setBubbleText(node, text) {
   const value = text == null ? "" : String(text);
@@ -1316,27 +1560,61 @@ function setBubbleText(node, text) {
     node.appendChild(document.createTextNode(parts[i]));
   }
 }
-// Наполняем пузырёк чата с учётом служебных статусов (TX и т.п.)
 function applyChatBubbleContent(node, entry) {
   const raw = entry && entry.m != null ? String(entry.m) : "";
-  const trimmed = raw.trim();
-  const role = entry && entry.role ? entry.role : (entry && entry.a === "you" ? "user" : "system");
-  const tag = entry && entry.tag ? entry.tag : "";
-  const statusRaw = entry && entry.status != null ? entry.status : null;
-  const isSystem = role !== "user";
-  const isTxStatus = isSystem && (tag === "tx-status" || /^TX\s*:/i.test(trimmed));
-  if (isTxStatus) {
-    const value = statusRaw != null ? String(statusRaw) : trimmed.replace(/^TX\s*:\s*/i, "").trim();
-    const statusText = value ? "TX: " + value : (trimmed || "TX");
-    node.classList.add("bubble-status-only", "bubble-tx");
-    node.setAttribute("aria-label", statusText);
-    const corner = document.createElement("span");
-    corner.className = "bubble-status-text";
-    corner.textContent = statusText;
-    node.appendChild(corner);
-    return;
+  node.innerHTML = "";
+  const textBox = document.createElement("div");
+  textBox.className = "bubble-text";
+  setBubbleText(textBox, raw);
+  node.appendChild(textBox);
+  const tx = entry && entry.txStatus;
+  if (tx && typeof tx === "object") {
+    const footer = document.createElement("div");
+    footer.className = "bubble-meta bubble-tx";
+    footer.classList.add(tx.ok === false ? "err" : "ok");
+    const label = document.createElement("span");
+    label.className = "bubble-tx-label";
+    label.textContent = tx.ok === false ? "TX ERR" : "TX OK";
+    footer.appendChild(label);
+    const detailRaw = tx.text != null ? String(tx.text) : "";
+    const detail = detailRaw.trim();
+    if (detail) {
+      const detailNode = document.createElement("span");
+      detailNode.className = "bubble-tx-detail";
+      detailNode.textContent = detail;
+      footer.appendChild(detailNode);
+    }
+    node.appendChild(footer);
   }
-  setBubbleText(node, raw);
+}
+function updateChatMessageContent(index) {
+  if (!UI.els.chatLog) return;
+  const entries = getChatHistory();
+  if (!Array.isArray(entries) || index < 0 || index >= entries.length) return;
+  const wrap = UI.els.chatLog.querySelector('.msg[data-index="' + index + '"]');
+  if (!wrap) return;
+  const bubble = wrap.querySelector('.bubble');
+  if (!bubble) return;
+  applyChatBubbleContent(bubble, entries[index]);
+}
+function attachTxStatus(index, info) {
+  const entries = getChatHistory();
+  if (!Array.isArray(entries) || typeof index !== "number") return false;
+  if (index < 0 || index >= entries.length) return false;
+  const entry = entries[index];
+  if (!entry || entry.a !== "you") return false;
+  const ok = info && info.ok === false ? false : true;
+  const detailRaw = info && info.text != null ? String(info.text) : "";
+  const raw = info && info.raw != null ? String(info.raw) : detailRaw;
+  entry.txStatus = {
+    ok,
+    text: detailRaw,
+    raw,
+    t: Date.now(),
+  };
+  saveChatHistory();
+  updateChatMessageContent(index);
+  return true;
 }
 async function onSendChat() {
   if (!UI.els.chatInput) return;
@@ -1344,8 +1622,8 @@ async function onSendChat() {
   if (!text) return;
   UI.els.chatInput.value = "";
   const isCommand = text.startsWith("/");
-  persistChat(text, "you");
-  addChatMessage({ t: Date.now(), a: "you", m: text });
+  const saved = persistChat(text, "you");
+  addChatMessage(saved.record, saved.index);
   if (isCommand) {
     const parsed = parseSlashCommand(text.slice(1));
     if (!parsed) {
@@ -1353,12 +1631,12 @@ async function onSendChat() {
       return;
     }
     if (parsed.cmd === "TX") {
-      await sendTextMessage(parsed.message || "");
+      await sendTextMessage(parsed.message || "", { originIndex: saved.index });
     } else {
       await sendCommand(parsed.cmd, parsed.params || {});
     }
   } else {
-    await sendTextMessage(text);
+    await sendTextMessage(text, { originIndex: saved.index });
   }
 }
 function parseSlashCommand(raw) {
@@ -1468,9 +1746,8 @@ async function sendCommand(cmd, params, opts) {
       status("✓ " + cmd);
       const text = cmd + ": " + res.text;
       note(text.slice(0, 200));
-      const meta = { role: "system" };
-      persistChat(text, "dev", meta);
-      addChatMessage({ t: Date.now(), a: "dev", m: text, role: "system" });
+      const saved = persistChat(text, "dev", { role: "system" });
+      addChatMessage(saved.record, saved.index);
     }
     debugLog(cmd + ": " + res.text);
     handleCommandSideEffects(cmd, res.text);
@@ -1480,9 +1757,8 @@ async function sendCommand(cmd, params, opts) {
     status("✗ " + cmd);
     const text = "ERR " + cmd + ": " + res.error;
     note("Ошибка: " + res.error);
-    const meta = { role: "system" };
-    persistChat(text, "dev", meta);
-    addChatMessage({ t: Date.now(), a: "dev", m: text, role: "system" });
+    const saved = persistChat(text, "dev", { role: "system" });
+    addChatMessage(saved.record, saved.index);
   }
   debugLog("ERR " + cmd + ": " + res.error);
   return null;
@@ -1519,7 +1795,9 @@ async function postTx(text, timeoutMs) {
     return { ok: false, error: String(e) };
   }
 }
-async function sendTextMessage(text) {
+async function sendTextMessage(text, opts) {
+  const options = opts || {};
+  const originIndex = typeof options.originIndex === "number" ? options.originIndex : null;
   const payload = (text || "").trim();
   if (!payload) {
     note("Пустое сообщение");
@@ -1532,19 +1810,30 @@ async function sendTextMessage(text) {
     const value = res.text != null ? String(res.text) : "";
     const msg = "TX: " + value;
     note(msg);
-    const meta = { role: "system", tag: "tx-status", status: value };
-    persistChat(msg, "dev", meta);
-    addChatMessage({ t: Date.now(), a: "dev", m: msg, role: "system", tag: "tx-status", status: value });
     debugLog("TX: " + value);
+    let attached = false;
+    if (originIndex !== null) {
+      attached = attachTxStatus(originIndex, { ok: true, text: value, raw: res.text });
+    }
+    if (!attached) {
+      const saved = persistChat(msg, "dev", { role: "system" });
+      addChatMessage(saved.record, saved.index);
+    }
     return value;
   }
   status("✗ TX");
-  note("Ошибка TX: " + res.error);
-  const errMsg = "TX ERR: " + res.error;
-  const meta = { role: "system" };
-  persistChat(errMsg, "dev", meta);
-  addChatMessage({ t: Date.now(), a: "dev", m: errMsg, role: "system" });
-  debugLog("ERR TX: " + res.error);
+  const errorText = res.error != null ? String(res.error) : "";
+  note("Ошибка TX: " + errorText);
+  debugLog("ERR TX: " + errorText);
+  let attached = false;
+  if (originIndex !== null) {
+    attached = attachTxStatus(originIndex, { ok: false, text: errorText, raw: res.error });
+  }
+  if (!attached) {
+    const errMsg = "TX ERR: " + errorText;
+    const saved = persistChat(errMsg, "dev", { role: "system" });
+    addChatMessage(saved.record, saved.index);
+  }
   return null;
 }
 function handleCommandSideEffects(cmd, text) {
@@ -1811,18 +2100,36 @@ async function loadChannelReferenceData() {
   channelReference.loading = true;
   channelReference.error = null;
   channelReference.promise = (async () => {
+    const sources = ["libs/freq-info.csv", "./libs/freq-info.csv", "/libs/freq-info.csv"];
+    let lastErr = null;
     try {
-      const res = await fetch("libs/freq-info.csv", { cache: "no-store" });
-      if (!res.ok) {
-        throw new Error("HTTP " + res.status);
+      for (let i = 0; i < sources.length; i++) {
+        const url = sources[i];
+        try {
+          const res = await fetch(url, { cache: "no-store" });
+          if (!res.ok) {
+            lastErr = new Error("HTTP " + res.status + " (" + url + ")");
+            continue;
+          }
+          const text = await res.text();
+          channelReference.map = parseChannelReferenceCsv(text);
+          channelReference.ready = true;
+          channelReference.error = null;
+          return channelReference.map;
+        } catch (err) {
+          lastErr = err;
+        }
       }
-      const text = await res.text();
-      channelReference.map = parseChannelReferenceCsv(text);
-      channelReference.ready = true;
-      return channelReference.map;
-    } catch (err) {
-      channelReference.error = err;
-      throw err;
+      if (CHANNEL_REFERENCE_FALLBACK) {
+        if (lastErr) console.warn("[freq-info] основной источник недоступен, используем встроенные данные:", lastErr);
+        channelReference.map = parseChannelReferenceCsv(CHANNEL_REFERENCE_FALLBACK);
+        channelReference.ready = true;
+        channelReference.error = null;
+        return channelReference.map;
+      }
+      const error = lastErr || new Error("Не удалось загрузить справочник");
+      channelReference.error = error;
+      throw error;
     } finally {
       channelReference.loading = false;
       channelReference.promise = null;
@@ -2513,6 +2820,7 @@ function debugLog(text) {
   log.appendChild(line);
   log.scrollTop = log.scrollHeight;
 }
+
 )~~~";
 
 // libs/sha256.js
