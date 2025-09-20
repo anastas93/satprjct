@@ -19,10 +19,10 @@ static constexpr bool USE_BIT_INTERLEAVER = true; // включение бито
 static constexpr bool USE_RS = DefaultSettings::USE_RS; // использовать RS(255,223)
 
 // Удаление пилотов из полезной нагрузки
-static std::vector<uint8_t> removePilots(const uint8_t* data, size_t len) {
-  std::vector<uint8_t> out;
+static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
+  out.clear();
   if (!data || len == 0) {               // проверка указателя и длины
-    return out;
+    return;
   }
   out.reserve(len);
   size_t count = 0;
@@ -34,7 +34,6 @@ static std::vector<uint8_t> removePilots(const uint8_t* data, size_t len) {
     out.push_back(data[i]);
     ++count;
   }
-  return out;
 }
 
 // Конструктор модуля приёма
@@ -46,68 +45,70 @@ RxModule::RxModule()
 void RxModule::onReceive(const uint8_t* data, size_t len) {
   if (!cb_ || !data || len < FrameHeader::SIZE * 2) return; // проверка указателя
 
-  std::vector<uint8_t> frame(data, data + len);            // копия для дескремблирования
-  scrambler::descramble(frame.data(), frame.size());       // дескремблируем весь кадр
+  frame_buf_.assign(data, data + len);                     // переиспользуемый буфер кадра
+  scrambler::descramble(frame_buf_.data(), frame_buf_.size()); // дескремблируем весь кадр
 
   FrameHeader hdr;
-  bool ok = FrameHeader::decode(frame.data(), frame.size(), hdr);
+  bool ok = FrameHeader::decode(frame_buf_.data(), frame_buf_.size(), hdr);
   if (!ok)
-    ok = FrameHeader::decode(frame.data() + FrameHeader::SIZE,
-                             frame.size() - FrameHeader::SIZE, hdr);
+    ok = FrameHeader::decode(frame_buf_.data() + FrameHeader::SIZE,
+                             frame_buf_.size() - FrameHeader::SIZE, hdr);
   if (!ok) return; // оба заголовка повреждены
 
-  const uint8_t* payload_p = frame.data() + FrameHeader::SIZE * 2;
-  size_t payload_len = frame.size() - FrameHeader::SIZE * 2;
-  auto payload = removePilots(payload_p, payload_len);
-  if (payload.size() != hdr.payload_len) return; // несоответствие длины
-  if (!hdr.checkFrameCrc(payload.data(), payload.size())) return; // неверный CRC
+  const uint8_t* payload_p = frame_buf_.data() + FrameHeader::SIZE * 2;
+  size_t payload_len = frame_buf_.size() - FrameHeader::SIZE * 2;
+  removePilots(payload_p, payload_len, payload_buf_);      // убираем пилоты без выделений
+  if (payload_buf_.size() != hdr.payload_len) return;      // несоответствие длины
+  if (!hdr.checkFrameCrc(payload_buf_.data(), payload_buf_.size())) return; // неверный CRC
 
   // Деинтерливинг и декодирование
-  std::vector<uint8_t> result;
-  if (USE_RS && payload.size() == RS_ENC_LEN * 2) {
+  result_buf_.clear();
+  work_buf_.clear();
+  size_t result_len = 0;
+  if (USE_RS && payload_buf_.size() == RS_ENC_LEN * 2) {
     if (USE_BIT_INTERLEAVER)
-      bit_interleaver::deinterleave(payload.data(), payload.size()); // деинтерливинг бит
-    std::vector<uint8_t> vit_dec;
-    if (!conv_codec::viterbiDecode(payload.data(), payload.size(), vit_dec)) return;
-    byte_interleaver::deinterleave(vit_dec.data(), vit_dec.size()); // байтовый деинтерливинг
-    std::vector<uint8_t> decoded(RS_DATA_LEN);
-    if (!rs255223::decode(vit_dec.data(), decoded.data())) return;
-    result.swap(decoded);
-  } else if (USE_RS && payload.size() == RS_ENC_LEN) {
-    byte_interleaver::deinterleave(payload.data(), payload.size()); // байтовый деинтерливинг
-    std::vector<uint8_t> decoded(RS_DATA_LEN);
-    if (!rs255223::decode(payload.data(), decoded.data())) return;
-    result.swap(decoded);
-  } else if (!USE_RS && payload.size() == RS_DATA_LEN * 2) {
+      bit_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // деинтерливинг бит
+    if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), work_buf_)) return;
+    if (!work_buf_.empty())
+      byte_interleaver::deinterleave(work_buf_.data(), work_buf_.size()); // байтовый деинтерливинг
+    result_buf_.resize(RS_DATA_LEN);
+    if (!rs255223::decode(work_buf_.data(), result_buf_.data())) return;
+    result_len = RS_DATA_LEN;
+  } else if (USE_RS && payload_buf_.size() == RS_ENC_LEN) {
+    byte_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // байтовый деинтерливинг
+    result_buf_.resize(RS_DATA_LEN);
+    if (!rs255223::decode(payload_buf_.data(), result_buf_.data())) return;
+    result_len = RS_DATA_LEN;
+  } else if (!USE_RS && payload_buf_.size() == RS_DATA_LEN * 2) {
     if (USE_BIT_INTERLEAVER)
-      bit_interleaver::deinterleave(payload.data(), payload.size()); // деинтерливинг бит
-    std::vector<uint8_t> vit_dec;
-    if (!conv_codec::viterbiDecode(payload.data(), payload.size(), vit_dec)) return;
-    result.swap(vit_dec);
+      bit_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // деинтерливинг бит
+    if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), result_buf_)) return;
+    result_len = result_buf_.size();
   } else {
-    result.swap(payload); // кадр без кодирования
+    result_buf_.assign(payload_buf_.begin(), payload_buf_.end()); // кадр без кодирования
+    result_len = result_buf_.size();
   }
 
   // Дешифрование и сборка сообщения
-  if (result.size() < TAG_LEN) return;                 // недостаточно данных
-  std::vector<uint8_t> tag(result.end() - TAG_LEN, result.end());
-  std::vector<uint8_t> cipher(result.begin(), result.end() - TAG_LEN);
-  std::array<uint8_t,12> nonce{};                     // простой нонс
-  std::vector<uint8_t> plain;
-  if (!decrypt_ccm(key_.data(), key_.size(), nonce.data(), nonce.size(),
-                   nullptr, 0, cipher.data(), cipher.size(),
-                   tag.data(), TAG_LEN, plain)) {
+  if (result_len < TAG_LEN) return;                  // недостаточно данных
+  const uint8_t* cipher = result_buf_.data();
+  size_t cipher_len = result_len - TAG_LEN;
+  const uint8_t* tag = result_buf_.data() + cipher_len;
+  if (!decrypt_ccm(key_.data(), key_.size(), nonce_.data(), nonce_.size(),
+                   nullptr, 0, cipher, cipher_len,
+                   tag, TAG_LEN, plain_buf_)) {
     LOG_ERROR("RxModule: ошибка дешифрования");
     return;                                           // прекращаем обработку
   }
 
-  if (!plain.empty() && plain[0] == '[') {            // удаляем префикс [ID|n]
-    auto it = std::find(plain.begin(), plain.end(), ']');
-    if (it != plain.end()) {
-      plain.erase(plain.begin(), it + 1);
+  if (!plain_buf_.empty() && plain_buf_[0] == '[') {  // удаляем префикс [ID|n]
+    auto it = std::find(plain_buf_.begin(), plain_buf_.end(), ']');
+    if (it != plain_buf_.end()) {
+      plain_buf_.erase(plain_buf_.begin(), it + 1);
     }
   }
-  gatherer_.add(plain.data(), plain.size());
+  gatherer_.add(plain_buf_.data(), plain_buf_.size());
+  plain_buf_.clear();                                  // очищаем буфер, сохраняя вместимость
   if (hdr.frag_idx + 1 == hdr.frag_cnt) {             // последний фрагмент
     const auto& full = gatherer_.get();
     if (buf_) {                                       // при наличии внешнего буфера сохраняем данные

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <array>
+#include <vector>
 #include "libs/packetizer/packet_gatherer.h" // сборщик пакетов
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
 
@@ -23,4 +24,10 @@ private:
   PacketGatherer gatherer_; // внутренний сборщик фрагментов
   ReceivedBuffer* buf_ = nullptr; // внешний буфер готовых данных
   std::array<uint8_t,16> key_{};   // ключ для дешифрования
+  std::array<uint8_t,12> nonce_{}; // фиксированный нонс для AES-CCM
+  std::vector<uint8_t> frame_buf_;   // рабочий буфер кадра без дополнительного выделения
+  std::vector<uint8_t> payload_buf_; // буфер полезной нагрузки после удаления пилотов
+  std::vector<uint8_t> work_buf_;    // временный буфер для декодеров
+  std::vector<uint8_t> result_buf_;  // буфер результата перед дешифрованием
+  std::vector<uint8_t> plain_buf_;   // буфер расшифрованных данных
 };

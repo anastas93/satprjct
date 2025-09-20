@@ -18,9 +18,9 @@ int main() {
   assert(names.size() == 3);                      // ожидаем три элемента
   assert(names[0] == n1 && names[1] == n2 && names[2] == n3);
   ReceivedBuffer::Item out;
-  assert(buf.popRaw(out) && out.id == 1 && out.part == 2 && out.data.size() == 2);
-  assert(buf.popSplit(out) && out.id == 7 && out.data.size() == 3);
-  assert(buf.popReady(out) && out.id == 5 && out.data.size() == 1);
+  assert(buf.popRaw(out) && out.id == 1 && out.part == 2 && out.data.size() == 2 && out.name == n1);
+  assert(buf.popSplit(out) && out.id == 7 && out.data.size() == 3 && out.name == n2);
+  assert(buf.popReady(out) && out.id == 5 && out.data.size() == 1 && out.name == n3);
   std::cout << "OK" << std::endl;
   return 0;
 }
