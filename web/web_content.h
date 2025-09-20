@@ -148,7 +148,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             <option value="7.8">7.8</option>
             <option value="10.4">10.4</option>
             <option value="15.6">15.6</option>
-            <option value="20.8">20.8</option>
+            <option value="20.8" selected>20.8</option>
             <option value="31.25">31.25</option>
             <option value="41.7">41.7</option>
             <option value="62.5">62.5</option>
@@ -1666,6 +1666,9 @@ function parseSlashCommand(raw) {
       const low = rest.toLowerCase();
       if (low === "toggle" || low === "t") params.toggle = "1";
       else params.v = rest;
+    } else if (cmd === "PW") {
+      const normalized = normalizePowerPreset(rest);
+      params.v = normalized ? String(normalized.index) : rest;
     } else if (cmd === "TXL") {
       params.size = rest;
     } else if (cmd === "TX") {

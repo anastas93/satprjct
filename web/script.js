@@ -735,6 +735,9 @@ function parseSlashCommand(raw) {
       const low = rest.toLowerCase();
       if (low === "toggle" || low === "t") params.toggle = "1";
       else params.v = rest;
+    } else if (cmd === "PW") {
+      const normalized = normalizePowerPreset(rest);
+      params.v = normalized ? String(normalized.index) : rest;
     } else if (cmd === "TXL") {
       params.size = rest;
     } else if (cmd === "TX") {
