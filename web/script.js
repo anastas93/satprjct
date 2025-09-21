@@ -1384,6 +1384,7 @@ async function refreshReceivedList(opts) {
   const entries = parseReceivedResponse(text);
   renderReceivedList(entries);
   if (manual) status("✓ RSTS (" + entries.length + ")");
+}
 
 
 // Кэш декодеров для преобразования входящих сообщений
