@@ -12,7 +12,11 @@
 class MockRadio : public IRadio {
 public:
   std::vector<uint8_t> last;
-  void send(const uint8_t* data, size_t len) override { last.assign(data, data+len); }
+  std::vector<std::vector<uint8_t>> history;
+  void send(const uint8_t* data, size_t len) override {
+    last.assign(data, data + len);
+    history.emplace_back(last);
+  }
   void setReceiveCallback(RxCallback) override {}
 };
 
@@ -44,5 +48,22 @@ int main() {
   std::string text(plain.begin(), plain.end());
   assert(text.size() >= 5 && text.substr(text.size()-5) == "HELLO");
   std::cout << "OK" << std::endl;
+
+  // Проверяем, что при отсутствии ACK остальные части пакета переносятся в архив
+  MockRadio radioAck;
+  TxModule txAck(radioAck, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txAck.setAckEnabled(true);
+  txAck.setAckRetryLimit(1);          // одна повторная отправка
+  txAck.setAckTimeout(0);             // мгновенный тайм-аут для теста
+  txAck.setSendPause(0);              // убираем ожидание между циклами
+  std::vector<uint8_t> big(80, 'A');  // гарантированно несколько частей
+  txAck.queue(big.data(), big.size());
+  txAck.loop();                       // первая попытка
+  txAck.loop();                       // срабатывает тайм-аут, попытка №2 станет доступна
+  txAck.loop();                       // повторная отправка
+  txAck.loop();                       // тайм-аут, пакет уходит в архив вместе с остатком
+  size_t sent_before = radioAck.history.size();
+  txAck.loop();                       // новых фрагментов не должно появиться
+  assert(radioAck.history.size() == sent_before);
   return 0;
 }
