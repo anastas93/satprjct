@@ -95,10 +95,13 @@ bool TxModule::loop() {
         DEBUG_LOG("TxModule: повтор без ACK");
       } else {
         DEBUG_LOG("TxModule: ACK не получен, перенос в архив");
+        uint8_t failed_qos = inflight_->qos;
+        std::string failed_tag = inflight_->packet_tag;
         inflight_->attempts_left = ack_retry_limit_;
         archive_.push_back(std::move(*inflight_));
         inflight_.reset();
         waiting_ack_ = false;
+        archiveFollowingParts(failed_qos, failed_tag);
       }
     } else {
       waiting_ack_ = false;
@@ -133,6 +136,7 @@ bool TxModule::loop() {
     out.qos = qos_idx;
     out.attempts_left = ack_retry_limit_;
     out.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(out.data);
+    out.packet_tag = extractPacketTag(out.data);
     if (!ack_enabled_) out.expect_ack = false;
     return true;
   };
@@ -342,6 +346,36 @@ bool TxModule::isAckPayload(const std::vector<uint8_t>& data) {
   }
   if (data.size() < offset + 3) return false;
   return data[offset] == 'A' && data[offset + 1] == 'C' && data[offset + 2] == 'K';
+}
+
+std::string TxModule::extractPacketTag(const std::vector<uint8_t>& data) {
+  if (data.empty() || data.front() != '[') return {};
+  auto pipe = std::find(data.begin(), data.end(), '|');
+  if (pipe == data.end() || pipe == data.begin() + 1) return {};
+  return std::string(data.begin() + 1, pipe);          // возвращаем часть между '[' и '|'
+}
+
+void TxModule::archiveFollowingParts(uint8_t qos, const std::string& tag) {
+  if (tag.empty() || qos >= buffers_.size()) return;    // нет смысла обрабатывать пустой тег
+  auto& buf = buffers_[qos];
+  while (true) {
+    uint32_t peek_id = 0;
+    const std::vector<uint8_t>* next = buf.peek(peek_id);
+    if (!next) break;                                   // очередь пуста
+    if (extractPacketTag(*next) != tag) break;          // следующий элемент принадлежит другому пакету
+    uint32_t id = 0;
+    std::vector<uint8_t> data;
+    if (!buf.pop(id, data)) break;                      // защита от расхождений между peek и pop
+    PendingMessage archived;
+    archived.id = id;
+    archived.data = std::move(data);
+    archived.qos = qos;
+    archived.attempts_left = ack_retry_limit_;
+    archived.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(archived.data);
+    archived.packet_tag = tag;
+    archive_.push_back(std::move(archived));
+    DEBUG_LOG("TxModule: часть пакета перенесена в архив");
+  }
 }
 
 void TxModule::scheduleFromArchive() {

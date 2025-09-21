@@ -100,6 +100,7 @@
 - `bool dropLast()` — удалить последнее сообщение (используется для отката).
 - `bool hasPending() const` — проверяет наличие сообщений.
 - `bool pop(uint32_t& id, std::vector<uint8_t>& out)` — извлекает сообщение и его идентификатор.
+- `const std::vector<uint8_t>* peek(uint32_t& id) const` — получить указатель на данные первого сообщения без извлечения.
 
 ### ReceivedBuffer
 - `std::string pushRaw(uint32_t id, uint32_t part, const uint8_t* data, size_t len)` — сохранить сырой пакет и получить имя вида `R-000000|номер`.

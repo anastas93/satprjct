@@ -5,6 +5,7 @@
 #include <deque>
 #include <optional>
 #include <vector>
+#include <string>
 #include "radio_interface.h"
 #include "message_buffer.h"
 #include "libs/packetizer/packet_splitter.h" // подключаем разделитель пакетов из каталога libs
@@ -44,10 +45,13 @@ private:
     uint8_t qos = 0;                         // очередь QoS
     uint8_t attempts_left = 0;               // оставшиеся повторы
     bool expect_ack = false;                 // требуется ли подтверждение
+    std::string packet_tag;                  // идентификатор пакета для группировки частей
   };
 
   bool transmit(const PendingMessage& message);
   static bool isAckPayload(const std::vector<uint8_t>& data);
+  static std::string extractPacketTag(const std::vector<uint8_t>& data);
+  void archiveFollowingParts(uint8_t qos, const std::string& tag);
   void scheduleFromArchive();
   void onSendSuccess();
 

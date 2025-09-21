@@ -22,6 +22,8 @@ public:
   bool hasPending() const;
   // Извлекает первое сообщение из очереди, возвращает ID и данные
   bool pop(uint32_t& id, std::vector<uint8_t>& out);
+  // Позволяет заглянуть в начало очереди без извлечения
+  const std::vector<uint8_t>* peek(uint32_t& id) const;
 private:
   uint32_t next_id_ = 1;                                       // следующий идентификатор
   size_t capacity_;                                            // максимальное количество сообщений

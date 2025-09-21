@@ -55,3 +55,12 @@ bool MessageBuffer::pop(uint32_t& id, std::vector<uint8_t>& out) {
   DEBUG_LOG_VAL("MessageBuffer: извлечён id=", id);
   return true;
 }
+
+const std::vector<uint8_t>* MessageBuffer::peek(uint32_t& id) const {
+  if (q_.empty()) {                              // очередь пуста
+    DEBUG_LOG("MessageBuffer: просмотр пустой очереди");
+    return nullptr;
+  }
+  id = q_.front().first;
+  return &q_.front().second;                    // возвращаем указатель на данные без копирования
+}
