@@ -1236,11 +1236,36 @@ void loop() {
           Serial.println(s.c_str());
         }
       } else if (line.startsWith("RSTS")) {
-        int cnt = line.length() > 4 ? line.substring(5).toInt() : 10; // ограничение выводимых имён
-        if (cnt <= 0) cnt = 10;                                       // значение по умолчанию
-        auto names = recvBuf.list(cnt);                               // получаем список имён из буфера
-        for (const auto& n : names) {
-          Serial.println(n.c_str());
+        String args = line.substring(4);                              // выделяем аргументы команды
+        args.trim();
+        bool wantJson = false;                                        // флаг расширенного вывода
+        int cnt = 10;                                                 // количество записей по умолчанию
+        if (args.length() > 0) {
+          String rest = args;
+          while (rest.length() > 0) {                                 // разбираем аргументы по пробелам
+            int space = rest.indexOf(' ');
+            String token = space >= 0 ? rest.substring(0, space) : rest;
+            rest = space >= 0 ? rest.substring(space + 1) : String();
+            token.trim();
+            rest.trim();
+            if (token.length() == 0) continue;                        // пропускаем пустые сегменты
+            if (token.equalsIgnoreCase("FULL") || token.equalsIgnoreCase("JSON")) {
+              wantJson = true;                                        // включаем JSON-формат
+              continue;
+            }
+            int value = token.toInt();                                // пытаемся интерпретировать число
+            if (value > 0) cnt = value;                               // положительное значение задаёт лимит
+          }
+        }
+        if (cnt <= 0) cnt = 10;                                       // защита от некорректных значений
+        if (wantJson) {
+          String json = cmdRstsJson(cnt);                             // сериализуем полный снимок
+          Serial.println(json);                                       // отправляем JSON для проверки данных
+        } else {
+          auto names = recvBuf.list(cnt);                             // стандартный список имён
+          for (const auto& n : names) {
+            Serial.println(n.c_str());
+          }
         }
       } else if (line.startsWith("TX ")) {
         String msg = line.substring(3);                     // исходный текст

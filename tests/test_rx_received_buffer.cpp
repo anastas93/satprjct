@@ -42,6 +42,13 @@ int main() {
   assert(names.size() == 1);
   assert(names[0] == "GO-00001");                 // ожидаем имя готового сообщения
 
+  auto snapshot = buffer.snapshot(5);              // проверяем наличие данных в снимке
+  assert(snapshot.size() == 1);
+  assert(snapshot[0].kind == ReceivedBuffer::Kind::Ready);
+  assert(snapshot[0].item.id == id);
+  assert(snapshot[0].item.name == "GO-00001");
+  assert(snapshot[0].item.data == payload);        // полезная нагрузка сохранена полностью
+
   ReceivedBuffer::Item item;
   assert(buffer.popReady(item));                   // извлекаем готовые данные
   assert(item.id == id);
