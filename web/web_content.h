@@ -1094,8 +1094,7 @@ tbody tr.selected-info td { font-weight:600; }
 )~~~";
 
 // libs/sha256.js — библиотека SHA-256 на чистом JavaScript
-const char SHA256_JS[] PROGMEM = R"~~~(
-/* Простая реализация SHA-256 на чистом JS.
+const char SHA256_JS[] PROGMEM = R"~~~(/* Простая реализация SHA-256 на чистом JS.
  * Используется, когда WebCrypto недоступен (например, на HTTP).
  */
 (function(global){
@@ -1150,12 +1149,10 @@ const char SHA256_JS[] PROGMEM = R"~~~(
   // экспорт в глобальный объект
   global.sha256Bytes = sha256Bytes;
 })(this);
-
 )~~~";
 
 // script.js
-const char SCRIPT_JS[] PROGMEM = R"~~~(
-/* satprjct web/app.js — vanilla JS only */
+const char SCRIPT_JS[] PROGMEM = R"~~~(/* satprjct web/app.js — vanilla JS only */
 /* Безопасная обёртка для localStorage: веб-приложение должно работать даже без постоянного хранилища */
 const storage = (() => {
   const memory = new Map();
@@ -2541,6 +2538,7 @@ async function refreshReceivedList(opts) {
   const entries = parseReceivedResponse(text);
   renderReceivedList(entries);
   if (manual) status("✓ RSTS (" + entries.length + ")");
+}
 
 
 // Кэш декодеров для преобразования входящих сообщений
@@ -4894,7 +4892,6 @@ async function resyncAfterEndpointChange() {
     console.warn("[endpoint] resync error", err);
   }
 }
-
 
 )~~~";
 
