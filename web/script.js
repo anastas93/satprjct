@@ -790,6 +790,10 @@ function normalizeChatEntries(rawEntries) {
       let rxText = cleanString(rawMeta.text || obj.text || obj.detail);
       const rawMessage = cleanString(obj.m);
       if (!rxText) rxText = dropRxPrefix(rawMessage);
+      if (!rxText && rawMeta && rawMeta.hex) {
+        const decodedMetaText = resolveReceivedText(rawMeta);
+        if (decodedMetaText) rxText = decodedMetaText;
+      }
       let name = cleanString(rawMeta.name || obj.name);
       if (!name) name = parseKnownName(rawMessage);
       if (!name && rxText) name = parseKnownName(rxText);
@@ -800,7 +804,11 @@ function normalizeChatEntries(rawEntries) {
         else if (/^R-/i.test(name)) type = "raw";
       }
       const hex = cleanString(rawMeta.hex || obj.hex);
-      const lenValue = toNumber(rawMeta.len != null ? rawMeta.len : (obj.len != null ? obj.len : obj.length));
+      let lenValue = toNumber(rawMeta.len != null ? rawMeta.len : (obj.len != null ? obj.len : obj.length));
+      if ((!lenValue || lenValue <= 0) && rawMeta && rawMeta.hex) {
+        const metaLen = getReceivedLength(rawMeta);
+        if (metaLen) lenValue = metaLen;
+      }
       let bubbleCore = rxText || dropRxPrefix(rawMessage) || name;
       bubbleCore = cleanString(bubbleCore);
       if (!bubbleCore) bubbleCore = name ? name : "—";
@@ -1348,7 +1356,132 @@ async function refreshReceivedList(opts) {
   const entries = parseReceivedResponse(text);
   renderReceivedList(entries);
   if (manual) status("✓ RSTS (" + entries.length + ")");
+
+
+// Кэш декодеров для преобразования входящих сообщений
+const receivedTextDecoderCache = {};
+
+// Получение (или создание) TextDecoder для нужной кодировки
+function getCachedTextDecoder(label) {
+  if (typeof TextDecoder !== "function") return null;
+  const key = label || "utf-8";
+  if (Object.prototype.hasOwnProperty.call(receivedTextDecoderCache, key)) {
+    return receivedTextDecoderCache[key];
+  }
+  try {
+    const decoder = new TextDecoder(key, { fatal: false });
+    receivedTextDecoderCache[key] = decoder;
+    return decoder;
+  } catch (err) {
+    receivedTextDecoderCache[key] = null;
+    console.warn("[recv] неподдерживаемая кодировка", label, err);
+    return null;
+  }
 }
+
+// Преобразование hex-строки в массив байтов
+function hexToBytes(hex) {
+  if (hex == null) return null;
+  const clean = String(hex).trim().replace(/[^0-9A-Fa-f]/g, "");
+  if (!clean) return null;
+  const size = Math.floor(clean.length / 2);
+  if (!size) return null;
+  const out = new Uint8Array(size);
+  let pos = 0;
+  for (let i = 0; i + 1 < clean.length && pos < size; i += 2) {
+    const byte = parseInt(clean.slice(i, i + 2), 16);
+    if (Number.isNaN(byte)) return null;
+    out[pos] = byte;
+    pos += 1;
+  }
+  return pos === size ? out : out.slice(0, pos);
+}
+
+// Декодирование массива байтов в строку (cp1251 → utf-8 → ASCII)
+function decodeBytesToText(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) return "";
+  const candidates = [];
+  const decoder1251 = getCachedTextDecoder("windows-1251");
+  if (decoder1251) {
+    try {
+      candidates.push(decoder1251.decode(bytes));
+    } catch (err) {
+      console.warn("[recv] ошибка декодирования cp1251", err);
+    }
+  }
+  const decoderUtf8 = getCachedTextDecoder("utf-8");
+  if (decoderUtf8) {
+    try {
+      candidates.push(decoderUtf8.decode(bytes));
+    } catch (err) {
+      console.warn("[recv] ошибка декодирования utf-8", err);
+    }
+  }
+  let best = "";
+  let bestScore = Infinity;
+  for (let i = 0; i < candidates.length; i += 1) {
+    const text = typeof candidates[i] === "string" ? candidates[i] : "";
+    if (!text) continue;
+    const score = (text.match(/\uFFFD/g) || []).length;
+    if (score < bestScore) {
+      best = text;
+      bestScore = score;
+      if (score === 0) break;
+    }
+  }
+  if (!best) {
+    let ascii = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+      ascii += String.fromCharCode(bytes[i]);
+    }
+    best = ascii;
+  }
+  return best.replace(/\u0000+$/g, "");
+}
+
+// Подбор читаемого текста для элемента списка приёма
+function resolveReceivedText(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  if (typeof entry.resolvedText === "string") return entry.resolvedText;
+  const raw = entry.text != null ? String(entry.text) : "";
+  const trimmed = raw.trim();
+  if (trimmed) {
+    entry.resolvedText = trimmed;
+    return trimmed;
+  }
+  let bytes = null;
+  if (entry._hexBytes instanceof Uint8Array) bytes = entry._hexBytes;
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+    bytes = hexToBytes(entry.hex);
+    if (bytes && bytes.length) entry._hexBytes = bytes;
+  }
+  const decoded = bytes && bytes.length ? decodeBytesToText(bytes) : "";
+  const cleaned = decoded.trim();
+  entry.resolvedText = cleaned;
+  if (!entry.text && cleaned) entry.text = cleaned;
+  return cleaned;
+}
+
+// Определение длины полезной нагрузки (len → hex → текст)
+function getReceivedLength(entry) {
+  if (!entry || typeof entry !== "object") return 0;
+  if (Number.isFinite(entry.len) && entry.len > 0) return Number(entry.len);
+  let bytes = null;
+  if (entry._hexBytes instanceof Uint8Array) bytes = entry._hexBytes;
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+    bytes = hexToBytes(entry.hex);
+    if (bytes && bytes.length) entry._hexBytes = bytes;
+  }
+  if (bytes && bytes.length) {
+    entry.resolvedLen = bytes.length;
+    return bytes.length;
+  }
+  const textValue = resolveReceivedText(entry);
+  const len = textValue ? textValue.length : 0;
+  entry.resolvedLen = len;
+  return len;
+}
+
 function parseReceivedResponse(raw) {
   if (raw == null) return [];
   const trimmed = String(raw).trim();
@@ -1365,8 +1498,16 @@ function parseReceivedResponse(raw) {
           const type = typeRaw || (/^GO-/i.test(name) ? "ready" : "raw");
           const text = entry.text != null ? String(entry.text) : "";
           const hex = entry.hex != null ? String(entry.hex) : "";
-          const len = Number.isFinite(entry.len) ? Number(entry.len) : (hex ? Math.floor(hex.length / 2) : text.length);
-          return { name, type, text, hex, len };
+          const bytes = hexToBytes(hex);
+          const len = Number.isFinite(entry.len) ? Number(entry.len)
+            : (bytes && bytes.length ? bytes.length : text.length);
+          const normalized = { name, type, text, hex, len };
+          if (bytes && bytes.length) normalized._hexBytes = bytes;
+          const resolved = resolveReceivedText(normalized);
+          if (resolved && !normalized.text) normalized.text = resolved;
+          normalized.resolvedText = resolved;
+          normalized.resolvedLen = getReceivedLength(normalized);
+          return normalized;
         }).filter(Boolean);
       }
     } catch (err) {
@@ -1393,7 +1534,7 @@ function renderReceivedList(items) {
     const body = document.createElement("div");
     body.className = "received-body";
     const textNode = document.createElement("div");
-    const textValue = entry && entry.text != null ? String(entry.text) : "";
+    const textValue = resolveReceivedText(entry);
     textNode.className = "received-text" + (textValue ? "" : " empty");
     textNode.textContent = textValue || "Без текста";
     body.appendChild(textNode);
@@ -1403,7 +1544,7 @@ function renderReceivedList(items) {
     nameNode.className = "received-name";
     nameNode.textContent = name || "—";
     meta.appendChild(nameNode);
-    const lenValue = entry && Number.isFinite(entry.len) ? Number(entry.len) : null;
+    const lenValue = getReceivedLength(entry);
     if (lenValue && lenValue > 0) {
       const lenNode = document.createElement("span");
       lenNode.className = "received-length";
@@ -1439,12 +1580,15 @@ function logReceivedMessage(entry) {
   if (!entry) return;
   const name = entry.name ? String(entry.name).trim() : "";
   if (!/^GO-/i.test(name)) return;
-  const textValue = entry.text != null ? String(entry.text).trim() : "";
+  const textValue = resolveReceivedText(entry);
   const history = getChatHistory();
   const duplicate = Array.isArray(history) && history.some((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
   if (duplicate) return;
   const message = textValue ? ("RX · " + textValue) : ("RX · " + name);
-  const meta = { role: "rx", tag: "rx-message", rx: { name, type: entry.type || "", hex: entry.hex || "", len: entry.len || 0 } };
+  const meta = { role: "rx", tag: "rx-message", rx: { name, type: entry.type || "", hex: entry.hex || "" } };
+  const length = getReceivedLength(entry);
+  if (length) meta.rx.len = length;
+  if (textValue) meta.rx.text = textValue;
   const saved = persistChat(message, "dev", meta);
   addChatMessage(saved.record, saved.index);
 }
