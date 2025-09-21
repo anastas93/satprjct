@@ -524,6 +524,14 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   display: grid;
   gap: 1rem;
 }
+.channel-info-actions {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+.channel-info-actions .btn {
+  width: 100%;
+}
 .channel-info-block {
   display: grid;
   gap: .6rem;

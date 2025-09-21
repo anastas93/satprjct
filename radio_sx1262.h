@@ -24,6 +24,8 @@ public:
   void loop();
   // Установка колбэка приёма
   void setReceiveCallback(RxCallback cb) override;
+  // Возвращение в режим приёма
+  void ensureReceiveMode() override;
   // Получение параметров последнего принятого пакета
   float getLastSnr() const;  // последний SNR
   float getLastRssi() const; // последний RSSI

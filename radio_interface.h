@@ -12,4 +12,6 @@ public:
   virtual void send(const uint8_t* data, size_t len) = 0;
   // Регистрация колбэка для приёма
   virtual void setReceiveCallback(RxCallback cb) = 0;
+  // Гарантируем возврат в режим приёма (по умолчанию ничего не делаем)
+  virtual void ensureReceiveMode() {}
 };

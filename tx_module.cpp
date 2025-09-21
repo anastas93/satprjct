@@ -78,12 +78,14 @@ bool TxModule::loop() {
   auto now = std::chrono::steady_clock::now();
   if (pause_ms_ && now - last_send_ < std::chrono::milliseconds(pause_ms_)) {
     DEBUG_LOG("TxModule: пауза");
+    radio_.ensureReceiveMode();
     return false;
   }
 
   if (ack_enabled_ && waiting_ack_) {
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_attempt_);
     if (elapsed.count() < static_cast<long>(ack_timeout_ms_)) {
+      radio_.ensureReceiveMode();
       return false;
     }
     if (inflight_) {

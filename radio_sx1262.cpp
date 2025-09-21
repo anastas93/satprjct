@@ -194,6 +194,12 @@ bool RadioSX1262::ping(const uint8_t* data, size_t len,
 
 void RadioSX1262::setReceiveCallback(RxCallback cb) { rx_cb_ = cb; }
 
+void RadioSX1262::ensureReceiveMode() {
+  const float freq_rx = fRX_bank_[static_cast<int>(bank_)][channel_];
+  radio_.setFrequency(freq_rx);
+  radio_.startReceive();
+}
+
 // Получить SNR последнего принятого пакета
 float RadioSX1262::getLastSnr() const { return lastSnr_; }
 
