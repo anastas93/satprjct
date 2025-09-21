@@ -1578,11 +1578,12 @@ function renderReceivedList(items) {
     copyBtn.addEventListener("click", () => copyReceivedName(name));
     actions.appendChild(copyBtn);
     li.appendChild(actions);
-    if (name && !prev.has(name)) {
+    const isNew = name && !prev.has(name);
+    if (isNew) {
       li.classList.add("fresh");
       setTimeout(() => li.classList.remove("fresh"), 1600);
-      logReceivedMessage(entry);
     }
+    logReceivedMessage(entry, { isNew });
     frag.appendChild(li);
   });
   UI.els.recvList.appendChild(frag);
@@ -1591,19 +1592,72 @@ function renderReceivedList(items) {
 }
 
 // Добавляем отметку о принятом сообщении в чат
-function logReceivedMessage(entry) {
+function logReceivedMessage(entry, opts) {
   if (!entry) return;
+  const options = opts || {};
   const name = entry.name ? String(entry.name).trim() : "";
   if (!/^GO-/i.test(name)) return;
   const textValue = resolveReceivedText(entry);
-  const history = getChatHistory();
-  const duplicate = Array.isArray(history) && history.some((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
-  if (duplicate) return;
-  const message = textValue ? ("RX · " + textValue) : ("RX · " + name);
-  const meta = { role: "rx", tag: "rx-message", rx: { name, type: entry.type || "", hex: entry.hex || "" } };
   const length = getReceivedLength(entry);
-  if (length) meta.rx.len = length;
-  if (textValue) meta.rx.text = textValue;
+  const message = textValue ? ("RX · " + textValue) : ("RX · " + name);
+  const rxMeta = {
+    name,
+    type: entry.type || "",
+    hex: entry.hex || "",
+  };
+  if (length) rxMeta.len = length;
+  if (textValue) rxMeta.text = textValue;
+  const history = getChatHistory();
+  let existingIndex = -1;
+  if (Array.isArray(history)) {
+    existingIndex = history.findIndex((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
+  }
+  if (existingIndex >= 0) {
+    const existing = history[existingIndex];
+    let changed = false;
+    if (textValue) {
+      const desired = "RX · " + textValue;
+      if (existing.m !== desired) {
+        existing.m = desired;
+        changed = true;
+      }
+    }
+    if (!existing.rx || typeof existing.rx !== "object") {
+      existing.rx = { ...rxMeta };
+      changed = true;
+    } else {
+      if (rxMeta.type && existing.rx.type !== rxMeta.type) {
+        existing.rx.type = rxMeta.type;
+        changed = true;
+      }
+      if (rxMeta.hex && existing.rx.hex !== rxMeta.hex) {
+        existing.rx.hex = rxMeta.hex;
+        changed = true;
+      }
+      if (length && existing.rx.len !== length) {
+        existing.rx.len = length;
+        changed = true;
+      }
+      if (textValue && existing.rx.text !== textValue) {
+        existing.rx.text = textValue;
+        changed = true;
+      }
+    }
+    if (!existing.t) {
+      existing.t = Date.now();
+      changed = true;
+    }
+    if (changed) {
+      saveChatHistory();
+      updateChatMessageContent(existingIndex);
+    }
+    return;
+  }
+  if (options.isNew === false && !textValue) {
+    // Для старых записей без текста не добавляем дубль.
+    return;
+  }
+  const meta = { role: "rx", tag: "rx-message", rx: rxMeta };
   const saved = persistChat(message, "dev", meta);
   addChatMessage(saved.record, saved.index);
 }
