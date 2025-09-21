@@ -192,7 +192,10 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           </select>
         </label>
         <div class="settings-toggle" id="ackSettingControl">
-          <div class="field-label">ACK (подтверждения)</div>
+          <label class="chip switch">
+            <input type="checkbox" id="ACK" />
+            <span>ACK (подтверждения)</span>
+          </label>
           <div id="ackSettingHint" class="field-hint">Состояние не загружено.</div>
         </div>
         <label>ACK повторы
