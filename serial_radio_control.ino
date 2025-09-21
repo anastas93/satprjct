@@ -141,6 +141,58 @@ String vectorToString(const std::vector<uint8_t>& data) {
   return out;
 }
 
+// Декодирование CP1251 в UTF-8 для отправки в веб-интерфейс
+String decodeCp1251ToString(const std::vector<uint8_t>& data) {
+  if (data.empty()) return String();
+  std::vector<uint8_t> trimmed(data);
+  while (!trimmed.empty() && trimmed.back() == 0) {
+    trimmed.pop_back();
+  }
+  if (trimmed.empty()) return String();
+  std::string utf8 = cp1251ToUtf8(trimmed);
+  String out(utf8.c_str());
+  out.trim();
+  return out;
+}
+
+// Текстовое представление очереди буфера
+String receivedKindToString(ReceivedBuffer::Kind kind) {
+  switch (kind) {
+    case ReceivedBuffer::Kind::Raw:   return String("raw");
+    case ReceivedBuffer::Kind::Split: return String("split");
+    case ReceivedBuffer::Kind::Ready: return String("ready");
+  }
+  return String("unknown");
+}
+
+// Формирование JSON-объекта для элемента буфера приёма
+String receivedItemToJson(const ReceivedBuffer::SnapshotEntry& entry) {
+  String json = "{";
+  String name = jsonEscape(String(entry.item.name.c_str()));
+  json += "\"name\":\"";
+  json += name;
+  json += "\"";
+  json += ",\"type\":\"";
+  json += receivedKindToString(entry.kind);
+  json += "\"";
+  json += ",\"len\":";
+  json += String(entry.item.data.size());
+  String decoded = decodeCp1251ToString(entry.item.data);
+  if (decoded.length() > 0) {
+    json += ",\"text\":\"";
+    json += jsonEscape(decoded);
+    json += "\"";
+  }
+  String hex = toHex(entry.item.data);
+  if (hex.length() > 0) {
+    json += ",\"hex\":\"";
+    json += hex;
+    json += "\"";
+  }
+  json += "}";
+  return json;
+}
+
 // Выдача нового идентификатора для тестовых сообщений
 uint32_t nextTestRxmId() {
   static uint32_t counter = 60000;
@@ -692,6 +744,19 @@ String cmdRsts(int cnt) {
   return s;
 }
 
+// JSON-версия списка принятых сообщений
+String cmdRstsJson(int cnt) {
+  if (cnt <= 0) cnt = 10;
+  auto snapshot = recvBuf.snapshot(cnt);
+  String out = "{\"items\":[";
+  for (size_t i = 0; i < snapshot.size(); ++i) {
+    if (i > 0) out += ',';
+    out += receivedItemToJson(snapshot[i]);
+  }
+  out += "]}";
+  return out;
+}
+
 // Обработка HTTP-команды вида /cmd?c=PI
 void handleCmdHttp() {
   String cmd = server.arg("c");
@@ -706,6 +771,7 @@ void handleCmdHttp() {
     cmd = cmd.substring(0, spacePos);
   }
   String resp;
+  String contentType = "text/plain";
   if (cmd == "PI") {
     resp = cmdPing();
   } else if (cmd == "SEAR") {
@@ -772,7 +838,22 @@ void handleCmdHttp() {
     resp = cmdSts(cnt);
   } else if (cmd == "RSTS") {
     int cnt = server.hasArg("n") ? server.arg("n").toInt() : 10;
-    resp = cmdRsts(cnt);
+    bool wantJson = false;
+    if (server.hasArg("full")) {
+      wantJson = server.arg("full").toInt() != 0;
+    } else if (server.hasArg("json")) {
+      wantJson = server.arg("json").toInt() != 0;
+    } else if (server.hasArg("fmt")) {
+      String fmt = server.arg("fmt");
+      fmt.toLowerCase();
+      wantJson = (fmt == "json");
+    }
+    if (wantJson) {
+      resp = cmdRstsJson(cnt);
+      contentType = "application/json";
+    } else {
+      resp = cmdRsts(cnt);
+    }
   } else if (cmd == "ACK") {
     if (server.hasArg("toggle")) {
       ackEnabled = !ackEnabled;
@@ -855,7 +936,7 @@ void handleCmdHttp() {
   } else {
     resp = "UNKNOWN";
   }
-  server.send(200, "text/plain", resp);
+  server.send(200, contentType, resp);
 }
 
 void handleVer() {

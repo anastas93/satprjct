@@ -108,3 +108,26 @@ std::vector<std::string> ReceivedBuffer::list(size_t count) const {
   return out;                                  // возвращаем список имён
 }
 
+// Сформировать копию элементов с типом
+std::vector<ReceivedBuffer::SnapshotEntry> ReceivedBuffer::snapshot(size_t count) const {
+  std::vector<SnapshotEntry> out;
+  if (count == 0) return out;                                  // пустой запрос
+  const size_t total = std::min(count, raw_.size() + split_.size() + ready_.size());
+  out.reserve(total);
+  size_t produced = 0;
+  auto append = [&](const std::deque<Item>& queue, Kind kind) {
+    for (const auto& it : queue) {
+      if (produced >= count) break;                             // достигнут лимит
+      SnapshotEntry entry;
+      entry.item = it;                                          // копируем данные
+      entry.kind = kind;
+      out.push_back(std::move(entry));
+      ++produced;
+    }
+  };
+  append(raw_, Kind::Raw);
+  append(split_, Kind::Split);
+  append(ready_, Kind::Ready);
+  return out;
+}
+
