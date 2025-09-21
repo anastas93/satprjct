@@ -13,6 +13,9 @@
 #include <algorithm>
 #include <string>
 #include <array>
+#ifndef ARDUINO
+#include <thread>
+#endif
 #include "libs/simple_logger/simple_logger.h" // журнал статусов
 
 // Максимально допустимый размер кадра
@@ -181,11 +184,11 @@ bool TxModule::loop() {
     return false;
   }
 
-  last_send_ = now;
+  auto send_moment = last_send_;
   if (ack_enabled_) {
     if (message->expect_ack) {
       waiting_ack_ = true;
-      last_attempt_ = now;
+      last_attempt_ = send_moment;
     } else {
       waiting_ack_ = false;
       if (inflight_) {
@@ -327,7 +330,9 @@ bool TxModule::transmit(const PendingMessage& message) {
       LOG_ERROR_VAL("TxModule: превышен размер кадра=", frame.size());
       continue;
     }
+    waitForPauseWindow();
     radio_.send(frame.data(), frame.size());
+    last_send_ = std::chrono::steady_clock::now();
     DEBUG_LOG_VAL("TxModule: отправлен фрагмент=", idx);
     sent = true;
   }
@@ -392,6 +397,21 @@ void TxModule::onSendSuccess() {
   scheduleFromArchive();
 }
 
+void TxModule::waitForPauseWindow() {
+  if (pause_ms_ == 0) return;
+  auto target = last_send_ + std::chrono::milliseconds(pause_ms_);
+  auto now = std::chrono::steady_clock::now();
+  if (now >= target) return;
+  auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(target - now);
+  if (remaining.count() <= 0) return;
+  radio_.ensureReceiveMode();
+#ifdef ARDUINO
+  delay(static_cast<unsigned long>(remaining.count()));
+#else
+  std::this_thread::sleep_for(remaining);
+#endif
+}
+
 void TxModule::setAckEnabled(bool enabled) {
   if (ack_enabled_ == enabled) return;
   ack_enabled_ = enabled;
@@ -438,4 +458,12 @@ void TxModule::setEncryptionEnabled(bool enabled) {
   if (encryption_enabled_ == enabled) return;
   encryption_enabled_ = enabled;
   DEBUG_LOG(enabled ? "TxModule: шифрование включено" : "TxModule: шифрование отключено");
+}
+
+void TxModule::prepareExternalSend() {
+  waitForPauseWindow();
+}
+
+void TxModule::completeExternalSend() {
+  last_send_ = std::chrono::steady_clock::now();
 }

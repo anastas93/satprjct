@@ -343,7 +343,9 @@ String cmdKeyTransferSendLora() {
   if (!KeyTransfer::buildFrame(msg_id, state.root_public, key_id, frame)) {
     return String("{\"error\":\"build\"}");
   }
+  tx.prepareExternalSend();
   radio.send(frame.data(), frame.size());
+  tx.completeExternalSend();
   keyTransferRuntime.last_msg_id = msg_id;
   SimpleLogger::logStatus("KEYTRANSFER SEND");
   Serial.println("KEYTRANSFER: отправлен публичный корневой ключ");
@@ -494,10 +496,12 @@ String cmdPing() {
   std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> resp{};
   size_t respLen = 0;
   uint32_t elapsed = 0;
+  tx.prepareExternalSend();
   bool ok = radio.ping(ping.data(), ping.size(),
                        resp.data(), resp.size(),
                        respLen, DefaultSettings::PING_WAIT_MS * 1000UL,
                        elapsed);
+  tx.completeExternalSend();
   if (ok && respLen == ping.size() &&
       memcmp(resp.data(), ping.data(), ping.size()) == 0) {
     float dist_km = ((elapsed * 0.000001f) * 299792458.0f / 2.0f) / 1000.0f;
@@ -535,10 +539,12 @@ String cmdSear() {
     std::array<uint8_t, DefaultSettings::PING_PACKET_SIZE> resp{};
     size_t respLen = 0;
     uint32_t elapsed = 0;
+    tx.prepareExternalSend();
     bool ok_ch = radio.ping(pkt.data(), pkt.size(),
                             resp.data(), resp.size(),
                             respLen, DefaultSettings::PING_WAIT_MS * 1000UL,
                             elapsed);
+    tx.completeExternalSend();
     (void)respLen; // длина не нужна при проверке ок
     (void)elapsed; // время в поиске не используется
     if (ok_ch) {
@@ -647,7 +653,9 @@ String cmdTxl(size_t sz) {
 
 // Команда BCN отправляет служебный маяк
 String cmdBcn() {
+  tx.prepareExternalSend();
   radio.sendBeacon();
+  tx.completeExternalSend();
   return String("BCN:OK");
 }
 
@@ -1060,7 +1068,9 @@ void loop() {
           Serial.println("Ошибка установки мощности");
         }
       } else if (line.equalsIgnoreCase("BCN")) {
+        tx.prepareExternalSend();
         radio.sendBeacon();
+        tx.completeExternalSend();
         Serial.println("Маяк отправлен");
       } else if (line.equalsIgnoreCase("INFO")) {
         // выводим текущие настройки радиомодуля
