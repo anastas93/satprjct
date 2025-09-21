@@ -959,6 +959,8 @@ void handleCmdHttp() {
     resp = cmdChlist(b);
   } else if (cmd == "INFO") {
     resp = cmdInfo();
+  } else if (cmd == "VER") {
+    resp = readVersionFile();
   } else if (cmd == "STS") {
     int cnt = server.hasArg("n") ? server.arg("n").toInt() : 10;
     resp = cmdSts(cnt);
