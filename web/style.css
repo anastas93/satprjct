@@ -312,8 +312,20 @@ main {
   color: var(--muted);
   justify-content:flex-start;
 }
-.bubble-meta.bubble-rx { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); gap:.5rem; }
-.bubble-rx .label { text-transform: uppercase; letter-spacing:.05em; font-weight:700; }
+.bubble-meta.bubble-rx {
+  color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%);
+  gap:.45rem;
+  font-size:.72rem;
+  flex-wrap:wrap;
+}
+.bubble-rx-name {
+  font-weight:600;
+  letter-spacing:.02em;
+}
+.bubble-rx-len {
+  font-variant-numeric: tabular-nums;
+  opacity:.85;
+}
 .bubble-tx.ok { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); }
 .bubble-tx.err { color: color-mix(in oklab, var(--danger) 65%, var(--muted) 35%); }
 .bubble-tx-label {

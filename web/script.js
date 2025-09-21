@@ -104,7 +104,7 @@ const UI = {
 };
 
 // Максимальная длина текста пользовательского сообщения для TESTRXM
-const TEST_RXM_MESSAGE_MAX = 256;
+const TEST_RXM_MESSAGE_MAX = 2048;
 
 // Справочные данные по каналам из CSV
 const channelReference = {
@@ -834,7 +834,7 @@ function normalizeChatEntries(rawEntries) {
       }
       const bubbleSource = rxText || dropRxPrefix(rawMessage) || "";
       const bubbleCore = cleanString(bubbleSource);
-      const finalMessage = bubbleCore ? ("RX · " + bubbleCore) : "RX · —";
+      const finalMessage = bubbleCore || "—";
       obj.m = finalMessage;
       obj.tag = "rx-message";
       obj.role = "rx";
@@ -845,6 +845,7 @@ function normalizeChatEntries(rawEntries) {
         len: lenValue != null ? lenValue : 0,
       };
       if (rxText) normalizedRx.text = rxText;
+      else if (bubbleCore) normalizedRx.text = bubbleCore;
       obj.rx = normalizedRx;
       out.push(obj);
       continue;
@@ -923,10 +924,20 @@ function setBubbleText(node, text) {
 }
 function applyChatBubbleContent(node, entry) {
   const raw = entry && entry.m != null ? String(entry.m) : "";
+  const isRx = entry && entry.role === "rx";
   node.innerHTML = "";
   const textBox = document.createElement("div");
   textBox.className = "bubble-text";
-  setBubbleText(textBox, raw);
+  if (isRx) {
+    const rxInfo = entry && entry.rx && typeof entry.rx === "object" ? entry.rx : {};
+    const rxTextRaw = rxInfo.text != null ? String(rxInfo.text) : "";
+    const rxText = rxTextRaw.trim();
+    const fallback = raw.replace(/^RX\s*[·:>.\-]?\s*/i, "").trim();
+    const displayText = rxText || fallback || raw || "—";
+    setBubbleText(textBox, displayText || "—");
+  } else {
+    setBubbleText(textBox, raw);
+  }
   node.appendChild(textBox);
   const tx = entry && entry.txStatus;
   if (tx && typeof tx === "object") {
@@ -947,26 +958,31 @@ function applyChatBubbleContent(node, entry) {
     }
     node.appendChild(footer);
   }
-  if (entry && entry.role === "rx" && entry.rx) {
-    const rxInfo = entry.rx;
+  if (isRx) {
+    const rxInfo = entry && entry.rx && typeof entry.rx === "object" ? entry.rx : {};
     const footer = document.createElement("div");
     footer.className = "bubble-meta bubble-rx";
-    const label = document.createElement("span");
-    label.className = "label";
-    // Показываем текст полезной нагрузки вместо имени, чтобы сразу видеть содержимое
-    const metaTextRaw = rxInfo.text != null ? String(rxInfo.text) : "";
-    const metaTextTrimmed = metaTextRaw.trim();
-    const displayText = metaTextTrimmed || "—";
-    label.textContent = displayText;
-    if (rxInfo.name) {
-      label.title = rxInfo.name;
+    const nameNode = document.createElement("span");
+    nameNode.className = "bubble-rx-name";
+    const metaNameRaw = rxInfo.name != null ? String(rxInfo.name) : "";
+    const metaName = metaNameRaw.trim();
+    nameNode.textContent = "name: " + (metaName || "—");
+    if (metaName) nameNode.title = metaName;
+    footer.appendChild(nameNode);
+    const lenNode = document.createElement("span");
+    lenNode.className = "bubble-rx-len";
+    let lenValue = null;
+    if (rxInfo.len != null) {
+      const lenNum = Number(rxInfo.len);
+      if (Number.isFinite(lenNum) && lenNum >= 0) lenValue = lenNum;
     }
-    footer.appendChild(label);
-    if (rxInfo.len && Number.isFinite(rxInfo.len) && rxInfo.len > 0) {
-      const lenNode = document.createElement("span");
-      lenNode.textContent = rxInfo.len + " байт";
-      footer.appendChild(lenNode);
+    if (lenValue == null) {
+      const metaText = rxInfo.text != null ? String(rxInfo.text) : "";
+      if (metaText) lenValue = metaText.length;
+      else if (typeof raw === "string" && raw) lenValue = raw.length;
     }
+    lenNode.textContent = "Len: " + (lenValue != null ? lenValue + " байт" : "—");
+    footer.appendChild(lenNode);
     node.appendChild(footer);
   }
 }
@@ -1722,22 +1738,25 @@ async function downloadRstsFullJson() {
 function logReceivedMessage(entry, opts) {
   if (!entry) return;
   const options = opts || {};
-  const name = entry.name ? String(entry.name).trim() : "";
-  if (!/^GO-/i.test(name)) return;
+  const name = entry.name != null ? String(entry.name).trim() : "";
   const textValue = resolveReceivedText(entry);
-  const length = getReceivedLength(entry);
-  const messageText = textValue || "—";
-  const message = "RX · " + messageText;
+  const fallbackTextRaw = entry.text != null ? String(entry.text) : "";
+  const fallbackText = fallbackTextRaw.trim();
+  const messageBody = textValue || fallbackText;
+  const message = messageBody || "—";
+  let length = getReceivedLength(entry);
+  if (!Number.isFinite(length) || length < 0) length = null;
+  if (length == null && messageBody) length = messageBody.length;
   const rxMeta = {
     name,
     type: entry.type || "",
     hex: entry.hex || "",
+    text: messageBody || "",
   };
-  if (length) rxMeta.len = length;
-  rxMeta.text = textValue || "";
+  if (length != null) rxMeta.len = length;
   const history = getChatHistory();
   let existingIndex = -1;
-  if (Array.isArray(history)) {
+  if (name && Array.isArray(history)) {
     existingIndex = history.findIndex((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
     if (existingIndex < 0) {
       const legacyMessage = "RX: " + name;
@@ -1747,8 +1766,8 @@ function logReceivedMessage(entry, opts) {
   if (existingIndex >= 0) {
     const existing = history[existingIndex];
     let changed = false;
-    const desiredBody = textValue || "—";
-    const desiredMessage = "RX · " + desiredBody;
+    const desiredBody = message;
+    const desiredMessage = desiredBody || "—";
     if (existing.m !== desiredMessage) {
       existing.m = desiredMessage;
       changed = true;
@@ -1777,11 +1796,15 @@ function logReceivedMessage(entry, opts) {
         existing.rx.hex = rxMeta.hex;
         changed = true;
       }
-      if (length && existing.rx.len !== length) {
-        existing.rx.len = length;
+      if (rxMeta.len != null && existing.rx.len !== rxMeta.len) {
+        existing.rx.len = rxMeta.len;
         changed = true;
       }
-      const nextText = textValue || "";
+      if (rxMeta.len == null && existing.rx.len != null) {
+        existing.rx.len = rxMeta.len;
+        changed = true;
+      }
+      const nextText = rxMeta.text || "";
       if (existing.rx.text !== nextText) {
         existing.rx.text = nextText;
         changed = true;
@@ -1797,7 +1820,7 @@ function logReceivedMessage(entry, opts) {
     }
     return;
   }
-  if (options.isNew === false && !textValue) {
+  if (options.isNew === false && !messageBody) {
     // Для старых записей без текста не добавляем дубль.
     return;
   }

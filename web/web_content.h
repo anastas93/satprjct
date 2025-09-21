@@ -206,7 +206,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           <div id="ackTimeoutHint" class="field-hint">Время ожидания ACK не загружено.</div>
         </label>
         <label>Сообщение для TESTRXM
-          <input id="TESTRXMMSG" type="text" maxlength="256" placeholder="Lorem ipsum dolor sit amet" />
+          <input id="TESTRXMMSG" type="text" maxlength="2048" placeholder="Lorem ipsum dolor sit amet" />
           <div id="testRxmMessageHint" class="field-hint">Будет использован встроенный шаблон Lorem ipsum.</div>
         </label>
         <div class="settings-actions actions">
@@ -291,8 +291,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
 )~~~";
 
 // style.css
-const char STYLE_CSS[] PROGMEM = R"~~~(
-/* satprjct redesign (rev2): Aurora + glass + depth — responsive with mobile dock */
+const char STYLE_CSS[] PROGMEM = R"~~~(/* satprjct redesign (rev2): Aurora + glass + depth — responsive with mobile dock */
 /* Themes */
 :root {
   --bg: #0b1224;
@@ -606,8 +605,20 @@ main {
   color: var(--muted);
   justify-content:flex-start;
 }
-.bubble-meta.bubble-rx { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); gap:.5rem; }
-.bubble-rx .label { text-transform: uppercase; letter-spacing:.05em; font-weight:700; }
+.bubble-meta.bubble-rx {
+  color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%);
+  gap:.45rem;
+  font-size:.72rem;
+  flex-wrap:wrap;
+}
+.bubble-rx-name {
+  font-weight:600;
+  letter-spacing:.02em;
+}
+.bubble-rx-len {
+  font-variant-numeric: tabular-nums;
+  opacity:.85;
+}
 .bubble-tx.ok { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); }
 .bubble-tx.err { color: color-mix(in oklab, var(--danger) 65%, var(--muted) 35%); }
 .bubble-tx-label {
@@ -621,6 +632,7 @@ main {
 .chat-input { display:flex; gap:.6rem; margin-top:.8rem; }
 .chat-input button { min-width: 7.5rem; }
 .chat-input-row { display:grid; gap:.6rem; grid-template-columns: 1fr; margin-top:.8rem; }
+.chat-recv-controls { margin-top: .8rem; }
 .cmd-buttons { display:flex; gap:.4rem; flex-wrap:wrap; }
 .send-row { position: relative; display:flex; gap:.5rem; }
 #chatInput {
@@ -1086,7 +1098,7 @@ tbody tr.selected-info td { font-weight:600; }
   font-size: .85rem;
 }
 
-)~~~";
+)~~~";;
 
 // libs/sha256.js — библиотека SHA-256 на чистом JavaScript
 const char SHA256_JS[] PROGMEM = R"~~~(/* Простая реализация SHA-256 на чистом JS.
@@ -1253,7 +1265,7 @@ const UI = {
 };
 
 // Максимальная длина текста пользовательского сообщения для TESTRXM
-const TEST_RXM_MESSAGE_MAX = 256;
+const TEST_RXM_MESSAGE_MAX = 2048;
 
 // Справочные данные по каналам из CSV
 const channelReference = {
@@ -1983,7 +1995,7 @@ function normalizeChatEntries(rawEntries) {
       }
       const bubbleSource = rxText || dropRxPrefix(rawMessage) || "";
       const bubbleCore = cleanString(bubbleSource);
-      const finalMessage = bubbleCore ? ("RX · " + bubbleCore) : "RX · —";
+      const finalMessage = bubbleCore || "—";
       obj.m = finalMessage;
       obj.tag = "rx-message";
       obj.role = "rx";
@@ -1994,6 +2006,7 @@ function normalizeChatEntries(rawEntries) {
         len: lenValue != null ? lenValue : 0,
       };
       if (rxText) normalizedRx.text = rxText;
+      else if (bubbleCore) normalizedRx.text = bubbleCore;
       obj.rx = normalizedRx;
       out.push(obj);
       continue;
@@ -2072,10 +2085,20 @@ function setBubbleText(node, text) {
 }
 function applyChatBubbleContent(node, entry) {
   const raw = entry && entry.m != null ? String(entry.m) : "";
+  const isRx = entry && entry.role === "rx";
   node.innerHTML = "";
   const textBox = document.createElement("div");
   textBox.className = "bubble-text";
-  setBubbleText(textBox, raw);
+  if (isRx) {
+    const rxInfo = entry && entry.rx && typeof entry.rx === "object" ? entry.rx : {};
+    const rxTextRaw = rxInfo.text != null ? String(rxInfo.text) : "";
+    const rxText = rxTextRaw.trim();
+    const fallback = raw.replace(/^RX\s*[·:>.\-]?\s*/i, "").trim();
+    const displayText = rxText || fallback || raw || "—";
+    setBubbleText(textBox, displayText || "—");
+  } else {
+    setBubbleText(textBox, raw);
+  }
   node.appendChild(textBox);
   const tx = entry && entry.txStatus;
   if (tx && typeof tx === "object") {
@@ -2096,26 +2119,31 @@ function applyChatBubbleContent(node, entry) {
     }
     node.appendChild(footer);
   }
-  if (entry && entry.role === "rx" && entry.rx) {
-    const rxInfo = entry.rx;
+  if (isRx) {
+    const rxInfo = entry && entry.rx && typeof entry.rx === "object" ? entry.rx : {};
     const footer = document.createElement("div");
     footer.className = "bubble-meta bubble-rx";
-    const label = document.createElement("span");
-    label.className = "label";
-    // Показываем текст полезной нагрузки вместо имени, чтобы сразу видеть содержимое
-    const metaTextRaw = rxInfo.text != null ? String(rxInfo.text) : "";
-    const metaTextTrimmed = metaTextRaw.trim();
-    const displayText = metaTextTrimmed || "—";
-    label.textContent = displayText;
-    if (rxInfo.name) {
-      label.title = rxInfo.name;
+    const nameNode = document.createElement("span");
+    nameNode.className = "bubble-rx-name";
+    const metaNameRaw = rxInfo.name != null ? String(rxInfo.name) : "";
+    const metaName = metaNameRaw.trim();
+    nameNode.textContent = "name: " + (metaName || "—");
+    if (metaName) nameNode.title = metaName;
+    footer.appendChild(nameNode);
+    const lenNode = document.createElement("span");
+    lenNode.className = "bubble-rx-len";
+    let lenValue = null;
+    if (rxInfo.len != null) {
+      const lenNum = Number(rxInfo.len);
+      if (Number.isFinite(lenNum) && lenNum >= 0) lenValue = lenNum;
     }
-    footer.appendChild(label);
-    if (rxInfo.len && Number.isFinite(rxInfo.len) && rxInfo.len > 0) {
-      const lenNode = document.createElement("span");
-      lenNode.textContent = rxInfo.len + " байт";
-      footer.appendChild(lenNode);
+    if (lenValue == null) {
+      const metaText = rxInfo.text != null ? String(rxInfo.text) : "";
+      if (metaText) lenValue = metaText.length;
+      else if (typeof raw === "string" && raw) lenValue = raw.length;
     }
+    lenNode.textContent = "Len: " + (lenValue != null ? lenValue + " байт" : "—");
+    footer.appendChild(lenNode);
     node.appendChild(footer);
   }
 }
@@ -2516,7 +2544,6 @@ function setRecvAuto(enabled, opts) {
   }
 }
 async function refreshReceivedList(opts) {
-  if (!UI.els.recvList) return;
   const options = opts || {};
   const manual = options.manual === true;
   if (manual) status("→ RSTS");
@@ -2698,58 +2725,62 @@ function parseReceivedResponse(raw) {
                 .map((name) => ({ name, type: /^GO-/i.test(name) ? "ready" : "raw", text: "", hex: "", len: 0 }));
 }
 function renderReceivedList(items) {
-  if (!UI.els.recvList) return;
-  UI.els.recvList.innerHTML = "";
+  const hasList = !!UI.els.recvList;
+  if (hasList) UI.els.recvList.innerHTML = "";
   const prev = UI.state.receivedKnown instanceof Set ? UI.state.receivedKnown : new Set();
   const next = new Set();
-  const frag = document.createDocumentFragment();
+  const frag = hasList ? document.createDocumentFragment() : null;
   const list = Array.isArray(items) ? items : [];
   list.forEach((entry) => {
     const name = entry && entry.name ? String(entry.name).trim() : "";
     if (name) next.add(name);
-    const li = document.createElement("li");
-    li.classList.add("received-type-" + (entry && entry.type ? entry.type : "ready"));
-    const body = document.createElement("div");
-    body.className = "received-body";
-    const textNode = document.createElement("div");
-    const textValue = resolveReceivedText(entry);
-    textNode.className = "received-text" + (textValue ? "" : " empty");
-    textNode.textContent = textValue || "Без текста";
-    body.appendChild(textNode);
-    const meta = document.createElement("div");
-    meta.className = "received-meta";
-    const nameNode = document.createElement("span");
-    nameNode.className = "received-name";
-    nameNode.textContent = name || "—";
-    meta.appendChild(nameNode);
-    const lenValue = getReceivedLength(entry);
-    if (lenValue && lenValue > 0) {
-      const lenNode = document.createElement("span");
-      lenNode.className = "received-length";
-      lenNode.textContent = lenValue + " байт";
-      meta.appendChild(lenNode);
-    }
-    body.appendChild(meta);
-    li.appendChild(body);
-    const actions = document.createElement("div");
-    actions.className = "received-actions";
-    const copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "icon-btn ghost";
-    copyBtn.textContent = "⧉";
-    copyBtn.title = "Скопировать имя";
-    copyBtn.addEventListener("click", () => copyReceivedName(name));
-    actions.appendChild(copyBtn);
-    li.appendChild(actions);
     const isNew = name && !prev.has(name);
-    if (isNew) {
-      li.classList.add("fresh");
-      setTimeout(() => li.classList.remove("fresh"), 1600);
+    if (hasList && frag) {
+      const li = document.createElement("li");
+      li.classList.add("received-type-" + (entry && entry.type ? entry.type : "ready"));
+      const body = document.createElement("div");
+      body.className = "received-body";
+      const textNode = document.createElement("div");
+      const textValue = resolveReceivedText(entry);
+      textNode.className = "received-text" + (textValue ? "" : " empty");
+      textNode.textContent = textValue || "Без текста";
+      body.appendChild(textNode);
+      const meta = document.createElement("div");
+      meta.className = "received-meta";
+      const nameNode = document.createElement("span");
+      nameNode.className = "received-name";
+      nameNode.textContent = name || "—";
+      meta.appendChild(nameNode);
+      const lenValue = getReceivedLength(entry);
+      if (lenValue && lenValue > 0) {
+        const lenNode = document.createElement("span");
+        lenNode.className = "received-length";
+        lenNode.textContent = lenValue + " байт";
+        meta.appendChild(lenNode);
+      }
+      body.appendChild(meta);
+      li.appendChild(body);
+      const actions = document.createElement("div");
+      actions.className = "received-actions";
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "icon-btn ghost";
+      copyBtn.textContent = "⧉";
+      copyBtn.title = "Скопировать имя";
+      copyBtn.addEventListener("click", () => copyReceivedName(name));
+      actions.appendChild(copyBtn);
+      li.appendChild(actions);
+      if (isNew) {
+        li.classList.add("fresh");
+        setTimeout(() => li.classList.remove("fresh"), 1600);
+      }
+      frag.appendChild(li);
     }
     logReceivedMessage(entry, { isNew });
-    frag.appendChild(li);
   });
-  UI.els.recvList.appendChild(frag);
+  if (hasList && frag) {
+    UI.els.recvList.appendChild(frag);
+  }
   UI.state.receivedKnown = next;
   if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = list.length > 0;
 }
@@ -2868,22 +2899,25 @@ async function downloadRstsFullJson() {
 function logReceivedMessage(entry, opts) {
   if (!entry) return;
   const options = opts || {};
-  const name = entry.name ? String(entry.name).trim() : "";
-  if (!/^GO-/i.test(name)) return;
+  const name = entry.name != null ? String(entry.name).trim() : "";
   const textValue = resolveReceivedText(entry);
-  const length = getReceivedLength(entry);
-  const messageText = textValue || "—";
-  const message = "RX · " + messageText;
+  const fallbackTextRaw = entry.text != null ? String(entry.text) : "";
+  const fallbackText = fallbackTextRaw.trim();
+  const messageBody = textValue || fallbackText;
+  const message = messageBody || "—";
+  let length = getReceivedLength(entry);
+  if (!Number.isFinite(length) || length < 0) length = null;
+  if (length == null && messageBody) length = messageBody.length;
   const rxMeta = {
     name,
     type: entry.type || "",
     hex: entry.hex || "",
+    text: messageBody || "",
   };
-  if (length) rxMeta.len = length;
-  rxMeta.text = textValue || "";
+  if (length != null) rxMeta.len = length;
   const history = getChatHistory();
   let existingIndex = -1;
-  if (Array.isArray(history)) {
+  if (name && Array.isArray(history)) {
     existingIndex = history.findIndex((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
     if (existingIndex < 0) {
       const legacyMessage = "RX: " + name;
@@ -2893,8 +2927,8 @@ function logReceivedMessage(entry, opts) {
   if (existingIndex >= 0) {
     const existing = history[existingIndex];
     let changed = false;
-    const desiredBody = textValue || "—";
-    const desiredMessage = "RX · " + desiredBody;
+    const desiredBody = message;
+    const desiredMessage = desiredBody || "—";
     if (existing.m !== desiredMessage) {
       existing.m = desiredMessage;
       changed = true;
@@ -2923,11 +2957,15 @@ function logReceivedMessage(entry, opts) {
         existing.rx.hex = rxMeta.hex;
         changed = true;
       }
-      if (length && existing.rx.len !== length) {
-        existing.rx.len = length;
+      if (rxMeta.len != null && existing.rx.len !== rxMeta.len) {
+        existing.rx.len = rxMeta.len;
         changed = true;
       }
-      const nextText = textValue || "";
+      if (rxMeta.len == null && existing.rx.len != null) {
+        existing.rx.len = rxMeta.len;
+        changed = true;
+      }
+      const nextText = rxMeta.text || "";
       if (existing.rx.text !== nextText) {
         existing.rx.text = nextText;
         changed = true;
@@ -2943,7 +2981,7 @@ function logReceivedMessage(entry, opts) {
     }
     return;
   }
-  if (options.isNew === false && !textValue) {
+  if (options.isNew === false && !messageBody) {
     // Для старых записей без текста не добавляем дубль.
     return;
   }
@@ -4888,7 +4926,8 @@ async function resyncAfterEndpointChange() {
   }
 }
 
-)~~~";
+
+)~~~";;
 
 // libs/sha256.js
 const char SHA_JS[] PROGMEM = R"~~~(
