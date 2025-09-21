@@ -140,6 +140,7 @@ bool TxModule::loop() {
     out.attempts_left = ack_retry_limit_;
     out.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(out.data);
     out.packet_tag = extractPacketTag(out.data);
+    out.status_prefix = extractStatusPrefix(out.data);
     if (!ack_enabled_) out.expect_ack = false;
     return true;
   };
@@ -236,9 +237,10 @@ bool TxModule::transmit(const PendingMessage& message) {
     return false;
   }
 
-  std::string prefix;
-  auto it = std::find(msg.begin(), msg.end(), ']');
-  if (it != msg.end()) prefix.assign(msg.begin(), it + 1);
+  std::string prefix = message.status_prefix;
+  if (prefix.empty()) {
+    prefix = extractStatusPrefix(msg);
+  }
 
   PacketSplitter rs_splitter(PayloadMode::SMALL, RS_DATA_LEN - TAG_LEN);
   MessageBuffer tmp((msg.size() + (RS_DATA_LEN - TAG_LEN) - 1) / (RS_DATA_LEN - TAG_LEN));
@@ -337,7 +339,7 @@ bool TxModule::transmit(const PendingMessage& message) {
     sent = true;
   }
 
-  if (!prefix.empty()) {
+  if (!prefix.empty() && (!ack_enabled_ || !message.expect_ack)) {
     SimpleLogger::logStatus(prefix + " GO");
   }
   return sent;
@@ -360,6 +362,13 @@ std::string TxModule::extractPacketTag(const std::vector<uint8_t>& data) {
   return std::string(data.begin() + 1, pipe);          // возвращаем часть между '[' и '|'
 }
 
+std::string TxModule::extractStatusPrefix(const std::vector<uint8_t>& data) {
+  if (data.empty() || data.front() != '[') return {};
+  auto it = std::find(data.begin(), data.end(), ']');
+  if (it == data.end()) return {};
+  return std::string(data.begin(), it + 1);
+}
+
 void TxModule::archiveFollowingParts(uint8_t qos, const std::string& tag) {
   if (tag.empty() || qos >= buffers_.size()) return;    // нет смысла обрабатывать пустой тег
   auto& buf = buffers_[qos];
@@ -378,6 +387,7 @@ void TxModule::archiveFollowingParts(uint8_t qos, const std::string& tag) {
     archived.attempts_left = ack_retry_limit_;
     archived.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(archived.data);
     archived.packet_tag = tag;
+    archived.status_prefix = extractStatusPrefix(archived.data);
     archive_.push_back(std::move(archived));
     DEBUG_LOG("TxModule: часть пакета перенесена в архив");
   }
@@ -448,6 +458,9 @@ void TxModule::onAckReceived() {
   waiting_ack_ = false;
   DEBUG_LOG("TxModule: ACK получен");
   if (inflight_) {
+    if (!inflight_->status_prefix.empty()) {
+      SimpleLogger::logStatus(inflight_->status_prefix + " GO");
+    }
     inflight_->attempts_left = ack_retry_limit_;
     inflight_.reset();
   }

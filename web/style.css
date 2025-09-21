@@ -478,21 +478,6 @@ main {
 .received-actions .icon-btn.ghost {
   border-color: color-mix(in oklab, var(--accent) 35%, var(--panel-2) 65%);
 }
-.ack-actions {
-  display:flex;
-  align-items:center;
-  gap:.45rem;
-  flex-wrap:wrap;
-}
-.ack-actions .icon-btn {
-  width:2.4rem;
-  height:2.4rem;
-  border-radius:999px;
-  padding:0;
-  display:grid;
-  place-items:center;
-  font-size:1.1rem;
-}
 .cmd-inline {
   display:flex;
   flex-wrap:wrap;

@@ -50,11 +50,13 @@ private:
     uint8_t attempts_left = 0;               // оставшиеся повторы
     bool expect_ack = false;                 // требуется ли подтверждение
     std::string packet_tag;                  // идентификатор пакета для группировки частей
+    std::string status_prefix;               // префикс для журнала статусов
   };
 
   bool transmit(const PendingMessage& message);
   static bool isAckPayload(const std::vector<uint8_t>& data);
   static std::string extractPacketTag(const std::vector<uint8_t>& data);
+  static std::string extractStatusPrefix(const std::vector<uint8_t>& data);
   void archiveFollowingParts(uint8_t qos, const std::string& tag);
   void scheduleFromArchive();
   void onSendSuccess();
