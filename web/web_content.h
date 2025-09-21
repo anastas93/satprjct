@@ -132,6 +132,9 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
                 <div><dt>Назначение</dt><dd id="channelInfoPurpose">—</dd></div>
               </dl>
             </div>
+            <div class="channel-info-actions">
+              <button id="channelInfoSetCurrent" class="btn">Установить текущим каналом</button>
+            </div>
           </div>
         </aside>
       </div>
@@ -808,6 +811,14 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   display: grid;
   gap: 1rem;
 }
+.channel-info-actions {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+.channel-info-actions .btn {
+  width: 100%;
+}
 .channel-info-block {
   display: grid;
   gap: .6rem;
@@ -1184,6 +1195,7 @@ const UI = {
     lastMessage: "",
   },
   state: {
+    bank: null,
     channel: null,
     ack: null,
     ackRetry: null,
@@ -1194,6 +1206,8 @@ const UI = {
     recvTimer: null,
     receivedKnown: new Set(),
     infoChannel: null,
+    infoChannelTx: null,
+    infoChannelRx: null,
     chatHistory: [],
     version: null,
     pauseMs: null,
@@ -1212,168 +1226,168 @@ const channelReference = {
   error: null,
   promise: null,
 };
-const CHANNEL_REFERENCE_FALLBACK = `,RX (MHz),TX (MHz),System,Band Plan,Purpose
-0,243.625,316.725,,,
-1,243.625,300.400,,,
-2,243.800,298.200,Unknown,,
+const CHANNEL_REFERENCE_FALLBACK = `Channel,RX (MHz),TX (MHz),System,Band Plan,Purpose
+0,243.625,316.725,UHF military,225-328.6 MHz,Military communications
+1,243.625,300.400,UHF military,225-328.6 MHz,Military communications
+2,243.800,298.200,UHF military,225-328.6 MHz,Military communications
 3,244.135,296.075,UHF FO,Band Plan P,Tactical communications
-4,244.275,300.250,Unknown,,
-5,245.200,312.850,,,
-6,245.800,298.650,,,
-7,245.850,314.230,,,
-8,245.950,299.400,,,
-9,247.450,298.800,Unknown,,
+4,244.275,300.250,UHF military,225-328.6 MHz,Military communications
+5,245.200,312.850,UHF military,225-328.6 MHz,Military communications
+6,245.800,298.650,UHF military,225-328.6 MHz,Military communications
+7,245.850,314.230,UHF military,225-328.6 MHz,Military communications
+8,245.950,299.400,UHF military,225-328.6 MHz,Military communications
+9,247.450,298.800,UHF military,225-328.6 MHz,Military communications
 10,248.750,306.900,Marisat,B,Tactical voice/data
 11,248.825,294.375,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder
-12,249.375,316.975,,,
-13,249.400,300.975,Unknown,,
-14,249.450,299.000,,,
-15,249.450,312.750,,,
-16,249.490,313.950,,,
-17,249.530,318.280,,,
-18,249.850,316.250,,,
-19,249.850,298.830,,,
-20,249.890,300.500,Unknown,,
+12,249.375,316.975,UHF military,225-328.6 MHz,Military communications
+13,249.400,300.975,UHF military,225-328.6 MHz,Military communications
+14,249.450,299.000,UHF military,225-328.6 MHz,Military communications
+15,249.450,312.750,UHF military,225-328.6 MHz,Military communications
+16,249.490,313.950,UHF military,225-328.6 MHz,Military communications
+17,249.530,318.280,UHF military,225-328.6 MHz,Military communications
+18,249.850,316.250,UHF military,225-328.6 MHz,Military communications
+19,249.850,298.830,UHF military,225-328.6 MHz,Military communications
+20,249.890,300.500,UHF military,225-328.6 MHz,Military communications
 21,249.930,308.750,UHF FO,Q,Tactical communications
-22,250.090,312.600,Unknown,,
+22,250.090,312.600,UHF military,225-328.6 MHz,Military communications
 23,250.900,308.300,UHF FO,Q,Tactical communications
 24,251.275,296.500,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder
-25,251.575,308.450,Unknown,,
-26,251.600,298.225,Unknown,,
+25,251.575,308.450,UHF military,225-328.6 MHz,Military communications
+26,251.600,298.225,UHF military,225-328.6 MHz,Military communications
 27,251.850,292.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 28,251.900,292.900,FLTSATCOM/Leasat,A/X,Tactical communications
 29,251.950,292.950,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 30,252.000,293.100,FLTSATCOM,B,Tactical communications
 31,252.050,293.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-32,252.150,293.150,,,
-33,252.200,299.150,,,
+32,252.150,293.150,UHF military,225-328.6 MHz,Military communications
+33,252.200,299.150,UHF military,225-328.6 MHz,Military communications
 34,252.400,309.700,UHF FO,Q,Tactical communications
-35,252.450,309.750,,,
-36,252.500,309.800,,,
-37,252.550,309.850,,,
-38,252.625,309.925,,,
-39,253.550,294.550,,,
-40,253.600,295.950,Unknown,,
+35,252.450,309.750,UHF military,225-328.6 MHz,Military communications
+36,252.500,309.800,UHF military,225-328.6 MHz,Military communications
+37,252.550,309.850,UHF military,225-328.6 MHz,Military communications
+38,252.625,309.925,UHF military,225-328.6 MHz,Military communications
+39,253.550,294.550,UHF military,225-328.6 MHz,Military communications
+40,253.600,295.950,UHF military,225-328.6 MHz,Military communications
 41,253.650,294.650,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 42,253.700,294.700,FLTSATCOM/Leasat/UHF FO,A/X/O,Tactical communications
-43,253.750,294.750,,,
-44,253.800,296.000,Unknown,,
+43,253.750,294.750,UHF military,225-328.6 MHz,Military communications
+44,253.800,296.000,UHF military,225-328.6 MHz,Military communications
 45,253.850,294.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 46,253.850,294.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-47,253.900,307.500,,,
-48,254.000,298.630,Unknown,,
-49,254.730,312.550,Unknown,,
-50,254.775,310.800,Unknown,,
-51,254.830,296.200,,,
-52,255.250,302.425,,,
+47,253.900,307.500,UHF military,225-328.6 MHz,Military communications
+48,254.000,298.630,UHF military,225-328.6 MHz,Military communications
+49,254.730,312.550,UHF military,225-328.6 MHz,Military communications
+50,254.775,310.800,UHF military,225-328.6 MHz,Military communications
+51,254.830,296.200,UHF military,225-328.6 MHz,Military communications
+52,255.250,302.425,UHF military,225-328.6 MHz,Military communications
 53,255.350,296.350,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 54,255.400,296.400,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-55,255.450,296.450,,,
+55,255.450,296.450,UHF military,225-328.6 MHz,Military communications
 56,255.550,296.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 57,255.550,296.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-58,255.775,309.300,Unknown,,
-59,256.450,313.850,Unknown,,
-60,256.600,305.950,,,
+58,255.775,309.300,UHF military,225-328.6 MHz,Military communications
+59,256.450,313.850,UHF military,225-328.6 MHz,Military communications
+60,256.600,305.950,UHF military,225-328.6 MHz,Military communications
 61,256.850,297.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-62,256.900,296.100,Unknown,,
-63,256.950,297.950,,,
+62,256.900,296.100,UHF military,225-328.6 MHz,Military communications
+63,256.950,297.950,UHF military,225-328.6 MHz,Military communications
 64,257.000,297.675,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 65,257.050,298.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-66,257.100,295.650,Unknown,,
-67,257.150,298.150,,,
-68,257.200,308.800,Unknown,,
-69,257.250,309.475,,,
-70,257.300,309.725,Unknown,,
-71,257.350,307.200,Unknown,,
-72,257.500,311.350,,,
-73,257.700,316.150,Unknown,,
-74,257.775,311.375,Unknown,,
-75,257.825,297.075,Unknown,,
-76,257.900,298.000,,,
-77,258.150,293.200,,,
+66,257.100,295.650,UHF military,225-328.6 MHz,Military communications
+67,257.150,298.150,UHF military,225-328.6 MHz,Military communications
+68,257.200,308.800,UHF military,225-328.6 MHz,Military communications
+69,257.250,309.475,UHF military,225-328.6 MHz,Military communications
+70,257.300,309.725,UHF military,225-328.6 MHz,Military communications
+71,257.350,307.200,UHF military,225-328.6 MHz,Military communications
+72,257.500,311.350,UHF military,225-328.6 MHz,Military communications
+73,257.700,316.150,UHF military,225-328.6 MHz,Military communications
+74,257.775,311.375,UHF military,225-328.6 MHz,Military communications
+75,257.825,297.075,UHF military,225-328.6 MHz,Military communications
+76,257.900,298.000,UHF military,225-328.6 MHz,Military communications
+77,258.150,293.200,UHF military,225-328.6 MHz,Military communications
 78,258.350,299.350,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 79,258.450,299.450,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 80,258.500,299.500,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 81,258.550,299.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 82,258.650,299.650,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-83,259.000,317.925,,,
-84,259.050,317.975,,,
-85,259.975,310.050,,,
-86,260.025,310.225,,,
-87,260.075,310.275,Unknown,,
-88,260.125,310.125,Unknown,,
-89,260.175,310.325,Unknown,,
-90,260.375,292.975,,,
-91,260.425,297.575,Unknown,,
+83,259.000,317.925,UHF military,225-328.6 MHz,Military communications
+84,259.050,317.975,UHF military,225-328.6 MHz,Military communications
+85,259.975,310.050,UHF military,225-328.6 MHz,Military communications
+86,260.025,310.225,UHF military,225-328.6 MHz,Military communications
+87,260.075,310.275,UHF military,225-328.6 MHz,Military communications
+88,260.125,310.125,UHF military,225-328.6 MHz,Military communications
+89,260.175,310.325,UHF military,225-328.6 MHz,Military communications
+90,260.375,292.975,UHF military,225-328.6 MHz,Military communications
+91,260.425,297.575,UHF military,225-328.6 MHz,Military communications
 92,260.425,294.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
 93,260.475,294.075,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-94,260.525,294.125,,,
-95,260.550,296.775,Unknown,,
+94,260.525,294.125,UHF military,225-328.6 MHz,Military communications
+95,260.550,296.775,UHF military,225-328.6 MHz,Military communications
 96,260.575,294.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
 97,260.625,294.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
 98,260.675,294.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-99,260.675,294.275,,,
-100,260.725,294.325,,,
-101,260.900,313.900,,,
-102,261.100,298.380,Unknown,,
-103,261.100,298.700,Unknown,,
-104,261.200,294.950,Unknown,,
-105,262.000,314.200,Unknown,,
-106,262.040,307.075,Unknown,,
-107,262.075,306.975,Unknown,,
+99,260.675,294.275,UHF military,225-328.6 MHz,Military communications
+100,260.725,294.325,UHF military,225-328.6 MHz,Military communications
+101,260.900,313.900,UHF military,225-328.6 MHz,Military communications
+102,261.100,298.380,UHF military,225-328.6 MHz,Military communications
+103,261.100,298.700,UHF military,225-328.6 MHz,Military communications
+104,261.200,294.950,UHF military,225-328.6 MHz,Military communications
+105,262.000,314.200,UHF military,225-328.6 MHz,Military communications
+106,262.040,307.075,UHF military,225-328.6 MHz,Military communications
+107,262.075,306.975,UHF military,225-328.6 MHz,Military communications
 108,262.125,295.725,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-109,262.175,297.025,Unknown,,
+109,262.175,297.025,UHF military,225-328.6 MHz,Military communications
 110,262.175,295.775,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
 111,262.225,295.825,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-112,262.275,295.875,,,
-113,262.275,300.275,Unknown,,
+112,262.275,295.875,UHF military,225-328.6 MHz,Military communications
+113,262.275,300.275,UHF military,225-328.6 MHz,Military communications
 114,262.325,295.925,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-115,262.375,295.975,,,
+115,262.375,295.975,UHF military,225-328.6 MHz,Military communications
 116,262.425,296.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-117,263.450,311.400,Unknown,,
-118,263.500,309.875,,,
+117,263.450,311.400,UHF military,225-328.6 MHz,Military communications
+118,263.500,309.875,UHF military,225-328.6 MHz,Military communications
 119,263.575,297.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
 120,263.625,297.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
 121,263.675,297.275,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-122,263.725,297.325,,,
+122,263.725,297.325,UHF military,225-328.6 MHz,Military communications
 123,263.775,297.375,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
 124,263.825,297.425,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
 125,263.875,297.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
 126,263.925,297.525,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-127,265.250,306.250,,,
-128,265.350,306.350,,,
+127,265.250,306.250,UHF military,225-328.6 MHz,Military communications
+128,265.350,306.350,UHF military,225-328.6 MHz,Military communications
 129,265.400,294.425,FLTSATCOM/Leasat,A/X,Tactical communications
-130,265.450,306.450,,,
-131,265.500,302.525,Unknown,,
+130,265.450,306.450,UHF military,225-328.6 MHz,Military communications
+131,265.500,302.525,UHF military,225-328.6 MHz,Military communications
 132,265.550,306.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-133,265.675,306.675,Unknown,,
-134,265.850,306.850,Unknown,,
-135,266.750,316.575,,,
+133,265.675,306.675,UHF military,225-328.6 MHz,Military communications
+134,265.850,306.850,UHF military,225-328.6 MHz,Military communications
+135,266.750,316.575,UHF military,225-328.6 MHz,Military communications
 136,266.850,307.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-137,266.900,297.625,Unknown,,
+137,266.900,297.625,UHF military,225-328.6 MHz,Military communications
 138,266.950,307.950,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 139,267.050,308.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 140,267.100,308.100,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 141,267.150,308.150,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 142,267.200,308.200,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 143,267.250,308.250,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-144,267.400,294.900,Unknown,,
-145,267.875,310.375,Unknown,,
-146,267.950,310.450,,,
-147,268.000,310.475,,,
+144,267.400,294.900,UHF military,225-328.6 MHz,Military communications
+145,267.875,310.375,UHF military,225-328.6 MHz,Military communications
+146,267.950,310.450,UHF military,225-328.6 MHz,Military communications
+147,268.000,310.475,UHF military,225-328.6 MHz,Military communications
 148,268.025,309.025,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-149,268.050,310.550,Unknown,,
-150,268.100,310.600,Unknown,,
+149,268.050,310.550,UHF military,225-328.6 MHz,Military communications
+150,268.100,310.600,UHF military,225-328.6 MHz,Military communications
 151,268.150,309.150,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-152,268.200,296.050,Unknown,,
+152,268.200,296.050,UHF military,225-328.6 MHz,Military communications
 153,268.250,309.250,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 154,268.300,309.300,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-155,268.350,309.350,,,
+155,268.350,309.350,UHF military,225-328.6 MHz,Military communications
 156,268.400,295.900,FLTSATCOM/Leasat,C/Z,Tactical communications
-157,268.450,309.450,,,
-158,269.700,309.925,,,
-159,269.750,310.750,,,
-160,269.800,310.025,,,
+157,268.450,309.450,UHF military,225-328.6 MHz,Military communications
+158,269.700,309.925,UHF military,225-328.6 MHz,Military communications
+159,269.750,310.750,UHF military,225-328.6 MHz,Military communications
+160,269.800,310.025,UHF military,225-328.6 MHz,Military communications
 161,269.850,310.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
 162,269.950,310.950,DOD 25 kHz,DOD 25K,Tactical communications (DoD)`;
 const POWER_PRESETS = [-5, -2, 1, 4, 7, 10, 13, 16, 19, 22];
@@ -1446,6 +1460,7 @@ async function init() {
   UI.els.channelInfoBody = $("#channelInfoBody");
   UI.els.channelInfoEmpty = $("#channelInfoEmpty");
   UI.els.channelInfoStatus = $("#channelInfoStatus");
+  UI.els.channelInfoSetBtn = $("#channelInfoSetCurrent");
   UI.els.channelInfoFields = {
     rxCurrent: $("#channelInfoRxCurrent"),
     txCurrent: $("#channelInfoTxCurrent"),
@@ -1468,9 +1483,20 @@ async function init() {
     tag: $("#encTestTag"),
     nonce: $("#encTestNonce"),
   };
+  if (UI.els.channelInfoSetBtn) {
+    UI.els.channelInfoSetBtn.addEventListener("click", onChannelInfoSetCurrent);
+  }
   const infoClose = $("#channelInfoClose");
   if (infoClose) infoClose.addEventListener("click", hideChannelInfo);
   const channelsTable = $("#channelsTable");
+  const savedChannelRaw = storage.get("set.CH");
+  if (savedChannelRaw != null && UI.state.channel == null) {
+    const savedChannelNum = parseInt(savedChannelRaw, 10);
+    if (!isNaN(savedChannelNum)) {
+      UI.state.channel = savedChannelNum;
+      if (UI.els.channelSelect) UI.els.channelSelect.value = String(savedChannelNum);
+    }
+  }
   updateFooterVersion();
   if (channelsTable) {
     // Обрабатываем клики по строкам таблицы каналов, чтобы открыть карточку информации
@@ -1577,6 +1603,7 @@ async function init() {
   if (UI.els.recvRefresh) {
     UI.els.recvRefresh.addEventListener("click", () => refreshReceivedList({ manual: true }));
   }
+  loadChatHistory();
   setRecvAuto(savedAuto, { skipImmediate: true });
   refreshReceivedList({ silentError: true });
 
@@ -1607,8 +1634,6 @@ async function init() {
     console.warn("[freq-info] загрузка не удалась:", err);
     updateChannelInfoPanel();
   });
-
-  loadChatHistory();
   renderEncTest(UI.state.encTest);
 
   // Настройки
@@ -1620,7 +1645,7 @@ async function init() {
   loadSettings();
   updatePauseUi();
   updateAckTimeoutUi();
-  const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels());
+  const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels({ forceBank: true }));
   if (UI.els.channelSelect) UI.els.channelSelect.addEventListener("change", onChannelSelectChange);
   updateChannelSelectHint();
 
@@ -2139,9 +2164,15 @@ function handleCommandSideEffects(cmd, text) {
   } else if (upper === "SEAR") {
     applySearchResult(text);
   } else if (upper === "BANK") {
-    if (text && text.length === 1) {
-      const bankSel = $("#BANK");
-      if (bankSel) bankSel.value = text;
+    if (text && text.length >= 1) {
+      const letter = text.trim().charAt(0);
+      if (letter) {
+        const normalized = letter.toLowerCase();
+        UI.state.bank = normalized;
+        storage.set("set.BANK", normalized);
+        const bankSel = $("#BANK");
+        if (bankSel) bankSel.value = normalized;
+      }
     }
   } else if (upper === "ENCT") {
     const info = parseEncTestResponse(text);
@@ -2259,12 +2290,26 @@ function renderReceivedList(names) {
     if (!prev.has(name)) {
       li.classList.add("fresh");
       setTimeout(() => li.classList.remove("fresh"), 1600);
+      logReceivedNameInChat(name);
     }
     frag.appendChild(li);
   });
   UI.els.recvList.appendChild(frag);
   UI.state.receivedKnown = next;
   if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = names.length > 0;
+}
+
+// Добавляем отметку о принятом сообщении в чат
+function logReceivedNameInChat(name) {
+  if (!name) return;
+  const raw = String(name).trim();
+  if (!/^GO-/i.test(raw)) return;
+  const text = "RX: " + raw;
+  const history = getChatHistory();
+  const duplicate = Array.isArray(history) && history.some((entry) => entry && entry.tag === "rx-name" && entry.m === text);
+  if (duplicate) return;
+  const saved = persistChat(text, "dev", { role: "rx", tag: "rx-name" });
+  addChatMessage(saved.record, saved.index);
 }
 async function copyReceivedName(name) {
   if (!name) return;
@@ -2307,6 +2352,8 @@ const searchState = { running: false, cancel: false };
 // Скрываем панель информации о канале
 function hideChannelInfo() {
   UI.state.infoChannel = null;
+  UI.state.infoChannelTx = null;
+  UI.state.infoChannelRx = null;
   updateChannelInfoPanel();
 }
 
@@ -2315,6 +2362,12 @@ function showChannelInfo(ch) {
   const num = Number(ch);
   if (!Number.isFinite(num)) return;
   UI.state.infoChannel = num;
+  const entry = channels.find((c) => c.ch === num);
+  if (entry) {
+    // Сохраняем частоты выбранного канала, чтобы карточка не пустела после обновления списка
+    UI.state.infoChannelTx = entry.tx != null ? entry.tx : null;
+    UI.state.infoChannelRx = entry.rx != null ? entry.rx : null;
+  }
   updateChannelInfoPanel();
   if (!channelReference.ready && !channelReference.loading) {
     loadChannelReferenceData().then(() => {
@@ -2348,6 +2401,11 @@ function updateChannelInfoPanel() {
     if (empty) empty.hidden = false;
     if (body) body.hidden = true;
     if (statusEl) { statusEl.textContent = ""; statusEl.hidden = true; }
+    const setBtn = UI.els.channelInfoSetBtn || $("#channelInfoSetCurrent");
+    if (setBtn) {
+      setBtn.disabled = true;
+      setBtn.textContent = "Установить текущим каналом";
+    }
     updateChannelInfoHighlight();
     return;
   }
@@ -2357,8 +2415,16 @@ function updateChannelInfoPanel() {
   if (body) body.hidden = false;
   if (UI.els.channelInfoTitle) UI.els.channelInfoTitle.textContent = String(UI.state.infoChannel);
 
-  const entry = channels.find((c) => c.ch === UI.state.infoChannel);
-  const ref = entry ? (findChannelReferenceByTx(entry) || channelReference.map.get(UI.state.infoChannel)) : channelReference.map.get(UI.state.infoChannel);
+  const actualEntry = channels.find((c) => c.ch === UI.state.infoChannel);
+  let entry = actualEntry;
+  if (!entry && (UI.state.infoChannelTx != null || UI.state.infoChannelRx != null)) {
+    entry = {
+      ch: UI.state.infoChannel,
+      tx: UI.state.infoChannelTx,
+      rx: UI.state.infoChannelRx,
+    };
+  }
+  const ref = entry ? (findChannelReferenceByTx(entry) || findChannelReferenceByTxValue(entry.tx)) : findChannelReferenceByTxValue(UI.state.infoChannelTx);
   const fields = UI.els.channelInfoFields || {};
 
   setChannelInfoText(fields.rxCurrent, entry ? formatChannelNumber(entry.rx, 3) : "—");
@@ -2381,11 +2447,18 @@ function updateChannelInfoPanel() {
     messages.push("Не удалось загрузить справочник: " + errText);
   }
   if (!channelReference.loading && !channelReference.error && !ref) messages.push("В справочнике нет данных для этого канала.");
-  if (!entry) messages.push("Канал отсутствует в текущем списке.");
+  if (!actualEntry) messages.push("Канал отсутствует в текущем списке.");
   if (statusEl) {
     const text = messages.join(" ");
     statusEl.textContent = text;
     statusEl.hidden = !text;
+  }
+
+  const setBtn = UI.els.channelInfoSetBtn || $("#channelInfoSetCurrent");
+  if (setBtn) {
+    const same = UI.state.channel != null && UI.state.channel === UI.state.infoChannel;
+    setBtn.disabled = !!same;
+    setBtn.textContent = same ? "Канал уже активен" : "Установить текущим каналом";
   }
 
   updateChannelInfoHighlight();
@@ -2395,6 +2468,36 @@ function updateChannelInfoPanel() {
 function setChannelInfoText(el, text) {
   if (!el) return;
   el.textContent = text;
+}
+
+// Устанавливаем канал из карточки в качестве текущего
+async function onChannelInfoSetCurrent() {
+  const btn = UI.els.channelInfoSetBtn || $("#channelInfoSetCurrent");
+  if (UI.state.infoChannel == null) {
+    note("Выберите канал в таблице");
+    return;
+  }
+  if (UI.state.channel != null && UI.state.channel === UI.state.infoChannel) {
+    note("Канал " + UI.state.infoChannel + " уже активен");
+    updateChannelInfoPanel();
+    return;
+  }
+  if (btn) btn.disabled = true;
+  let applied = false;
+  try {
+    const num = UI.state.infoChannel;
+    const res = await sendCommand("CH", { v: String(num) });
+    if (res === null) return;
+    applied = true;
+    storage.set("set.CH", String(num));
+    UI.state.channel = num;
+    updateChannelSelect();
+    renderChannels();
+    updateChannelSelectHint();
+    updateChannelInfoPanel();
+  } finally {
+    if (!applied && btn) btn.disabled = false;
+  }
 }
 
 // Форматируем числовое значение с заданным количеством знаков после запятой
@@ -2463,15 +2566,44 @@ function normalizeFrequencyKey(value) {
 
 function findChannelReferenceByTx(entry) {
   if (!entry || entry.tx == null) return null;
-  const key = normalizeFrequencyKey(entry.tx);
+  const match = findChannelReferenceByTxValue(entry.tx, entry.ch);
+  if (match) return match;
+  if (entry.ch != null && channelReference.map.has(entry.ch)) {
+    return channelReference.map.get(entry.ch);
+  }
+  return null;
+}
+
+// Ищем сведения по частоте передачи с учётом допустимого отклонения
+function findChannelReferenceByTxValue(value, channelNumber) {
+  if (value == null) return null;
+  const key = normalizeFrequencyKey(value);
   if (key === null) return null;
   const list = channelReference.byTx.get(key);
-  if (!list || !list.length) return null;
-  if (entry.ch != null) {
-    const match = list.find((item) => item && item.ch === entry.ch);
-    if (match) return match;
+  if (list && list.length) {
+    if (channelNumber != null) {
+      const exact = list.find((item) => item && item.ch === channelNumber);
+      if (exact) return exact;
+    }
+    return list[0];
   }
-  return list[0];
+  let closest = null;
+  let closestDiff = Number.POSITIVE_INFINITY;
+  const limit = 0.005; // 5 кГц допуска
+  for (const items of channelReference.byTx.values()) {
+    if (!items || !items.length) continue;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!item || item.tx == null) continue;
+      const diff = Math.abs(Number(item.tx) - Number(value));
+      if (diff < closestDiff && diff <= limit) {
+        closest = item;
+        closestDiff = diff;
+        if (closestDiff === 0) return closest;
+      }
+    }
+  }
+  return closest;
 }
 
 // Преобразуем CSV в таблицу каналов
@@ -2582,6 +2714,13 @@ function renderChannels() {
     if (infoSelected) tr.classList.add("selected-info");
     tbody.appendChild(tr);
   });
+  if (UI.state.infoChannel != null) {
+    const current = channels.find((c) => c.ch === UI.state.infoChannel);
+    if (current) {
+      UI.state.infoChannelTx = current.tx != null ? current.tx : UI.state.infoChannelTx;
+      UI.state.infoChannelRx = current.rx != null ? current.rx : UI.state.infoChannelRx;
+    }
+  }
   updateChannelInfoPanel();
 }
 function updateChannelSelect() {
@@ -2668,11 +2807,19 @@ function updateChannelSelectHint() {
   hint.textContent = "RX " + rx + " · TX " + tx;
   hint.hidden = false;
 }
-async function refreshChannels() {
+async function refreshChannels(options) {
+  const opts = options || {};
   const bankSel = $("#BANK");
   const bank = bankSel ? bankSel.value : null;
   try {
-    if (bank) await deviceFetch("BANK", { v: bank }, 2500);
+    const shouldApplyBank = bank && (opts.forceBank === true || UI.state.bank !== bank);
+    if (shouldApplyBank) {
+      const res = await deviceFetch("BANK", { v: bank }, 2500);
+      if (res.ok) {
+        UI.state.bank = bank;
+        storage.set("set.BANK", bank);
+      }
+    }
     const list = await deviceFetch("CHLIST", bank ? { bank: bank } : {}, 4000);
     if (list.ok && list.text) {
       const parsed = parseChannels(list.text);
@@ -2695,6 +2842,11 @@ async function refreshChannels() {
   } catch (e) {
     if (!channels.length) mockChannels();
     debugLog("ERR refreshChannels: " + e);
+  }
+  if (UI.state.channel == null) {
+    const savedRaw = storage.get("set.CH");
+    const savedNum = parseInt(savedRaw || "", 10);
+    if (!isNaN(savedNum)) UI.state.channel = savedNum;
   }
   renderChannels();
   updateChannelSelect();
@@ -3020,7 +3172,8 @@ function updateAckRetryUi() {
     if (UI.state.ack === true) {
       const attempts = state != null ? state : "—";
       const timeout = UI.state.ackTimeout != null ? UI.state.ackTimeout + " мс" : "—";
-      hint.textContent = "Повторные отправки: " + attempts + " раз. Ожидание ACK: " + timeout + ".";
+      const pause = UI.state.pauseMs != null ? UI.state.pauseMs + " мс" : "—";
+      hint.textContent = "Повторные отправки: " + attempts + " раз. Пауза: " + pause + ". Ожидание ACK: " + timeout + ".";
     } else {
       hint.textContent = "Доступно после включения ACK.";
     }
@@ -3415,6 +3568,9 @@ function loadSettings() {
       updateAckTimeoutUi();
     } else {
       el.value = v;
+      if (key === "BANK") {
+        UI.state.bank = v;
+      }
     }
   }
 }
@@ -3614,6 +3770,7 @@ async function syncSettingsFromDevice() {
       if (letter) {
         const value = letter.toLowerCase();
         if (bankEl) bankEl.value = value;
+        UI.state.bank = value;
         storage.set("set.BANK", value);
       }
     }
@@ -3799,6 +3956,7 @@ async function requestKeyGen() {
     UI.key.state = data;
     UI.key.lastMessage = "Сгенерирован новый локальный ключ";
     renderKeyState(data);
+    debugLog("KEYGEN ✓ ключ обновлён на устройстве");
     status("✓ KEYGEN");
   } catch (err) {
     status("✗ KEYGEN");
@@ -3827,6 +3985,7 @@ async function requestKeyRestore() {
     UI.key.state = data;
     UI.key.lastMessage = "Восстановлена резервная версия ключа";
     renderKeyState(data);
+    debugLog("KEYRESTORE ✓ восстановление завершено");
     status("✓ KEYRESTORE");
   } catch (err) {
     status("✗ KEYRESTORE");
@@ -3860,10 +4019,13 @@ async function requestKeySend() {
         await navigator.clipboard.writeText(data.public);
         UI.key.lastMessage = "Публичный ключ скопирован";
         renderKeyState(data);
+        debugLog("KEYTRANSFER SEND ✓ ключ скопирован в буфер обмена");
       } catch (err) {
         console.warn("[key] clipboard", err);
+        debugLog("KEYTRANSFER SEND ⚠ не удалось скопировать ключ: " + String(err));
       }
     }
+    debugLog("KEYTRANSFER SEND ✓ данные отправлены");
     status("✓ KEYTRANSFER SEND");
   } catch (err) {
     status("✗ KEYTRANSFER SEND");
@@ -3896,6 +4058,7 @@ async function requestKeyReceive() {
     UI.key.state = data;
     UI.key.lastMessage = "Получен внешний ключ";
     renderKeyState(data);
+    debugLog("KEYTRANSFER RECEIVE ✓ ключ принят");
     status("✓ KEYTRANSFER RECEIVE");
   } catch (err) {
     status("✗ KEYTRANSFER RECEIVE");
@@ -3947,7 +4110,8 @@ async function loadVersion() {
   try {
     const res = await fetch(url.toString(), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const text = (await res.text()).trim();
+    const raw = await res.text();
+    const text = normalizeVersionText(raw);
     UI.state.version = text || null;
     updateFooterVersion();
     return UI.state.version;
@@ -3960,15 +4124,17 @@ async function loadVersion() {
 function updateFooterVersion() {
   const el = UI.els.version || $("#appVersion");
   if (!el) return;
-  let text = UI.state.version != null ? String(UI.state.version) : "";
-  if (text) {
-    text = text.trim();
-    if (/^v+/i.test(text)) {
-      text = text.replace(/^v+/i, "").trim();
-    }
-  }
-  if (!text) text = "—";
-  el.textContent = text;
+  const text = UI.state.version != null ? String(UI.state.version) : "";
+  el.textContent = text ? ("v" + text) : "—";
+}
+// Приводим текст версии к человеку понятному виду
+function normalizeVersionText(value) {
+  if (!value) return "";
+  let text = String(value).trim();
+  text = text.replace(/^v+/i, "").trim();
+  if (!text) return "";
+  if (/^(unknown|undefined|none)$/i.test(text)) return "";
+  return text;
 }
 async function resyncAfterEndpointChange() {
   try {
