@@ -440,6 +440,18 @@ a { color: inherit; }
 .site-header .brand { grid-area: brand; }
 .site-header .nav { grid-area: nav; }
 .site-header .header-actions { grid-area: actions; justify-self: end; }
+.nav-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 15, 28, .55);
+  backdrop-filter: blur(6px);
+  z-index: 40;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+.nav-overlay.visible { opacity: 1; pointer-events: auto; }
+body.nav-open { overflow: hidden; }
 .brand { display:flex; gap:.6rem; align-items:center; font-weight:800; letter-spacing:.3px; }
 .brand .tag { font-size:.75rem; padding:.15rem .45rem; border-radius:.5rem; background: var(--panel-2); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); color: var(--muted); }
 
@@ -580,6 +592,12 @@ main {
   opacity: .88;
 }
 .msg.system time { color: color-mix(in oklab, var(--accent-2) 35%, var(--muted) 65%); }
+.msg.rx .bubble {
+  background: color-mix(in oklab, var(--good) 18%, var(--panel) 82%);
+  border-color: color-mix(in oklab, var(--good) 45%, var(--panel) 55%);
+}
+.msg.rx .bubble-text { font-weight:600; }
+.msg.rx time { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); }
 .bubble-text { line-height:1.55; }
 .bubble-meta {
   display:flex;
@@ -590,6 +608,8 @@ main {
   color: var(--muted);
   justify-content:flex-start;
 }
+.bubble-meta.bubble-rx { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); gap:.5rem; }
+.bubble-rx .label { text-transform: uppercase; letter-spacing:.05em; font-weight:700; }
 .bubble-tx.ok { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); }
 .bubble-tx.err { color: color-mix(in oklab, var(--danger) 65%, var(--muted) 35%); }
 .bubble-tx-label {
@@ -634,6 +654,19 @@ main {
 .btn.soft { background: color-mix(in oklab, var(--panel-2) 90%, var(--accent) 10%); }
 .btn.ghost { background: var(--panel-2); }
 .btn.danger { background: linear-gradient(180deg, var(--danger), #b91c1c); color:#fff; border-color: transparent; }
+.btn.waiting {
+  color: #001018;
+  border-color: transparent;
+  animation: key-wait 1.1s ease-in-out infinite;
+  background: color-mix(in oklab, var(--accent) 45%, var(--panel) 55%);
+}
+.btn.waiting:hover { background: color-mix(in oklab, var(--danger) 45%, var(--panel) 55%); }
+.btn.waiting:disabled { opacity: 1; }
+@keyframes key-wait {
+  0% { background: color-mix(in oklab, var(--accent) 45%, var(--panel) 55%); box-shadow: 0 0 0 rgba(248,113,113,0); }
+  50% { background: color-mix(in oklab, var(--danger) 45%, var(--panel) 55%); box-shadow: 0 0 12px rgba(248,113,113,.35); }
+  100% { background: color-mix(in oklab, var(--accent) 45%, var(--panel) 55%); box-shadow: 0 0 0 rgba(248,113,113,0); }
+}
 
 /* Дополнительные блоки в чате */
 .status-row { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem; margin: .75rem 0; }
@@ -705,10 +738,10 @@ main {
 }
 .received-list li {
   display:flex;
-  align-items:center;
+  align-items:flex-start;
   justify-content:space-between;
   gap:.75rem;
-  padding:.45rem .65rem;
+  padding:.55rem .7rem;
   border-radius:.75rem;
   background: color-mix(in oklab, var(--panel-2) 88%, black 12%);
   border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
@@ -720,11 +753,15 @@ main {
   background: color-mix(in oklab, var(--accent) 26%, var(--panel-2) 74%);
   transform: translateX(4px);
 }
-.received-name {
-  font-family: 'JetBrains Mono','Fira Code','SFMono-Regular',monospace;
-  letter-spacing:.04em;
-  font-size:.9rem;
-}
+.received-body { flex:1; display:flex; flex-direction:column; gap:.45rem; }
+.received-text { font-size:.95rem; line-height:1.45; word-break:break-word; }
+.received-text.empty { color: var(--muted); font-style:italic; }
+.received-meta { display:flex; flex-wrap:wrap; gap:.45rem; font-size:.78rem; color: var(--muted); }
+.received-name { font-family: 'JetBrains Mono','Fira Code','SFMono-Regular',monospace; letter-spacing:.04em; }
+.received-length { opacity:.85; }
+.received-type-ready .received-text { color: color-mix(in oklab, var(--text) 92%, white 8%); }
+.received-type-raw .received-text { color: color-mix(in oklab, var(--accent) 65%, var(--text) 35%); }
+.received-type-split .received-text { color: color-mix(in oklab, var(--accent-2) 55%, var(--text) 45%); }
 .received-actions { display:flex; gap:.35rem; }
 .received-actions .icon-btn {
   width: 2.2rem;
@@ -917,10 +954,11 @@ tbody tr.selected-info td { font-weight:600; }
 .enc-test-header {
   display:flex;
   flex-wrap:wrap;
-  align-items:baseline;
+  align-items:center;
   justify-content:space-between;
   gap:.35rem 1rem;
 }
+.enc-test-header .btn { padding:.4rem .9rem; }
 .enc-test-title { font-weight:700; }
 .enc-test-grid { display:grid; gap:.75rem; }
 .enc-test-field { display:flex; flex-direction:column; gap:.35rem; }
@@ -1021,11 +1059,14 @@ tbody tr.selected-info td { font-weight:600; }
 @media (max-width: 860px) {
   .only-mobile { display:block; }
   .site-header { grid-template-columns: 1fr auto; grid-template-areas: "brand actions"; }
-  .nav { position: fixed; top: 3.25rem; right: .75rem; left: auto; width: min(280px, calc(100% - 1.5rem)); z-index: 50;
-         background: var(--panel); border-radius:.7rem; padding:.5rem;
-         border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); }
-  .nav { display:none; flex-direction:column; align-items:flex-end; text-align:right; }
+  .nav { position: fixed; top: 3.6rem; right: clamp(.75rem, 8vw, 2rem); left: clamp(.75rem, 8vw, 2rem);
+         width: auto; z-index: 50; background: color-mix(in oklab, var(--panel) 94%, black 6%);
+         border-radius:1rem; padding:.75rem .85rem;
+         border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+         box-shadow: 0 20px 45px rgba(0,0,0,.25); }
+  .nav { display:none; flex-direction:column; align-items:stretch; text-align:left; gap:.35rem; }
   .nav.open { display:flex; }
+  .nav a { font-size:1rem; justify-content:space-between; padding:.65rem .85rem; border-radius:.85rem; }
   .chip input { width: 42vw; }
   .chip.input-chip input { width: min(6rem, 34vw); }
   table { min-width: 640px; }
@@ -1046,6 +1087,7 @@ tbody tr.selected-info td { font-weight:600; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: .85rem;
 }
+
 )~~~";
 
 // libs/sha256.js — библиотека SHA-256 на чистом JavaScript
@@ -1105,6 +1147,7 @@ const char SHA256_JS[] PROGMEM = R"~~~(
   // экспорт в глобальный объект
   global.sha256Bytes = sha256Bytes;
 })(this);
+
 )~~~";
 
 // script.js
@@ -1183,6 +1226,7 @@ const UI = {
     endpoint: storage.get("endpoint") || "http://192.168.4.1",
     theme: storage.get("theme") || detectPreferredTheme(),
     accent: (storage.get("accent") === "red") ? "red" : "default",
+    autoNight: storage.get("autoNight") !== "0",
   },
   key: {
     state: null,
@@ -1208,6 +1252,8 @@ const UI = {
     ackTimeout: null,
     encTest: null,
     testRxmTimers: [],
+    autoNightTimer: null,
+    autoNightActive: false,
   }
 };
 
@@ -1430,6 +1476,7 @@ async function init() {
   // Базовые элементы интерфейса
   UI.els.menuToggle = $("#menuToggle");
   UI.els.nav = $("#siteNav");
+  UI.els.navOverlay = $("#navOverlay");
   UI.els.endpoint = $("#endpoint");
   UI.els.themeToggle = $("#themeToggle");
   UI.els.themeRedToggle = $("#themeRedToggle");
@@ -1438,6 +1485,9 @@ async function init() {
   UI.els.version = $("#appVersion");
   UI.els.toast = $("#toast");
   UI.els.debugLog = $("#debugLog");
+  UI.els.rstsFullBtn = $("#btnRstsFull");
+  UI.els.rstsJsonBtn = $("#btnRstsJson");
+  UI.els.rstsDownloadBtn = $("#btnRstsDownloadJson");
   UI.els.chatLog = $("#chatLog");
   UI.els.chatInput = $("#chatInput");
   UI.els.sendBtn = $("#sendBtn");
@@ -1464,6 +1514,8 @@ async function init() {
   UI.els.recvAuto = $("#recvAuto");
   UI.els.recvLimit = $("#recvLimit");
   UI.els.recvRefresh = $("#btnRecvRefresh");
+  UI.els.autoNightSwitch = $("#autoNightMode");
+  UI.els.autoNightHint = $("#autoNightHint");
   UI.els.channelInfoPanel = $("#channelInfoPanel");
   UI.els.channelInfoTitle = $("#channelInfoTitle");
   UI.els.channelInfoBody = $("#channelInfoBody");
@@ -1492,6 +1544,8 @@ async function init() {
     tag: $("#encTestTag"),
     nonce: $("#encTestNonce"),
   };
+  UI.els.keyRecvBtn = $("#btnKeyRecv");
+  UI.els.encTestBtn = $("#btnEncTestRun");
   if (UI.els.channelInfoSetBtn) {
     UI.els.channelInfoSetBtn.addEventListener("click", onChannelInfoSetCurrent);
   }
@@ -1552,22 +1606,29 @@ async function init() {
   if (UI.els.menuToggle && UI.els.nav) {
     UI.els.menuToggle.addEventListener("click", () => {
       const open = !UI.els.nav.classList.contains("open");
-      UI.els.menuToggle.setAttribute("aria-expanded", String(open));
-      UI.els.nav.classList.toggle("open", open);
+      setMenuOpen(open);
     });
-    UI.els.nav.addEventListener("click", () => UI.els.nav.classList.remove("open"));
+  }
+  if (UI.els.nav) {
+    UI.els.nav.addEventListener("click", () => setMenuOpen(false));
+  }
+  if (UI.els.navOverlay) {
+    UI.els.navOverlay.addEventListener("click", () => setMenuOpen(false));
   }
 
   // Тема оформления
-  applyTheme(UI.cfg.theme);
+  initThemeSystem();
   applyAccent(UI.cfg.accent);
   if (UI.els.themeToggle) {
-    UI.els.themeToggle.setAttribute("aria-pressed", UI.cfg.theme === "dark" ? "true" : "false");
     UI.els.themeToggle.addEventListener("click", () => toggleTheme());
   }
   if (UI.els.themeRedToggle) {
     UI.els.themeRedToggle.setAttribute("aria-pressed", UI.cfg.accent === "red" ? "true" : "false");
     UI.els.themeRedToggle.addEventListener("click", () => toggleAccent());
+  }
+  if (UI.els.autoNightSwitch) {
+    UI.els.autoNightSwitch.checked = UI.cfg.autoNight;
+    UI.els.autoNightSwitch.addEventListener("change", () => setAutoNight(UI.els.autoNightSwitch.checked));
   }
 
   // Настройка endpoint
@@ -1598,6 +1659,11 @@ async function init() {
       btn.addEventListener("click", () => sendCommand(cmd));
     }
   });
+
+  // Управление командами RSTS на вкладке Debug
+  if (UI.els.rstsFullBtn) UI.els.rstsFullBtn.addEventListener("click", requestRstsFullDebug);
+  if (UI.els.rstsJsonBtn) UI.els.rstsJsonBtn.addEventListener("click", requestRstsJsonDebug);
+  if (UI.els.rstsDownloadBtn) UI.els.rstsDownloadBtn.addEventListener("click", downloadRstsFullJson);
 
   // Список принятых сообщений
   const savedLimitRaw = storage.get("recvLimit");
@@ -1683,6 +1749,19 @@ async function init() {
   probe().catch(() => {});
 }
 
+function setMenuOpen(open) {
+  const nav = UI.els.nav || $("#siteNav");
+  const toggle = UI.els.menuToggle || $("#menuToggle");
+  const overlay = UI.els.navOverlay || $("#navOverlay");
+  if (nav) nav.classList.toggle("open", open);
+  if (toggle) toggle.setAttribute("aria-expanded", String(open));
+  if (overlay) {
+    overlay.hidden = !open;
+    overlay.classList.toggle("visible", open);
+  }
+  document.body.classList.toggle("nav-open", open);
+}
+
 /* Вкладки */
 function setTab(tab) {
   for (const t of UI.tabs) {
@@ -1700,6 +1779,15 @@ function setTab(tab) {
 }
 
 /* Тема */
+function initThemeSystem() {
+  if (UI.cfg.autoNight) {
+    startAutoNightTimer();
+    applyAutoNightTheme(true);
+  } else {
+    applyTheme(UI.cfg.theme);
+    updateAutoNightUi();
+  }
+}
 function applyTheme(mode) {
   UI.cfg.theme = mode === "light" ? "light" : "dark";
   document.documentElement.classList.toggle("light", UI.cfg.theme === "light");
@@ -1707,9 +1795,63 @@ function applyTheme(mode) {
   if (UI.els.themeToggle) {
     UI.els.themeToggle.setAttribute("aria-pressed", UI.cfg.theme === "dark" ? "true" : "false");
   }
+  updateAutoNightUi();
 }
 function toggleTheme() {
+  if (UI.cfg.autoNight) setAutoNight(false);
   applyTheme(UI.cfg.theme === "dark" ? "light" : "dark");
+}
+function setAutoNight(enabled) {
+  if (enabled) {
+    UI.cfg.autoNight = true;
+    storage.set("autoNight", "1");
+    startAutoNightTimer();
+    applyAutoNightTheme(true);
+  } else {
+    if (UI.cfg.autoNight) storage.set("autoNight", "0");
+    UI.cfg.autoNight = false;
+    stopAutoNightTimer();
+    UI.state.autoNightActive = false;
+    updateAutoNightUi();
+  }
+}
+function startAutoNightTimer() {
+  if (UI.state.autoNightTimer) clearInterval(UI.state.autoNightTimer);
+  UI.state.autoNightTimer = setInterval(() => applyAutoNightTheme(false), 5 * 60 * 1000);
+}
+function stopAutoNightTimer() {
+  if (UI.state.autoNightTimer) {
+    clearInterval(UI.state.autoNightTimer);
+    UI.state.autoNightTimer = null;
+  }
+}
+function applyAutoNightTheme(force) {
+  const now = new Date();
+  const hour = now.getHours();
+  const shouldDark = hour >= 21 || hour < 7;
+  if (force || shouldDark !== UI.state.autoNightActive) {
+    UI.state.autoNightActive = shouldDark;
+    applyTheme(shouldDark ? "dark" : "light");
+  } else {
+    updateAutoNightUi();
+  }
+}
+function updateAutoNightUi() {
+  const input = UI.els.autoNightSwitch || $("#autoNightMode");
+  if (input) input.checked = UI.cfg.autoNight;
+  const hint = UI.els.autoNightHint || $("#autoNightHint");
+  if (hint) {
+    if (UI.cfg.autoNight) {
+      hint.textContent = UI.state.autoNightActive
+        ? "Сейчас активна ночная тема (21:00–07:00)."
+        : "Автовключение с 21:00 до 07:00 работает.";
+    } else {
+      hint.textContent = "Автоматическое переключение отключено.";
+    }
+  }
+  if (UI.els.themeToggle) {
+    UI.els.themeToggle.setAttribute("aria-pressed", UI.cfg.theme === "dark" ? "true" : "false");
+  }
 }
 function applyAccent(mode) {
   UI.cfg.accent = mode === "red" ? "red" : "default";
@@ -1825,6 +1967,10 @@ function normalizeChatEntries(rawEntries) {
       let rxText = cleanString(rawMeta.text || obj.text || obj.detail);
       const rawMessage = cleanString(obj.m);
       if (!rxText) rxText = dropRxPrefix(rawMessage);
+      if (!rxText && rawMeta && rawMeta.hex) {
+        const decodedMetaText = resolveReceivedText(rawMeta);
+        if (decodedMetaText) rxText = decodedMetaText;
+      }
       let name = cleanString(rawMeta.name || obj.name);
       if (!name) name = parseKnownName(rawMessage);
       if (!name && rxText) name = parseKnownName(rxText);
@@ -1835,14 +1981,14 @@ function normalizeChatEntries(rawEntries) {
         else if (/^R-/i.test(name)) type = "raw";
       }
       const hex = cleanString(rawMeta.hex || obj.hex);
-      const lenValue = toNumber(rawMeta.len != null ? rawMeta.len : (obj.len != null ? obj.len : obj.length));
-      let bubbleCore = rxText || dropRxPrefix(rawMessage) || name;
-      bubbleCore = cleanString(bubbleCore);
-      if (!bubbleCore) bubbleCore = name ? name : "—";
-      let finalMessage = bubbleCore;
-      if (!/^RX\s*[·:>\-]/i.test(finalMessage)) {
-        finalMessage = "RX · " + finalMessage;
+      let lenValue = toNumber(rawMeta.len != null ? rawMeta.len : (obj.len != null ? obj.len : obj.length));
+      if ((!lenValue || lenValue <= 0) && rawMeta && rawMeta.hex) {
+        const metaLen = getReceivedLength(rawMeta);
+        if (metaLen) lenValue = metaLen;
       }
+      const bubbleSource = rxText || dropRxPrefix(rawMessage) || "";
+      const bubbleCore = cleanString(bubbleSource);
+      const finalMessage = bubbleCore ? ("RX · " + bubbleCore) : "RX · —";
       obj.m = finalMessage;
       obj.tag = "rx-message";
       obj.role = "rx";
@@ -1886,6 +2032,8 @@ function persistChat(message, author, meta) {
     if (meta.tag) record.tag = meta.tag;
     if (meta.status != null) record.status = meta.status;
     if (meta.txStatus) record.txStatus = meta.txStatus;
+    if (meta.rx) record.rx = meta.rx;
+    if (meta.detail != null) record.detail = meta.detail;
   }
   if (!record.role) record.role = author === "you" ? "user" : "system";
   entries.push(record);
@@ -1900,7 +2048,8 @@ function addChatMessage(entry, index) {
   wrap.className = "msg";
   wrap.classList.add(author);
   const role = data.role || (author === "you" ? "user" : "system");
-  if (role !== "user") wrap.classList.add("system");
+  if (role === "rx") wrap.classList.add("rx");
+  else if (role !== "user") wrap.classList.add("system");
   if (typeof index === "number" && index >= 0) {
     wrap.dataset.index = String(index);
   }
@@ -1949,6 +2098,28 @@ function applyChatBubbleContent(node, entry) {
       detailNode.className = "bubble-tx-detail";
       detailNode.textContent = detail;
       footer.appendChild(detailNode);
+    }
+    node.appendChild(footer);
+  }
+  if (entry && entry.role === "rx" && entry.rx) {
+    const rxInfo = entry.rx;
+    const footer = document.createElement("div");
+    footer.className = "bubble-meta bubble-rx";
+    const label = document.createElement("span");
+    label.className = "label";
+    // Показываем текст полезной нагрузки вместо имени, чтобы сразу видеть содержимое
+    const metaTextRaw = rxInfo.text != null ? String(rxInfo.text) : "";
+    const metaTextTrimmed = metaTextRaw.trim();
+    const displayText = metaTextTrimmed || "—";
+    label.textContent = displayText;
+    if (rxInfo.name) {
+      label.title = rxInfo.name;
+    }
+    footer.appendChild(label);
+    if (rxInfo.len && Number.isFinite(rxInfo.len) && rxInfo.len > 0) {
+      const lenNode = document.createElement("span");
+      lenNode.textContent = rxInfo.len + " байт";
+      footer.appendChild(lenNode);
     }
     node.appendChild(footer);
   }
@@ -2103,33 +2274,49 @@ async function deviceFetch(cmd, params, timeoutMs) {
   }
   return { ok: false, error: lastErr || "Unknown error" };
 }
+function summarizeResponse(text, fallback) {
+  const raw = text != null ? String(text) : "";
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback || "—";
+  const firstLine = trimmed.split(/\r?\n/)[0].trim();
+  if (firstLine.length > 140) return firstLine.slice(0, 137) + "…";
+  return firstLine;
+}
+function logSystemCommand(cmd, payload, state) {
+  const clean = (cmd || "").toUpperCase();
+  const ok = state === "ok";
+  const detail = payload != null ? String(payload) : "";
+  const summary = summarizeResponse(detail, ok ? "выполнено" : "ошибка");
+  const message = ok ? `СИСТЕМА · ${clean} → ${summary}` : `СИСТЕМА · ${clean} ✗ ${summary}`;
+  const meta = { role: "system", tag: "cmd", cmd: clean, status: ok ? "ok" : "error", detail };
+  const saved = persistChat(message, "dev", meta);
+  addChatMessage(saved.record, saved.index);
+}
 async function sendCommand(cmd, params, opts) {
   const options = opts || {};
   const silent = options.silent === true;
   const timeout = options.timeoutMs || 4000;
+  const debugLabel = options.debugLabel != null ? String(options.debugLabel) : cmd;
   const payload = params || {};
   if (!silent) status("→ " + cmd);
   const res = await deviceFetch(cmd, payload, timeout);
   if (res.ok) {
     if (!silent) {
       status("✓ " + cmd);
-      const text = cmd + ": " + res.text;
-      note(text.slice(0, 200));
-      const saved = persistChat(text, "dev", { role: "system" });
-      addChatMessage(saved.record, saved.index);
+      note("Команда " + cmd + ": " + summarizeResponse(res.text, "успешно"));
+      logSystemCommand(cmd, res.text, "ok");
     }
-    debugLog(cmd + ": " + res.text);
+    debugLog((debugLabel || cmd) + ": " + res.text);
     handleCommandSideEffects(cmd, res.text);
     return res.text;
   }
   if (!silent) {
     status("✗ " + cmd);
-    const text = "ERR " + cmd + ": " + res.error;
-    note("Ошибка: " + res.error);
-    const saved = persistChat(text, "dev", { role: "system" });
-    addChatMessage(saved.record, saved.index);
+    const errText = res.error != null ? String(res.error) : "ошибка";
+    note("Команда " + cmd + ": " + summarizeResponse(errText, "ошибка"));
+    logSystemCommand(cmd, errText, "error");
   }
-  debugLog("ERR " + cmd + ": " + res.error);
+  debugLog("ERR " + (debugLabel || cmd) + ": " + res.error);
   return null;
 }
 async function postTx(text, timeoutMs) {
@@ -2177,31 +2364,27 @@ async function sendTextMessage(text, opts) {
   if (res.ok) {
     status("✓ TX");
     const value = res.text != null ? String(res.text) : "";
-    const msg = "TX: " + value;
-    note(msg);
+    note("Команда TX: " + summarizeResponse(value, "успешно"));
     debugLog("TX: " + value);
     let attached = false;
     if (originIndex !== null) {
       attached = attachTxStatus(originIndex, { ok: true, text: value, raw: res.text });
     }
     if (!attached) {
-      const saved = persistChat(msg, "dev", { role: "system" });
-      addChatMessage(saved.record, saved.index);
+      logSystemCommand("TX", value, "ok");
     }
     return value;
   }
   status("✗ TX");
   const errorText = res.error != null ? String(res.error) : "";
-  note("Ошибка TX: " + errorText);
+  note("Команда TX: " + summarizeResponse(errorText, "ошибка"));
   debugLog("ERR TX: " + errorText);
   let attached = false;
   if (originIndex !== null) {
     attached = attachTxStatus(originIndex, { ok: false, text: errorText, raw: res.error });
   }
   if (!attached) {
-    const errMsg = "TX ERR: " + errorText;
-    const saved = persistChat(errMsg, "dev", { role: "system" });
-    addChatMessage(saved.record, saved.index);
+    logSystemCommand("TX", errorText, "error");
   }
   return null;
 }
@@ -2343,7 +2526,8 @@ async function refreshReceivedList(opts) {
   const manual = options.manual === true;
   if (manual) status("→ RSTS");
   const limit = getRecvLimit();
-  const text = await sendCommand("RSTS", { n: limit }, { silent: true, timeoutMs: 2500 });
+  debugLog("→ RSTS FULL (" + (manual ? "ручной" : "авто") + ", n=" + limit + ")");
+  const text = await sendCommand("RSTS", { n: limit, full: "1" }, { silent: true, timeoutMs: 2500, debugLabel: "RSTS FULL" });
   if (text === null) {
     if (!options.silentError) {
       if (manual) status("✗ RSTS");
@@ -2351,25 +2535,206 @@ async function refreshReceivedList(opts) {
     }
     return;
   }
-  const names = text.split(/\r?\n/)
-                    .map((line) => line.trim())
-                    .filter((line) => line.length > 0);
-  renderReceivedList(names);
-  if (manual) status("✓ RSTS (" + names.length + ")");
+  const entries = parseReceivedResponse(text);
+  renderReceivedList(entries);
+  if (manual) status("✓ RSTS (" + entries.length + ")");
+
+
+// Кэш декодеров для преобразования входящих сообщений
+const receivedTextDecoderCache = {};
+
+// Получение (или создание) TextDecoder для нужной кодировки
+function getCachedTextDecoder(label) {
+  if (typeof TextDecoder !== "function") return null;
+  const key = label || "utf-8";
+  if (Object.prototype.hasOwnProperty.call(receivedTextDecoderCache, key)) {
+    return receivedTextDecoderCache[key];
+  }
+  try {
+    const decoder = new TextDecoder(key, { fatal: false });
+    receivedTextDecoderCache[key] = decoder;
+    return decoder;
+  } catch (err) {
+    receivedTextDecoderCache[key] = null;
+    console.warn("[recv] неподдерживаемая кодировка", label, err);
+    return null;
+  }
 }
-function renderReceivedList(names) {
+
+// Преобразование hex-строки в массив байтов
+function hexToBytes(hex) {
+  if (hex == null) return null;
+  const clean = String(hex).trim().replace(/[^0-9A-Fa-f]/g, "");
+  if (!clean) return null;
+  const size = Math.floor(clean.length / 2);
+  if (!size) return null;
+  const out = new Uint8Array(size);
+  let pos = 0;
+  for (let i = 0; i + 1 < clean.length && pos < size; i += 2) {
+    const byte = parseInt(clean.slice(i, i + 2), 16);
+    if (Number.isNaN(byte)) return null;
+    out[pos] = byte;
+    pos += 1;
+  }
+  return pos === size ? out : out.slice(0, pos);
+}
+
+// Декодирование массива байтов в строку (cp1251 → utf-8 → ASCII)
+function decodeBytesToText(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) return "";
+  const candidates = [];
+  const decoder1251 = getCachedTextDecoder("windows-1251");
+  if (decoder1251) {
+    try {
+      candidates.push(decoder1251.decode(bytes));
+    } catch (err) {
+      console.warn("[recv] ошибка декодирования cp1251", err);
+    }
+  }
+  const decoderUtf8 = getCachedTextDecoder("utf-8");
+  if (decoderUtf8) {
+    try {
+      candidates.push(decoderUtf8.decode(bytes));
+    } catch (err) {
+      console.warn("[recv] ошибка декодирования utf-8", err);
+    }
+  }
+  let best = "";
+  let bestScore = Infinity;
+  for (let i = 0; i < candidates.length; i += 1) {
+    const text = typeof candidates[i] === "string" ? candidates[i] : "";
+    if (!text) continue;
+    const score = (text.match(/\uFFFD/g) || []).length;
+    if (score < bestScore) {
+      best = text;
+      bestScore = score;
+      if (score === 0) break;
+    }
+  }
+  if (!best) {
+    let ascii = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+      ascii += String.fromCharCode(bytes[i]);
+    }
+    best = ascii;
+  }
+  return best.replace(/\u0000+$/g, "");
+}
+
+// Подбор читаемого текста для элемента списка приёма
+function resolveReceivedText(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  if (typeof entry.resolvedText === "string") return entry.resolvedText;
+  const raw = entry.text != null ? String(entry.text) : "";
+  const trimmed = raw.trim();
+  if (trimmed) {
+    entry.resolvedText = trimmed;
+    return trimmed;
+  }
+  let bytes = null;
+  if (entry._hexBytes instanceof Uint8Array) bytes = entry._hexBytes;
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+    bytes = hexToBytes(entry.hex);
+    if (bytes && bytes.length) entry._hexBytes = bytes;
+  }
+  const decoded = bytes && bytes.length ? decodeBytesToText(bytes) : "";
+  const cleaned = decoded.trim();
+  entry.resolvedText = cleaned;
+  if (!entry.text && cleaned) entry.text = cleaned;
+  return cleaned;
+}
+
+// Определение длины полезной нагрузки (len → hex → текст)
+function getReceivedLength(entry) {
+  if (!entry || typeof entry !== "object") return 0;
+  if (Number.isFinite(entry.len) && entry.len > 0) return Number(entry.len);
+  let bytes = null;
+  if (entry._hexBytes instanceof Uint8Array) bytes = entry._hexBytes;
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+    bytes = hexToBytes(entry.hex);
+    if (bytes && bytes.length) entry._hexBytes = bytes;
+  }
+  if (bytes && bytes.length) {
+    entry.resolvedLen = bytes.length;
+    return bytes.length;
+  }
+  const textValue = resolveReceivedText(entry);
+  const len = textValue ? textValue.length : 0;
+  entry.resolvedLen = len;
+  return len;
+}
+
+function parseReceivedResponse(raw) {
+  if (raw == null) return [];
+  const trimmed = String(raw).trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.items) ? parsed.items : []);
+      if (Array.isArray(list)) {
+        return list.map((entry) => {
+          if (!entry) return null;
+          const name = entry.name != null ? String(entry.name).trim() : "";
+          const typeRaw = entry.type != null ? String(entry.type).toLowerCase() : "";
+          const type = typeRaw || (/^GO-/i.test(name) ? "ready" : "raw");
+          const text = entry.text != null ? String(entry.text) : "";
+          const hex = entry.hex != null ? String(entry.hex) : "";
+          const bytes = hexToBytes(hex);
+          const len = Number.isFinite(entry.len) ? Number(entry.len)
+            : (bytes && bytes.length ? bytes.length : text.length);
+          const normalized = { name, type, text, hex, len };
+          if (bytes && bytes.length) normalized._hexBytes = bytes;
+          const resolved = resolveReceivedText(normalized);
+          if (resolved && !normalized.text) normalized.text = resolved;
+          normalized.resolvedText = resolved;
+          normalized.resolvedLen = getReceivedLength(normalized);
+          return normalized;
+        }).filter(Boolean);
+      }
+    } catch (err) {
+      console.warn("[recv] не удалось разобрать ответ RSTS:", err);
+    }
+  }
+  return trimmed.split(/\r?\n/)
+                .map((line) => line.trim())
+                .filter((line) => line.length > 0)
+                .map((name) => ({ name, type: /^GO-/i.test(name) ? "ready" : "raw", text: "", hex: "", len: 0 }));
+}
+function renderReceivedList(items) {
   if (!UI.els.recvList) return;
   UI.els.recvList.innerHTML = "";
   const prev = UI.state.receivedKnown instanceof Set ? UI.state.receivedKnown : new Set();
   const next = new Set();
   const frag = document.createDocumentFragment();
-  names.forEach((name) => {
-    next.add(name);
+  const list = Array.isArray(items) ? items : [];
+  list.forEach((entry) => {
+    const name = entry && entry.name ? String(entry.name).trim() : "";
+    if (name) next.add(name);
     const li = document.createElement("li");
-    const label = document.createElement("span");
-    label.className = "received-name";
-    label.textContent = name;
-    li.appendChild(label);
+    li.classList.add("received-type-" + (entry && entry.type ? entry.type : "ready"));
+    const body = document.createElement("div");
+    body.className = "received-body";
+    const textNode = document.createElement("div");
+    const textValue = resolveReceivedText(entry);
+    textNode.className = "received-text" + (textValue ? "" : " empty");
+    textNode.textContent = textValue || "Без текста";
+    body.appendChild(textNode);
+    const meta = document.createElement("div");
+    meta.className = "received-meta";
+    const nameNode = document.createElement("span");
+    nameNode.className = "received-name";
+    nameNode.textContent = name || "—";
+    meta.appendChild(nameNode);
+    const lenValue = getReceivedLength(entry);
+    if (lenValue && lenValue > 0) {
+      const lenNode = document.createElement("span");
+      lenNode.className = "received-length";
+      lenNode.textContent = lenValue + " байт";
+      meta.appendChild(lenNode);
+    }
+    body.appendChild(meta);
+    li.appendChild(body);
     const actions = document.createElement("div");
     actions.className = "received-actions";
     const copyBtn = document.createElement("button");
@@ -2380,28 +2745,214 @@ function renderReceivedList(names) {
     copyBtn.addEventListener("click", () => copyReceivedName(name));
     actions.appendChild(copyBtn);
     li.appendChild(actions);
-    if (!prev.has(name)) {
+    const isNew = name && !prev.has(name);
+    if (isNew) {
       li.classList.add("fresh");
       setTimeout(() => li.classList.remove("fresh"), 1600);
-      logReceivedNameInChat(name);
     }
+    logReceivedMessage(entry, { isNew });
     frag.appendChild(li);
   });
   UI.els.recvList.appendChild(frag);
   UI.state.receivedKnown = next;
-  if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = names.length > 0;
+  if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = list.length > 0;
+}
+
+// Оцениваем количество элементов в JSON-ответе RSTS для подсказок пользователю
+function countRstsJsonItems(value) {
+  if (!value) return 0;
+  let data = value;
+  if (typeof value === "string") {
+    try {
+      data = JSON.parse(value);
+    } catch (err) {
+      console.warn("[debug] не удалось разобрать JSON RSTS:", err);
+      return 0;
+    }
+  }
+  if (Array.isArray(data)) return data.length;
+  if (data && Array.isArray(data.items)) return data.items.length;
+  return 0;
+}
+
+// Ручной запрос полного списка RSTS для вкладки Debug
+async function requestRstsFullDebug() {
+  debugLog("→ RSTS FULL (ручной запрос во вкладке Debug)");
+  const text = await sendCommand("RSTS", { full: "1" }, { silent: true, timeoutMs: 4000, debugLabel: "RSTS FULL" });
+  if (text === null) {
+    note("RSTS FULL: ошибка запроса");
+    return;
+  }
+  const entries = parseReceivedResponse(text);
+  note("RSTS FULL: получено " + entries.length + " элементов");
+}
+
+// Ручной запрос JSON-версии списка RSTS для вкладки Debug
+async function requestRstsJsonDebug() {
+  const text = await sendCommand("RSTS", { json: "1" }, { silent: true, timeoutMs: 4000, debugLabel: "RSTS JSON" });
+  if (text === null) {
+    note("RSTS JSON: ошибка запроса");
+    return;
+  }
+  const count = countRstsJsonItems(text);
+  if (count > 0) note("RSTS JSON: получено " + count + " элементов");
+  else note("RSTS JSON: ответ получен");
+}
+
+// Загрузка полного списка RSTS в формате JSON из вкладки Debug
+async function downloadRstsFullJson() {
+  debugLog("→ RSTS FULL (подготовка JSON для скачивания)");
+  const text = await sendCommand(
+    "RSTS",
+    { full: "1", json: "1" },
+    { silent: true, timeoutMs: 5000, debugLabel: "RSTS FULL JSON" }
+  );
+  if (text === null) {
+    note("RSTS FULL JSON: ошибка запроса");
+    return;
+  }
+  let parsed = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    console.warn("[debug] некорректный JSON RSTS FULL, выполняется разбор текстового ответа:", err);
+  }
+  let items = null;
+  if (Array.isArray(parsed)) {
+    items = parsed;
+  } else if (parsed && Array.isArray(parsed.items)) {
+    items = parsed.items;
+  }
+  if (!Array.isArray(items)) {
+    const fallbackList = parseReceivedResponse(text);
+    items = Array.isArray(fallbackList) ? fallbackList : [];
+  }
+  const normalized = items.map((item) => {
+    const source = item && typeof item === "object" ? item : {};
+    const name = source.name != null ? String(source.name) : "";
+    const typeRaw = source.type != null ? String(source.type) : "";
+    const type = typeRaw || (/^GO-/i.test(name) ? "ready" : "raw");
+    const textRaw = source.text != null ? String(source.text) : "";
+    const resolvedRaw = source.resolvedText != null ? String(source.resolvedText) : "";
+    const textValue = textRaw || resolvedRaw;
+    const hex = source.hex != null ? String(source.hex) : "";
+    let lenValue = null;
+    if (source.len != null && source.len !== "") {
+      const parsedLen = Number(source.len);
+      if (Number.isFinite(parsedLen) && parsedLen >= 0) lenValue = parsedLen;
+    }
+    if (lenValue == null) {
+      const measured = getReceivedLength(source);
+      if (Number.isFinite(measured) && measured >= 0) lenValue = measured;
+    }
+    if (lenValue == null) {
+      lenValue = textValue.length;
+    }
+    return { name, type, text: textValue, hex, len: lenValue };
+  });
+  const payload = {
+    source: "RSTS FULL",
+    generatedAt: new Date().toISOString(),
+    items: normalized,
+  };
+  const pretty = JSON.stringify(payload, null, 2);
+  const blob = new Blob([pretty], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  a.href = url;
+  a.download = "rsts-full-" + stamp + ".json";
+  a.click();
+  URL.revokeObjectURL(url);
+  debugLog("RSTS FULL JSON сохранён (" + normalized.length + " элементов)");
+  note("RSTS FULL JSON: файл сохранён");
 }
 
 // Добавляем отметку о принятом сообщении в чат
-function logReceivedNameInChat(name) {
-  if (!name) return;
-  const raw = String(name).trim();
-  if (!/^GO-/i.test(raw)) return;
-  const text = "RX: " + raw;
+function logReceivedMessage(entry, opts) {
+  if (!entry) return;
+  const options = opts || {};
+  const name = entry.name ? String(entry.name).trim() : "";
+  if (!/^GO-/i.test(name)) return;
+  const textValue = resolveReceivedText(entry);
+  const length = getReceivedLength(entry);
+  const messageText = textValue || "—";
+  const message = "RX · " + messageText;
+  const rxMeta = {
+    name,
+    type: entry.type || "",
+    hex: entry.hex || "",
+  };
+  if (length) rxMeta.len = length;
+  rxMeta.text = textValue || "";
   const history = getChatHistory();
-  const duplicate = Array.isArray(history) && history.some((entry) => entry && entry.tag === "rx-name" && entry.m === text);
-  if (duplicate) return;
-  const saved = persistChat(text, "dev", { role: "rx", tag: "rx-name" });
+  let existingIndex = -1;
+  if (Array.isArray(history)) {
+    existingIndex = history.findIndex((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
+    if (existingIndex < 0) {
+      const legacyMessage = "RX: " + name;
+      existingIndex = history.findIndex((item) => item && item.tag === "rx-name" && typeof item.m === "string" && item.m.trim() === legacyMessage);
+    }
+  }
+  if (existingIndex >= 0) {
+    const existing = history[existingIndex];
+    let changed = false;
+    const desiredBody = textValue || "—";
+    const desiredMessage = "RX · " + desiredBody;
+    if (existing.m !== desiredMessage) {
+      existing.m = desiredMessage;
+      changed = true;
+    }
+    if (existing.tag !== "rx-message") {
+      existing.tag = "rx-message";
+      changed = true;
+    }
+    if (existing.role !== "rx") {
+      existing.role = "rx";
+      changed = true;
+    }
+    if (!existing.rx || typeof existing.rx !== "object") {
+      existing.rx = { ...rxMeta };
+      changed = true;
+    } else {
+      if (existing.rx.name !== name) {
+        existing.rx.name = name;
+        changed = true;
+      }
+      if (rxMeta.type && existing.rx.type !== rxMeta.type) {
+        existing.rx.type = rxMeta.type;
+        changed = true;
+      }
+      if (rxMeta.hex && existing.rx.hex !== rxMeta.hex) {
+        existing.rx.hex = rxMeta.hex;
+        changed = true;
+      }
+      if (length && existing.rx.len !== length) {
+        existing.rx.len = length;
+        changed = true;
+      }
+      const nextText = textValue || "";
+      if (existing.rx.text !== nextText) {
+        existing.rx.text = nextText;
+        changed = true;
+      }
+    }
+    if (!existing.t) {
+      existing.t = Date.now();
+      changed = true;
+    }
+    if (changed) {
+      saveChatHistory();
+      updateChatMessageContent(existingIndex);
+    }
+    return;
+  }
+  if (options.isNew === false && !textValue) {
+    // Для старых записей без текста не добавляем дубль.
+    return;
+  }
+  const meta = { role: "rx", tag: "rx-message", rx: rxMeta };
+  const saved = persistChat(message, "dev", meta);
   addChatMessage(saved.record, saved.index);
 }
 async function copyReceivedName(name) {
@@ -4195,36 +4746,50 @@ async function requestKeySend() {
   }
 }
 
+function setKeyReceiveWaiting(active) {
+  const btn = UI.els.keyRecvBtn || $("#btnKeyRecv");
+  if (!btn) return;
+  btn.classList.toggle("waiting", active);
+  btn.disabled = active;
+  if (active) btn.setAttribute("aria-busy", "true");
+  else btn.removeAttribute("aria-busy");
+}
+
 async function requestKeyReceive() {
   status("→ KEYTRANSFER RECEIVE");
+  setKeyReceiveWaiting(true);
   UI.key.lastMessage = "Ожидание ключа по LoRa";
   renderKeyState(UI.key.state);
   debugLog("KEYTRANSFER RECEIVE → ожидание ключа");
-  const res = await deviceFetch("KEYTRANSFER RECEIVE", {}, 8000);
-  if (!res.ok) {
-    debugLog("KEYTRANSFER RECEIVE ✗ " + res.error);
-    status("✗ KEYTRANSFER RECEIVE");
-    note("Ошибка KEYTRANSFER RECEIVE: " + res.error);
-    return;
-  }
   try {
-    debugLog("KEYTRANSFER RECEIVE ← " + res.text);
-    const data = JSON.parse(res.text);
-    if (data && data.error) {
-      if (data.error === "timeout") note("KEYTRANSFER: тайм-аут ожидания ключа");
-      else if (data.error === "apply") note("KEYTRANSFER: ошибка применения ключа");
-      else note("KEYTRANSFER RECEIVE: " + data.error);
+    const res = await deviceFetch("KEYTRANSFER RECEIVE", {}, 8000);
+    if (!res.ok) {
+      debugLog("KEYTRANSFER RECEIVE ✗ " + res.error);
       status("✗ KEYTRANSFER RECEIVE");
+      note("Ошибка KEYTRANSFER RECEIVE: " + res.error);
       return;
     }
-    UI.key.state = data;
-    UI.key.lastMessage = "Получен внешний ключ";
-    renderKeyState(data);
-    debugLog("KEYTRANSFER RECEIVE ✓ ключ принят");
-    status("✓ KEYTRANSFER RECEIVE");
-  } catch (err) {
-    status("✗ KEYTRANSFER RECEIVE");
-    note("Некорректный ответ KEYTRANSFER RECEIVE");
+    try {
+      debugLog("KEYTRANSFER RECEIVE ← " + res.text);
+      const data = JSON.parse(res.text);
+      if (data && data.error) {
+        if (data.error === "timeout") note("KEYTRANSFER: тайм-аут ожидания ключа");
+        else if (data.error === "apply") note("KEYTRANSFER: ошибка применения ключа");
+        else note("KEYTRANSFER RECEIVE: " + data.error);
+        status("✗ KEYTRANSFER RECEIVE");
+        return;
+      }
+      UI.key.state = data;
+      UI.key.lastMessage = "Получен внешний ключ";
+      renderKeyState(data);
+      debugLog("KEYTRANSFER RECEIVE ✓ ключ принят");
+      status("✓ KEYTRANSFER RECEIVE");
+    } catch (err) {
+      status("✗ KEYTRANSFER RECEIVE");
+      note("Некорректный ответ KEYTRANSFER RECEIVE");
+    }
+  } finally {
+    setKeyReceiveWaiting(false);
   }
 }
 
@@ -4262,26 +4827,40 @@ function debugLog(text) {
 }
 
 async function loadVersion() {
-  let base;
+  const targets = [];
   try {
-    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+    targets.push(new URL("/ver", window.location.href));
   } catch (err) {
-    base = new URL("http://192.168.4.1");
+    // окно может не иметь корректного href (например, file://)
   }
-  const url = new URL("/ver", base);
   try {
-    const res = await fetch(url.toString(), { cache: "no-store" });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const raw = await res.text();
-    const text = normalizeVersionText(raw);
-    UI.state.version = text || null;
-    updateFooterVersion();
-    return UI.state.version;
+    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+    targets.push(new URL("/ver", base));
   } catch (err) {
-    UI.state.version = null;
-    updateFooterVersion();
-    throw err;
+    targets.push(new URL("/ver", "http://192.168.4.1"));
   }
+  const seen = new Set();
+  let lastError = null;
+  for (const url of targets) {
+    const key = url.toString();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const res = await fetch(key, { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const raw = await res.text();
+      const text = normalizeVersionText(raw);
+      UI.state.version = text || null;
+      updateFooterVersion();
+      return UI.state.version;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  UI.state.version = null;
+  updateFooterVersion();
+  if (lastError) throw lastError;
+  throw new Error("version unavailable");
 }
 function updateFooterVersion() {
   const el = UI.els.version || $("#appVersion");
@@ -4312,6 +4891,8 @@ async function resyncAfterEndpointChange() {
     console.warn("[endpoint] resync error", err);
   }
 }
+
+
 )~~~";
 
 // libs/sha256.js
