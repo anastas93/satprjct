@@ -1254,7 +1254,7 @@ const UI = {
     infoChannelTx: null,
     infoChannelRx: null,
     chatHistory: [],
-    version: null,
+    version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
     encTest: null,
@@ -1490,6 +1490,7 @@ async function init() {
   UI.els.status = $("#statusLine");
   UI.els.footerMeta = $("#footerMeta");
   UI.els.version = $("#appVersion");
+  updateFooterVersion(); // сразу показываем сохранённую версию, если она есть
   UI.els.toast = $("#toast");
   UI.els.debugLog = $("#debugLog");
   UI.els.rstsFullBtn = $("#btnRstsFull");
@@ -2566,6 +2567,185 @@ async function refreshReceivedList(opts) {
 // Кэш декодеров для преобразования входящих сообщений
 const receivedTextDecoderCache = {};
 
+// Допустимые знаки пунктуации для эвристики читаемости текста (оставляем комментарии по-русски)
+const textAllowedPunctuation = new Set([
+  ".", ",", ";", ":", "!", "?", "\"", "'", "(", ")", "[", "]", "{", "}",
+  "<", ">", "-", "—", "–", "_", "+", "=", "*", "&", "%", "#", "@", "$",
+  "^", "~", "`", "/", "\\", "|", "№", "…", "«", "»", "„", "“", "”", "‹", "›"
+]);
+
+// Подозрительные пары символов, указывающие на «кракозябры» после неверной перекодировки
+const textSuspiciousPairRules = [
+  { lead: 0x00C2, ranges: [[0x00A0, 0x00BF]] },
+  { lead: 0x00C3, ranges: [[0x0080, 0x00BF]] },
+  { lead: 0x00D0, ranges: [[0x0080, 0x00BF]] },
+  { lead: 0x00D1, ranges: [[0x0080, 0x00BF]] },
+  { lead: 0x0420, ranges: [[0x00A0, 0x00BF]] },
+  { lead: 0x0421, ranges: [[0x0080, 0x009F], [0x0450, 0x045F]] }
+];
+
+// Оценка качества текста: возвращаем метрики и итоговый балл (чем меньше, тем лучше)
+function evaluateTextCandidate(text) {
+  if (!text) {
+    return {
+      text: "",
+      score: Number.POSITIVE_INFINITY,
+      replacements: Number.POSITIVE_INFINITY,
+      cyrLower: 0,
+      cyrUpper: 0,
+      asciiLetters: 0,
+      digits: 0,
+      whitespace: 0,
+      punctuation: 0,
+      latinExtended: 0,
+      mojibakePairs: 0,
+    };
+  }
+
+  let replacements = 0;
+  let control = 0;
+  let asciiLetters = 0;
+  let digits = 0;
+  let whitespace = 0;
+  let punctuation = 0;
+  let cyrLower = 0;
+  let cyrUpper = 0;
+  let latinExtended = 0;
+  let otherSymbols = 0;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    const ch = text[i];
+    if (code === 0xFFFD) {
+      replacements += 1;
+      continue;
+    }
+    if (code === 0x0009 || code === 0x000A || code === 0x000D) {
+      whitespace += 1;
+      continue;
+    }
+    if (code < 0x20 || (code >= 0x7F && code <= 0x9F)) {
+      control += 1;
+      continue;
+    }
+    if (code === 0x20 || code === 0x00A0) {
+      whitespace += 1;
+      continue;
+    }
+    if (code >= 0x30 && code <= 0x39) {
+      digits += 1;
+      continue;
+    }
+    if ((code >= 0x41 && code <= 0x5A) || (code >= 0x61 && code <= 0x7A)) {
+      asciiLetters += 1;
+      continue;
+    }
+    if (textAllowedPunctuation.has(ch) || (code >= 0x2010 && code <= 0x2043) || (code >= 0x2100 && code <= 0x214F)) {
+      punctuation += 1;
+      continue;
+    }
+    if ((code >= 0x0430 && code <= 0x044F) || code === 0x0451) {
+      cyrLower += 1;
+      continue;
+    }
+    if ((code >= 0x0410 && code <= 0x042F) || code === 0x0401) {
+      cyrUpper += 1;
+      continue;
+    }
+    if ((code >= 0x00A0 && code <= 0x036F) || (code >= 0x2000 && code <= 0x206F)) {
+      latinExtended += 1;
+      continue;
+    }
+    otherSymbols += 1;
+  }
+
+  let mojibakePairs = 0;
+  for (let i = 0; i + 1 < text.length; i += 1) {
+    const lead = text.charCodeAt(i);
+    const next = text.charCodeAt(i + 1);
+    let matched = false;
+    for (let r = 0; r < textSuspiciousPairRules.length && !matched; r += 1) {
+      const rule = textSuspiciousPairRules[r];
+      if (lead !== rule.lead) continue;
+      const segments = rule.ranges;
+      for (let s = 0; s < segments.length; s += 1) {
+        const range = segments[s];
+        if (next >= range[0] && next <= range[1]) {
+          mojibakePairs += 1;
+          matched = true;
+          break;
+        }
+      }
+    }
+  }
+
+  const recognized = asciiLetters + digits + whitespace + punctuation + cyrLower + cyrUpper;
+  const unknown = Math.max(0, text.length - recognized - replacements);
+
+  let score = (replacements * 400)
+    + (control * 40)
+    + (latinExtended * 12)
+    + (otherSymbols * 25)
+    + (unknown * 18)
+    + (mojibakePairs * 65);
+
+  const lowerBonus = Math.min(cyrLower, 12) * 6;
+  const asciiBonus = Math.min(asciiLetters + digits, 12) * 2;
+  score = Math.max(0, score - lowerBonus - asciiBonus);
+
+  return {
+    text,
+    score,
+    replacements,
+    control,
+    latinExtended,
+    otherSymbols,
+    unknown,
+    mojibakePairs,
+    cyrLower,
+    cyrUpper,
+    asciiLetters,
+    digits,
+    whitespace,
+    punctuation,
+  };
+}
+
+// Выбор наилучшего текстового кандидата на основе эвристик
+function selectReadableTextCandidate(items) {
+  if (!Array.isArray(items) || !items.length) return null;
+  let best = null;
+  for (let i = 0; i < items.length; i += 1) {
+    const rawItem = items[i];
+    if (!rawItem || typeof rawItem.text !== "string") continue;
+    const sanitized = rawItem.text.replace(/\u0000+$/g, "");
+    const trimmed = sanitized.trim();
+    const prepared = trimmed || sanitized;
+    if (!prepared) continue;
+    const metrics = evaluateTextCandidate(prepared);
+    if (!best) {
+      best = { text: prepared, source: rawItem.source || "", metrics };
+      continue;
+    }
+    const currentScore = metrics.score;
+    const bestScore = best.metrics.score;
+    if (currentScore < bestScore - 0.001) {
+      best = { text: prepared, source: rawItem.source || "", metrics };
+      continue;
+    }
+    if (Math.abs(currentScore - bestScore) <= 0.001) {
+      if (metrics.cyrLower > best.metrics.cyrLower) {
+        best = { text: prepared, source: rawItem.source || "", metrics };
+        continue;
+      }
+      if (metrics.cyrLower === best.metrics.cyrLower && prepared.length > best.text.length) {
+        best = { text: prepared, source: rawItem.source || "", metrics };
+      }
+    }
+  }
+  return best;
+}
+
 // Получение (или создание) TextDecoder для нужной кодировки
 function getCachedTextDecoder(label) {
   if (typeof TextDecoder !== "function") return null;
@@ -2606,42 +2786,29 @@ function hexToBytes(hex) {
 function decodeBytesToText(bytes) {
   if (!(bytes instanceof Uint8Array) || bytes.length === 0) return "";
   const candidates = [];
-  const decoder1251 = getCachedTextDecoder("windows-1251");
-  if (decoder1251) {
-    try {
-      candidates.push(decoder1251.decode(bytes));
-    } catch (err) {
-      console.warn("[recv] ошибка декодирования cp1251", err);
-    }
-  }
   const decoderUtf8 = getCachedTextDecoder("utf-8");
   if (decoderUtf8) {
     try {
-      candidates.push(decoderUtf8.decode(bytes));
+      candidates.push({ text: decoderUtf8.decode(bytes), source: "utf-8" });
     } catch (err) {
       console.warn("[recv] ошибка декодирования utf-8", err);
     }
   }
-  let best = "";
-  let bestScore = Infinity;
-  for (let i = 0; i < candidates.length; i += 1) {
-    const text = typeof candidates[i] === "string" ? candidates[i] : "";
-    if (!text) continue;
-    const score = (text.match(/\uFFFD/g) || []).length;
-    if (score < bestScore) {
-      best = text;
-      bestScore = score;
-      if (score === 0) break;
+  const decoder1251 = getCachedTextDecoder("windows-1251");
+  if (decoder1251) {
+    try {
+      candidates.push({ text: decoder1251.decode(bytes), source: "cp1251" });
+    } catch (err) {
+      console.warn("[recv] ошибка декодирования cp1251", err);
     }
   }
-  if (!best) {
-    let ascii = "";
-    for (let i = 0; i < bytes.length; i += 1) {
-      ascii += String.fromCharCode(bytes[i]);
-    }
-    best = ascii;
+  const best = selectReadableTextCandidate(candidates);
+  if (best && best.text) return best.text;
+  let ascii = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    ascii += String.fromCharCode(bytes[i]);
   }
-  return best.replace(/\u0000+$/g, "");
+  return ascii.replace(/\u0000+$/g, "").trim();
 }
 
 // Подбор читаемого текста для элемента списка приёма
@@ -2649,10 +2816,9 @@ function resolveReceivedText(entry) {
   if (!entry || typeof entry !== "object") return "";
   if (typeof entry.resolvedText === "string") return entry.resolvedText;
   const raw = entry.text != null ? String(entry.text) : "";
-  const trimmed = raw.trim();
-  if (trimmed) {
-    entry.resolvedText = trimmed;
-    return trimmed;
+  const candidates = [];
+  if (raw) {
+    candidates.push({ text: raw, source: "raw" });
   }
   let bytes = null;
   if (entry._hexBytes instanceof Uint8Array) bytes = entry._hexBytes;
@@ -2660,10 +2826,23 @@ function resolveReceivedText(entry) {
     bytes = hexToBytes(entry.hex);
     if (bytes && bytes.length) entry._hexBytes = bytes;
   }
-  const decoded = bytes && bytes.length ? decodeBytesToText(bytes) : "";
-  const cleaned = decoded.trim();
+  if (bytes && bytes.length) {
+    const decoded = decodeBytesToText(bytes);
+    if (decoded) {
+      candidates.push({ text: decoded, source: "decoded" });
+    }
+  }
+  const best = selectReadableTextCandidate(candidates);
+  const cleaned = best && best.text ? best.text : "";
   entry.resolvedText = cleaned;
-  if (!entry.text && cleaned) entry.text = cleaned;
+  if (best && best.source === "decoded" && cleaned) {
+    const rawMetrics = raw ? evaluateTextCandidate(raw.trim() || raw) : null;
+    if (!rawMetrics || rawMetrics.score > best.metrics.score) {
+      entry.text = cleaned;
+    }
+  } else if (!entry.text && cleaned) {
+    entry.text = cleaned;
+  }
   return cleaned;
 }
 
@@ -4861,6 +5040,36 @@ function debugLog(text) {
 }
 
 async function loadVersion() {
+  let versionClearedExplicitly = false;
+  const applyVersion = (value, opts) => {
+    const normalized = normalizeVersionText(value);
+    if (normalized) {
+      UI.state.version = normalized;
+      storage.set("appVersion", normalized);
+    } else if (opts && opts.clear === true) {
+      UI.state.version = null;
+      storage.remove("appVersion");
+      versionClearedExplicitly = true;
+    }
+    updateFooterVersion();
+    return normalized;
+  };
+
+  if (!UI.state.version) {
+    const meta = document.querySelector('meta[name="app-version"]');
+    if (meta) {
+      const metaValue = normalizeVersionText(meta.getAttribute("content"));
+      if (metaValue) {
+        UI.state.version = metaValue;
+        storage.set("appVersion", metaValue);
+        updateFooterVersion();
+      }
+    }
+  } else {
+    updateFooterVersion();
+  }
+
+  const initialVersion = UI.state.version;
   const targets = [];
   try {
     targets.push(new URL("/ver", window.location.href));
@@ -4883,16 +5092,31 @@ async function loadVersion() {
       const res = await fetch(key, { cache: "no-store" });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const raw = await res.text();
-      const text = normalizeVersionText(raw);
-      UI.state.version = text || null;
-      updateFooterVersion();
+      applyVersion(raw, { clear: true });
       return UI.state.version;
     } catch (err) {
       lastError = err;
     }
   }
-  UI.state.version = null;
-  updateFooterVersion();
+
+  try {
+    const res = await deviceFetch("VER", {}, 2000);
+    if (res.ok) {
+      applyVersion(res.text, { clear: true });
+      return UI.state.version;
+    }
+    if (res.error) lastError = new Error(res.error);
+  } catch (err) {
+    lastError = err;
+  }
+
+  if (UI.state.version != null) {
+    updateFooterVersion();
+  } else if (!versionClearedExplicitly && initialVersion != null) {
+    UI.state.version = initialVersion;
+    updateFooterVersion();
+  }
+
   if (lastError) throw lastError;
   throw new Error("version unavailable");
 }
@@ -4906,9 +5130,16 @@ function updateFooterVersion() {
 function normalizeVersionText(value) {
   if (!value) return "";
   let text = String(value).trim();
+  text = text.replace(/^\uFEFF+/, "").trim();
+  const eqIndex = text.lastIndexOf("=");
+  if (eqIndex >= 0 && eqIndex < text.length - 1) {
+    text = text.slice(eqIndex + 1).trim();
+  }
+  text = text.replace(/^['"]+/, "").replace(/['"]+$/, "").trim();
   text = text.replace(/^v+/i, "").trim();
+  text = text.replace(/^(?:version|ver|release|build)[\s:=#-]*/i, "").trim();
   if (!text) return "";
-  if (/^(unknown|undefined|none)$/i.test(text)) return "";
+  if (/^(unknown|undefined|none|-{1,3})$/i.test(text)) return "";
   return text;
 }
 async function resyncAfterEndpointChange() {
