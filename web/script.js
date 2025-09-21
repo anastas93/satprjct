@@ -331,6 +331,9 @@ async function init() {
   UI.els.version = $("#appVersion");
   UI.els.toast = $("#toast");
   UI.els.debugLog = $("#debugLog");
+  UI.els.rstsFullBtn = $("#btnRstsFull");
+  UI.els.rstsJsonBtn = $("#btnRstsJson");
+  UI.els.rstsDownloadBtn = $("#btnRstsDownloadJson");
   UI.els.chatLog = $("#chatLog");
   UI.els.chatInput = $("#chatInput");
   UI.els.sendBtn = $("#sendBtn");
@@ -502,6 +505,11 @@ async function init() {
       btn.addEventListener("click", () => sendCommand(cmd));
     }
   });
+
+  // Управление командами RSTS на вкладке Debug
+  if (UI.els.rstsFullBtn) UI.els.rstsFullBtn.addEventListener("click", requestRstsFullDebug);
+  if (UI.els.rstsJsonBtn) UI.els.rstsJsonBtn.addEventListener("click", requestRstsJsonDebug);
+  if (UI.els.rstsDownloadBtn) UI.els.rstsDownloadBtn.addEventListener("click", downloadRstsFullJson);
 
   // Список принятых сообщений
   const savedLimitRaw = storage.get("recvLimit");
@@ -949,7 +957,13 @@ function applyChatBubbleContent(node, entry) {
     footer.className = "bubble-meta bubble-rx";
     const label = document.createElement("span");
     label.className = "label";
-    label.textContent = rxInfo.name || "GO";
+    // Показываем текст полезной нагрузки вместо имени, чтобы сразу видеть содержимое
+    const metaTextRaw = rxInfo.text != null ? String(rxInfo.text) : "";
+    const metaText = metaTextRaw.trim() ? metaTextRaw.trim() : (rxInfo.name || "GO");
+    label.textContent = metaText;
+    if (rxInfo.name && rxInfo.name !== metaText) {
+      label.title = rxInfo.name;
+    }
     footer.appendChild(label);
     if (rxInfo.len && Number.isFinite(rxInfo.len) && rxInfo.len > 0) {
       const lenNode = document.createElement("span");
@@ -1131,6 +1145,7 @@ async function sendCommand(cmd, params, opts) {
   const options = opts || {};
   const silent = options.silent === true;
   const timeout = options.timeoutMs || 4000;
+  const debugLabel = options.debugLabel != null ? String(options.debugLabel) : cmd;
   const payload = params || {};
   if (!silent) status("→ " + cmd);
   const res = await deviceFetch(cmd, payload, timeout);
@@ -1140,7 +1155,7 @@ async function sendCommand(cmd, params, opts) {
       note("Команда " + cmd + ": " + summarizeResponse(res.text, "успешно"));
       logSystemCommand(cmd, res.text, "ok");
     }
-    debugLog(cmd + ": " + res.text);
+    debugLog((debugLabel || cmd) + ": " + res.text);
     handleCommandSideEffects(cmd, res.text);
     return res.text;
   }
@@ -1150,7 +1165,7 @@ async function sendCommand(cmd, params, opts) {
     note("Команда " + cmd + ": " + summarizeResponse(errText, "ошибка"));
     logSystemCommand(cmd, errText, "error");
   }
-  debugLog("ERR " + cmd + ": " + res.error);
+  debugLog("ERR " + (debugLabel || cmd) + ": " + res.error);
   return null;
 }
 async function postTx(text, timeoutMs) {
@@ -1360,7 +1375,7 @@ async function refreshReceivedList(opts) {
   const manual = options.manual === true;
   if (manual) status("→ RSTS");
   const limit = getRecvLimit();
-  const text = await sendCommand("RSTS", { n: limit, full: "1" }, { silent: true, timeoutMs: 2500 });
+  const text = await sendCommand("RSTS", { n: limit, full: "1" }, { silent: true, timeoutMs: 2500, debugLabel: "RSTS FULL" });
   if (text === null) {
     if (!options.silentError) {
       if (manual) status("✗ RSTS");
@@ -1589,6 +1604,79 @@ function renderReceivedList(items) {
   UI.els.recvList.appendChild(frag);
   UI.state.receivedKnown = next;
   if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = list.length > 0;
+}
+
+// Оцениваем количество элементов в JSON-ответе RSTS для подсказок пользователю
+function countRstsJsonItems(value) {
+  if (!value) return 0;
+  let data = value;
+  if (typeof value === "string") {
+    try {
+      data = JSON.parse(value);
+    } catch (err) {
+      console.warn("[debug] не удалось разобрать JSON RSTS:", err);
+      return 0;
+    }
+  }
+  if (Array.isArray(data)) return data.length;
+  if (data && Array.isArray(data.items)) return data.items.length;
+  return 0;
+}
+
+// Ручной запрос полного списка RSTS для вкладки Debug
+async function requestRstsFullDebug() {
+  const text = await sendCommand("RSTS", { full: "1" }, { silent: true, timeoutMs: 4000, debugLabel: "RSTS FULL" });
+  if (text === null) {
+    note("RSTS FULL: ошибка запроса");
+    return;
+  }
+  const entries = parseReceivedResponse(text);
+  note("RSTS FULL: получено " + entries.length + " элементов");
+}
+
+// Ручной запрос JSON-версии списка RSTS для вкладки Debug
+async function requestRstsJsonDebug() {
+  const text = await sendCommand("RSTS", { json: "1" }, { silent: true, timeoutMs: 4000, debugLabel: "RSTS JSON" });
+  if (text === null) {
+    note("RSTS JSON: ошибка запроса");
+    return;
+  }
+  const count = countRstsJsonItems(text);
+  if (count > 0) note("RSTS JSON: получено " + count + " элементов");
+  else note("RSTS JSON: ответ получен");
+}
+
+// Загрузка полного списка RSTS в формате JSON из вкладки Debug
+async function downloadRstsFullJson() {
+  const text = await sendCommand(
+    "RSTS",
+    { full: "1", json: "1" },
+    { silent: true, timeoutMs: 5000, debugLabel: "RSTS FULL JSON" }
+  );
+  if (text === null) {
+    note("RSTS FULL JSON: ошибка запроса");
+    return;
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    note("RSTS FULL JSON: некорректный ответ");
+    console.warn("[debug] некорректный JSON RSTS FULL:", err);
+    return;
+  }
+  const pretty = JSON.stringify(data, null, 2);
+  const blob = new Blob([pretty], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  a.href = url;
+  a.download = "rsts-full-" + stamp + ".json";
+  a.click();
+  URL.revokeObjectURL(url);
+  const count = countRstsJsonItems(data);
+  debugLog("RSTS FULL JSON сохранён (" + count + " элементов)");
+  note("RSTS FULL JSON: файл сохранён");
 }
 
 // Добавляем отметку о принятом сообщении в чат
