@@ -3270,7 +3270,9 @@ function updatePauseUi() {
   }
   const hint = UI.els.pauseHint;
   if (hint) {
-    hint.textContent = value != null ? ("Минимальная пауза между пакетами: " + value + " мс.") : "Пауза между пакетами не загружена.";
+    hint.textContent = value != null
+      ? "Минимальная пауза между пакетами: " + value + " мс. Параметр глобальный и позволяет дождаться ACK для каждого пакета, но действует даже при выключенных подтверждениях."
+      : "Пауза между пакетами не загружена.";
   }
 }
 function updateAckTimeoutUi() {
