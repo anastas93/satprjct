@@ -15,6 +15,7 @@
 #include "libs/text_converter/text_converter.h"   // конвертер UTF-8 -> CP1251
 #include "libs/simple_logger/simple_logger.h"     // журнал статусов
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
+#include "libs/packetizer/packet_gatherer.h"      // собиратель пакетов для теста
 #include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
 #include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
 #include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
@@ -52,6 +53,27 @@ struct TestRxmState {
   uint8_t produced = 0;         // сколько сообщений создано
   uint32_t nextAt = 0;          // когда запланировано следующее сообщение (millis)
 } testRxmState;
+
+// Описание шаблона тестовых сообщений TESTRXM
+struct TestRxmSpec {
+  uint8_t percent;  // доля исходного текста в процентах
+  bool useGatherer; // требуется ли эмуляция поступления частями
+};
+
+// Количество сообщений и шаблоны (последний проверяет работу PacketGatherer)
+static constexpr size_t kTestRxmCount = 5;
+static constexpr TestRxmSpec kTestRxmSpecs[kTestRxmCount] = {
+  {100, false},
+  {50,  false},
+  {30,  false},
+  {20,  false},
+  {100, true},
+};
+
+// Эталонный текст для генерации тестовых сообщений
+static const char kTestRxmLorem[] =
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed eros arcu, "
+    "ultricies et maximus vitae, porttitor condimentum erat. Nam commodo porttitor.";
 
 // Состояние процесса обмена корневым ключом по LoRa
 struct KeyTransferRuntime {
@@ -199,6 +221,59 @@ uint32_t nextTestRxmId() {
   counter = (counter + 1) % 100000;
   if (counter == 0) counter = 1;
   return counter;
+}
+
+// Формирование тестового текста с указанным шаблоном
+String makeTestRxmPayload(uint8_t index, const TestRxmSpec& spec) {
+  const size_t sourceLen = strlen(kTestRxmLorem);                  // базовая длина
+  size_t take = (sourceLen * spec.percent + 99) / 100;             // округляем вверх
+  if (take == 0) take = sourceLen;                                 // страховка на случай нуля
+  if (take > sourceLen) take = sourceLen;                          // ограничение длиной источника
+  String payload;
+  payload.reserve(48 + take);                                      // резерв памяти под строку
+  payload += "RXM Lorem ";
+  payload += String(static_cast<int>(index + 1));
+  payload += " (";
+  payload += String(static_cast<int>(spec.percent));
+  payload += "%";
+  if (spec.useGatherer) payload += ", сборщик";
+  payload += "): ";
+  for (size_t i = 0; i < take; ++i) {                              // добавляем нужную долю текста
+    payload += kTestRxmLorem[i];
+  }
+  return payload;
+}
+
+// Добавление тестового сообщения в буфер с опциональной эмуляцией разбиения
+void enqueueTestRxmMessage(uint32_t id, const TestRxmSpec& spec, const String& payload) {
+  const uint8_t* data = reinterpret_cast<const uint8_t*>(payload.c_str());
+  const size_t len = static_cast<size_t>(payload.length());
+  if (len == 0) return;                                            // пустые сообщения не добавляем
+
+  if (!spec.useGatherer) {                                         // простое готовое сообщение
+    recvBuf.pushReady(id, data, len);
+    return;
+  }
+
+  PacketGatherer gatherer(PayloadMode::SMALL, DefaultSettings::GATHER_BLOCK_SIZE);
+  gatherer.reset();                                                // сбрасываем внутреннее состояние
+  const size_t chunk = DefaultSettings::GATHER_BLOCK_SIZE;         // размер части для "эфира"
+  size_t offset = 0;
+  uint32_t part = 0;
+  while (offset < len) {                                           // нарезаем на части
+    size_t take = std::min(chunk, len - offset);
+    recvBuf.pushRaw(id, part, data + offset, take);                // сырые пакеты R-xxxxxx
+    gatherer.add(data + offset, take);                             // передаём части сборщику
+    offset += take;
+    ++part;
+  }
+  const auto& combined = gatherer.get();                           // собранный результат SP-xxxxx
+  if (!combined.empty()) {
+    recvBuf.pushSplit(id, combined.data(), combined.size());
+    recvBuf.pushReady(id, combined.data(), combined.size());       // финальный GO-xxxxx
+  } else {
+    recvBuf.pushReady(id, data, len);                              // fallback на случай пустой сборки
+  }
 }
 
 // Формирование JSON с состоянием ключа
@@ -448,27 +523,26 @@ void processTestRxm() {
   if (delta < 0) return;                                   // ещё рано
 
   const uint8_t index = testRxmState.produced;
-  const size_t noise = 12 + (radio.randomByte() % 48);     // длина случайной части
-  String payload = "RXM тест ";
-  payload += String(static_cast<int>(index + 1));
-  payload += ": ";
-  payload.reserve(payload.length() + noise + 12);
-  for (size_t i = 0; i < noise; ++i) {
-    char c = static_cast<char>('A' + (radio.randomByte() % 26));
-    payload += c;
+  if (index >= kTestRxmCount) {                            // защита от выхода за границы
+    testRxmState.active = false;
+    testRxmState.nextAt = 0;
+    return;
   }
-  payload += " (len=";
-  payload += String(payload.length());
-  payload += ")";
 
-  const uint32_t id = nextTestRxmId();
-  recvBuf.pushReady(id, reinterpret_cast<const uint8_t*>(payload.c_str()), payload.length());
+  const TestRxmSpec& spec = kTestRxmSpecs[index];          // выбираем сценарий
+  String payload = makeTestRxmPayload(index, spec);        // формируем полезную нагрузку
+  const uint32_t id = nextTestRxmId();                     // выделяем идентификатор
+  enqueueTestRxmMessage(id, spec, payload);                // добавляем в буфер
+
   DEBUG_LOG("TESTRXM: создано входящее сообщение");
   DEBUG_LOG_VAL("TESTRXM: id=", id);
   DEBUG_LOG_VAL("TESTRXM: bytes=", static_cast<int>(payload.length()));
+  if (spec.useGatherer) {
+    DEBUG_LOG("TESTRXM: сообщение имитирует поступление частями");
+  }
 
   testRxmState.produced++;
-  if (testRxmState.produced >= 5) {
+  if (testRxmState.produced >= kTestRxmCount) {
     testRxmState.active = false;
     testRxmState.nextAt = 0;
     DEBUG_LOG("TESTRXM: серия завершена");
@@ -485,8 +559,11 @@ String cmdTestRxm() {
   testRxmState.active = true;
   testRxmState.produced = 0;
   testRxmState.nextAt = millis();
-  DEBUG_LOG("TESTRXM: запуск генерации пяти сообщений");
-  return String("{\"status\":\"scheduled\",\"count\":5,\"intervalMs\":500}");
+  DEBUG_LOG("TESTRXM: запуск генерации серии сообщений");
+  String json = "{\"status\":\"scheduled\",\"count\":";
+  json += String(static_cast<int>(kTestRxmCount));
+  json += ",\"intervalMs\":500}";
+  return json;
 }
 
 // Выполнение одиночного пинга и получение результата
