@@ -1367,7 +1367,6 @@ function setRecvAuto(enabled, opts) {
   }
 }
 async function refreshReceivedList(opts) {
-  if (!UI.els.recvList) return;
   const options = opts || {};
   const manual = options.manual === true;
   if (manual) status("→ RSTS");
@@ -1549,58 +1548,62 @@ function parseReceivedResponse(raw) {
                 .map((name) => ({ name, type: /^GO-/i.test(name) ? "ready" : "raw", text: "", hex: "", len: 0 }));
 }
 function renderReceivedList(items) {
-  if (!UI.els.recvList) return;
-  UI.els.recvList.innerHTML = "";
+  const hasList = !!UI.els.recvList;
+  if (hasList) UI.els.recvList.innerHTML = "";
   const prev = UI.state.receivedKnown instanceof Set ? UI.state.receivedKnown : new Set();
   const next = new Set();
-  const frag = document.createDocumentFragment();
+  const frag = hasList ? document.createDocumentFragment() : null;
   const list = Array.isArray(items) ? items : [];
   list.forEach((entry) => {
     const name = entry && entry.name ? String(entry.name).trim() : "";
     if (name) next.add(name);
-    const li = document.createElement("li");
-    li.classList.add("received-type-" + (entry && entry.type ? entry.type : "ready"));
-    const body = document.createElement("div");
-    body.className = "received-body";
-    const textNode = document.createElement("div");
-    const textValue = resolveReceivedText(entry);
-    textNode.className = "received-text" + (textValue ? "" : " empty");
-    textNode.textContent = textValue || "Без текста";
-    body.appendChild(textNode);
-    const meta = document.createElement("div");
-    meta.className = "received-meta";
-    const nameNode = document.createElement("span");
-    nameNode.className = "received-name";
-    nameNode.textContent = name || "—";
-    meta.appendChild(nameNode);
-    const lenValue = getReceivedLength(entry);
-    if (lenValue && lenValue > 0) {
-      const lenNode = document.createElement("span");
-      lenNode.className = "received-length";
-      lenNode.textContent = lenValue + " байт";
-      meta.appendChild(lenNode);
-    }
-    body.appendChild(meta);
-    li.appendChild(body);
-    const actions = document.createElement("div");
-    actions.className = "received-actions";
-    const copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "icon-btn ghost";
-    copyBtn.textContent = "⧉";
-    copyBtn.title = "Скопировать имя";
-    copyBtn.addEventListener("click", () => copyReceivedName(name));
-    actions.appendChild(copyBtn);
-    li.appendChild(actions);
     const isNew = name && !prev.has(name);
-    if (isNew) {
-      li.classList.add("fresh");
-      setTimeout(() => li.classList.remove("fresh"), 1600);
+    if (hasList && frag) {
+      const li = document.createElement("li");
+      li.classList.add("received-type-" + (entry && entry.type ? entry.type : "ready"));
+      const body = document.createElement("div");
+      body.className = "received-body";
+      const textNode = document.createElement("div");
+      const textValue = resolveReceivedText(entry);
+      textNode.className = "received-text" + (textValue ? "" : " empty");
+      textNode.textContent = textValue || "Без текста";
+      body.appendChild(textNode);
+      const meta = document.createElement("div");
+      meta.className = "received-meta";
+      const nameNode = document.createElement("span");
+      nameNode.className = "received-name";
+      nameNode.textContent = name || "—";
+      meta.appendChild(nameNode);
+      const lenValue = getReceivedLength(entry);
+      if (lenValue && lenValue > 0) {
+        const lenNode = document.createElement("span");
+        lenNode.className = "received-length";
+        lenNode.textContent = lenValue + " байт";
+        meta.appendChild(lenNode);
+      }
+      body.appendChild(meta);
+      li.appendChild(body);
+      const actions = document.createElement("div");
+      actions.className = "received-actions";
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "icon-btn ghost";
+      copyBtn.textContent = "⧉";
+      copyBtn.title = "Скопировать имя";
+      copyBtn.addEventListener("click", () => copyReceivedName(name));
+      actions.appendChild(copyBtn);
+      li.appendChild(actions);
+      if (isNew) {
+        li.classList.add("fresh");
+        setTimeout(() => li.classList.remove("fresh"), 1600);
+      }
+      frag.appendChild(li);
     }
     logReceivedMessage(entry, { isNew });
-    frag.appendChild(li);
   });
-  UI.els.recvList.appendChild(frag);
+  if (hasList && frag) {
+    UI.els.recvList.appendChild(frag);
+  }
   UI.state.receivedKnown = next;
   if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = list.length > 0;
 }
