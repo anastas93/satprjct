@@ -272,6 +272,11 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <!-- Вкладка отладочных логов -->
     <section id="tab-debug" class="tab" hidden>
       <h2>Debug</h2>
+      <div class="actions debug-actions">
+        <button id="btnRstsFull" class="btn">RSTS FULL</button>
+        <button id="btnRstsJson" class="btn ghost">RSTS JSON</button>
+        <button id="btnRstsDownloadJson" class="btn ghost">Скачать RSTS FULL JSON</button>
+      </div>
       <div id="debugLog" class="debug-log"></div>
     </section>
   </main>
