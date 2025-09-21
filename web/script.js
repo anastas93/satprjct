@@ -1611,21 +1611,35 @@ function logReceivedMessage(entry, opts) {
   let existingIndex = -1;
   if (Array.isArray(history)) {
     existingIndex = history.findIndex((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
+    if (existingIndex < 0) {
+      const legacyMessage = "RX: " + name;
+      existingIndex = history.findIndex((item) => item && item.tag === "rx-name" && typeof item.m === "string" && item.m.trim() === legacyMessage);
+    }
   }
   if (existingIndex >= 0) {
     const existing = history[existingIndex];
     let changed = false;
-    if (textValue) {
-      const desired = "RX · " + textValue;
-      if (existing.m !== desired) {
-        existing.m = desired;
-        changed = true;
-      }
+    const desiredMessage = textValue ? ("RX · " + textValue) : ("RX · " + name);
+    if (existing.m !== desiredMessage) {
+      existing.m = desiredMessage;
+      changed = true;
+    }
+    if (existing.tag !== "rx-message") {
+      existing.tag = "rx-message";
+      changed = true;
+    }
+    if (existing.role !== "rx") {
+      existing.role = "rx";
+      changed = true;
     }
     if (!existing.rx || typeof existing.rx !== "object") {
       existing.rx = { ...rxMeta };
       changed = true;
     } else {
+      if (existing.rx.name !== name) {
+        existing.rx.name = name;
+        changed = true;
+      }
       if (rxMeta.type && existing.rx.type !== rxMeta.type) {
         existing.rx.type = rxMeta.type;
         changed = true;
