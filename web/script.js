@@ -832,13 +832,9 @@ function normalizeChatEntries(rawEntries) {
         const metaLen = getReceivedLength(rawMeta);
         if (metaLen) lenValue = metaLen;
       }
-      let bubbleCore = rxText || dropRxPrefix(rawMessage) || name;
-      bubbleCore = cleanString(bubbleCore);
-      if (!bubbleCore) bubbleCore = name ? name : "—";
-      let finalMessage = bubbleCore;
-      if (!/^RX\s*[·:>\-]/i.test(finalMessage)) {
-        finalMessage = "RX · " + finalMessage;
-      }
+      const bubbleSource = rxText || dropRxPrefix(rawMessage) || "";
+      const bubbleCore = cleanString(bubbleSource);
+      const finalMessage = bubbleCore ? ("RX · " + bubbleCore) : "RX · —";
       obj.m = finalMessage;
       obj.tag = "rx-message";
       obj.role = "rx";
@@ -959,9 +955,10 @@ function applyChatBubbleContent(node, entry) {
     label.className = "label";
     // Показываем текст полезной нагрузки вместо имени, чтобы сразу видеть содержимое
     const metaTextRaw = rxInfo.text != null ? String(rxInfo.text) : "";
-    const metaText = metaTextRaw.trim() ? metaTextRaw.trim() : (rxInfo.name || "GO");
-    label.textContent = metaText;
-    if (rxInfo.name && rxInfo.name !== metaText) {
+    const metaTextTrimmed = metaTextRaw.trim();
+    const displayText = metaTextTrimmed || "—";
+    label.textContent = displayText;
+    if (rxInfo.name) {
       label.title = rxInfo.name;
     }
     footer.appendChild(label);
@@ -1375,6 +1372,7 @@ async function refreshReceivedList(opts) {
   const manual = options.manual === true;
   if (manual) status("→ RSTS");
   const limit = getRecvLimit();
+  debugLog("→ RSTS FULL (" + (manual ? "ручной" : "авто") + ", n=" + limit + ")");
   const text = await sendCommand("RSTS", { n: limit, full: "1" }, { silent: true, timeoutMs: 2500, debugLabel: "RSTS FULL" });
   if (text === null) {
     if (!options.silentError) {
@@ -1625,6 +1623,7 @@ function countRstsJsonItems(value) {
 
 // Ручной запрос полного списка RSTS для вкладки Debug
 async function requestRstsFullDebug() {
+  debugLog("→ RSTS FULL (ручной запрос во вкладке Debug)");
   const text = await sendCommand("RSTS", { full: "1" }, { silent: true, timeoutMs: 4000, debugLabel: "RSTS FULL" });
   if (text === null) {
     note("RSTS FULL: ошибка запроса");
@@ -1648,6 +1647,7 @@ async function requestRstsJsonDebug() {
 
 // Загрузка полного списка RSTS в формате JSON из вкладки Debug
 async function downloadRstsFullJson() {
+  debugLog("→ RSTS FULL (подготовка JSON для скачивания)");
   const text = await sendCommand(
     "RSTS",
     { full: "1", json: "1" },
@@ -1657,15 +1657,51 @@ async function downloadRstsFullJson() {
     note("RSTS FULL JSON: ошибка запроса");
     return;
   }
-  let data;
+  let parsed = null;
   try {
-    data = JSON.parse(text);
+    parsed = JSON.parse(text);
   } catch (err) {
-    note("RSTS FULL JSON: некорректный ответ");
-    console.warn("[debug] некорректный JSON RSTS FULL:", err);
-    return;
+    console.warn("[debug] некорректный JSON RSTS FULL, выполняется разбор текстового ответа:", err);
   }
-  const pretty = JSON.stringify(data, null, 2);
+  let items = null;
+  if (Array.isArray(parsed)) {
+    items = parsed;
+  } else if (parsed && Array.isArray(parsed.items)) {
+    items = parsed.items;
+  }
+  if (!Array.isArray(items)) {
+    const fallbackList = parseReceivedResponse(text);
+    items = Array.isArray(fallbackList) ? fallbackList : [];
+  }
+  const normalized = items.map((item) => {
+    const source = item && typeof item === "object" ? item : {};
+    const name = source.name != null ? String(source.name) : "";
+    const typeRaw = source.type != null ? String(source.type) : "";
+    const type = typeRaw || (/^GO-/i.test(name) ? "ready" : "raw");
+    const textRaw = source.text != null ? String(source.text) : "";
+    const resolvedRaw = source.resolvedText != null ? String(source.resolvedText) : "";
+    const textValue = textRaw || resolvedRaw;
+    const hex = source.hex != null ? String(source.hex) : "";
+    let lenValue = null;
+    if (source.len != null && source.len !== "") {
+      const parsedLen = Number(source.len);
+      if (Number.isFinite(parsedLen) && parsedLen >= 0) lenValue = parsedLen;
+    }
+    if (lenValue == null) {
+      const measured = getReceivedLength(source);
+      if (Number.isFinite(measured) && measured >= 0) lenValue = measured;
+    }
+    if (lenValue == null) {
+      lenValue = textValue.length;
+    }
+    return { name, type, text: textValue, hex, len: lenValue };
+  });
+  const payload = {
+    source: "RSTS FULL",
+    generatedAt: new Date().toISOString(),
+    items: normalized,
+  };
+  const pretty = JSON.stringify(payload, null, 2);
   const blob = new Blob([pretty], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1674,8 +1710,7 @@ async function downloadRstsFullJson() {
   a.download = "rsts-full-" + stamp + ".json";
   a.click();
   URL.revokeObjectURL(url);
-  const count = countRstsJsonItems(data);
-  debugLog("RSTS FULL JSON сохранён (" + count + " элементов)");
+  debugLog("RSTS FULL JSON сохранён (" + normalized.length + " элементов)");
   note("RSTS FULL JSON: файл сохранён");
 }
 
@@ -1687,14 +1722,15 @@ function logReceivedMessage(entry, opts) {
   if (!/^GO-/i.test(name)) return;
   const textValue = resolveReceivedText(entry);
   const length = getReceivedLength(entry);
-  const message = textValue ? ("RX · " + textValue) : ("RX · " + name);
+  const messageText = textValue || "—";
+  const message = "RX · " + messageText;
   const rxMeta = {
     name,
     type: entry.type || "",
     hex: entry.hex || "",
   };
   if (length) rxMeta.len = length;
-  if (textValue) rxMeta.text = textValue;
+  rxMeta.text = textValue || "";
   const history = getChatHistory();
   let existingIndex = -1;
   if (Array.isArray(history)) {
@@ -1707,7 +1743,8 @@ function logReceivedMessage(entry, opts) {
   if (existingIndex >= 0) {
     const existing = history[existingIndex];
     let changed = false;
-    const desiredMessage = textValue ? ("RX · " + textValue) : ("RX · " + name);
+    const desiredBody = textValue || "—";
+    const desiredMessage = "RX · " + desiredBody;
     if (existing.m !== desiredMessage) {
       existing.m = desiredMessage;
       changed = true;
@@ -1740,8 +1777,9 @@ function logReceivedMessage(entry, opts) {
         existing.rx.len = length;
         changed = true;
       }
-      if (textValue && existing.rx.text !== textValue) {
-        existing.rx.text = textValue;
+      const nextText = textValue || "";
+      if (existing.rx.text !== nextText) {
+        existing.rx.text = nextText;
         changed = true;
       }
     }
