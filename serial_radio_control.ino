@@ -75,6 +75,10 @@ static const char kTestRxmLorem[] =
     "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed eros arcu, "
     "ultricies et maximus vitae, porttitor condimentum erat. Nam commodo porttitor.";
 
+// Пользовательский шаблон для TESTRXM и ограничение длины строки
+static constexpr size_t kTestRxmMaxSourceLength = 256;
+String testRxmSourceText;
+
 // Состояние процесса обмена корневым ключом по LoRa
 struct KeyTransferRuntime {
   bool waiting = false;                 // ожидаем ли приём специального кадра
@@ -224,8 +228,34 @@ uint32_t nextTestRxmId() {
 }
 
 // Формирование тестового текста с указанным шаблоном
+void setTestRxmSourceText(const String& text) {
+  String normalized = text;
+  normalized.trim();
+  if (normalized.length() == 0) {
+    testRxmSourceText = "";
+    DEBUG_LOG("TESTRXM: используется стандартный шаблон");
+    return;
+  }
+  if (normalized.length() > static_cast<int>(kTestRxmMaxSourceLength)) {
+    normalized.remove(kTestRxmMaxSourceLength);
+  }
+  testRxmSourceText = normalized;
+  DEBUG_LOG_VAL("TESTRXM: пользовательский шаблон, длина=", static_cast<int>(testRxmSourceText.length()));
+}
 String makeTestRxmPayload(uint8_t index, const TestRxmSpec& spec) {
-  const size_t sourceLen = strlen(kTestRxmLorem);                  // базовая длина
+  const char* sourcePtr = nullptr;
+  size_t sourceLen = 0;
+  if (testRxmSourceText.length() > 0) {                           // есть пользовательский текст
+    sourcePtr = testRxmSourceText.c_str();
+    sourceLen = static_cast<size_t>(testRxmSourceText.length());
+  } else {                                                         // иначе используем стандартный Lorem ipsum
+    sourcePtr = kTestRxmLorem;
+    sourceLen = strlen(kTestRxmLorem);
+  }
+  if (sourceLen == 0) {                                           // страховка от пустого шаблона
+    sourcePtr = kTestRxmLorem;
+    sourceLen = strlen(kTestRxmLorem);
+  }
   size_t take = (sourceLen * spec.percent + 99) / 100;             // округляем вверх
   if (take == 0) take = sourceLen;                                 // страховка на случай нуля
   if (take > sourceLen) take = sourceLen;                          // ограничение длиной источника
@@ -239,7 +269,7 @@ String makeTestRxmPayload(uint8_t index, const TestRxmSpec& spec) {
   if (spec.useGatherer) payload += ", сборщик";
   payload += "): ";
   for (size_t i = 0; i < take; ++i) {                              // добавляем нужную долю текста
-    payload += kTestRxmLorem[i];
+    payload += sourcePtr[i];
   }
   return payload;
 }
@@ -552,7 +582,10 @@ void processTestRxm() {
 }
 
 // Команда TESTRXM — запускает генерацию пяти тестовых входящих сообщений
-String cmdTestRxm() {
+String cmdTestRxm(const String* overrideText) {
+  if (overrideText != nullptr) {
+    setTestRxmSourceText(*overrideText);
+  }
   if (testRxmState.active) {
     return String("{\"status\":\"busy\"}");
   }
@@ -564,6 +597,10 @@ String cmdTestRxm() {
   json += String(static_cast<int>(kTestRxmCount));
   json += ",\"intervalMs\":500}";
   return json;
+}
+
+String cmdTestRxm() {
+  return cmdTestRxm(nullptr);
 }
 
 // Выполнение одиночного пинга и получение результата
@@ -1002,7 +1039,26 @@ void handleCmdHttp() {
   } else if (cmd == "ENCT") {
     resp = cmdEnct();
   } else if (cmd == "TESTRXM") {
-    resp = cmdTestRxm();
+    bool hasOverride = false;
+    String overrideText;
+    if (server.hasArg("msg")) {
+      overrideText = server.arg("msg");
+      hasOverride = true;
+    } else if (server.hasArg("text")) {
+      overrideText = server.arg("text");
+      hasOverride = true;
+    } else if (server.hasArg("payload")) {
+      overrideText = server.arg("payload");
+      hasOverride = true;
+    } else if (server.hasArg("v")) {
+      overrideText = server.arg("v");
+      hasOverride = true;
+    }
+    if (hasOverride) {
+      resp = cmdTestRxm(&overrideText);
+    } else {
+      resp = cmdTestRxm();
+    }
   } else if (cmd == "KEYSTATE") {
     resp = cmdKeyState();
   } else if (cmd == "KEYGEN") {
@@ -1245,6 +1301,9 @@ void loop() {
         } else {
           Serial.println("ENCT: ошибка");
         }
+      } else if (line.startsWith("TESTRXM ")) {
+        String overrideText = line.substring(8);
+        Serial.println(cmdTestRxm(&overrideText));
       } else if (line.equalsIgnoreCase("TESTRXM")) {
         Serial.println(cmdTestRxm());
       } else if (line.equalsIgnoreCase("KEYTRANSFER SEND")) {

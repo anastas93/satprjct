@@ -103,6 +103,9 @@ const UI = {
   }
 };
 
+// Максимальная длина текста пользовательского сообщения для TESTRXM
+const TEST_RXM_MESSAGE_MAX = 256;
+
 // Справочные данные по каналам из CSV
 const channelReference = {
   map: new Map(),
@@ -344,6 +347,8 @@ async function init() {
   UI.els.pauseHint = $("#pauseHint");
   UI.els.ackTimeout = $("#ACKT");
   UI.els.ackTimeoutHint = $("#ackTimeoutHint");
+  UI.els.testRxmMessage = $("#TESTRXMMSG");
+  UI.els.testRxmMessageHint = $("#testRxmMessageHint");
   UI.els.channelSelect = $("#CH");
   UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
@@ -490,7 +495,12 @@ async function init() {
   }
   $all('[data-cmd]').forEach((btn) => {
     const cmd = btn.dataset ? btn.dataset.cmd : null;
-    if (cmd) btn.addEventListener("click", () => sendCommand(cmd));
+    if (!cmd) return;
+    if (cmd === "TESTRXM") {
+      btn.addEventListener("click", runTestRxm);
+    } else {
+      btn.addEventListener("click", () => sendCommand(cmd));
+    }
   });
 
   // Список принятых сообщений
@@ -527,6 +537,10 @@ async function init() {
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
   if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
+  if (UI.els.testRxmMessage) {
+    UI.els.testRxmMessage.addEventListener("input", updateTestRxmMessageHint);
+    UI.els.testRxmMessage.addEventListener("change", onTestRxmMessageChange);
+  }
   const btnTxl = $("#btnTxlSend"); if (btnTxl) btnTxl.addEventListener("click", sendTxl);
 
   // Вкладка каналов
@@ -550,6 +564,7 @@ async function init() {
   const btnImportSettings = $("#btnImportSettings"); if (btnImportSettings) btnImportSettings.addEventListener("click", importSettings);
   const btnClearCache = $("#btnClearCache"); if (btnClearCache) btnClearCache.addEventListener("click", clearCaches);
   loadSettings();
+  updateTestRxmMessageHint();
   updatePauseUi();
   updateAckTimeoutUi();
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels({ forceBank: true }));
@@ -2420,6 +2435,13 @@ function clampAckTimeoutMs(value) {
   if (num > ACK_TIMEOUT_MAX_MS) return ACK_TIMEOUT_MAX_MS;
   return Math.round(num);
 }
+function clampTestRxmMessage(value) {
+  const text = value == null ? "" : String(value);
+  if (text.length > TEST_RXM_MESSAGE_MAX) {
+    return text.slice(0, TEST_RXM_MESSAGE_MAX);
+  }
+  return text;
+}
 function parseAckRetryResponse(text) {
   if (!text) return null;
   const match = String(text).match(/-?\d+/);
@@ -2612,6 +2634,42 @@ async function onAckRetryInput() {
   }
   await setAckRetry(clamped);
 }
+function onTestRxmMessageChange() {
+  if (!UI.els.testRxmMessage) return;
+  const normalized = clampTestRxmMessage(UI.els.testRxmMessage.value || "");
+  if (UI.els.testRxmMessage.value !== normalized) {
+    UI.els.testRxmMessage.value = normalized;
+  }
+  storage.set("set.TESTRXMMSG", normalized);
+  updateTestRxmMessageHint();
+}
+function updateTestRxmMessageHint() {
+  const hint = UI.els.testRxmMessageHint || $("#testRxmMessageHint");
+  const input = UI.els.testRxmMessage || $("#TESTRXMMSG");
+  if (!hint) return;
+  const raw = input ? String(input.value || "") : "";
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    hint.textContent = "Будет использован встроенный шаблон Lorem ipsum.";
+  } else {
+    hint.textContent = "Длина сообщения: " + raw.length + " символ(ов).";
+  }
+}
+async function runTestRxm() {
+  const params = {};
+  if (UI.els.testRxmMessage) {
+    let value = UI.els.testRxmMessage.value || "";
+    value = clampTestRxmMessage(value);
+    if (UI.els.testRxmMessage.value !== value) {
+      UI.els.testRxmMessage.value = value;
+    }
+    storage.set("set.TESTRXMMSG", value);
+    updateTestRxmMessageHint();
+    const trimmed = value.trim();
+    params.msg = trimmed ? value : " ";
+  }
+  await sendCommand("TESTRXM", params);
+}
 
 /* ENCT визуализация */
 function parseEncTestResponse(text) {
@@ -2795,7 +2853,7 @@ async function refreshEncryptionState() {
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","SF","PAUSE","ACKT","ACKR"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","SF","PAUSE","ACKT","ACKR","TESTRXMMSG"];
 function normalizePowerPreset(raw) {
   if (raw == null) return null;
   const str = String(raw).trim();
@@ -2849,6 +2907,10 @@ function loadSettings() {
       if (UI.els.ackTimeout) UI.els.ackTimeout.value = String(num);
       UI.state.ackTimeout = num;
       updateAckTimeoutUi();
+    } else if (key === "TESTRXMMSG") {
+      const text = clampTestRxmMessage(v);
+      if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = text;
+      updateTestRxmMessageHint();
     } else {
       el.value = v;
       if (key === "BANK") {
@@ -2873,6 +2935,10 @@ function saveSettingsLocal() {
       v = String(clampPauseMs(parseInt(v, 10)));
     } else if (key === "ACKT") {
       v = String(clampAckTimeoutMs(parseInt(v, 10)));
+    } else if (key === "TESTRXMMSG") {
+      v = clampTestRxmMessage(v);
+      if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = v;
+      updateTestRxmMessageHint();
     }
     storage.set("set." + key, v);
   }
@@ -2887,6 +2953,13 @@ async function applySettingsToDevice() {
       continue;
     }
     let value = el.type === "checkbox" ? (el.checked ? "1" : "0") : String(el.value || "").trim();
+    if (key === "TESTRXMMSG") {
+      const normalized = clampTestRxmMessage(el.value || "");
+      if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = normalized;
+      storage.set("set.TESTRXMMSG", normalized);
+      updateTestRxmMessageHint();
+      continue;
+    }
     if (!value) continue;
     if (key === "PW") {
       const resolved = normalizePowerPreset(value);
@@ -2959,6 +3032,8 @@ function exportSettings() {
       obj[key] = String(clampPauseMs(parseInt(el.value, 10)));
     } else if (key === "ACKT") {
       obj[key] = String(clampAckTimeoutMs(parseInt(el.value, 10)));
+    } else if (key === "TESTRXMMSG") {
+      obj[key] = clampTestRxmMessage(el.value || "");
     } else {
       obj[key] = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
     }
@@ -3015,6 +3090,13 @@ function importSettings() {
         updateAckTimeoutUi();
         updateAckRetryUi();
         storage.set("set.ACKT", String(num));
+        continue;
+      }
+      if (key === "TESTRXMMSG") {
+        const text = clampTestRxmMessage(String(obj[key] || ""));
+        if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = text;
+        storage.set("set.TESTRXMMSG", text);
+        updateTestRxmMessageHint();
         continue;
       }
       if (el.type === "checkbox") {
