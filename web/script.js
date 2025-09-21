@@ -72,6 +72,7 @@ const UI = {
     endpoint: storage.get("endpoint") || "http://192.168.4.1",
     theme: storage.get("theme") || detectPreferredTheme(),
     accent: (storage.get("accent") === "red") ? "red" : "default",
+    autoNight: storage.get("autoNight") !== "0",
   },
   key: {
     state: null,
@@ -97,6 +98,8 @@ const UI = {
     ackTimeout: null,
     encTest: null,
     testRxmTimers: [],
+    autoNightTimer: null,
+    autoNightActive: false,
   }
 };
 
@@ -306,6 +309,7 @@ async function init() {
   // Базовые элементы интерфейса
   UI.els.menuToggle = $("#menuToggle");
   UI.els.nav = $("#siteNav");
+  UI.els.navOverlay = $("#navOverlay");
   UI.els.endpoint = $("#endpoint");
   UI.els.themeToggle = $("#themeToggle");
   UI.els.themeRedToggle = $("#themeRedToggle");
@@ -338,6 +342,8 @@ async function init() {
   UI.els.recvAuto = $("#recvAuto");
   UI.els.recvLimit = $("#recvLimit");
   UI.els.recvRefresh = $("#btnRecvRefresh");
+  UI.els.autoNightSwitch = $("#autoNightMode");
+  UI.els.autoNightHint = $("#autoNightHint");
   UI.els.channelInfoPanel = $("#channelInfoPanel");
   UI.els.channelInfoTitle = $("#channelInfoTitle");
   UI.els.channelInfoBody = $("#channelInfoBody");
@@ -366,6 +372,8 @@ async function init() {
     tag: $("#encTestTag"),
     nonce: $("#encTestNonce"),
   };
+  UI.els.keyRecvBtn = $("#btnKeyRecv");
+  UI.els.encTestBtn = $("#btnEncTestRun");
   if (UI.els.channelInfoSetBtn) {
     UI.els.channelInfoSetBtn.addEventListener("click", onChannelInfoSetCurrent);
   }
@@ -426,22 +434,29 @@ async function init() {
   if (UI.els.menuToggle && UI.els.nav) {
     UI.els.menuToggle.addEventListener("click", () => {
       const open = !UI.els.nav.classList.contains("open");
-      UI.els.menuToggle.setAttribute("aria-expanded", String(open));
-      UI.els.nav.classList.toggle("open", open);
+      setMenuOpen(open);
     });
-    UI.els.nav.addEventListener("click", () => UI.els.nav.classList.remove("open"));
+  }
+  if (UI.els.nav) {
+    UI.els.nav.addEventListener("click", () => setMenuOpen(false));
+  }
+  if (UI.els.navOverlay) {
+    UI.els.navOverlay.addEventListener("click", () => setMenuOpen(false));
   }
 
   // Тема оформления
-  applyTheme(UI.cfg.theme);
+  initThemeSystem();
   applyAccent(UI.cfg.accent);
   if (UI.els.themeToggle) {
-    UI.els.themeToggle.setAttribute("aria-pressed", UI.cfg.theme === "dark" ? "true" : "false");
     UI.els.themeToggle.addEventListener("click", () => toggleTheme());
   }
   if (UI.els.themeRedToggle) {
     UI.els.themeRedToggle.setAttribute("aria-pressed", UI.cfg.accent === "red" ? "true" : "false");
     UI.els.themeRedToggle.addEventListener("click", () => toggleAccent());
+  }
+  if (UI.els.autoNightSwitch) {
+    UI.els.autoNightSwitch.checked = UI.cfg.autoNight;
+    UI.els.autoNightSwitch.addEventListener("change", () => setAutoNight(UI.els.autoNightSwitch.checked));
   }
 
   // Настройка endpoint
@@ -548,6 +563,19 @@ async function init() {
   probe().catch(() => {});
 }
 
+function setMenuOpen(open) {
+  const nav = UI.els.nav || $("#siteNav");
+  const toggle = UI.els.menuToggle || $("#menuToggle");
+  const overlay = UI.els.navOverlay || $("#navOverlay");
+  if (nav) nav.classList.toggle("open", open);
+  if (toggle) toggle.setAttribute("aria-expanded", String(open));
+  if (overlay) {
+    overlay.hidden = !open;
+    overlay.classList.toggle("visible", open);
+  }
+  document.body.classList.toggle("nav-open", open);
+}
+
 /* Вкладки */
 function setTab(tab) {
   for (const t of UI.tabs) {
@@ -565,6 +593,15 @@ function setTab(tab) {
 }
 
 /* Тема */
+function initThemeSystem() {
+  if (UI.cfg.autoNight) {
+    startAutoNightTimer();
+    applyAutoNightTheme(true);
+  } else {
+    applyTheme(UI.cfg.theme);
+    updateAutoNightUi();
+  }
+}
 function applyTheme(mode) {
   UI.cfg.theme = mode === "light" ? "light" : "dark";
   document.documentElement.classList.toggle("light", UI.cfg.theme === "light");
@@ -572,9 +609,63 @@ function applyTheme(mode) {
   if (UI.els.themeToggle) {
     UI.els.themeToggle.setAttribute("aria-pressed", UI.cfg.theme === "dark" ? "true" : "false");
   }
+  updateAutoNightUi();
 }
 function toggleTheme() {
+  if (UI.cfg.autoNight) setAutoNight(false);
   applyTheme(UI.cfg.theme === "dark" ? "light" : "dark");
+}
+function setAutoNight(enabled) {
+  if (enabled) {
+    UI.cfg.autoNight = true;
+    storage.set("autoNight", "1");
+    startAutoNightTimer();
+    applyAutoNightTheme(true);
+  } else {
+    if (UI.cfg.autoNight) storage.set("autoNight", "0");
+    UI.cfg.autoNight = false;
+    stopAutoNightTimer();
+    UI.state.autoNightActive = false;
+    updateAutoNightUi();
+  }
+}
+function startAutoNightTimer() {
+  if (UI.state.autoNightTimer) clearInterval(UI.state.autoNightTimer);
+  UI.state.autoNightTimer = setInterval(() => applyAutoNightTheme(false), 5 * 60 * 1000);
+}
+function stopAutoNightTimer() {
+  if (UI.state.autoNightTimer) {
+    clearInterval(UI.state.autoNightTimer);
+    UI.state.autoNightTimer = null;
+  }
+}
+function applyAutoNightTheme(force) {
+  const now = new Date();
+  const hour = now.getHours();
+  const shouldDark = hour >= 21 || hour < 7;
+  if (force || shouldDark !== UI.state.autoNightActive) {
+    UI.state.autoNightActive = shouldDark;
+    applyTheme(shouldDark ? "dark" : "light");
+  } else {
+    updateAutoNightUi();
+  }
+}
+function updateAutoNightUi() {
+  const input = UI.els.autoNightSwitch || $("#autoNightMode");
+  if (input) input.checked = UI.cfg.autoNight;
+  const hint = UI.els.autoNightHint || $("#autoNightHint");
+  if (hint) {
+    if (UI.cfg.autoNight) {
+      hint.textContent = UI.state.autoNightActive
+        ? "Сейчас активна ночная тема (21:00–07:00)."
+        : "Автовключение с 21:00 до 07:00 работает.";
+    } else {
+      hint.textContent = "Автоматическое переключение отключено.";
+    }
+  }
+  if (UI.els.themeToggle) {
+    UI.els.themeToggle.setAttribute("aria-pressed", UI.cfg.theme === "dark" ? "true" : "false");
+  }
 }
 function applyAccent(mode) {
   UI.cfg.accent = mode === "red" ? "red" : "default";
@@ -604,6 +695,43 @@ function saveChatHistory() {
 function normalizeChatEntries(rawEntries) {
   const out = [];
   if (!Array.isArray(rawEntries)) return out;
+  const cleanString = (value) => {
+    if (value == null) return "";
+    return String(value).trim();
+  };
+  const dropRxPrefix = (value) => {
+    const text = cleanString(value);
+    if (!/^RX/i.test(text)) return text;
+    let idx = 2;
+    let sawWhitespace = false;
+    while (idx < text.length && /\s/.test(text[idx])) {
+      sawWhitespace = true;
+      idx += 1;
+    }
+    let sawPunct = false;
+    if (idx < text.length && /[·:>.\-]/.test(text[idx])) {
+      sawPunct = true;
+      idx += 1;
+      while (idx < text.length && /\s/.test(text[idx])) {
+        sawWhitespace = true;
+        idx += 1;
+      }
+    }
+    if (!sawWhitespace && !sawPunct) return text;
+    return text.slice(idx).trim();
+  };
+  const parseKnownName = (value) => {
+    const text = cleanString(value);
+    if (!text) return "";
+    const match = text.match(/(GO-[0-9A-Za-z_-]+|SP-[0-9A-Za-z_-]+|R-[0-9A-Za-z_-]+(?:\|[0-9A-Za-z_-]+)?)/);
+    return match ? match[0] : text;
+  };
+  const toNumber = (value) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === "string" && value.trim() === "") return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
   for (let i = 0; i < rawEntries.length; i++) {
     const entry = rawEntries[i];
     if (!entry) continue;
@@ -647,6 +775,44 @@ function normalizeChatEntries(rawEntries) {
       };
       continue;
     }
+    const isLegacyRx = obj.tag === "rx-name" || (obj.role === "rx" && obj.tag !== "rx-message");
+    if (isLegacyRx) {
+      const rawMeta = (obj.rx && typeof obj.rx === "object") ? obj.rx : {};
+      let rxText = cleanString(rawMeta.text || obj.text || obj.detail);
+      const rawMessage = cleanString(obj.m);
+      if (!rxText) rxText = dropRxPrefix(rawMessage);
+      let name = cleanString(rawMeta.name || obj.name);
+      if (!name) name = parseKnownName(rawMessage);
+      if (!name && rxText) name = parseKnownName(rxText);
+      let type = cleanString(rawMeta.type || obj.type || obj.kind || obj.queue);
+      if (!type && name) {
+        if (/^GO-/i.test(name)) type = "ready";
+        else if (/^SP-/i.test(name)) type = "split";
+        else if (/^R-/i.test(name)) type = "raw";
+      }
+      const hex = cleanString(rawMeta.hex || obj.hex);
+      const lenValue = toNumber(rawMeta.len != null ? rawMeta.len : (obj.len != null ? obj.len : obj.length));
+      let bubbleCore = rxText || dropRxPrefix(rawMessage) || name;
+      bubbleCore = cleanString(bubbleCore);
+      if (!bubbleCore) bubbleCore = name ? name : "—";
+      let finalMessage = bubbleCore;
+      if (!/^RX\s*[·:>\-]/i.test(finalMessage)) {
+        finalMessage = "RX · " + finalMessage;
+      }
+      obj.m = finalMessage;
+      obj.tag = "rx-message";
+      obj.role = "rx";
+      const normalizedRx = {
+        name: name || "",
+        type: type || "",
+        hex: hex || "",
+        len: lenValue != null ? lenValue : 0,
+      };
+      if (rxText) normalizedRx.text = rxText;
+      obj.rx = normalizedRx;
+      out.push(obj);
+      continue;
+    }
     out.push(obj);
   }
   return out;
@@ -676,6 +842,8 @@ function persistChat(message, author, meta) {
     if (meta.tag) record.tag = meta.tag;
     if (meta.status != null) record.status = meta.status;
     if (meta.txStatus) record.txStatus = meta.txStatus;
+    if (meta.rx) record.rx = meta.rx;
+    if (meta.detail != null) record.detail = meta.detail;
   }
   if (!record.role) record.role = author === "you" ? "user" : "system";
   entries.push(record);
@@ -690,7 +858,8 @@ function addChatMessage(entry, index) {
   wrap.className = "msg";
   wrap.classList.add(author);
   const role = data.role || (author === "you" ? "user" : "system");
-  if (role !== "user") wrap.classList.add("system");
+  if (role === "rx") wrap.classList.add("rx");
+  else if (role !== "user") wrap.classList.add("system");
   if (typeof index === "number" && index >= 0) {
     wrap.dataset.index = String(index);
   }
@@ -739,6 +908,21 @@ function applyChatBubbleContent(node, entry) {
       detailNode.className = "bubble-tx-detail";
       detailNode.textContent = detail;
       footer.appendChild(detailNode);
+    }
+    node.appendChild(footer);
+  }
+  if (entry && entry.role === "rx" && entry.rx) {
+    const rxInfo = entry.rx;
+    const footer = document.createElement("div");
+    footer.className = "bubble-meta bubble-rx";
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = rxInfo.name || "GO";
+    footer.appendChild(label);
+    if (rxInfo.len && Number.isFinite(rxInfo.len) && rxInfo.len > 0) {
+      const lenNode = document.createElement("span");
+      lenNode.textContent = rxInfo.len + " байт";
+      footer.appendChild(lenNode);
     }
     node.appendChild(footer);
   }
@@ -893,6 +1077,24 @@ async function deviceFetch(cmd, params, timeoutMs) {
   }
   return { ok: false, error: lastErr || "Unknown error" };
 }
+function summarizeResponse(text, fallback) {
+  const raw = text != null ? String(text) : "";
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback || "—";
+  const firstLine = trimmed.split(/\r?\n/)[0].trim();
+  if (firstLine.length > 140) return firstLine.slice(0, 137) + "…";
+  return firstLine;
+}
+function logSystemCommand(cmd, payload, state) {
+  const clean = (cmd || "").toUpperCase();
+  const ok = state === "ok";
+  const detail = payload != null ? String(payload) : "";
+  const summary = summarizeResponse(detail, ok ? "выполнено" : "ошибка");
+  const message = ok ? `СИСТЕМА · ${clean} → ${summary}` : `СИСТЕМА · ${clean} ✗ ${summary}`;
+  const meta = { role: "system", tag: "cmd", cmd: clean, status: ok ? "ok" : "error", detail };
+  const saved = persistChat(message, "dev", meta);
+  addChatMessage(saved.record, saved.index);
+}
 async function sendCommand(cmd, params, opts) {
   const options = opts || {};
   const silent = options.silent === true;
@@ -903,10 +1105,8 @@ async function sendCommand(cmd, params, opts) {
   if (res.ok) {
     if (!silent) {
       status("✓ " + cmd);
-      const text = cmd + ": " + res.text;
-      note(text.slice(0, 200));
-      const saved = persistChat(text, "dev", { role: "system" });
-      addChatMessage(saved.record, saved.index);
+      note("Команда " + cmd + ": " + summarizeResponse(res.text, "успешно"));
+      logSystemCommand(cmd, res.text, "ok");
     }
     debugLog(cmd + ": " + res.text);
     handleCommandSideEffects(cmd, res.text);
@@ -914,10 +1114,9 @@ async function sendCommand(cmd, params, opts) {
   }
   if (!silent) {
     status("✗ " + cmd);
-    const text = "ERR " + cmd + ": " + res.error;
-    note("Ошибка: " + res.error);
-    const saved = persistChat(text, "dev", { role: "system" });
-    addChatMessage(saved.record, saved.index);
+    const errText = res.error != null ? String(res.error) : "ошибка";
+    note("Команда " + cmd + ": " + summarizeResponse(errText, "ошибка"));
+    logSystemCommand(cmd, errText, "error");
   }
   debugLog("ERR " + cmd + ": " + res.error);
   return null;
@@ -967,31 +1166,27 @@ async function sendTextMessage(text, opts) {
   if (res.ok) {
     status("✓ TX");
     const value = res.text != null ? String(res.text) : "";
-    const msg = "TX: " + value;
-    note(msg);
+    note("Команда TX: " + summarizeResponse(value, "успешно"));
     debugLog("TX: " + value);
     let attached = false;
     if (originIndex !== null) {
       attached = attachTxStatus(originIndex, { ok: true, text: value, raw: res.text });
     }
     if (!attached) {
-      const saved = persistChat(msg, "dev", { role: "system" });
-      addChatMessage(saved.record, saved.index);
+      logSystemCommand("TX", value, "ok");
     }
     return value;
   }
   status("✗ TX");
   const errorText = res.error != null ? String(res.error) : "";
-  note("Ошибка TX: " + errorText);
+  note("Команда TX: " + summarizeResponse(errorText, "ошибка"));
   debugLog("ERR TX: " + errorText);
   let attached = false;
   if (originIndex !== null) {
     attached = attachTxStatus(originIndex, { ok: false, text: errorText, raw: res.error });
   }
   if (!attached) {
-    const errMsg = "TX ERR: " + errorText;
-    const saved = persistChat(errMsg, "dev", { role: "system" });
-    addChatMessage(saved.record, saved.index);
+    logSystemCommand("TX", errorText, "error");
   }
   return null;
 }
@@ -1133,7 +1328,7 @@ async function refreshReceivedList(opts) {
   const manual = options.manual === true;
   if (manual) status("→ RSTS");
   const limit = getRecvLimit();
-  const text = await sendCommand("RSTS", { n: limit }, { silent: true, timeoutMs: 2500 });
+  const text = await sendCommand("RSTS", { n: limit, full: "1" }, { silent: true, timeoutMs: 2500 });
   if (text === null) {
     if (!options.silentError) {
       if (manual) status("✗ RSTS");
@@ -1141,25 +1336,73 @@ async function refreshReceivedList(opts) {
     }
     return;
   }
-  const names = text.split(/\r?\n/)
-                    .map((line) => line.trim())
-                    .filter((line) => line.length > 0);
-  renderReceivedList(names);
-  if (manual) status("✓ RSTS (" + names.length + ")");
+  const entries = parseReceivedResponse(text);
+  renderReceivedList(entries);
+  if (manual) status("✓ RSTS (" + entries.length + ")");
 }
-function renderReceivedList(names) {
+function parseReceivedResponse(raw) {
+  if (raw == null) return [];
+  const trimmed = String(raw).trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.items) ? parsed.items : []);
+      if (Array.isArray(list)) {
+        return list.map((entry) => {
+          if (!entry) return null;
+          const name = entry.name != null ? String(entry.name).trim() : "";
+          const typeRaw = entry.type != null ? String(entry.type).toLowerCase() : "";
+          const type = typeRaw || (/^GO-/i.test(name) ? "ready" : "raw");
+          const text = entry.text != null ? String(entry.text) : "";
+          const hex = entry.hex != null ? String(entry.hex) : "";
+          const len = Number.isFinite(entry.len) ? Number(entry.len) : (hex ? Math.floor(hex.length / 2) : text.length);
+          return { name, type, text, hex, len };
+        }).filter(Boolean);
+      }
+    } catch (err) {
+      console.warn("[recv] не удалось разобрать ответ RSTS:", err);
+    }
+  }
+  return trimmed.split(/\r?\n/)
+                .map((line) => line.trim())
+                .filter((line) => line.length > 0)
+                .map((name) => ({ name, type: /^GO-/i.test(name) ? "ready" : "raw", text: "", hex: "", len: 0 }));
+}
+function renderReceivedList(items) {
   if (!UI.els.recvList) return;
   UI.els.recvList.innerHTML = "";
   const prev = UI.state.receivedKnown instanceof Set ? UI.state.receivedKnown : new Set();
   const next = new Set();
   const frag = document.createDocumentFragment();
-  names.forEach((name) => {
-    next.add(name);
+  const list = Array.isArray(items) ? items : [];
+  list.forEach((entry) => {
+    const name = entry && entry.name ? String(entry.name).trim() : "";
+    if (name) next.add(name);
     const li = document.createElement("li");
-    const label = document.createElement("span");
-    label.className = "received-name";
-    label.textContent = name;
-    li.appendChild(label);
+    li.classList.add("received-type-" + (entry && entry.type ? entry.type : "ready"));
+    const body = document.createElement("div");
+    body.className = "received-body";
+    const textNode = document.createElement("div");
+    const textValue = entry && entry.text != null ? String(entry.text) : "";
+    textNode.className = "received-text" + (textValue ? "" : " empty");
+    textNode.textContent = textValue || "Без текста";
+    body.appendChild(textNode);
+    const meta = document.createElement("div");
+    meta.className = "received-meta";
+    const nameNode = document.createElement("span");
+    nameNode.className = "received-name";
+    nameNode.textContent = name || "—";
+    meta.appendChild(nameNode);
+    const lenValue = entry && Number.isFinite(entry.len) ? Number(entry.len) : null;
+    if (lenValue && lenValue > 0) {
+      const lenNode = document.createElement("span");
+      lenNode.className = "received-length";
+      lenNode.textContent = lenValue + " байт";
+      meta.appendChild(lenNode);
+    }
+    body.appendChild(meta);
+    li.appendChild(body);
     const actions = document.createElement("div");
     actions.className = "received-actions";
     const copyBtn = document.createElement("button");
@@ -1170,28 +1413,30 @@ function renderReceivedList(names) {
     copyBtn.addEventListener("click", () => copyReceivedName(name));
     actions.appendChild(copyBtn);
     li.appendChild(actions);
-    if (!prev.has(name)) {
+    if (name && !prev.has(name)) {
       li.classList.add("fresh");
       setTimeout(() => li.classList.remove("fresh"), 1600);
-      logReceivedNameInChat(name);
+      logReceivedMessage(entry);
     }
     frag.appendChild(li);
   });
   UI.els.recvList.appendChild(frag);
   UI.state.receivedKnown = next;
-  if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = names.length > 0;
+  if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = list.length > 0;
 }
 
 // Добавляем отметку о принятом сообщении в чат
-function logReceivedNameInChat(name) {
-  if (!name) return;
-  const raw = String(name).trim();
-  if (!/^GO-/i.test(raw)) return;
-  const text = "RX: " + raw;
+function logReceivedMessage(entry) {
+  if (!entry) return;
+  const name = entry.name ? String(entry.name).trim() : "";
+  if (!/^GO-/i.test(name)) return;
+  const textValue = entry.text != null ? String(entry.text).trim() : "";
   const history = getChatHistory();
-  const duplicate = Array.isArray(history) && history.some((entry) => entry && entry.tag === "rx-name" && entry.m === text);
+  const duplicate = Array.isArray(history) && history.some((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
   if (duplicate) return;
-  const saved = persistChat(text, "dev", { role: "rx", tag: "rx-name" });
+  const message = textValue ? ("RX · " + textValue) : ("RX · " + name);
+  const meta = { role: "rx", tag: "rx-message", rx: { name, type: entry.type || "", hex: entry.hex || "", len: entry.len || 0 } };
+  const saved = persistChat(message, "dev", meta);
   addChatMessage(saved.record, saved.index);
 }
 async function copyReceivedName(name) {
@@ -2916,36 +3161,50 @@ async function requestKeySend() {
   }
 }
 
+function setKeyReceiveWaiting(active) {
+  const btn = UI.els.keyRecvBtn || $("#btnKeyRecv");
+  if (!btn) return;
+  btn.classList.toggle("waiting", active);
+  btn.disabled = active;
+  if (active) btn.setAttribute("aria-busy", "true");
+  else btn.removeAttribute("aria-busy");
+}
+
 async function requestKeyReceive() {
   status("→ KEYTRANSFER RECEIVE");
+  setKeyReceiveWaiting(true);
   UI.key.lastMessage = "Ожидание ключа по LoRa";
   renderKeyState(UI.key.state);
   debugLog("KEYTRANSFER RECEIVE → ожидание ключа");
-  const res = await deviceFetch("KEYTRANSFER RECEIVE", {}, 8000);
-  if (!res.ok) {
-    debugLog("KEYTRANSFER RECEIVE ✗ " + res.error);
-    status("✗ KEYTRANSFER RECEIVE");
-    note("Ошибка KEYTRANSFER RECEIVE: " + res.error);
-    return;
-  }
   try {
-    debugLog("KEYTRANSFER RECEIVE ← " + res.text);
-    const data = JSON.parse(res.text);
-    if (data && data.error) {
-      if (data.error === "timeout") note("KEYTRANSFER: тайм-аут ожидания ключа");
-      else if (data.error === "apply") note("KEYTRANSFER: ошибка применения ключа");
-      else note("KEYTRANSFER RECEIVE: " + data.error);
+    const res = await deviceFetch("KEYTRANSFER RECEIVE", {}, 8000);
+    if (!res.ok) {
+      debugLog("KEYTRANSFER RECEIVE ✗ " + res.error);
       status("✗ KEYTRANSFER RECEIVE");
+      note("Ошибка KEYTRANSFER RECEIVE: " + res.error);
       return;
     }
-    UI.key.state = data;
-    UI.key.lastMessage = "Получен внешний ключ";
-    renderKeyState(data);
-    debugLog("KEYTRANSFER RECEIVE ✓ ключ принят");
-    status("✓ KEYTRANSFER RECEIVE");
-  } catch (err) {
-    status("✗ KEYTRANSFER RECEIVE");
-    note("Некорректный ответ KEYTRANSFER RECEIVE");
+    try {
+      debugLog("KEYTRANSFER RECEIVE ← " + res.text);
+      const data = JSON.parse(res.text);
+      if (data && data.error) {
+        if (data.error === "timeout") note("KEYTRANSFER: тайм-аут ожидания ключа");
+        else if (data.error === "apply") note("KEYTRANSFER: ошибка применения ключа");
+        else note("KEYTRANSFER RECEIVE: " + data.error);
+        status("✗ KEYTRANSFER RECEIVE");
+        return;
+      }
+      UI.key.state = data;
+      UI.key.lastMessage = "Получен внешний ключ";
+      renderKeyState(data);
+      debugLog("KEYTRANSFER RECEIVE ✓ ключ принят");
+      status("✓ KEYTRANSFER RECEIVE");
+    } catch (err) {
+      status("✗ KEYTRANSFER RECEIVE");
+      note("Некорректный ответ KEYTRANSFER RECEIVE");
+    }
+  } finally {
+    setKeyReceiveWaiting(false);
   }
 }
 
@@ -2983,26 +3242,40 @@ function debugLog(text) {
 }
 
 async function loadVersion() {
-  let base;
+  const targets = [];
   try {
-    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+    targets.push(new URL("/ver", window.location.href));
   } catch (err) {
-    base = new URL("http://192.168.4.1");
+    // окно может не иметь корректного href (например, file://)
   }
-  const url = new URL("/ver", base);
   try {
-    const res = await fetch(url.toString(), { cache: "no-store" });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const raw = await res.text();
-    const text = normalizeVersionText(raw);
-    UI.state.version = text || null;
-    updateFooterVersion();
-    return UI.state.version;
+    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+    targets.push(new URL("/ver", base));
   } catch (err) {
-    UI.state.version = null;
-    updateFooterVersion();
-    throw err;
+    targets.push(new URL("/ver", "http://192.168.4.1"));
   }
+  const seen = new Set();
+  let lastError = null;
+  for (const url of targets) {
+    const key = url.toString();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const res = await fetch(key, { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const raw = await res.text();
+      const text = normalizeVersionText(raw);
+      UI.state.version = text || null;
+      updateFooterVersion();
+      return UI.state.version;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  UI.state.version = null;
+  updateFooterVersion();
+  if (lastError) throw lastError;
+  throw new Error("version unavailable");
 }
 function updateFooterVersion() {
   const el = UI.els.version || $("#appVersion");

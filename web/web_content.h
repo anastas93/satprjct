@@ -25,6 +25,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
       <a href="#" data-tab="security">Security</a>
       <a href="#" data-tab="debug">Debug</a>
     </nav>
+    <div id="navOverlay" class="nav-overlay" hidden></div>
     <div class="header-actions">
       <button id="themeToggle" class="icon-btn" aria-label="Тема">🌓</button>
       <button id="themeRedToggle" class="icon-btn" aria-label="Красная тема">🔴</button>
@@ -60,7 +61,6 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         <button class="btn" data-cmd="STS">STS</button>
         <button class="btn" data-cmd="RSTS">RSTS</button>
         <button class="btn" data-cmd="BCN">BCN</button>
-        <button class="btn" data-cmd="ENCT">ENCT</button>
         <button class="btn" data-cmd="TESTRXM">TESTRXM</button>
       </div>
       <div class="cmd-inline">
@@ -146,6 +146,13 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         <label>Endpoint
           <input id="endpoint" type="text" placeholder="http://192.168.4.1" />
         </label>
+        <div class="settings-toggle" id="autoNightControl">
+          <label class="chip switch">
+            <input type="checkbox" id="autoNightMode" />
+            <span>Авто ночной режим</span>
+          </label>
+          <div id="autoNightHint" class="field-hint">Ночная тема включается автоматически с 21:00 до 07:00.</div>
+        </div>
         <label>Bank
           <select id="BANK">
             <option value="e">EAST</option>
@@ -239,6 +246,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         <div class="enc-test-header">
           <div class="enc-test-title">ENCT · тест шифрования</div>
           <div id="encTestStatus" class="small muted">Нет данных</div>
+          <button id="btnEncTestRun" class="btn ghost small" data-cmd="ENCT">ENCT</button>
         </div>
         <div class="enc-test-grid">
           <div class="enc-test-field">
@@ -1721,6 +1729,43 @@ function saveChatHistory() {
 function normalizeChatEntries(rawEntries) {
   const out = [];
   if (!Array.isArray(rawEntries)) return out;
+  const cleanString = (value) => {
+    if (value == null) return "";
+    return String(value).trim();
+  };
+  const dropRxPrefix = (value) => {
+    const text = cleanString(value);
+    if (!/^RX/i.test(text)) return text;
+    let idx = 2;
+    let sawWhitespace = false;
+    while (idx < text.length && /\s/.test(text[idx])) {
+      sawWhitespace = true;
+      idx += 1;
+    }
+    let sawPunct = false;
+    if (idx < text.length && /[·:>.\-]/.test(text[idx])) {
+      sawPunct = true;
+      idx += 1;
+      while (idx < text.length && /\s/.test(text[idx])) {
+        sawWhitespace = true;
+        idx += 1;
+      }
+    }
+    if (!sawWhitespace && !sawPunct) return text;
+    return text.slice(idx).trim();
+  };
+  const parseKnownName = (value) => {
+    const text = cleanString(value);
+    if (!text) return "";
+    const match = text.match(/(GO-[0-9A-Za-z_-]+|SP-[0-9A-Za-z_-]+|R-[0-9A-Za-z_-]+(?:\|[0-9A-Za-z_-]+)?)/);
+    return match ? match[0] : text;
+  };
+  const toNumber = (value) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === "string" && value.trim() === "") return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
   for (let i = 0; i < rawEntries.length; i++) {
     const entry = rawEntries[i];
     if (!entry) continue;
@@ -1762,6 +1807,44 @@ function normalizeChatEntries(rawEntries) {
         raw: status.raw != null ? String(status.raw) : (status.text != null ? String(status.text) : ""),
         t: status.t || obj.t || Date.now(),
       };
+      continue;
+    }
+    const isLegacyRx = obj.tag === "rx-name" || (obj.role === "rx" && obj.tag !== "rx-message");
+    if (isLegacyRx) {
+      const rawMeta = (obj.rx && typeof obj.rx === "object") ? obj.rx : {};
+      let rxText = cleanString(rawMeta.text || obj.text || obj.detail);
+      const rawMessage = cleanString(obj.m);
+      if (!rxText) rxText = dropRxPrefix(rawMessage);
+      let name = cleanString(rawMeta.name || obj.name);
+      if (!name) name = parseKnownName(rawMessage);
+      if (!name && rxText) name = parseKnownName(rxText);
+      let type = cleanString(rawMeta.type || obj.type || obj.kind || obj.queue);
+      if (!type && name) {
+        if (/^GO-/i.test(name)) type = "ready";
+        else if (/^SP-/i.test(name)) type = "split";
+        else if (/^R-/i.test(name)) type = "raw";
+      }
+      const hex = cleanString(rawMeta.hex || obj.hex);
+      const lenValue = toNumber(rawMeta.len != null ? rawMeta.len : (obj.len != null ? obj.len : obj.length));
+      let bubbleCore = rxText || dropRxPrefix(rawMessage) || name;
+      bubbleCore = cleanString(bubbleCore);
+      if (!bubbleCore) bubbleCore = name ? name : "—";
+      let finalMessage = bubbleCore;
+      if (!/^RX\s*[·:>\-]/i.test(finalMessage)) {
+        finalMessage = "RX · " + finalMessage;
+      }
+      obj.m = finalMessage;
+      obj.tag = "rx-message";
+      obj.role = "rx";
+      const normalizedRx = {
+        name: name || "",
+        type: type || "",
+        hex: hex || "",
+        len: lenValue != null ? lenValue : 0,
+      };
+      if (rxText) normalizedRx.text = rxText;
+      obj.rx = normalizedRx;
+      out.push(obj);
       continue;
     }
     out.push(obj);
