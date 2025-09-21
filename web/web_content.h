@@ -51,9 +51,6 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           <span class="label">ENC</span>
           <span id="encStateText">—</span>
         </button>
-        <div class="ack-actions">
-          <button class="icon-btn ghost" id="btnAckRefresh" title="Обновить состояние ACK" aria-label="Обновить состояние ACK">⟳</button>
-        </div>
       </div>
       <div class="group-title"><span>Команды</span><span class="line"></span></div>
       <div class="cmd-buttons actions">
@@ -163,16 +160,11 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         </label>
         <label>BW (kHz)
           <select id="BF">
-            <option value="7.8">7.8</option>
-            <option value="10.4">10.4</option>
-            <option value="15.6">15.6</option>
-            <option value="20.8" selected>20.8</option>
+            <option value="7.81">7.81</option>
+            <option value="10.42">10.42</option>
+            <option value="15.63">15.63</option>
+            <option value="20.83" selected>20.83</option>
             <option value="31.25">31.25</option>
-            <option value="41.7">41.7</option>
-            <option value="62.5">62.5</option>
-            <option value="125">125</option>
-            <option value="250">250</option>
-            <option value="500">500</option>
           </select>
         </label>
         <label>Channel
@@ -208,7 +200,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           <div id="ackRetryHint" class="field-hint">Доступно после включения ACK.</div>
         </label>
         <label>Пауза между пакетами (мс)
-          <input id="PAUSE" type="number" min="0" max="60000" value="80" />
+          <input id="PAUSE" type="number" min="0" max="60000" value="370" />
           <div id="pauseHint" class="field-hint">Пауза между пакетами не загружена.</div>
         </label>
         <label>ACK тайм-аут (мс)
@@ -220,7 +212,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           <button type="button" id="btnApplySettings" class="btn btn-primary">Применить</button>
           <button type="button" id="btnExportSettings" class="btn">Экспорт</button>
           <button type="button" id="btnImportSettings" class="btn">Импорт</button>
-          <button type="button" id="btnClearCache" class="btn">Очистить</button>
+          <button type="button" id="btnClearCache" class="btn danger">Очистить</button>
         </div>
         <button type="button" id="INFO" class="btn" data-cmd="INFO">INFO</button>
       </form>
@@ -735,21 +727,6 @@ main {
 }
 .received-actions .icon-btn.ghost {
   border-color: color-mix(in oklab, var(--accent) 35%, var(--panel-2) 65%);
-}
-.ack-actions {
-  display:flex;
-  align-items:center;
-  gap:.45rem;
-  flex-wrap:wrap;
-}
-.ack-actions .icon-btn {
-  width:2.4rem;
-  height:2.4rem;
-  border-radius:999px;
-  padding:0;
-  display:grid;
-  place-items:center;
-  font-size:1.1rem;
 }
 .cmd-inline {
   display:flex;
@@ -1397,7 +1374,17 @@ const CHANNEL_REFERENCE_FALLBACK = `Channel,RX (MHz),TX (MHz),System,Band Plan,P
 159,269.750,310.750,UHF military,225-328.6 MHz,Military communications
 160,269.800,310.025,UHF military,225-328.6 MHz,Military communications
 161,269.850,310.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-162,269.950,310.950,DOD 25 kHz,DOD 25K,Tactical communications (DoD)`;
+162,269.950,310.950,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+800,250.000,250.000,sattest,Random,Testing frequency mode
+801,260.000,260.000,sattest,Random,Testing frequency mode
+802,270.000,270.000,sattest,Random,Testing frequency mode
+803,280.000,280.000,sattest,Random,Testing frequency mode
+804,290.000,290.000,sattest,Random,Testing frequency mode
+805,300.000,300.000,sattest,Random,Testing frequency mode
+806,310.000,310.000,sattest,Random,Testing frequency mode
+807,433.000,433.000,sattest,Random,Testing frequency mode
+808,434.000,434.000,sattest,Random,Testing frequency mode
+809,446.000,446.000,sattest,Random,Testing frequency mode`;
 const POWER_PRESETS = [-5, -2, 1, 4, 7, 10, 13, 16, 19, 22];
 const ACK_RETRY_MAX = 10;
 const ACK_RETRY_DEFAULT = 3;
@@ -1624,7 +1611,6 @@ async function init() {
       void withAckLock(() => setAck(UI.els.ackSetting.checked));
     });
   }
-  const btnAckRefresh = $("#btnAckRefresh"); if (btnAckRefresh) btnAckRefresh.addEventListener("click", () => refreshAckState());
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
   if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
@@ -2288,7 +2274,7 @@ function handleCommandSideEffects(cmd, text) {
   }
 }
 async function probe() {
-  const res = await deviceFetch("PI", {}, 2500);
+  const res = await deviceFetch("INFO", {}, 2500);
   if (res.ok) {
     status("Подключено: " + UI.cfg.endpoint);
   } else {

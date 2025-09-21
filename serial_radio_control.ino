@@ -242,13 +242,17 @@ uint32_t generateKeyTransferMsgId() {
 
 String readVersionFile() {
 #ifndef ARDUINO
-  std::ifstream f("ver");
-  if (!f.good()) return String("unknown");
-  std::string line;
-  std::getline(f, line);
-  while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
-  if (line.empty()) return String("unknown");
-  return String(line.c_str());
+  const char* candidates[] = {"ver", "ver/ver"};
+  for (const char* path : candidates) {
+    std::ifstream f(path);
+    if (!f.good()) continue;
+    std::string line;
+    if (!std::getline(f, line)) continue;
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+    if (line.empty()) continue;
+    return String(line.c_str());
+  }
+  return String("unknown");
 #else
   static bool spiffsMounted = false;
   if (!spiffsMounted) spiffsMounted = SPIFFS.begin(true);

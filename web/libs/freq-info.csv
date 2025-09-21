@@ -158,6 +158,16 @@ Channel,RX (MHz),TX (MHz),System,Band Plan,Purpose
 156,268.400,295.900,FLTSATCOM/Leasat,C/Z,Tactical communications
 157,268.450,309.450,UHF military,225-328.6 MHz,Military communications
 158,269.700,309.925,UHF military,225-328.6 MHz,Military communications
+800,250.000,250.000,sattest,Random,Testing frequency mode
+801,260.000,260.000,sattest,Random,Testing frequency mode
+802,270.000,270.000,sattest,Random,Testing frequency mode
+803,280.000,280.000,sattest,Random,Testing frequency mode
+804,290.000,290.000,sattest,Random,Testing frequency mode
+805,300.000,300.000,sattest,Random,Testing frequency mode
+806,310.000,310.000,sattest,Random,Testing frequency mode
+807,433.000,433.000,sattest,Random,Testing frequency mode
+808,434.000,434.000,sattest,Random,Testing frequency mode
+809,446.000,446.000,sattest,Random,Testing frequency mode
 159,269.750,310.750,UHF military,225-328.6 MHz,Military communications
 160,269.800,310.025,UHF military,225-328.6 MHz,Military communications
 161,269.850,310.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications

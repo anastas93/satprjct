@@ -275,7 +275,17 @@ const CHANNEL_REFERENCE_FALLBACK = `Channel,RX (MHz),TX (MHz),System,Band Plan,P
 159,269.750,310.750,UHF military,225-328.6 MHz,Military communications
 160,269.800,310.025,UHF military,225-328.6 MHz,Military communications
 161,269.850,310.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-162,269.950,310.950,DOD 25 kHz,DOD 25K,Tactical communications (DoD)`;
+162,269.950,310.950,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
+800,250.000,250.000,sattest,Random,Testing frequency mode
+801,260.000,260.000,sattest,Random,Testing frequency mode
+802,270.000,270.000,sattest,Random,Testing frequency mode
+803,280.000,280.000,sattest,Random,Testing frequency mode
+804,290.000,290.000,sattest,Random,Testing frequency mode
+805,300.000,300.000,sattest,Random,Testing frequency mode
+806,310.000,310.000,sattest,Random,Testing frequency mode
+807,433.000,433.000,sattest,Random,Testing frequency mode
+808,434.000,434.000,sattest,Random,Testing frequency mode
+809,446.000,446.000,sattest,Random,Testing frequency mode`;
 const POWER_PRESETS = [-5, -2, 1, 4, 7, 10, 13, 16, 19, 22];
 const ACK_RETRY_MAX = 10;
 const ACK_RETRY_DEFAULT = 3;
@@ -514,7 +524,6 @@ async function init() {
       void withAckLock(() => setAck(UI.els.ackSetting.checked));
     });
   }
-  const btnAckRefresh = $("#btnAckRefresh"); if (btnAckRefresh) btnAckRefresh.addEventListener("click", () => refreshAckState());
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
   if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
@@ -1283,7 +1292,7 @@ function handleCommandSideEffects(cmd, text) {
   }
 }
 async function probe() {
-  const res = await deviceFetch("PI", {}, 2500);
+  const res = await deviceFetch("INFO", {}, 2500);
   if (res.ok) {
     status("Подключено: " + UI.cfg.endpoint);
   } else {
