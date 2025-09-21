@@ -38,6 +38,10 @@ public:
   void setAckRetryLimit(uint8_t retries);
   void onAckReceived();
   void setEncryptionEnabled(bool enabled);
+  // Ожидание глобальной паузы перед прямой отправкой через Radio (например, маяк или ping)
+  void prepareExternalSend();
+  // Фиксация момента завершения прямой отправки, чтобы пауза применялась ко всем модулям
+  void completeExternalSend();
 private:
   struct PendingMessage {
     uint32_t id = 0;                         // идентификатор сообщения
@@ -54,6 +58,7 @@ private:
   void archiveFollowingParts(uint8_t qos, const std::string& tag);
   void scheduleFromArchive();
   void onSendSuccess();
+  void waitForPauseWindow();
 
   IRadio& radio_;
   std::array<MessageBuffer,4> buffers_;             // очереди сообщений по классам QoS
