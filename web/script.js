@@ -64,6 +64,17 @@ const storage = (() => {
   }
 })();
 
+// Константы для вкладки наведения антенны
+const EARTH_RADIUS_KM = 6378.137; // экваториальный радиус Земли
+const GEO_ALTITUDE_KM = 35786.0;   // высота геостационарной орбиты над поверхностью
+const MU_EARTH = 398600.4418;      // гравитационный параметр Земли (км^3/с^2)
+const DEG2RAD = Math.PI / 180;
+const RAD2DEG = 180 / Math.PI;
+const TWO_PI = Math.PI * 2;
+const POINTING_DEFAULT_MIN_ELEVATION = 5; // минимальный угол возвышения по умолчанию
+const POINTING_ELEVATION_MIN = -30;       // нижний предел визуальной шкалы
+const POINTING_ELEVATION_MAX = 90;        // верхний предел визуальной шкалы
+
 /* Состояние интерфейса */
 const UI = {
   tabs: ["chat", "channels", "pointing", "settings", "security", "debug"],
@@ -120,17 +131,6 @@ const UI = {
 
 // Максимальная длина текста пользовательского сообщения для TESTRXM
 const TEST_RXM_MESSAGE_MAX = 2048;
-
-// Константы для вкладки наведения антенны
-const EARTH_RADIUS_KM = 6378.137; // экваториальный радиус Земли
-const GEO_ALTITUDE_KM = 35786.0;   // высота геостационарной орбиты над поверхностью
-const MU_EARTH = 398600.4418;      // гравитационный параметр Земли (км^3/с^2)
-const DEG2RAD = Math.PI / 180;
-const RAD2DEG = 180 / Math.PI;
-const TWO_PI = Math.PI * 2;
-const POINTING_DEFAULT_MIN_ELEVATION = 5; // минимальный угол возвышения по умолчанию
-const POINTING_ELEVATION_MIN = -30;       // нижний предел визуальной шкалы
-const POINTING_ELEVATION_MAX = 90;        // верхний предел визуальной шкалы
 
 // Справочные данные по каналам из CSV
 const channelReference = {
