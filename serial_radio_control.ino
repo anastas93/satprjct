@@ -31,6 +31,18 @@
 #include <SPIFFS.h>
 #endif
 
+#ifdef ARDUINO
+// Резервная версия прошивки, чтобы /ver отвечал даже без SPIFFS
+static const char kEmbeddedVersion[] PROGMEM =
+#include "ver"
+;
+#else
+// Аналогичный резерв для тестовых сборок на хосте
+static const char kEmbeddedVersion[] =
+#include "ver"
+;
+#endif
+
 // Пример управления радиомодулем через Serial c использованием абстрактного слоя
 RadioSX1262 radio;
 // Увеличиваем ёмкость очередей до 160 слотов, чтобы помещалось несколько пакетов по 5000 байт
@@ -355,20 +367,62 @@ String readVersionFile() {
     if (!std::getline(f, line)) continue;
     while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
     if (line.empty()) continue;
-    return String(line.c_str());
+    String text(line.c_str());
+    text.trim();
+    if (text.length() >= 2) {
+      char first = text.charAt(0);
+      char last = text.charAt(text.length() - 1);
+      if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+        text = text.substring(1, text.length() - 1);
+        text.trim();
+      }
+    }
+    if (text.length()) return text;
   }
+  String fallback(kEmbeddedVersion);
+  fallback.trim();
+  if (fallback.length() >= 2) {
+    char first = fallback.charAt(0);
+    char last = fallback.charAt(fallback.length() - 1);
+    if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+      fallback = fallback.substring(1, fallback.length() - 1);
+      fallback.trim();
+    }
+  }
+  if (fallback.length()) return fallback;
   return String("unknown");
 #else
   static bool spiffsMounted = false;
   if (!spiffsMounted) spiffsMounted = SPIFFS.begin(true);
-  if (!spiffsMounted) return String("unknown");
-  File f = SPIFFS.open("/ver", "r");
-  if (!f) return String("unknown");
-  String text = f.readStringUntil('\n');
-  f.close();
-  text.trim();
-  if (!text.length()) text = String("unknown");
-  return text;
+  if (spiffsMounted) {
+    File f = SPIFFS.open("/ver", "r");
+    if (f) {
+      String text = f.readStringUntil('\n');
+      f.close();
+      text.trim();
+      if (text.length() >= 2) {
+        char first = text.charAt(0);
+        char last = text.charAt(text.length() - 1);
+        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+          text = text.substring(1, text.length() - 1);
+          text.trim();
+        }
+      }
+      if (text.length()) return text;
+    }
+  }
+  String fallback(FPSTR(kEmbeddedVersion));
+  fallback.trim();
+  if (fallback.length() >= 2) {
+    char first = fallback.charAt(0);
+    char last = fallback.charAt(fallback.length() - 1);
+    if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+      fallback = fallback.substring(1, fallback.length() - 1);
+      fallback.trim();
+    }
+  }
+  if (fallback.length()) return fallback;
+  return String("unknown");
 #endif
 }
 
