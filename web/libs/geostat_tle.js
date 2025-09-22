@@ -285,4 +285,4 @@
   } else {
     global.SAT_TLE_DATA = tle;
   }
-})(this);
+})(typeof globalThis !== "undefined" ? globalThis : (typeof window !== "undefined" ? window : this));

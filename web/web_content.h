@@ -136,13 +136,27 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <section id="tab-pointing" class="tab" hidden>
       <h2>Pointing</h2>
       <p class="pointing-intro small muted">Интерактивный помощник для наведения антенны на геостационарные спутники. Используйте GPS телефона или введите координаты вручную.</p>
+      <div id="pointingSummary" class="pointing-summary glass">
+        <div class="pointing-summary-chip" id="pointingTleBadge" data-state="warn">
+          <span class="pointing-summary-icon">🛰️</span>
+          <span id="pointingTleText">TLE • нет данных</span>
+        </div>
+        <div class="pointing-summary-chip" id="pointingLocationBadge" data-state="idle">
+          <span class="pointing-summary-icon">📍</span>
+          <span id="pointingLocationText">Позиция • нет данных</span>
+        </div>
+        <div class="pointing-summary-chip" id="pointingSatBadge" data-state="idle">
+          <span class="pointing-summary-icon">🗺️</span>
+          <span id="pointingSatText">Спутники • —</span>
+        </div>
+      </div>
       <div class="pointing-grid">
         <article class="pointing-card glass">
           <h3>Положение наблюдателя</h3>
-          <p id="pointingStatus" class="small muted">Нажмите «Определить координаты», чтобы начать.</p>
+          <p id="pointingStatus" class="small muted">Нажмите «Запросить позицию» или включите отслеживание.</p>
           <div class="pointing-actions">
-            <button id="pointingLocateBtn" class="btn">Определить координаты</button>
-            <button id="pointingSensorsBtn" class="btn ghost">Датчики ориентации</button>
+            <button id="pointingLocateOnceBtn" class="btn">Запросить позицию</button>
+            <button id="pointingLocateBtn" class="btn ghost">Включить отслеживание</button>
           </div>
           <dl class="pointing-info">
             <div><dt>Широта</dt><dd><span id="pointingLat">—</span></dd></div>
@@ -170,6 +184,9 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         </article>
         <article class="pointing-card glass">
           <h3>Ориентация антенны</h3>
+          <div class="pointing-actions">
+            <button id="pointingSensorsBtn" class="btn ghost">Датчики ориентации</button>
+          </div>
           <p id="pointingOrientationStatus" class="small muted">Датчики не активны.</p>
           <div class="pointing-compass" id="pointingCompass">
             <div class="pointing-compass-dial">
@@ -217,7 +234,11 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
               <span id="pointingMinElValue" class="pointing-min-el-value">5°</span>
             </label>
           </div>
-          <p class="small muted" id="pointingSatSummary">Загрузите координаты, чтобы увидеть список спутников.</p>
+          <div class="pointing-horizon" id="pointingHorizon">
+            <div class="pointing-horizon-track" id="pointingHorizonTrack"></div>
+            <div class="pointing-horizon-empty small muted" id="pointingHorizonEmpty">Загрузите координаты, чтобы увидеть спутники.</div>
+          </div>
+          <p class="small muted" id="pointingSatSummary">После загрузки координат здесь появится статистика по видимым спутникам.</p>
           <label class="pointing-select">
             <span>Активный спутник</span>
             <select id="pointingSatSelect"></select>
@@ -908,6 +929,77 @@ main {
 }
 .cmd-inline input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px var(--ring); outline: none; }
 
+/* Pointing tab */
+.pointing-intro { margin-top:.4rem; max-width:640px; }
+.pointing-summary { margin-top:1rem; padding:.9rem 1.1rem; border-radius:1rem; display:flex; flex-wrap:wrap; gap:.75rem 1rem; align-items:center; }
+.pointing-summary-chip { display:inline-flex; align-items:center; gap:.45rem; padding:.55rem .9rem; border-radius:.85rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: color-mix(in oklab, var(--panel-2) 90%, black 10%); font-weight:600; font-size:.9rem; transition:background .2s ease, border-color .2s ease, transform .2s ease; }
+.pointing-summary-chip .pointing-summary-icon { font-size:1.1rem; line-height:1; }
+.pointing-summary-chip[data-state="ok"] { border-color: color-mix(in oklab, var(--good) 45%, var(--panel-2) 55%); background: color-mix(in oklab, var(--good) 20%, var(--panel-2) 80%); color: color-mix(in oklab, var(--good) 75%, white 25%); }
+.pointing-summary-chip[data-state="warn"] { border-color: color-mix(in oklab, var(--danger) 50%, var(--panel-2) 50%); background: color-mix(in oklab, var(--danger) 18%, var(--panel-2) 82%); color: color-mix(in oklab, var(--danger) 80%, white 20%); }
+.pointing-summary-chip[data-state="pending"] { border-color: color-mix(in oklab, var(--accent) 55%, var(--panel-2) 45%); background: color-mix(in oklab, var(--accent) 20%, var(--panel-2) 80%); color: color-mix(in oklab, var(--accent) 70%, white 30%); }
+.pointing-summary-chip[data-state="idle"] { opacity:.75; }
+.pointing-summary-chip:hover { transform:translateY(-2px); }
+.pointing-grid { display:grid; gap:1rem; margin-top:1rem; }
+.pointing-card { border-radius:.95rem; padding:1rem; display:flex; flex-direction:column; gap:.9rem; }
+.pointing-card h3 { margin:0; font-size:1.1rem; }
+.pointing-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
+.pointing-actions .btn { flex:0 0 auto; }
+.pointing-info { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:.5rem .75rem; }
+.pointing-info dt { font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color: var(--muted); margin:0 0 .2rem; }
+.pointing-info dd { margin:0; font-weight:600; }
+.pointing-manual { border-top:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); padding-top:.75rem; display:flex; flex-direction:column; gap:.6rem; }
+.pointing-manual-grid { display:grid; gap:.6rem; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); }
+.pointing-manual input { width:100%; background: var(--panel-2); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius:.6rem; padding:.5rem .65rem; color: var(--text); }
+.pointing-manual input:focus { border-color: var(--ring); box-shadow:0 0 0 3px var(--ring); outline:none; }
+.pointing-manual-title { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color: var(--muted); font-weight:700; }
+.pointing-compass { display:flex; justify-content:center; }
+.pointing-compass-dial { position:relative; width:min(280px, 75vw); aspect-ratio:1 / 1; border-radius:50%; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--panel-2) 95%, white 5%), color-mix(in oklab, var(--panel) 88%, black 12%)); display:flex; align-items:center; justify-content:center; }
+.pointing-compass-needle { position:absolute; left:50%; top:50%; width:45%; height:3px; transform-origin:0% 50%; border-radius:3px; background: color-mix(in oklab, var(--accent) 65%, white 35%); color: var(--accent); opacity:.35; transition:transform .2s ease, opacity .2s ease; }
+.pointing-compass-needle span { position:absolute; top:-1.9rem; right:-.4rem; font-size:.65rem; text-transform:uppercase; letter-spacing:.05em; font-weight:700; }
+.pointing-compass-needle.current { background: color-mix(in oklab, var(--good) 70%, white 30%); color: var(--good); }
+.pointing-compass-needle.active { opacity:1; }
+.pointing-compass-center { width:18px; height:18px; border-radius:50%; background: color-mix(in oklab, var(--panel-2) 85%, black 15%); border:2px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); }
+.pointing-compass-graduations { position:absolute; inset:12%; border-radius:50%; border:1px dashed color-mix(in oklab, var(--panel-2) 70%, black 30%); opacity:.5; }
+.pointing-angles { display:flex; flex-wrap:wrap; gap:.6rem 1rem; font-size:.9rem; }
+.pointing-angle { display:flex; flex-direction:column; gap:.2rem; }
+.pointing-angle .label { font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color: var(--muted); }
+.pointing-elevation { display:flex; flex-direction:column; gap:.6rem; }
+.pointing-elevation-scale { position:relative; height:18px; border-radius:999px; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: linear-gradient(90deg, color-mix(in oklab, var(--panel) 92%, white 8%), color-mix(in oklab, var(--accent-2) 30%, var(--panel-2) 70%)); overflow:hidden; }
+.pointing-elevation-target, .pointing-elevation-current { position:absolute; top:-6px; left:0; width:2px; height:30px; border-radius:1px; opacity:0; transition:opacity .2s ease, left .2s ease; }
+.pointing-elevation-target { background: var(--accent); }
+.pointing-elevation-current { background: var(--good); }
+.pointing-elevation-target span, .pointing-elevation-current span { position:absolute; top:-1.3rem; left:50%; transform:translateX(-50%); font-size:.65rem; text-transform:uppercase; letter-spacing:.05em; color: inherit; }
+.pointing-elevation-target.active, .pointing-elevation-current.active { opacity:1; }
+.pointing-min-el { display:flex; align-items:center; gap:.4rem; font-size:.85rem; color: var(--muted); }
+.pointing-min-el input { width:140px; }
+.pointing-min-el-value { font-weight:700; color: var(--text); min-width:2.5rem; text-align:right; }
+.pointing-select { display:flex; flex-direction:column; gap:.35rem; font-weight:600; }
+.pointing-select select { background: var(--panel-2); color: var(--text); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius:.6rem; padding:.55rem .7rem; outline:none; }
+.pointing-select select:focus { border-color: var(--ring); box-shadow:0 0 0 3px var(--ring); }
+.pointing-sat-details { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:.4rem .75rem; font-size:.85rem; color: var(--muted); }
+.pointing-sat-details strong { color: var(--text); }
+.pointing-sat-list { display:flex; flex-direction:column; gap:.6rem; margin-top:.5rem; }
+.pointing-sat-entry { border-radius:.85rem; padding:.65rem .8rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: color-mix(in oklab, var(--panel-2) 90%, black 10%); display:flex; flex-direction:column; gap:.35rem; text-align:left; cursor:pointer; transition:background .2s ease, transform .2s ease; }
+.pointing-sat-entry:hover { background: color-mix(in oklab, var(--accent) 25%, var(--panel-2) 75%); transform:translateY(-1px); }
+.pointing-sat-entry:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.pointing-sat-entry.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 40%, white 60%); }
+.pointing-sat-name { font-weight:700; }
+.pointing-sat-meta { display:flex; flex-wrap:wrap; gap:.5rem; font-size:.78rem; color: var(--muted); }
+.pointing-empty { padding:.8rem; border-radius:.8rem; background: color-mix(in oklab, var(--panel-2) 90%, black 10%); border:1px dashed color-mix(in oklab, var(--panel-2) 65%, black 35%); text-align:center; }
+.pointing-card-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.5rem; }
+.pointing-card-wide { grid-column:1 / -1; }
+.pointing-horizon { position:relative; border-radius:1rem; padding:1.2rem 1rem 1.7rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 70%, var(--accent-2) 10%), color-mix(in oklab, var(--panel) 88%, black 12%)); overflow:hidden; min-height:140px; }
+.pointing-horizon::before { content:""; position:absolute; inset:auto 0 0; height:35%; background: linear-gradient(180deg, color-mix(in oklab, var(--panel) 80%, black 20%), color-mix(in oklab, #020617 85%, black 15%)); opacity:.8; }
+.pointing-horizon-track { position:absolute; inset:20px 12px 26px 12px; z-index:1; }
+.pointing-horizon-empty { position:relative; z-index:1; margin:0; text-align:center; padding-top:2.2rem; }
+.pointing-horizon-sat { position:absolute; bottom:0; transform:translateX(-50%); border:none; border-radius:.8rem; padding:.35rem .65rem; font-size:.78rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); cursor:pointer; transition:transform .2s ease, box-shadow .2s ease; z-index:2; }
+.pointing-horizon-sat:hover { transform:translateX(-50%) translateY(-4px); box-shadow:0 12px 26px rgba(0,0,0,.35); }
+.pointing-horizon-sat.active { box-shadow:0 0 0 2px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, white 35%); }
+.pointing-horizon-sat:focus-visible { outline:2px solid var(--ring); outline-offset:3px; }
+.pointing-horizon-label { pointer-events:none; white-space:nowrap; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.35); }
+@media (min-width: 960px) { .pointing-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+
+
 /* Tables */
 .table-wrap { overflow:auto; border-radius:.8rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: var(--panel-2); }
 .table-wrap.pretty table thead th { position: sticky; top: 0; background: linear-gradient(180deg, var(--panel-2), color-mix(in oklab, var(--panel-2) 80%, white 20%)); }
@@ -1200,7 +1292,6 @@ tbody tr.selected-info td { font-weight:600; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: .85rem;
 }
-
 )~~~";;
 
 // libs/sha256.js — библиотека SHA-256 на чистом JavaScript
@@ -1262,8 +1353,7 @@ const char SHA256_JS[] PROGMEM = R"~~~(/* Простая реализация SH
 )~~~";
 
 // script.js
-const char SCRIPT_JS[] PROGMEM = R"~~~(
-/* satprjct web/app.js — vanilla JS only */
+const char SCRIPT_JS[] PROGMEM = R"~~~(/* satprjct web/app.js — vanilla JS only */
 /* Безопасная обёртка для localStorage: веб-приложение должно работать даже без постоянного хранилища */
 const storage = (() => {
   const memory = new Map();
@@ -1382,6 +1472,7 @@ const UI = {
       observer: null,
       locationWatchId: null,
       locationError: null,
+      locationRequestPending: false,
       minElevation: POINTING_DEFAULT_MIN_ELEVATION,
       orientation: null,
       sensorsActive: false,
@@ -1390,6 +1481,7 @@ const UI = {
       orientationSource: null,
       manualOrientation: false,
       tleReady: false,
+      tleError: null,
     },
   }
 };
@@ -1685,6 +1777,14 @@ async function init() {
   UI.els.pointing = {
     tab: $("#tab-pointing"),
     status: $("#pointingStatus"),
+    summary: $("#pointingSummary"),
+    tleBadge: $("#pointingTleBadge"),
+    tleBadgeText: $("#pointingTleText"),
+    locationBadge: $("#pointingLocationBadge"),
+    locationBadgeText: $("#pointingLocationText"),
+    satBadge: $("#pointingSatBadge"),
+    satBadgeText: $("#pointingSatText"),
+    locateOnceBtn: $("#pointingLocateOnceBtn"),
     locateBtn: $("#pointingLocateBtn"),
     sensorsBtn: $("#pointingSensorsBtn"),
     lat: $("#pointingLat"),
@@ -1705,6 +1805,9 @@ async function init() {
     satSelect: $("#pointingSatSelect"),
     satDetails: $("#pointingSatDetails"),
     satList: $("#pointingSatList"),
+    horizon: $("#pointingHorizon"),
+    horizonTrack: $("#pointingHorizonTrack"),
+    horizonEmpty: $("#pointingHorizonEmpty"),
     targetAz: $("#pointingTargetAz"),
     currentAz: $("#pointingCurrentAz"),
     deltaAz: $("#pointingDeltaAz"),
@@ -5206,13 +5309,21 @@ function initPointingTab() {
   }
   state.satellites = parsePointingSatellites(rawTle);
   state.tleReady = state.satellites.length > 0;
+  state.tleError = state.tleReady ? null : (rawTle.length ? "Некорректные TLE" : "Нет данных TLE");
 
   updatePointingLocationUi();
   renderPointingSatellites();
   updatePointingSatDetails(null);
   updatePointingOrientationUi();
   updatePointingOrientationStatus();
+  updatePointingBadges();
 
+  if (els.locateOnceBtn) {
+    els.locateOnceBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      requestPointingLocationOnce();
+    });
+  }
   if (els.locateBtn) {
     els.locateBtn.addEventListener("click", () => togglePointingLocationWatch());
   }
@@ -5246,6 +5357,13 @@ function initPointingTab() {
       setPointingActiveSatellite(btn.dataset.satId || null);
     });
   }
+  if (els.horizon) {
+    els.horizon.addEventListener("click", (event) => {
+      const marker = event && event.target ? event.target.closest("button[data-sat-id]") : null;
+      if (!marker || !marker.dataset) return;
+      setPointingActiveSatellite(marker.dataset.satId || null);
+    });
+  }
   if (els.minElSlider) {
     const handler = (event) => onPointingMinElevationChange(event);
     els.minElSlider.addEventListener("input", handler);
@@ -5253,6 +5371,7 @@ function initPointingTab() {
   }
   updatePointingLocationStatus();
   updatePointingSensorButton();
+  updatePointingLocationControls();
 }
 
 function parsePointingSatellites(rawData) {
@@ -5342,6 +5461,62 @@ function updatePointingMinElevationUi() {
   }
 }
 
+function requestPointingLocationOnce() {
+  const state = UI.state.pointing;
+  if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
+    note("Геолокация не поддерживается браузером");
+    return;
+  }
+  if (state.locationRequestPending) return;
+  state.locationRequestPending = true;
+  updatePointingLocationControls();
+  updatePointingLocationStatus();
+  try {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        state.locationRequestPending = false;
+        handlePointingPosition(position, "browser");
+        updatePointingLocationControls();
+        updatePointingLocationStatus();
+        note("Координаты обновлены по запросу браузера");
+      },
+      (error) => {
+        state.locationRequestPending = false;
+        handlePointingLocationError(error);
+        updatePointingLocationControls();
+        updatePointingLocationStatus();
+      },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 },
+    );
+  } catch (err) {
+    console.warn("[pointing] getCurrentPosition", err);
+    state.locationRequestPending = false;
+    updatePointingLocationControls();
+    updatePointingLocationStatus();
+    note("Не удалось запросить координаты у браузера");
+  }
+}
+
+function updatePointingLocationControls() {
+  const els = UI.els.pointing;
+  if (!els) return;
+  const state = UI.state.pointing;
+  const pending = !!state.locationRequestPending;
+  if (els.locateOnceBtn) {
+    els.locateOnceBtn.disabled = pending;
+    if (pending) {
+      els.locateOnceBtn.setAttribute("aria-busy", "true");
+      els.locateOnceBtn.textContent = "Запрос координат…";
+    } else {
+      els.locateOnceBtn.removeAttribute("aria-busy");
+      els.locateOnceBtn.textContent = "Запросить позицию";
+    }
+  }
+  if (els.locateBtn) {
+    els.locateBtn.disabled = pending && state.locationWatchId == null;
+  }
+}
+
 function togglePointingLocationWatch() {
   const state = UI.state.pointing;
   if (!navigator.geolocation || typeof navigator.geolocation.watchPosition !== "function") {
@@ -5366,6 +5541,8 @@ function togglePointingLocationWatch() {
     console.warn("[pointing] watchPosition", err);
     note("Не удалось включить отслеживание координат");
   }
+  updatePointingLocationControls();
+  updatePointingBadges();
 }
 
 function stopPointingLocationWatch() {
@@ -5379,9 +5556,11 @@ function stopPointingLocationWatch() {
   }
   state.locationWatchId = null;
   updatePointingLocationStatus();
+  updatePointingLocationControls();
+  updatePointingBadges();
 }
 
-function handlePointingPosition(position) {
+function handlePointingPosition(position, source) {
   const state = UI.state.pointing;
   if (!position || !position.coords) return;
   const { latitude, longitude, altitude, accuracy } = position.coords;
@@ -5391,19 +5570,21 @@ function handlePointingPosition(position) {
     lon: normalizeDegreesSigned(longitude),
     heightM: Number.isFinite(altitude) ? altitude : 0,
     accuracy: Number.isFinite(accuracy) ? accuracy : null,
-    source: "gps",
+    source: source === "browser" ? "browser" : "gps",
     timestamp: new Date(position.timestamp || Date.now()),
   };
   state.observer = observer;
   state.locationError = null;
   updatePointingLocationUi();
   updatePointingSatellites();
+  updatePointingBadges();
 }
 
 function handlePointingLocationError(error) {
   const state = UI.state.pointing;
   state.locationError = error || { message: "Неизвестная ошибка" };
   updatePointingLocationStatus();
+  updatePointingBadges();
   if (error && error.message) note("Геолокация: " + error.message);
 }
 
@@ -5419,6 +5600,7 @@ function updatePointingLocationUi() {
   if (els.locationSource) {
     if (!observer) els.locationSource.textContent = "—";
     else if (observer.source === "manual") els.locationSource.textContent = "ручной ввод";
+    else if (observer.source === "browser") els.locationSource.textContent = "браузер";
     else els.locationSource.textContent = "GPS";
   }
   if (els.locationTime) {
@@ -5429,6 +5611,7 @@ function updatePointingLocationUi() {
     }
   }
   updatePointingLocationStatus();
+  updatePointingBadges();
 }
 
 function updatePointingLocationStatus() {
@@ -5436,7 +5619,9 @@ function updatePointingLocationStatus() {
   const els = UI.els.pointing;
   if (!els) return;
   if (els.status) {
-    if (state.locationError) {
+    if (state.locationRequestPending) {
+      els.status.textContent = "Ожидаем ответ браузера с координатами…";
+    } else if (state.locationError) {
       const message = state.locationError.message || "Ошибка геолокации";
       els.status.textContent = "Ошибка геолокации: " + message;
     } else if (state.locationWatchId != null) {
@@ -5452,7 +5637,13 @@ function updatePointingLocationStatus() {
     }
   }
   if (els.locateBtn) {
-    els.locateBtn.textContent = state.locationWatchId != null ? "Остановить отслеживание" : "Определить координаты";
+    if (state.locationWatchId != null) {
+      els.locateBtn.textContent = "Остановить отслеживание";
+    } else if (state.locationRequestPending) {
+      els.locateBtn.textContent = "Ожидание координат";
+    } else {
+      els.locateBtn.textContent = "Включить отслеживание";
+    }
   }
 }
 
@@ -5480,11 +5671,14 @@ function applyPointingManualLocation() {
     timestamp: new Date(),
   };
   stopPointingLocationWatch();
+  state.locationRequestPending = false;
   state.observer = observer;
   state.locationError = null;
   updatePointingLocationUi();
   updatePointingSatellites();
+  updatePointingBadges();
   note("Координаты применены вручную");
+  updatePointingLocationControls();
 }
 
 function updatePointingSatellites() {
@@ -5688,6 +5882,118 @@ function renderPointingSatellites() {
         btn.appendChild(metaEl);
         els.satList.appendChild(btn);
       }
+    }
+  }
+  renderPointingHorizon(visible);
+  updatePointingBadges();
+}
+
+function renderPointingHorizon(visible) {
+  const els = UI.els.pointing;
+  if (!els || !els.horizonTrack) return;
+  const state = UI.state.pointing;
+  els.horizonTrack.innerHTML = "";
+  if (!Array.isArray(visible) || !visible.length) {
+    if (els.horizonEmpty) {
+      els.horizonEmpty.hidden = false;
+      if (!state.tleReady) {
+        els.horizonEmpty.textContent = "Ожидание загрузки TLE.";
+      } else if (!state.observer) {
+        els.horizonEmpty.textContent = "Укажите координаты для визуализации спутников.";
+      } else {
+        els.horizonEmpty.textContent = "Спутники ниже выбранного порога возвышения.";
+      }
+    }
+    return;
+  }
+  if (els.horizonEmpty) {
+    els.horizonEmpty.hidden = true;
+  }
+  for (const sat of visible) {
+    const marker = document.createElement("button");
+    marker.type = "button";
+    marker.dataset.satId = sat.id;
+    marker.className = "pointing-horizon-sat" + (sat.id === state.selectedSatId ? " active" : "");
+    const leftPercent = clampNumber(sat.azimuth / 360, 0, 1) * 100;
+    marker.style.left = leftPercent + "%";
+    marker.style.setProperty("--pointing-sat-color", pointingElevationToColor(sat.elevation));
+    marker.title = sat.name + " — азимут " + formatDegrees(sat.azimuth, 1) + ", возвышение " + formatDegrees(sat.elevation, 1);
+    const label = document.createElement("span");
+    label.className = "pointing-horizon-label";
+    label.textContent = sat.name + " • " + formatDegrees(sat.azimuth, 0) + "/" + formatDegrees(sat.elevation, 0);
+    marker.appendChild(label);
+    els.horizonTrack.appendChild(marker);
+  }
+}
+
+function pointingElevationToColor(elevation) {
+  const normalized = clampNumber((elevation + 5) / 60, 0, 1);
+  const hue = 210 - normalized * 170;
+  const saturation = 80;
+  const lightness = 60 - normalized * 15;
+  return "hsl(" + Math.round(hue) + ", " + saturation + "%, " + Math.round(lightness) + "%)";
+}
+
+function updatePointingBadges() {
+  const els = UI.els.pointing;
+  const state = UI.state.pointing;
+  if (!els) return;
+  if (els.tleBadge) {
+    const total = state.satellites ? state.satellites.length : 0;
+    let status = "warn";
+    let text = "TLE • нет данных";
+    if (state.tleReady && total > 0) {
+      status = "ok";
+      text = "TLE • " + total;
+    } else if (state.tleError) {
+      text = "TLE • " + state.tleError;
+    }
+    els.tleBadge.dataset.state = status;
+    if (els.tleBadgeText) {
+      els.tleBadgeText.textContent = text;
+    } else {
+      els.tleBadge.textContent = text;
+    }
+  }
+  if (els.locationBadge) {
+    let status = "idle";
+    let text = "Позиция • нет данных";
+    if (state.locationRequestPending) {
+      status = "pending";
+      text = "Позиция • запрос";
+    } else if (state.locationError) {
+      status = "warn";
+      text = "Позиция • ошибка";
+    } else if (state.locationWatchId != null) {
+      status = state.observer ? "ok" : "pending";
+      text = state.observer ? "Позиция • GPS" : "Позиция • ожидание";
+    } else if (state.observer) {
+      status = "ok";
+      text = state.observer.source === "manual" ? "Позиция • ручной ввод" : "Позиция • GPS";
+    }
+    els.locationBadge.dataset.state = status;
+    if (els.locationBadgeText) {
+      els.locationBadgeText.textContent = text;
+    } else {
+      els.locationBadge.textContent = text;
+    }
+  }
+  if (els.satBadge) {
+    const count = state.visible ? state.visible.length : 0;
+    const status = count > 0 ? "ok" : state.observer ? "warn" : "idle";
+    let text = "Спутники • —";
+    if (count > 0) {
+      text = "Спутники • " + count;
+    } else if (state.observer && state.tleReady) {
+      text = "Спутники • вне порога";
+    } else if (!state.tleReady) {
+      text = "Спутники • ждём TLE";
+    }
+    els.satBadge.dataset.state = status;
+    if (els.satBadgeText) {
+      els.satBadgeText.textContent = text;
+    } else {
+      els.satBadge.textContent = text;
     }
   }
 }
@@ -6244,6 +6550,7 @@ async function resyncAfterEndpointChange() {
     console.warn("[endpoint] resync error", err);
   }
 }
+
 )~~~";;
 
 // libs/sha256.js
