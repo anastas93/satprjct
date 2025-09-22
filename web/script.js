@@ -4660,8 +4660,18 @@ function updatePointingBadges() {
     }
   }
   if (els.locationBadge) {
-    const hasObserver = !!(state.observer && Number.isFinite(state.observer.lat) && Number.isFinite(state.observer.lon));
-    const label = state.observerMgrs || (hasObserver ? "задана" : "нет данных");
+    const observer = state.observer;
+    const hasObserver = !!(observer && Number.isFinite(observer.lat) && Number.isFinite(observer.lon));
+    let label = "нет данных";
+    if (observer) {
+      if (observer.mgrs) {
+        label = observer.mgrs;
+      } else if (state.observerMgrs) {
+        label = state.observerMgrs;
+      } else if (hasObserver) {
+        label = formatLatitude(observer.lat, 2) + ", " + formatLongitude(observer.lon, 2);
+      }
+    }
     const status = hasObserver ? "ok" : "idle";
     const text = hasObserver ? "Позиция • " + label : "Позиция • нет данных";
     els.locationBadge.dataset.state = status;
