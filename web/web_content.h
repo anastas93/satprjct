@@ -192,6 +192,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             <div class="pointing-compass-dial">
               <div class="pointing-compass-needle target" id="pointingTargetNeedle"><span>цель</span></div>
               <div class="pointing-compass-needle current" id="pointingCurrentNeedle"><span>курс</span></div>
+              <div class="pointing-compass-radar" id="pointingCompassRadar"></div>
               <div class="pointing-compass-center"></div>
               <div class="pointing-compass-graduations"></div>
             </div>
@@ -953,7 +954,12 @@ main {
 .pointing-manual input:focus { border-color: var(--ring); box-shadow:0 0 0 3px var(--ring); outline:none; }
 .pointing-manual-title { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color: var(--muted); font-weight:700; }
 .pointing-compass { display:flex; justify-content:center; }
-.pointing-compass-dial { position:relative; width:min(280px, 75vw); aspect-ratio:1 / 1; border-radius:50%; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--panel-2) 95%, white 5%), color-mix(in oklab, var(--panel) 88%, black 12%)); display:flex; align-items:center; justify-content:center; }
+.pointing-compass-dial { position:relative; width:min(280px, 75vw); aspect-ratio:1 / 1; border-radius:50%; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--panel-2) 95%, white 5%), color-mix(in oklab, var(--panel) 88%, black 12%)); display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.pointing-compass-radar { position:absolute; inset:12%; border-radius:50%; pointer-events:none; }
+.pointing-compass-sat { position:absolute; left:50%; top:50%; width:12px; height:12px; border-radius:50%; transform:translate(-50%, -50%); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, var(--panel) 45%); border:2px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, black 35%); box-shadow:0 4px 10px rgba(0,0,0,.25); pointer-events:auto; cursor:pointer; transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+.pointing-compass-sat:hover { transform:translate(-50%, -50%) scale(1.2); box-shadow:0 8px 16px rgba(0,0,0,.35); }
+.pointing-compass-sat:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.pointing-compass-sat.active { border-color: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 70%, white 30%); box-shadow:0 0 0 2px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, white 55%); }
 .pointing-compass-needle { position:absolute; left:50%; top:50%; width:45%; height:3px; transform-origin:0% 50%; border-radius:3px; background: color-mix(in oklab, var(--accent) 65%, white 35%); color: var(--accent); opacity:.35; transition:transform .2s ease, opacity .2s ease; }
 .pointing-compass-needle span { position:absolute; top:-1.9rem; right:-.4rem; font-size:.65rem; text-transform:uppercase; letter-spacing:.05em; font-weight:700; }
 .pointing-compass-needle.current { background: color-mix(in oklab, var(--good) 70%, white 30%); color: var(--good); }
@@ -988,12 +994,12 @@ main {
 .pointing-empty { padding:.8rem; border-radius:.8rem; background: color-mix(in oklab, var(--panel-2) 90%, black 10%); border:1px dashed color-mix(in oklab, var(--panel-2) 65%, black 35%); text-align:center; }
 .pointing-card-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.5rem; }
 .pointing-card-wide { grid-column:1 / -1; }
-.pointing-horizon { position:relative; border-radius:1rem; padding:1.2rem 1rem 1.7rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 70%, var(--accent-2) 10%), color-mix(in oklab, var(--panel) 88%, black 12%)); overflow:hidden; min-height:140px; }
+.pointing-horizon { position:relative; border-radius:1rem; padding:1.2rem 1rem 2.1rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 70%, var(--accent-2) 10%), color-mix(in oklab, var(--panel) 88%, black 12%)); overflow:hidden; min-height:160px; }
 .pointing-horizon::before { content:""; position:absolute; inset:auto 0 0; height:35%; background: linear-gradient(180deg, color-mix(in oklab, var(--panel) 80%, black 20%), color-mix(in oklab, #020617 85%, black 15%)); opacity:.8; }
 .pointing-horizon-track { position:absolute; inset:20px 12px 26px 12px; z-index:1; }
 .pointing-horizon-empty { position:relative; z-index:1; margin:0; text-align:center; padding-top:2.2rem; }
-.pointing-horizon-sat { position:absolute; bottom:0; transform:translateX(-50%); border:none; border-radius:.8rem; padding:.35rem .65rem; font-size:.78rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); cursor:pointer; transition:transform .2s ease, box-shadow .2s ease; z-index:2; }
-.pointing-horizon-sat:hover { transform:translateX(-50%) translateY(-4px); box-shadow:0 12px 26px rgba(0,0,0,.35); }
+.pointing-horizon-sat { position:absolute; bottom:0; --pointing-sat-offset:0; transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -1.8rem)); border:none; border-radius:.8rem; padding:.35rem .65rem; font-size:.78rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); cursor:pointer; transition:transform .2s ease, box-shadow .2s ease; z-index:2; }
+.pointing-horizon-sat:hover { transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -1.8rem - 4px)); box-shadow:0 12px 26px rgba(0,0,0,.35); }
 .pointing-horizon-sat.active { box-shadow:0 0 0 2px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, white 35%); }
 .pointing-horizon-sat:focus-visible { outline:2px solid var(--ring); outline-offset:3px; }
 .pointing-horizon-label { pointer-events:none; white-space:nowrap; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.35); }
@@ -1817,6 +1823,7 @@ async function init() {
     targetNeedle: $("#pointingTargetNeedle"),
     currentNeedle: $("#pointingCurrentNeedle"),
     compass: $("#pointingCompass"),
+    compassRadar: $("#pointingCompassRadar"),
     elevationScale: $("#pointingElevationScale"),
     elevationTarget: $("#pointingElevationTarget"),
     elevationCurrent: $("#pointingElevationCurrent"),
@@ -5364,6 +5371,13 @@ function initPointingTab() {
       setPointingActiveSatellite(marker.dataset.satId || null);
     });
   }
+  if (els.compass) {
+    els.compass.addEventListener("click", (event) => {
+      const dot = event && event.target ? event.target.closest("button[data-sat-id]") : null;
+      if (!dot || !dot.dataset) return;
+      setPointingActiveSatellite(dot.dataset.satId || null);
+    });
+  }
   if (els.minElSlider) {
     const handler = (event) => onPointingMinElevationChange(event);
     els.minElSlider.addEventListener("input", handler);
@@ -5884,6 +5898,7 @@ function renderPointingSatellites() {
       }
     }
   }
+  renderPointingCompassRadar(visible);
   renderPointingHorizon(visible);
   updatePointingBadges();
 }
@@ -5909,13 +5924,23 @@ function renderPointingHorizon(visible) {
   if (els.horizonEmpty) {
     els.horizonEmpty.hidden = true;
   }
-  for (const sat of visible) {
+  const sorted = [...visible].sort((a, b) => a.azimuth - b.azimuth);
+  const laneLast = [];
+  const minGap = 6; // минимальный зазор между маркерами в процентах ширины трека
+  for (const sat of sorted) {
     const marker = document.createElement("button");
     marker.type = "button";
     marker.dataset.satId = sat.id;
     marker.className = "pointing-horizon-sat" + (sat.id === state.selectedSatId ? " active" : "");
     const leftPercent = clampNumber(sat.azimuth / 360, 0, 1) * 100;
     marker.style.left = leftPercent + "%";
+    let laneIndex = 0;
+    while (laneLast[laneIndex] != null && leftPercent - laneLast[laneIndex] < minGap) {
+      laneIndex += 1;
+    }
+    laneLast[laneIndex] = leftPercent;
+    marker.style.setProperty("--pointing-sat-offset", String(laneIndex));
+    marker.style.zIndex = String(10 + laneIndex);
     marker.style.setProperty("--pointing-sat-color", pointingElevationToColor(sat.elevation));
     marker.title = sat.name + " — азимут " + formatDegrees(sat.azimuth, 1) + ", возвышение " + formatDegrees(sat.elevation, 1);
     const label = document.createElement("span");
@@ -5923,6 +5948,34 @@ function renderPointingHorizon(visible) {
     label.textContent = sat.name + " • " + formatDegrees(sat.azimuth, 0) + "/" + formatDegrees(sat.elevation, 0);
     marker.appendChild(label);
     els.horizonTrack.appendChild(marker);
+  }
+}
+
+function renderPointingCompassRadar(visible) {
+  const els = UI.els.pointing;
+  if (!els || !els.compassRadar) return;
+  const state = UI.state.pointing;
+  const container = els.compassRadar;
+  container.innerHTML = "";
+  if (!Array.isArray(visible) || !visible.length) return;
+  const sorted = [...visible].sort((a, b) => a.azimuth - b.azimuth);
+  for (const sat of sorted) {
+    const dot = document.createElement("button");
+    dot.type = "button";
+    dot.dataset.satId = sat.id;
+    dot.className = "pointing-compass-sat" + (sat.id === state.selectedSatId ? " active" : "");
+    dot.style.setProperty("--pointing-sat-color", pointingElevationToColor(sat.elevation));
+    const angleRad = sat.azimuth * DEG2RAD;
+    const elevationClamped = clampNumber(sat.elevation, 0, 90);
+    const radius = (1 - elevationClamped / 90) * 45; // ближе к центру при большем возвышении
+    const x = 50 + Math.sin(angleRad) * radius;
+    const y = 50 - Math.cos(angleRad) * radius;
+    dot.style.left = x + "%";
+    dot.style.top = y + "%";
+    const description = sat.name + " — азимут " + formatDegrees(sat.azimuth, 1) + ", возвышение " + formatDegrees(sat.elevation, 1);
+    dot.title = description;
+    dot.setAttribute("aria-label", description);
+    container.appendChild(dot);
   }
 }
 
