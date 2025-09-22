@@ -512,6 +512,59 @@ main {
 }
 .cmd-inline input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px var(--ring); outline: none; }
 
+/* Pointing tab */
+.pointing-intro { margin-top:.4rem; max-width:640px; }
+.pointing-grid { display:grid; gap:1rem; margin-top:1rem; }
+.pointing-card { border-radius:.95rem; padding:1rem; display:flex; flex-direction:column; gap:.9rem; }
+.pointing-card h3 { margin:0; font-size:1.1rem; }
+.pointing-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
+.pointing-info { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:.5rem .75rem; }
+.pointing-info dt { font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color: var(--muted); margin:0 0 .2rem; }
+.pointing-info dd { margin:0; font-weight:600; }
+.pointing-manual { border-top:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); padding-top:.75rem; display:flex; flex-direction:column; gap:.6rem; }
+.pointing-manual-grid { display:grid; gap:.6rem; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); }
+.pointing-manual input { width:100%; background: var(--panel-2); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius:.6rem; padding:.5rem .65rem; color: var(--text); }
+.pointing-manual input:focus { border-color: var(--ring); box-shadow:0 0 0 3px var(--ring); outline:none; }
+.pointing-manual-title { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color: var(--muted); font-weight:700; }
+.pointing-compass { display:flex; justify-content:center; }
+.pointing-compass-dial { position:relative; width:min(280px, 75vw); aspect-ratio:1 / 1; border-radius:50%; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--panel-2) 95%, white 5%), color-mix(in oklab, var(--panel) 88%, black 12%)); display:flex; align-items:center; justify-content:center; }
+.pointing-compass-needle { position:absolute; left:50%; top:50%; width:45%; height:3px; transform-origin:0% 50%; border-radius:3px; background: color-mix(in oklab, var(--accent) 65%, white 35%); color: var(--accent); opacity:.35; transition:transform .2s ease, opacity .2s ease; }
+.pointing-compass-needle span { position:absolute; top:-1.9rem; right:-.4rem; font-size:.65rem; text-transform:uppercase; letter-spacing:.05em; font-weight:700; }
+.pointing-compass-needle.current { background: color-mix(in oklab, var(--good) 70%, white 30%); color: var(--good); }
+.pointing-compass-needle.active { opacity:1; }
+.pointing-compass-center { width:18px; height:18px; border-radius:50%; background: color-mix(in oklab, var(--panel-2) 85%, black 15%); border:2px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); }
+.pointing-compass-graduations { position:absolute; inset:12%; border-radius:50%; border:1px dashed color-mix(in oklab, var(--panel-2) 70%, black 30%); opacity:.5; }
+.pointing-angles { display:flex; flex-wrap:wrap; gap:.6rem 1rem; font-size:.9rem; }
+.pointing-angle { display:flex; flex-direction:column; gap:.2rem; }
+.pointing-angle .label { font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color: var(--muted); }
+.pointing-elevation { display:flex; flex-direction:column; gap:.6rem; }
+.pointing-elevation-scale { position:relative; height:18px; border-radius:999px; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: linear-gradient(90deg, color-mix(in oklab, var(--panel) 92%, white 8%), color-mix(in oklab, var(--accent-2) 30%, var(--panel-2) 70%)); overflow:hidden; }
+.pointing-elevation-target, .pointing-elevation-current { position:absolute; top:-6px; left:0; width:2px; height:30px; border-radius:1px; opacity:0; transition:opacity .2s ease, left .2s ease; }
+.pointing-elevation-target { background: var(--accent); }
+.pointing-elevation-current { background: var(--good); }
+.pointing-elevation-target span, .pointing-elevation-current span { position:absolute; top:-1.3rem; left:50%; transform:translateX(-50%); font-size:.65rem; text-transform:uppercase; letter-spacing:.05em; color: inherit; }
+.pointing-elevation-target.active, .pointing-elevation-current.active { opacity:1; }
+.pointing-min-el { display:flex; align-items:center; gap:.4rem; font-size:.85rem; color: var(--muted); }
+.pointing-min-el input { width:140px; }
+.pointing-min-el-value { font-weight:700; color: var(--text); min-width:2.5rem; text-align:right; }
+.pointing-select { display:flex; flex-direction:column; gap:.35rem; font-weight:600; }
+.pointing-select select { background: var(--panel-2); color: var(--text); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius:.6rem; padding:.55rem .7rem; outline:none; }
+.pointing-select select:focus { border-color: var(--ring); box-shadow:0 0 0 3px var(--ring); }
+.pointing-sat-details { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:.4rem .75rem; font-size:.85rem; color: var(--muted); }
+.pointing-sat-details strong { color: var(--text); }
+.pointing-sat-list { display:flex; flex-direction:column; gap:.6rem; margin-top:.5rem; }
+.pointing-sat-entry { border-radius:.85rem; padding:.65rem .8rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: color-mix(in oklab, var(--panel-2) 90%, black 10%); display:flex; flex-direction:column; gap:.35rem; text-align:left; cursor:pointer; transition:background .2s ease, transform .2s ease; }
+.pointing-sat-entry:hover { background: color-mix(in oklab, var(--accent) 25%, var(--panel-2) 75%); transform:translateY(-1px); }
+.pointing-sat-entry:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.pointing-sat-entry.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 40%, white 60%); }
+.pointing-sat-name { font-weight:700; }
+.pointing-sat-meta { display:flex; flex-wrap:wrap; gap:.5rem; font-size:.78rem; color: var(--muted); }
+.pointing-empty { padding:.8rem; border-radius:.8rem; background: color-mix(in oklab, var(--panel-2) 90%, black 10%); border:1px dashed color-mix(in oklab, var(--panel-2) 65%, black 35%); text-align:center; }
+.pointing-card-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.5rem; }
+.pointing-card-wide { grid-column:1 / -1; }
+@media (min-width: 960px) { .pointing-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+
+
 /* Tables */
 .table-wrap { overflow:auto; border-radius:.8rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: var(--panel-2); }
 .table-wrap.pretty table thead th { position: sticky; top: 0; background: linear-gradient(180deg, var(--panel-2), color-mix(in oklab, var(--panel-2) 80%, white 20%)); }
