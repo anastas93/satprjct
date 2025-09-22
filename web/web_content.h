@@ -158,6 +158,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             <button id="pointingLocateOnceBtn" class="btn">Запросить позицию</button>
             <button id="pointingLocateBtn" class="btn ghost">Включить отслеживание</button>
           </div>
+          <p id="pointingLocationHint" class="pointing-location-hint" hidden>Safari на iOS требует защищённое подключение для доступа к геолокации. При необходимости используйте ручной ввод координат.</p>
           <dl class="pointing-info">
             <div><dt>Широта</dt><dd><span id="pointingLat">—</span></dd></div>
             <div><dt>Долгота</dt><dd><span id="pointingLon">—</span></dd></div>
@@ -197,6 +198,12 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
               <div class="pointing-compass-center"></div>
               <div class="pointing-compass-graduations"></div>
             </div>
+            <div class="pointing-compass-legend" id="pointingCompassLegend" aria-hidden="true">
+              <span data-quadrant="north">Север • N</span>
+              <span data-quadrant="east">Восток • E</span>
+              <span data-quadrant="south">Юг • S</span>
+              <span data-quadrant="west">Запад • W</span>
+            </div>
           </div>
           <div class="pointing-angles">
             <div class="pointing-angle"><span class="label">Азимут цели</span><strong id="pointingTargetAz">—</strong></div>
@@ -228,16 +235,6 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           </div>
         </article>
         <article class="pointing-card glass pointing-card-wide">
-          <label class="pointing-select">
-            <span>Активный спутник</span>
-            <select id="pointingSatSelect"></select>
-          </label>
-          <div class="pointing-sat-details" id="pointingSatDetails" hidden>
-            <div>Долгота подспутника: <strong id="pointingSubLon">—</strong></div>
-            <div>Широта подспутника: <strong id="pointingSubLat">—</strong></div>
-            <div>Высота орбиты: <strong id="pointingSatAltitude">—</strong></div>
-            <div>Дистанция: <strong id="pointingRange">—</strong></div>
-          </div>
           <div class="pointing-card-header">
             <h3>Доступные спутники</h3>
             <label class="pointing-min-el">
@@ -252,6 +249,16 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           </div>
           <p class="small muted" id="pointingSatSummary">После загрузки координат здесь появится статистика по видимым спутникам.</p>
           <div class="pointing-sat-list" id="pointingSatList"></div>
+          <label class="pointing-select">
+            <span>Активный спутник</span>
+            <select id="pointingSatSelect"></select>
+          </label>
+          <div class="pointing-sat-details" id="pointingSatDetails" hidden>
+            <div>Долгота подспутника: <strong id="pointingSubLon">—</strong></div>
+            <div>Широта подспутника: <strong id="pointingSubLat">—</strong></div>
+            <div>Высота орбиты: <strong id="pointingSatAltitude">—</strong></div>
+            <div>Дистанция: <strong id="pointingRange">—</strong></div>
+          </div>
         </article>
       </div>
     </section>
@@ -417,7 +424,8 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
 )~~~";
 
 // style.css
-const char STYLE_CSS[] PROGMEM = R"~~~(/* satprjct redesign (rev2): Aurora + glass + depth — responsive with mobile dock */
+const char STYLE_CSS[] PROGMEM = R"~~~(
+/* satprjct redesign (rev2): Aurora + glass + depth — responsive with mobile dock */
 /* Themes */
 :root {
   --bg: #0b1224;
@@ -946,6 +954,7 @@ main {
 .pointing-card h3 { margin:0; font-size:1.1rem; }
 .pointing-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
 .pointing-actions .btn { flex:0 0 auto; }
+.pointing-location-hint { margin:0; font-size:.78rem; color: color-mix(in oklab, var(--accent) 40%, var(--text) 60%); background: color-mix(in oklab, var(--accent) 14%, var(--panel-2) 86%); border:1px solid color-mix(in oklab, var(--accent) 45%, var(--panel-2) 55%); border-radius:.7rem; padding:.55rem .75rem; line-height:1.3; }
 .pointing-info { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:.5rem .75rem; }
 .pointing-info dt { font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color: var(--muted); margin:0 0 .2rem; }
 .pointing-info dd { margin:0; font-weight:600; }
@@ -954,13 +963,21 @@ main {
 .pointing-manual input { width:100%; background: var(--panel-2); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius:.6rem; padding:.5rem .65rem; color: var(--text); }
 .pointing-manual input:focus { border-color: var(--ring); box-shadow:0 0 0 3px var(--ring); outline:none; }
 .pointing-manual-title { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color: var(--muted); font-weight:700; }
-.pointing-compass { display:flex; justify-content:center; }
+.pointing-compass { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.6rem; }
 .pointing-compass-dial { position:relative; width:min(280px, 75vw); aspect-ratio:1 / 1; border-radius:50%; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--panel-2) 95%, white 5%), color-mix(in oklab, var(--panel) 88%, black 12%)); display:flex; align-items:center; justify-content:center; overflow:hidden; }
-.pointing-compass-radar { position:absolute; inset:12%; border-radius:50%; pointer-events:none; }
-.pointing-compass-sat { position:absolute; left:50%; top:50%; width:12px; height:12px; border-radius:50%; transform:translate(-50%, -50%); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, var(--panel) 45%); border:2px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, black 35%); box-shadow:0 4px 10px rgba(0,0,0,.25); pointer-events:auto; cursor:pointer; transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
-.pointing-compass-sat:hover { transform:translate(-50%, -50%) scale(1.2); box-shadow:0 8px 16px rgba(0,0,0,.35); }
+.pointing-compass-radar { position:absolute; left:12%; top:12%; width:76%; height:76%; border-radius:50%; pointer-events:none; }
+.pointing-compass-sat { position:absolute; left:50%; top:50%; width:18px; height:18px; border-radius:50%; padding:0; display:flex; align-items:center; justify-content:center; transform:translate(-50%, -50%); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, var(--panel) 55%); border:3px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, black 35%); box-shadow:0 6px 16px rgba(0,0,0,.35); pointer-events:auto; cursor:pointer; transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease, filter .2s ease; box-sizing:border-box; line-height:1; aspect-ratio:1 / 1; }
+.pointing-compass-sat:hover { transform:translate(-50%, -50%) scale(1.16); box-shadow:0 10px 24px rgba(0,0,0,.45); }
 .pointing-compass-sat:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
-.pointing-compass-sat.active { border-color: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 70%, white 30%); box-shadow:0 0 0 2px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, white 55%); }
+.pointing-compass-sat.active { transform:translate(-50%, -52%) scale(1.18); border-color: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 72%, white 28%); filter:brightness(1.08); box-shadow:0 0 0 3px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 42%, white 58%); }
+.pointing-compass-sat .pointing-compass-label { position:absolute; left:50%; top:-.6rem; transform:translate(-50%, -100%); padding:.32rem .6rem; border-radius:.65rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); font-size:.72rem; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.3); white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .2s ease, transform .2s ease; z-index:5; }
+.pointing-compass-sat .pointing-compass-label::after { content:""; position:absolute; left:50%; top:100%; width:9px; height:9px; transform:translate(-50%, -6px) rotate(45deg); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); border-left:none; border-top:none; box-shadow:0 4px 8px rgba(0,0,0,.25); }
+.pointing-compass-sat:hover .pointing-compass-label, .pointing-compass-sat:focus-visible .pointing-compass-label, .pointing-compass-sat.active .pointing-compass-label { opacity:1; transform:translate(-50%, -120%); }
+.pointing-compass-north { position:absolute; top:6%; left:50%; transform:translate(-50%, -50%); font-size:.78rem; font-weight:700; letter-spacing:.22em; text-transform:uppercase; color: color-mix(in oklab, var(--accent) 45%, var(--text) 55%); pointer-events:none; text-align:center; }
+.pointing-compass-north::after { content:""; display:block; margin:.3rem auto 0; width:0; height:0; border:6px solid transparent; border-bottom:9px solid color-mix(in oklab, var(--accent) 55%, white 45%); filter:drop-shadow(0 2px 2px rgba(0,0,0,.35)); }
+.pointing-compass-legend { display:flex; flex-wrap:wrap; justify-content:center; gap:.6rem 1rem; margin-top:.75rem; }
+.pointing-compass-legend span { display:flex; align-items:center; gap:.4rem; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color: color-mix(in oklab, var(--text) 80%, var(--panel-2) 20%); opacity:.85; }
+.pointing-compass-legend span::before { content:""; width:11px; height:11px; border-radius:50%; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 78%, white 22%); box-shadow:0 0 0 2px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, black 55%); }
 .pointing-compass-needle { position:absolute; left:50%; top:50%; width:45%; height:3px; transform-origin:0% 50%; border-radius:3px; background: color-mix(in oklab, var(--accent) 65%, white 35%); color: var(--accent); opacity:.35; transition:transform .2s ease, opacity .2s ease; }
 .pointing-compass-needle span { position:absolute; top:-1.9rem; right:-.4rem; font-size:.65rem; text-transform:uppercase; letter-spacing:.05em; font-weight:700; }
 .pointing-compass-needle.current { background: color-mix(in oklab, var(--good) 70%, white 30%); color: var(--good); }
@@ -985,11 +1002,15 @@ main {
 .pointing-select select:focus { border-color: var(--ring); box-shadow:0 0 0 3px var(--ring); }
 .pointing-sat-details { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:.4rem .75rem; font-size:.85rem; color: var(--muted); }
 .pointing-sat-details strong { color: var(--text); }
-.pointing-sat-list { display:flex; flex-direction:column; gap:.6rem; margin-top:.5rem; }
-.pointing-sat-entry { border-radius:.85rem; padding:.65rem .8rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: color-mix(in oklab, var(--panel-2) 90%, black 10%); display:flex; flex-direction:column; gap:.35rem; text-align:left; cursor:pointer; transition:background .2s ease, transform .2s ease; }
-.pointing-sat-entry:hover { background: color-mix(in oklab, var(--accent) 25%, var(--panel-2) 75%); transform:translateY(-1px); }
+.pointing-sat-list { display:flex; flex-direction:column; gap:1rem; margin-top:.5rem; }
+.pointing-sat-group { display:flex; flex-direction:column; gap:.65rem; padding: .35rem 0 .45rem 1rem; border-left:3px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, var(--panel-2) 55%); border-radius:.75rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 8%, transparent); }
+.pointing-sat-group-title { font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; font-weight:700; color: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 60%, var(--text) 40%); display:flex; align-items:center; gap:.45rem; }
+.pointing-sat-group-title::before { content:""; width:12px; height:12px; border-radius:50%; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 80%, white 20%); box-shadow:0 0 0 2px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, black 55%); }
+.pointing-sat-group-list { display:flex; flex-direction:column; gap:.6rem; }
+.pointing-sat-entry { border-radius:.85rem; padding:.65rem .8rem; border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 35%, black 65%); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 12%, var(--panel-2) 88%); display:flex; flex-direction:column; gap:.35rem; text-align:left; cursor:pointer; transition:background .2s ease, transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
+.pointing-sat-entry:hover { background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); transform:translateY(-1px); }
 .pointing-sat-entry:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
-.pointing-sat-entry.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 40%, white 60%); }
+.pointing-sat-entry.active { border-color: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 70%, white 30%); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, white 55%); }
 .pointing-sat-name { font-weight:700; }
 .pointing-sat-meta { display:flex; flex-wrap:wrap; gap:.5rem; font-size:.78rem; color: var(--muted); }
 .pointing-empty { padding:.8rem; border-radius:.8rem; background: color-mix(in oklab, var(--panel-2) 90%, black 10%); border:1px dashed color-mix(in oklab, var(--panel-2) 65%, black 35%); text-align:center; }
@@ -999,11 +1020,13 @@ main {
 .pointing-horizon::before { content:""; position:absolute; inset:auto 0 0; height:35%; background: linear-gradient(180deg, color-mix(in oklab, var(--panel) 80%, black 20%), color-mix(in oklab, #020617 85%, black 15%)); opacity:.8; }
 .pointing-horizon-track { position:absolute; inset:20px 12px 26px 12px; z-index:1; }
 .pointing-horizon-empty { position:relative; z-index:1; margin:0; text-align:center; padding-top:2.2rem; }
-.pointing-horizon-sat { position:absolute; bottom:0; --pointing-sat-offset:0; transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -1.8rem)); border:none; border-radius:.8rem; padding:.35rem .65rem; font-size:.78rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); cursor:pointer; transition:transform .2s ease, box-shadow .2s ease; z-index:2; }
-.pointing-horizon-sat:hover { transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -1.8rem - 4px)); box-shadow:0 12px 26px rgba(0,0,0,.35); }
-.pointing-horizon-sat.active { box-shadow:0 0 0 2px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, white 35%); }
-.pointing-horizon-sat:focus-visible { outline:2px solid var(--ring); outline-offset:3px; }
-.pointing-horizon-label { pointer-events:none; white-space:nowrap; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.35); }
+.pointing-horizon-sat { position:absolute; bottom:0; --pointing-sat-offset:0; transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -2.3rem)); border:none; width:18px; height:18px; border-radius:50%; padding:0; display:flex; align-items:center; justify-content:center; line-height:1; aspect-ratio:1 / 1; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 48%, var(--panel) 52%); border:3px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, black 35%); box-shadow:0 6px 18px rgba(0,0,0,.35); cursor:pointer; transition:transform .2s ease, box-shadow .2s ease, filter .2s ease; z-index:2; box-sizing:border-box; }
+.pointing-horizon-sat:hover { transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -2.3rem - 6px)) scale(1.12); box-shadow:0 14px 28px rgba(0,0,0,.45); }
+.pointing-horizon-sat.active { filter:brightness(1.08); box-shadow:0 0 0 3px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, white 55%); }
+.pointing-horizon-sat:focus-visible { outline:2px solid var(--ring); outline-offset:4px; }
+.pointing-horizon-sat .pointing-horizon-label { position:absolute; left:50%; bottom:140%; transform:translate(-50%, 8px); padding:.35rem .65rem; border-radius:.7rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 20%, var(--panel-2) 80%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); font-weight:600; font-size:.75rem; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .2s ease, transform .2s ease; text-shadow:0 1px 2px rgba(0,0,0,.3); }
+.pointing-horizon-sat .pointing-horizon-label::after { content:""; position:absolute; left:50%; top:100%; width:10px; height:10px; transform:translate(-50%, -6px) rotate(45deg); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 20%, var(--panel-2) 80%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); border-left:none; border-top:none; box-shadow:0 4px 8px rgba(0,0,0,.25); }
+.pointing-horizon-sat:hover .pointing-horizon-label, .pointing-horizon-sat:focus-visible .pointing-horizon-label, .pointing-horizon-sat.active .pointing-horizon-label { opacity:1; transform:translate(-50%, -6px); }
 @media (min-width: 960px) { .pointing-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 
 
@@ -1360,7 +1383,8 @@ const char SHA256_JS[] PROGMEM = R"~~~(/* Простая реализация SH
 )~~~";
 
 // script.js
-const char SCRIPT_JS[] PROGMEM = R"~~~(/* satprjct web/app.js — vanilla JS only */
+const char SCRIPT_JS[] PROGMEM = R"~~~(
+/* satprjct web/app.js — vanilla JS only */
 /* Безопасная обёртка для localStorage: веб-приложение должно работать даже без постоянного хранилища */
 const storage = (() => {
   const memory = new Map();
@@ -1479,6 +1503,7 @@ const UI = {
       observer: null,
       locationWatchId: null,
       locationError: null,
+      locationErrorHint: null,
       locationRequestPending: false,
       minElevation: POINTING_DEFAULT_MIN_ELEVATION,
       orientation: null,
@@ -1794,6 +1819,7 @@ async function init() {
     locateOnceBtn: $("#pointingLocateOnceBtn"),
     locateBtn: $("#pointingLocateBtn"),
     sensorsBtn: $("#pointingSensorsBtn"),
+    locationHint: $("#pointingLocationHint"),
     lat: $("#pointingLat"),
     lon: $("#pointingLon"),
     alt: $("#pointingAlt"),
@@ -1825,6 +1851,7 @@ async function init() {
     currentNeedle: $("#pointingCurrentNeedle"),
     compass: $("#pointingCompass"),
     compassRadar: $("#pointingCompassRadar"),
+    compassLegend: $("#pointingCompassLegend"),
     elevationScale: $("#pointingElevationScale"),
     elevationTarget: $("#pointingElevationTarget"),
     elevationCurrent: $("#pointingElevationCurrent"),
@@ -5384,6 +5411,7 @@ function initPointingTab() {
     els.minElSlider.addEventListener("input", handler);
     els.minElSlider.addEventListener("change", handler);
   }
+  updatePointingCompassLegend();
   updatePointingLocationStatus();
   updatePointingSensorButton();
   updatePointingLocationControls();
@@ -5550,6 +5578,7 @@ function togglePointingLocationWatch() {
       { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 },
     );
     state.locationError = null;
+    state.locationErrorHint = null;
     updatePointingLocationStatus();
     note("Отслеживание координат включено");
   } catch (err) {
@@ -5590,6 +5619,7 @@ function handlePointingPosition(position, source) {
   };
   state.observer = observer;
   state.locationError = null;
+  state.locationErrorHint = null;
   updatePointingLocationUi();
   updatePointingSatellites();
   updatePointingBadges();
@@ -5597,10 +5627,26 @@ function handlePointingPosition(position, source) {
 
 function handlePointingLocationError(error) {
   const state = UI.state.pointing;
-  state.locationError = error || { message: "Неизвестная ошибка" };
+  const fallbackError = { message: "Неизвестная ошибка" };
+  const messageText = error && typeof error.message === "string" ? error.message : "";
+  let hint = null;
+  if (messageText && /Origin does not have permission to use Geolocation service/i.test(messageText)) {
+    hint = "ios-insecure";
+  } else if (error && typeof error.code === "number" && error.code === 1) {
+    hint = "denied";
+  }
+  state.locationError = error || fallbackError;
+  state.locationErrorHint = hint;
   updatePointingLocationStatus();
   updatePointingBadges();
-  if (error && error.message) note("Геолокация: " + error.message);
+  let readableMessage = messageText || fallbackError.message;
+  if (hint === "ios-insecure") {
+    readableMessage = "Safari блокирует геолокацию для незашифрованного соединения.";
+  } else if (hint === "denied") {
+    readableMessage = "Доступ к геолокации запрещён браузером.";
+  }
+  note("Геолокация: " + readableMessage +
+    (hint === "ios-insecure" ? " Откройте интерфейс по HTTPS или разрешите доступ в Настройки → Safari → Местоположение." : ""));
 }
 
 function updatePointingLocationUi() {
@@ -5638,7 +5684,13 @@ function updatePointingLocationStatus() {
       els.status.textContent = "Ожидаем ответ браузера с координатами…";
     } else if (state.locationError) {
       const message = state.locationError.message || "Ошибка геолокации";
-      els.status.textContent = "Ошибка геолокации: " + message;
+      if (state.locationErrorHint === "ios-insecure") {
+        els.status.textContent = "Safari блокирует геолокацию для незашифрованного соединения. Используйте HTTPS или разрешите доступ в Настройки → Safari → Местоположение.";
+      } else if (state.locationErrorHint === "denied") {
+        els.status.textContent = "Геолокация запрещена браузером. Разрешите доступ или введите координаты вручную.";
+      } else {
+        els.status.textContent = "Ошибка геолокации: " + message;
+      }
     } else if (state.locationWatchId != null) {
       els.status.textContent = state.observer
         ? "Отслеживание включено, координаты обновлены."
@@ -5649,6 +5701,23 @@ function updatePointingLocationStatus() {
       els.status.textContent = "Список спутников станет доступен после загрузки данных TLE.";
     } else {
       els.status.textContent = "Нажмите «Определить координаты» или введите их вручную.";
+    }
+  }
+  if (els.locationHint) {
+    let hint = "";
+    if (state.locationErrorHint === "ios-insecure") {
+      hint = "Safari на iOS блокирует геолокацию для незашифрованного соединения. Откройте интерфейс по HTTPS или разрешите доступ в Настройки → Safari → Местоположение.";
+    } else if (state.locationErrorHint === "denied") {
+      hint = "Проверьте, что браузеру разрешён доступ к геолокации, либо используйте ручной ввод координат.";
+    } else if (!state.locationRequestPending && !state.locationError && !state.observer && !state.locationWatchId && !window.isSecureContext && isProbablyIos()) {
+      hint = "Safari на iOS требует защищённое подключение (HTTPS), иначе геолокация будет заблокирована. При необходимости введите координаты вручную.";
+    }
+    if (hint) {
+      els.locationHint.hidden = false;
+      els.locationHint.textContent = hint;
+    } else {
+      els.locationHint.hidden = true;
+      els.locationHint.textContent = "";
     }
   }
   if (els.locateBtn) {
@@ -5689,6 +5758,7 @@ function applyPointingManualLocation() {
   state.locationRequestPending = false;
   state.observer = observer;
   state.locationError = null;
+  state.locationErrorHint = null;
   updatePointingLocationUi();
   updatePointingSatellites();
   updatePointingBadges();
@@ -5868,34 +5938,81 @@ function renderPointingSatellites() {
       empty.textContent = observer ? "Спутники ниже заданного порога возвышения." : "Нет данных для отображения.";
       els.satList.appendChild(empty);
     } else {
+      const groups = new Map();
       for (const sat of visible) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.dataset.satId = sat.id;
-        btn.className = "pointing-sat-entry" + (sat.id === state.selectedSatId ? " active" : "");
+        const colorInfo = pointingColorForSat(sat);
+        const quadrant = colorInfo.quadrant || "unknown";
+        if (!groups.has(quadrant)) {
+          groups.set(quadrant, []);
+        }
+        groups.get(quadrant).push({ sat, color: colorInfo.color });
+      }
+      const order = ["north", "east", "south", "west", "unknown"];
+      const handled = new Set();
+      const processGroup = (quadrant) => {
+        const entries = groups.get(quadrant);
+        if (!entries || !entries.length) return;
+        handled.add(quadrant);
+        const groupSection = document.createElement("section");
+        groupSection.className = "pointing-sat-group";
+        groupSection.dataset.quadrant = quadrant;
+        const groupColor = pointingColorForQuadrant(quadrant);
+        if (groupColor) {
+          groupSection.style.setProperty("--pointing-sat-color", groupColor);
+        }
+        const title = document.createElement("div");
+        title.className = "pointing-sat-group-title";
+        title.textContent = pointingQuadrantLabel(quadrant);
+        groupSection.appendChild(title);
+        const list = document.createElement("div");
+        list.className = "pointing-sat-group-list";
+        for (const entry of entries) {
+          const { sat, color } = entry;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.dataset.satId = sat.id;
+          btn.className = "pointing-sat-entry" + (sat.id === state.selectedSatId ? " active" : "");
+          if (color) {
+            btn.style.setProperty("--pointing-sat-color", color);
+          }
+          if (quadrant && quadrant !== "unknown") {
+            btn.dataset.quadrant = quadrant;
+          } else {
+            delete btn.dataset.quadrant;
+          }
 
-        const nameEl = document.createElement("div");
-        nameEl.className = "pointing-sat-name";
-        nameEl.textContent = sat.name;
-        btn.appendChild(nameEl);
+          const nameEl = document.createElement("div");
+          nameEl.className = "pointing-sat-name";
+          nameEl.textContent = sat.name;
+          btn.appendChild(nameEl);
 
-        const metaEl = document.createElement("div");
-        metaEl.className = "pointing-sat-meta";
+          const metaEl = document.createElement("div");
+          metaEl.className = "pointing-sat-meta";
 
-        const azEl = document.createElement("span");
-        azEl.textContent = "Азимут " + formatDegrees(sat.azimuth, 1);
-        metaEl.appendChild(azEl);
+          const azEl = document.createElement("span");
+          azEl.textContent = "Азимут " + formatDegrees(sat.azimuth, 1);
+          metaEl.appendChild(azEl);
 
-        const elEl = document.createElement("span");
-        elEl.textContent = "Возвышение " + formatDegrees(sat.elevation, 1);
-        metaEl.appendChild(elEl);
+          const elEl = document.createElement("span");
+          elEl.textContent = "Возвышение " + formatDegrees(sat.elevation, 1);
+          metaEl.appendChild(elEl);
 
-        const lonEl = document.createElement("span");
-        lonEl.textContent = "Долгота " + formatLongitude(sat.subLonDeg, 1);
-        metaEl.appendChild(lonEl);
+          const lonEl = document.createElement("span");
+          lonEl.textContent = "Долгота " + formatLongitude(sat.subLonDeg, 1);
+          metaEl.appendChild(lonEl);
 
-        btn.appendChild(metaEl);
-        els.satList.appendChild(btn);
+          btn.appendChild(metaEl);
+          list.appendChild(btn);
+        }
+        groupSection.appendChild(list);
+        els.satList.appendChild(groupSection);
+      };
+      for (const quadrant of order) {
+        processGroup(quadrant);
+      }
+      for (const [quadrant] of groups) {
+        if (handled.has(quadrant)) continue;
+        processGroup(quadrant);
       }
     }
   }
@@ -5927,7 +6044,7 @@ function renderPointingHorizon(visible) {
   }
   const sorted = [...visible].sort((a, b) => a.azimuth - b.azimuth);
   const laneLast = [];
-  const minGap = 6; // минимальный зазор между маркерами в процентах ширины трека
+  const minGap = 9; // минимальный зазор между маркерами в процентах ширины трека
   for (const sat of sorted) {
     const marker = document.createElement("button");
     marker.type = "button";
@@ -5940,9 +6057,15 @@ function renderPointingHorizon(visible) {
       laneIndex += 1;
     }
     laneLast[laneIndex] = leftPercent;
+    const colorInfo = pointingColorForSat(sat);
     marker.style.setProperty("--pointing-sat-offset", String(laneIndex));
     marker.style.zIndex = String(10 + laneIndex);
-    marker.style.setProperty("--pointing-sat-color", pointingElevationToColor(sat.elevation));
+    marker.style.setProperty("--pointing-sat-color", colorInfo.color);
+    if (colorInfo.quadrant) {
+      marker.dataset.quadrant = colorInfo.quadrant;
+    } else {
+      delete marker.dataset.quadrant;
+    }
     marker.title = sat.name + " — азимут " + formatDegrees(sat.azimuth, 1) + ", возвышение " + formatDegrees(sat.elevation, 1);
     const label = document.createElement("span");
     label.className = "pointing-horizon-label";
@@ -5958,6 +6081,7 @@ function renderPointingCompassRadar(visible) {
   const state = UI.state.pointing;
   const container = els.compassRadar;
   container.innerHTML = "";
+  resetCompassDots();
   if (!Array.isArray(visible) || !visible.length) return;
   const sorted = [...visible].sort((a, b) => a.azimuth - b.azimuth);
   for (const sat of sorted) {
@@ -5965,27 +6089,124 @@ function renderPointingCompassRadar(visible) {
     dot.type = "button";
     dot.dataset.satId = sat.id;
     dot.className = "pointing-compass-sat" + (sat.id === state.selectedSatId ? " active" : "");
-    dot.style.setProperty("--pointing-sat-color", pointingElevationToColor(sat.elevation));
+    const colorInfo = pointingColorForSat(sat);
+    dot.style.setProperty("--pointing-sat-color", colorInfo.color);
+    if (colorInfo.quadrant) {
+      dot.dataset.quadrant = colorInfo.quadrant;
+    } else {
+      delete dot.dataset.quadrant;
+    }
     const angleRad = sat.azimuth * DEG2RAD;
     const elevationClamped = clampNumber(sat.elevation, 0, 90);
-    const radius = (1 - elevationClamped / 90) * 45; // ближе к центру при большем возвышении
-    const x = 50 + Math.sin(angleRad) * radius;
-    const y = 50 - Math.cos(angleRad) * radius;
+    const baseRadius = (1 - elevationClamped / 90) * 45;
+    const placed = placeCompassDot(angleRad, baseRadius);
+    const x = placed.x;
+    const y = placed.y;
     dot.style.left = x + "%";
     dot.style.top = y + "%";
+    dot.style.zIndex = String(50 + Math.round(60 - baseRadius));
     const description = sat.name + " — азимут " + formatDegrees(sat.azimuth, 1) + ", возвышение " + formatDegrees(sat.elevation, 1);
     dot.title = description;
     dot.setAttribute("aria-label", description);
+    const label = document.createElement("span");
+    label.className = "pointing-compass-label";
+    label.textContent = sat.name + " • " + formatDegrees(sat.azimuth, 0) + "/" + formatDegrees(sat.elevation, 0);
+    label.setAttribute("aria-hidden", "true");
+    dot.appendChild(label);
     container.appendChild(dot);
   }
 }
 
-function pointingElevationToColor(elevation) {
-  const normalized = clampNumber((elevation + 5) / 60, 0, 1);
-  const hue = 210 - normalized * 170;
-  const saturation = 80;
-  const lightness = 60 - normalized * 15;
+// Минимизируем перекрытие маркеров на радаре: сдвигаем их ближе к центру при конфликте.
+const compassPlacedDots = [];
+
+function placeCompassDot(angleRad, baseRadius) {
+  const maxAttempts = 4;
+  let radius = baseRadius;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const x = 50 + Math.sin(angleRad) * radius;
+    const y = 50 - Math.cos(angleRad) * radius;
+    const collision = compassPlacedDots.some((pt) => Math.hypot(pt.x - x, pt.y - y) < 6);
+    if (!collision) {
+      compassPlacedDots.push({ x, y });
+      return { x, y };
+    }
+    radius = Math.max(6, radius - 6);
+  }
+  const fallbackX = 50 + Math.sin(angleRad) * baseRadius;
+  const fallbackY = 50 - Math.cos(angleRad) * baseRadius;
+  compassPlacedDots.push({ x: fallbackX, y: fallbackY });
+  return { x: fallbackX, y: fallbackY };
+}
+
+function resetCompassDots() {
+  compassPlacedDots.length = 0;
+}
+
+// Подбор цвета маркера с учётом квадранта и возвышения: так проще визуально различать группы спутников.
+const POINTING_QUADRANT_META = {
+  north: { hue: 205, label: "Север", short: "N", order: 0 },
+  east: { hue: 130, label: "Восток", short: "E", order: 1 },
+  south: { hue: 25, label: "Юг", short: "S", order: 2 },
+  west: { hue: 285, label: "Запад", short: "W", order: 3 },
+  unknown: { hue: 205, label: "Прочие", short: "?", order: 99 },
+};
+
+function pointingQuadrantMeta(quadrant) {
+  return POINTING_QUADRANT_META[quadrant] || POINTING_QUADRANT_META.unknown;
+}
+
+function pointingColorFromHue(hue, elevation) {
+  const normalized = clampNumber(((elevation || 0) + 5) / 65, 0, 1);
+  const saturation = 78;
+  const lightness = 64 - normalized * 20;
   return "hsl(" + Math.round(hue) + ", " + saturation + "%, " + Math.round(lightness) + "%)";
+}
+
+function pointingColorForSat(sat) {
+  const elevation = sat && Number.isFinite(sat.elevation) ? sat.elevation : 0;
+  const quadrant = pointingAzimuthToQuadrant(sat ? sat.azimuth : null);
+  const meta = pointingQuadrantMeta(quadrant);
+  return {
+    color: pointingColorFromHue(meta.hue, elevation),
+    quadrant,
+  };
+}
+
+function pointingColorForQuadrant(quadrant) {
+  const meta = pointingQuadrantMeta(quadrant);
+  return pointingColorFromHue(meta.hue, 30);
+}
+
+function pointingQuadrantLabel(quadrant) {
+  const meta = pointingQuadrantMeta(quadrant);
+  if (quadrant === "unknown") {
+    return "Прочие направления";
+  }
+  return meta.label + " • " + meta.short;
+}
+
+function updatePointingCompassLegend() {
+  const els = UI.els.pointing;
+  if (!els || !els.compassLegend) return;
+  const entries = els.compassLegend.querySelectorAll("[data-quadrant]");
+  entries.forEach((entry) => {
+    const quadrant = entry.dataset.quadrant || "unknown";
+    const color = pointingColorForQuadrant(quadrant);
+    if (color) {
+      entry.style.setProperty("--pointing-sat-color", color);
+    }
+  });
+}
+
+// Определение квадранта компаса по азимуту (С/В/Ю/З) с нормализацией угла.
+function pointingAzimuthToQuadrant(azimuth) {
+  const value = Number.isFinite(azimuth) ? normalizeDegrees(azimuth) : 0;
+  if (value >= 315 || value < 45) return "north";
+  if (value < 135) return "east";
+  if (value < 225) return "south";
+  if (value < 315) return "west";
+  return "north";
 }
 
 function updatePointingBadges() {
@@ -6370,6 +6591,12 @@ function formatDegrees(value, digits = 1) {
   return value.toFixed(digits) + "°";
 }
 
+function isProbablyIos() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return /iPad|iPhone|iPod/i.test(ua);
+}
+
 function formatSignedDegrees(value, digits = 1) {
   if (!Number.isFinite(value)) return "—";
   const sign = value >= 0 ? "+" : "−";
@@ -6604,7 +6831,6 @@ async function resyncAfterEndpointChange() {
     console.warn("[endpoint] resync error", err);
   }
 }
-
 )~~~";;
 
 // libs/sha256.js
