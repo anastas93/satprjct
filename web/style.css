@@ -514,9 +514,10 @@ main {
 
 /* Pointing tab */
 .pointing-intro { margin-top:.4rem; max-width:640px; }
+.pointing-title { margin:0; font-size:clamp(2.6rem, 6vw, 3.4rem); font-weight:800; letter-spacing:.12em; line-height:1.1; }
 .pointing-summary { margin-top:1rem; padding:.9rem 1.1rem; border-radius:1rem; display:flex; flex-wrap:wrap; gap:.75rem 1rem; align-items:center; }
 .pointing-summary-chip { display:inline-flex; align-items:center; gap:.45rem; padding:.55rem .9rem; border-radius:.85rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: color-mix(in oklab, var(--panel-2) 90%, black 10%); font-weight:600; font-size:.9rem; transition:background .2s ease, border-color .2s ease, transform .2s ease; }
-.pointing-summary-chip .pointing-summary-icon { font-size:1.1rem; line-height:1; }
+.pointing-summary-chip .pointing-summary-icon { font-size:.55rem; line-height:1; }
 .pointing-summary-chip[data-state="ok"] { border-color: color-mix(in oklab, var(--good) 45%, var(--panel-2) 55%); background: color-mix(in oklab, var(--good) 20%, var(--panel-2) 80%); color: color-mix(in oklab, var(--good) 75%, white 25%); }
 .pointing-summary-chip[data-state="warn"] { border-color: color-mix(in oklab, var(--danger) 50%, var(--panel-2) 50%); background: color-mix(in oklab, var(--danger) 18%, var(--panel-2) 82%); color: color-mix(in oklab, var(--danger) 80%, white 20%); }
 .pointing-summary-chip[data-state="pending"] { border-color: color-mix(in oklab, var(--accent) 55%, var(--panel-2) 45%); background: color-mix(in oklab, var(--accent) 20%, var(--panel-2) 80%); color: color-mix(in oklab, var(--accent) 70%, white 30%); }
@@ -562,6 +563,7 @@ main {
 .pointing-min-el { display:flex; align-items:center; gap:.4rem; font-size:.85rem; color: var(--muted); }
 .pointing-min-el input { width:140px; }
 .pointing-min-el-value { font-weight:700; color: var(--text); min-width:2.5rem; text-align:right; }
+.pointing-min-el-footer { margin-top:auto; padding-top:.6rem; border-top:1px solid color-mix(in oklab, var(--panel-2) 55%, black 45%); }
 .pointing-select { display:flex; flex-direction:column; gap:.35rem; font-weight:600; }
 .pointing-select select { background: var(--panel-2); color: var(--text); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius:.6rem; padding:.55rem .7rem; outline:none; }
 .pointing-select select:focus { border-color: var(--ring); box-shadow:0 0 0 3px var(--ring); }
@@ -582,7 +584,11 @@ main {
 .pointing-card-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.5rem; }
 .pointing-card-wide { grid-column:1 / -1; }
 .pointing-horizon { position:relative; border-radius:1rem; padding:1.4rem 1.1rem 1.9rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 72%, var(--accent-2) 6%), color-mix(in oklab, var(--panel) 90%, black 10%)); overflow:hidden; min-height:160px; }
-.pointing-horizon::before { content:""; position:absolute; inset:auto 0 0; height:32%; background: linear-gradient(180deg, color-mix(in oklab, var(--panel) 82%, black 18%), color-mix(in oklab, #020617 88%, black 12%)); opacity:.85; }
+.pointing-horizon::before { content:""; position:absolute; inset:auto 0 0; height:32%; background: linear-gradient(180deg, color-mix(in oklab, var(--panel) 82%, black 18%), color-mix(in oklab, #020617 88%, black 12%)); opacity:.85; z-index:0; pointer-events:none; }
+.pointing-horizon::after { content:""; position:absolute; inset:46px 18px 24px; background:
+    repeating-linear-gradient(to right, color-mix(in oklab, var(--panel-2) 65%, black 35%) 0, color-mix(in oklab, var(--panel-2) 65%, black 35%) 1px, transparent 1px, transparent calc(100% / 36)),
+    repeating-linear-gradient(to top, color-mix(in oklab, var(--panel-2) 65%, black 35%) 0, color-mix(in oklab, var(--panel-2) 65%, black 35%) 1px, transparent 1px, transparent calc(100% / 9));
+  opacity:.32; pointer-events:none; z-index:0; }
 .pointing-horizon-azimuths { position:absolute; top:14px; left:18px; right:18px; display:flex; justify-content:space-between; font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; color: color-mix(in oklab, var(--muted) 70%, var(--text) 30%); pointer-events:none; z-index:0; opacity:.85; }
 .pointing-horizon-azimuths span { display:flex; align-items:center; gap:.35rem; }
 .pointing-horizon-azimuths span::before { content:""; display:block; width:1px; height:14px; background: color-mix(in oklab, var(--panel-2) 60%, black 40%); }

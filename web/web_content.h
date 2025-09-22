@@ -134,8 +134,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     </section>
     <!-- Вкладка наведения антенны -->
     <section id="tab-pointing" class="tab" hidden>
-      <h2>Pointing</h2>
-      <p class="pointing-intro small muted">Помощник для наведения антенны на геостационарные спутники с ручным вводом координат в формате MGRS (100 км).</p>
+      <h2 class="pointing-title">pointing</h2>
       <div id="pointingSummary" class="pointing-summary glass">
         <div class="pointing-summary-chip" id="pointingTleBadge" data-state="warn">
           <span class="pointing-summary-icon">🛰️</span>
@@ -151,6 +150,60 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         </div>
       </div>
       <div class="pointing-grid">
+        <article class="pointing-card glass">
+          <h3>Активный спутник</h3>
+          <label class="pointing-select">
+            <span>Выбор спутника</span>
+            <select id="pointingSatSelect"></select>
+          </label>
+          <div class="pointing-sat-details" id="pointingSatDetails" hidden>
+            <div>Долгота подспутника: <strong id="pointingSubLon">—</strong></div>
+            <div>Широта подспутника: <strong id="pointingSubLat">—</strong></div>
+            <div>Высота орбиты: <strong id="pointingSatAltitude">—</strong></div>
+            <div>Дистанция: <strong id="pointingRange">—</strong></div>
+          </div>
+        </article>
+        <article class="pointing-card glass">
+          <h3>Наведение на спутник</h3>
+          <div class="pointing-target-grid">
+            <div class="pointing-target-metric"><span class="label">Азимут</span><strong id="pointingTargetAz">—</strong></div>
+            <div class="pointing-target-metric"><span class="label">Возвышение</span><strong id="pointingTargetEl">—</strong></div>
+          </div>
+          <div class="pointing-compass" id="pointingCompass">
+            <div class="pointing-compass-dial">
+              <div class="pointing-compass-radar" id="pointingCompassRadar"></div>
+              <div class="pointing-compass-north" aria-hidden="true">N</div>
+              <div class="pointing-compass-center"></div>
+              <div class="pointing-compass-graduations"></div>
+            </div>
+            <div class="pointing-compass-legend" id="pointingCompassLegend" aria-hidden="true">
+              <span data-quadrant="north">Север • N</span>
+              <span data-quadrant="east">Восток • E</span>
+              <span data-quadrant="south">Юг • S</span>
+              <span data-quadrant="west">Запад • W</span>
+            </div>
+          </div>
+          <label class="pointing-min-el pointing-min-el-footer">
+            <span>Мин. возвышение</span>
+            <input id="pointingMinElevation" type="range" min="0" max="30" step="1" value="10" />
+            <span id="pointingMinElValue" class="pointing-min-el-value">10°</span>
+          </label>
+        </article>
+        <article class="pointing-card glass pointing-card-wide">
+          <h3>Доступные спутники</h3>
+          <div class="pointing-horizon" id="pointingHorizon">
+            <div class="pointing-horizon-azimuths" aria-hidden="true">
+              <span data-az="0">0° • N</span>
+              <span data-az="90">90° • E</span>
+              <span data-az="180">180° • S</span>
+              <span data-az="270">270° • W</span>
+            </div>
+            <div class="pointing-horizon-track" id="pointingHorizonTrack"></div>
+            <div class="pointing-horizon-empty small muted" id="pointingHorizonEmpty">Укажите координаты, чтобы увидеть спутники.</div>
+          </div>
+          <p class="small muted" id="pointingSatSummary">После выбора квадрата MGRS появится список видимых спутников и их параметры.</p>
+          <div class="pointing-sat-list" id="pointingSatList"></div>
+        </article>
         <article class="pointing-card glass">
           <details id="pointingObserverDetails" class="pointing-observer">
             <summary class="pointing-observer-summary">
@@ -176,61 +229,9 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             </div>
           </details>
         </article>
-        <article class="pointing-card glass">
-          <h3>Наведение на спутник</h3>
-          <div class="pointing-target-grid">
-            <div class="pointing-target-metric"><span class="label">Азимут</span><strong id="pointingTargetAz">—</strong></div>
-            <div class="pointing-target-metric"><span class="label">Возвышение</span><strong id="pointingTargetEl">—</strong></div>
-          </div>
-          <div class="pointing-compass" id="pointingCompass">
-            <div class="pointing-compass-dial">
-              <div class="pointing-compass-radar" id="pointingCompassRadar"></div>
-              <div class="pointing-compass-north" aria-hidden="true">N</div>
-              <div class="pointing-compass-center"></div>
-              <div class="pointing-compass-graduations"></div>
-            </div>
-            <div class="pointing-compass-legend" id="pointingCompassLegend" aria-hidden="true">
-              <span data-quadrant="north">Север • N</span>
-              <span data-quadrant="east">Восток • E</span>
-              <span data-quadrant="south">Юг • S</span>
-              <span data-quadrant="west">Запад • W</span>
-            </div>
-          </div>
-        </article>
-        <article class="pointing-card glass pointing-card-wide">
-          <div class="pointing-card-header">
-            <h3>Доступные спутники</h3>
-            <label class="pointing-min-el">
-              <span>Мин. возвышение</span>
-              <input id="pointingMinElevation" type="range" min="0" max="30" step="1" value="5" />
-              <span id="pointingMinElValue" class="pointing-min-el-value">5°</span>
-            </label>
-          </div>
-          <div class="pointing-horizon" id="pointingHorizon">
-            <div class="pointing-horizon-azimuths" aria-hidden="true">
-              <span data-az="0">0° • N</span>
-              <span data-az="90">90° • E</span>
-              <span data-az="180">180° • S</span>
-              <span data-az="270">270° • W</span>
-            </div>
-            <div class="pointing-horizon-track" id="pointingHorizonTrack"></div>
-            <div class="pointing-horizon-empty small muted" id="pointingHorizonEmpty">Укажите координаты, чтобы увидеть спутники.</div>
-          </div>
-          <p class="small muted" id="pointingSatSummary">После выбора квадрата MGRS появится список видимых спутников и их параметры.</p>
-          <div class="pointing-sat-list" id="pointingSatList"></div>
-          <label class="pointing-select">
-            <span>Активный спутник</span>
-            <select id="pointingSatSelect"></select>
-          </label>
-          <div class="pointing-sat-details" id="pointingSatDetails" hidden>
-            <div>Долгота подспутника: <strong id="pointingSubLon">—</strong></div>
-            <div>Широта подспутника: <strong id="pointingSubLat">—</strong></div>
-            <div>Высота орбиты: <strong id="pointingSatAltitude">—</strong></div>
-            <div>Дистанция: <strong id="pointingRange">—</strong></div>
-          </div>
-        </article>
       </div>
     </section>
+
 
     <!-- Вкладка настроек -->
     <section id="tab-settings" class="tab" hidden>

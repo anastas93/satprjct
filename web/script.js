@@ -71,7 +71,7 @@ const MU_EARTH = 398600.4418;      // гравитационный параме�
 const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
 const TWO_PI = Math.PI * 2;
-const POINTING_DEFAULT_MIN_ELEVATION = 5; // минимальный угол возвышения по умолчанию
+const POINTING_DEFAULT_MIN_ELEVATION = 10; // минимальный угол возвышения по умолчанию
 
 /* Состояние интерфейса */
 const UI = {
