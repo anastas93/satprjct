@@ -117,6 +117,7 @@ const UI = {
       observer: null,
       locationWatchId: null,
       locationError: null,
+      locationErrorHint: null,
       locationRequestPending: false,
       minElevation: POINTING_DEFAULT_MIN_ELEVATION,
       orientation: null,
@@ -4188,6 +4189,7 @@ function togglePointingLocationWatch() {
       { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 },
     );
     state.locationError = null;
+    state.locationErrorHint = null;
     updatePointingLocationStatus();
     note("Отслеживание координат включено");
   } catch (err) {
@@ -4228,6 +4230,7 @@ function handlePointingPosition(position, source) {
   };
   state.observer = observer;
   state.locationError = null;
+  state.locationErrorHint = null;
   updatePointingLocationUi();
   updatePointingSatellites();
   updatePointingBadges();
@@ -4235,10 +4238,26 @@ function handlePointingPosition(position, source) {
 
 function handlePointingLocationError(error) {
   const state = UI.state.pointing;
-  state.locationError = error || { message: "Неизвестная ошибка" };
+  const fallbackError = { message: "Неизвестная ошибка" };
+  const messageText = error && typeof error.message === "string" ? error.message : "";
+  let hint = null;
+  if (messageText && /Origin does not have permission to use Geolocation service/i.test(messageText)) {
+    hint = "ios-insecure";
+  } else if (error && typeof error.code === "number" && error.code === 1) {
+    hint = "denied";
+  }
+  state.locationError = error || fallbackError;
+  state.locationErrorHint = hint;
   updatePointingLocationStatus();
   updatePointingBadges();
-  if (error && error.message) note("Геолокация: " + error.message);
+  let readableMessage = messageText || fallbackError.message;
+  if (hint === "ios-insecure") {
+    readableMessage = "Safari блокирует геолокацию для незашифрованного соединения.";
+  } else if (hint === "denied") {
+    readableMessage = "Доступ к геолокации запрещён браузером.";
+  }
+  note("Геолокация: " + readableMessage +
+    (hint === "ios-insecure" ? " Откройте интерфейс по HTTPS или разрешите доступ в Настройки → Safari → Местоположение." : ""));
 }
 
 function updatePointingLocationUi() {
@@ -4276,7 +4295,13 @@ function updatePointingLocationStatus() {
       els.status.textContent = "Ожидаем ответ браузера с координатами…";
     } else if (state.locationError) {
       const message = state.locationError.message || "Ошибка геолокации";
-      els.status.textContent = "Ошибка геолокации: " + message;
+      if (state.locationErrorHint === "ios-insecure") {
+        els.status.textContent = "Safari блокирует геолокацию для незашифрованного соединения. Используйте HTTPS или разрешите доступ в Настройки → Safari → Местоположение.";
+      } else if (state.locationErrorHint === "denied") {
+        els.status.textContent = "Геолокация запрещена браузером. Разрешите доступ или введите координаты вручную.";
+      } else {
+        els.status.textContent = "Ошибка геолокации: " + message;
+      }
     } else if (state.locationWatchId != null) {
       els.status.textContent = state.observer
         ? "Отслеживание включено, координаты обновлены."
@@ -4327,6 +4352,7 @@ function applyPointingManualLocation() {
   state.locationRequestPending = false;
   state.observer = observer;
   state.locationError = null;
+  state.locationErrorHint = null;
   updatePointingLocationUi();
   updatePointingSatellites();
   updatePointingBadges();
@@ -4578,9 +4604,15 @@ function renderPointingHorizon(visible) {
       laneIndex += 1;
     }
     laneLast[laneIndex] = leftPercent;
+    const colorInfo = pointingColorForSat(sat);
     marker.style.setProperty("--pointing-sat-offset", String(laneIndex));
     marker.style.zIndex = String(10 + laneIndex);
-    marker.style.setProperty("--pointing-sat-color", pointingElevationToColor(sat.elevation));
+    marker.style.setProperty("--pointing-sat-color", colorInfo.color);
+    if (colorInfo.quadrant) {
+      marker.dataset.quadrant = colorInfo.quadrant;
+    } else {
+      delete marker.dataset.quadrant;
+    }
     marker.title = sat.name + " — азимут " + formatDegrees(sat.azimuth, 1) + ", возвышение " + formatDegrees(sat.elevation, 1);
     const label = document.createElement("span");
     label.className = "pointing-horizon-label";
@@ -4603,7 +4635,13 @@ function renderPointingCompassRadar(visible) {
     dot.type = "button";
     dot.dataset.satId = sat.id;
     dot.className = "pointing-compass-sat" + (sat.id === state.selectedSatId ? " active" : "");
-    dot.style.setProperty("--pointing-sat-color", pointingElevationToColor(sat.elevation));
+    const colorInfo = pointingColorForSat(sat);
+    dot.style.setProperty("--pointing-sat-color", colorInfo.color);
+    if (colorInfo.quadrant) {
+      dot.dataset.quadrant = colorInfo.quadrant;
+    } else {
+      delete dot.dataset.quadrant;
+    }
     const angleRad = sat.azimuth * DEG2RAD;
     const elevationClamped = clampNumber(sat.elevation, 0, 90);
     const radius = (1 - elevationClamped / 90) * 45; // ближе к центру при большем возвышении
@@ -4618,12 +4656,29 @@ function renderPointingCompassRadar(visible) {
   }
 }
 
-function pointingElevationToColor(elevation) {
-  const normalized = clampNumber((elevation + 5) / 60, 0, 1);
-  const hue = 210 - normalized * 170;
-  const saturation = 80;
-  const lightness = 60 - normalized * 15;
-  return "hsl(" + Math.round(hue) + ", " + saturation + "%, " + Math.round(lightness) + "%)";
+// Подбор цвета маркера с учётом квадранта и возвышения: так проще визуально различать группы спутников.
+function pointingColorForSat(sat) {
+  const elevation = sat && Number.isFinite(sat.elevation) ? sat.elevation : 0;
+  const quadrant = pointingAzimuthToQuadrant(sat ? sat.azimuth : null);
+  const hueMap = { north: 205, east: 130, south: 25, west: 285 };
+  const baseHue = hueMap[quadrant] != null ? hueMap[quadrant] : 205;
+  const normalized = clampNumber((elevation + 5) / 65, 0, 1);
+  const saturation = 78;
+  const lightness = 64 - normalized * 20;
+  return {
+    color: "hsl(" + Math.round(baseHue) + ", " + saturation + "%, " + Math.round(lightness) + "%)",
+    quadrant,
+  };
+}
+
+// Определение квадранта компаса по азимуту (С/В/Ю/З) с нормализацией угла.
+function pointingAzimuthToQuadrant(azimuth) {
+  const value = Number.isFinite(azimuth) ? normalizeDegrees(azimuth) : 0;
+  if (value >= 315 || value < 45) return "north";
+  if (value < 135) return "east";
+  if (value < 225) return "south";
+  if (value < 315) return "west";
+  return "north";
 }
 
 function updatePointingBadges() {

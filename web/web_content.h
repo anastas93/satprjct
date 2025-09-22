@@ -193,6 +193,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
               <div class="pointing-compass-needle target" id="pointingTargetNeedle"><span>цель</span></div>
               <div class="pointing-compass-needle current" id="pointingCurrentNeedle"><span>курс</span></div>
               <div class="pointing-compass-radar" id="pointingCompassRadar"></div>
+              <div class="pointing-compass-north" aria-hidden="true">N</div>
               <div class="pointing-compass-center"></div>
               <div class="pointing-compass-graduations"></div>
             </div>
@@ -227,6 +228,16 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           </div>
         </article>
         <article class="pointing-card glass pointing-card-wide">
+          <label class="pointing-select">
+            <span>Активный спутник</span>
+            <select id="pointingSatSelect"></select>
+          </label>
+          <div class="pointing-sat-details" id="pointingSatDetails" hidden>
+            <div>Долгота подспутника: <strong id="pointingSubLon">—</strong></div>
+            <div>Широта подспутника: <strong id="pointingSubLat">—</strong></div>
+            <div>Высота орбиты: <strong id="pointingSatAltitude">—</strong></div>
+            <div>Дистанция: <strong id="pointingRange">—</strong></div>
+          </div>
           <div class="pointing-card-header">
             <h3>Доступные спутники</h3>
             <label class="pointing-min-el">
@@ -240,16 +251,6 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             <div class="pointing-horizon-empty small muted" id="pointingHorizonEmpty">Загрузите координаты, чтобы увидеть спутники.</div>
           </div>
           <p class="small muted" id="pointingSatSummary">После загрузки координат здесь появится статистика по видимым спутникам.</p>
-          <label class="pointing-select">
-            <span>Активный спутник</span>
-            <select id="pointingSatSelect"></select>
-          </label>
-          <div class="pointing-sat-details" id="pointingSatDetails" hidden>
-            <div>Долгота подспутника: <strong id="pointingSubLon">—</strong></div>
-            <div>Широта подспутника: <strong id="pointingSubLat">—</strong></div>
-            <div>Высота орбиты: <strong id="pointingSatAltitude">—</strong></div>
-            <div>Дистанция: <strong id="pointingRange">—</strong></div>
-          </div>
           <div class="pointing-sat-list" id="pointingSatList"></div>
         </article>
       </div>
