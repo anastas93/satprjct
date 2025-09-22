@@ -66,7 +66,7 @@ const storage = (() => {
 
 /* Состояние интерфейса */
 const UI = {
-  tabs: ["chat", "channels", "settings", "security", "debug"],
+  tabs: ["chat", "channels", "pointing", "settings", "security", "debug"],
   els: {},
   cfg: {
     endpoint: storage.get("endpoint") || "http://192.168.4.1",
@@ -100,11 +100,37 @@ const UI = {
     testRxmTimers: [],
     autoNightTimer: null,
     autoNightActive: false,
+    pointing: {
+      satellites: [],
+      visible: [],
+      observer: null,
+      locationWatchId: null,
+      locationError: null,
+      minElevation: POINTING_DEFAULT_MIN_ELEVATION,
+      orientation: null,
+      sensorsActive: false,
+      orientationListeners: [],
+      selectedSatId: null,
+      orientationSource: null,
+      manualOrientation: false,
+      tleReady: false,
+    },
   }
 };
 
 // Максимальная длина текста пользовательского сообщения для TESTRXM
 const TEST_RXM_MESSAGE_MAX = 2048;
+
+// Константы для вкладки наведения антенны
+const EARTH_RADIUS_KM = 6378.137; // экваториальный радиус Земли
+const GEO_ALTITUDE_KM = 35786.0;   // высота геостационарной орбиты над поверхностью
+const MU_EARTH = 398600.4418;      // гравитационный параметр Земли (км^3/с^2)
+const DEG2RAD = Math.PI / 180;
+const RAD2DEG = 180 / Math.PI;
+const TWO_PI = Math.PI * 2;
+const POINTING_DEFAULT_MIN_ELEVATION = 5; // минимальный угол возвышения по умолчанию
+const POINTING_ELEVATION_MIN = -30;       // нижний предел визуальной шкалы
+const POINTING_ELEVATION_MAX = 90;        // верхний предел визуальной шкалы
 
 // Справочные данные по каналам из CSV
 const channelReference = {
@@ -391,6 +417,48 @@ async function init() {
     tag: $("#encTestTag"),
     nonce: $("#encTestNonce"),
   };
+  UI.els.pointing = {
+    tab: $("#tab-pointing"),
+    status: $("#pointingStatus"),
+    locateBtn: $("#pointingLocateBtn"),
+    sensorsBtn: $("#pointingSensorsBtn"),
+    lat: $("#pointingLat"),
+    lon: $("#pointingLon"),
+    alt: $("#pointingAlt"),
+    accuracy: $("#pointingAccuracy"),
+    locationSource: $("#pointingLocationSource"),
+    locationTime: $("#pointingLocationTime"),
+    manualLat: $("#pointingManualLat"),
+    manualLon: $("#pointingManualLon"),
+    manualAlt: $("#pointingManualAlt"),
+    manualApply: $("#pointingManualApply"),
+    orientationStatus: $("#pointingOrientationStatus"),
+    manualAz: $("#pointingManualAz"),
+    manualEl: $("#pointingManualEl"),
+    manualOrientationApply: $("#pointingManualOrientationApply"),
+    satSummary: $("#pointingSatSummary"),
+    satSelect: $("#pointingSatSelect"),
+    satDetails: $("#pointingSatDetails"),
+    satList: $("#pointingSatList"),
+    targetAz: $("#pointingTargetAz"),
+    currentAz: $("#pointingCurrentAz"),
+    deltaAz: $("#pointingDeltaAz"),
+    targetEl: $("#pointingTargetEl"),
+    currentEl: $("#pointingCurrentEl"),
+    deltaEl: $("#pointingDeltaEl"),
+    targetNeedle: $("#pointingTargetNeedle"),
+    currentNeedle: $("#pointingCurrentNeedle"),
+    compass: $("#pointingCompass"),
+    elevationScale: $("#pointingElevationScale"),
+    elevationTarget: $("#pointingElevationTarget"),
+    elevationCurrent: $("#pointingElevationCurrent"),
+    minElSlider: $("#pointingMinElevation"),
+    minElValue: $("#pointingMinElValue"),
+    subLon: $("#pointingSubLon"),
+    subLat: $("#pointingSubLat"),
+    satAltitude: $("#pointingSatAltitude"),
+    range: $("#pointingRange"),
+  };
   UI.els.keyRecvBtn = $("#btnKeyRecv");
   UI.els.encTestBtn = $("#btnEncTestRun");
   if (UI.els.channelInfoSetBtn) {
@@ -448,6 +516,7 @@ async function init() {
     }
   }
   setTab(initialTab);
+  initPointingTab();
 
   // Меню на мобильных устройствах
   if (UI.els.menuToggle && UI.els.nav) {
@@ -3856,6 +3925,909 @@ async function requestKeyReceive() {
     setKeyReceiveWaiting(false);
   }
 }
+
+/* Наведение антенны (вкладка Pointing) */
+function initPointingTab() {
+  const els = UI.els.pointing;
+  const state = UI.state.pointing;
+  if (!els || !els.tab) return;
+
+  state.minElevation = POINTING_DEFAULT_MIN_ELEVATION;
+  updatePointingMinElevationUi();
+
+  const rawTle = Array.isArray(window.SAT_TLE_DATA) ? window.SAT_TLE_DATA : [];
+  if (!rawTle.length) {
+    console.warn("[pointing] нет данных TLE — список спутников будет пустым");
+  }
+  state.satellites = parsePointingSatellites(rawTle);
+  state.tleReady = state.satellites.length > 0;
+
+  updatePointingLocationUi();
+  renderPointingSatellites();
+  updatePointingSatDetails(null);
+  updatePointingOrientationUi();
+  updatePointingOrientationStatus();
+
+  if (els.locateBtn) {
+    els.locateBtn.addEventListener("click", () => togglePointingLocationWatch());
+  }
+  if (els.manualApply) {
+    els.manualApply.addEventListener("click", (event) => {
+      event.preventDefault();
+      applyPointingManualLocation();
+    });
+  }
+  if (els.sensorsBtn) {
+    els.sensorsBtn.addEventListener("click", () => {
+      togglePointingSensors().catch((err) => console.warn("[pointing] sensors", err));
+    });
+  }
+  if (els.manualOrientationApply) {
+    els.manualOrientationApply.addEventListener("click", (event) => {
+      event.preventDefault();
+      applyPointingManualOrientation();
+    });
+  }
+  if (els.satSelect) {
+    els.satSelect.addEventListener("change", (event) => {
+      const value = event && event.target ? event.target.value : "";
+      setPointingActiveSatellite(value || null);
+    });
+  }
+  if (els.satList) {
+    els.satList.addEventListener("click", (event) => {
+      const btn = event && event.target ? event.target.closest("button[data-sat-id]") : null;
+      if (!btn || !btn.dataset) return;
+      setPointingActiveSatellite(btn.dataset.satId || null);
+    });
+  }
+  if (els.minElSlider) {
+    const handler = (event) => onPointingMinElevationChange(event);
+    els.minElSlider.addEventListener("input", handler);
+    els.minElSlider.addEventListener("change", handler);
+  }
+  updatePointingLocationStatus();
+  updatePointingSensorButton();
+}
+
+function parsePointingSatellites(rawData) {
+  const list = [];
+  if (!Array.isArray(rawData)) return list;
+  for (const entry of rawData) {
+    const parsed = parsePointingTle(entry);
+    if (parsed) list.push(parsed);
+  }
+  return list;
+}
+
+function parsePointingTle(entry) {
+  if (!entry || !entry.line1 || !entry.line2) return null;
+  try {
+    const line1 = entry.line1;
+    const line2 = entry.line2;
+    const epochYearRaw = line1.slice(18, 20);
+    const epochDayRaw = line1.slice(20, 32);
+    const epochYear = parseInt(epochYearRaw, 10);
+    const dayOfYear = Number(epochDayRaw.trim());
+    if (!Number.isFinite(epochYear) || !Number.isFinite(dayOfYear)) return null;
+    const fullYear = epochYear < 57 ? 2000 + epochYear : 1900 + epochYear;
+    const epoch = tleDayToDate(fullYear, dayOfYear);
+
+    const inclination = Number(line2.slice(8, 16).trim());
+    const raan = Number(line2.slice(17, 25).trim());
+    const eccRaw = line2.slice(26, 33).replace(/\s+/g, "");
+    const eccentricity = eccRaw ? Number("0." + eccRaw) : 0;
+    const argPerigee = Number(line2.slice(34, 42).trim());
+    const meanAnomaly = Number(line2.slice(43, 51).trim());
+    const meanMotion = Number(line2.slice(52, 63).trim());
+    if (!Number.isFinite(meanMotion) || meanMotion <= 0) return null;
+
+    const meanMotionRad = meanMotion * TWO_PI / 86400; // рад/с
+    const semiMajorAxis = Math.cbrt(MU_EARTH / (meanMotionRad * meanMotionRad));
+
+    const rev = line2.slice(63, 68).trim();
+    return {
+      id: String(entry.name || "SAT") + "|" + rev,
+      name: entry.name || "SATELLITE",
+      line1,
+      line2,
+      epoch,
+      inclination,
+      raan,
+      eccentricity,
+      argPerigee,
+      meanAnomaly,
+      meanMotion,
+      meanMotionRad,
+      semiMajorAxis,
+    };
+  } catch (err) {
+    console.warn("[pointing] не удалось разобрать TLE", err, entry);
+    return null;
+  }
+}
+
+function tleDayToDate(year, dayOfYear) {
+  const clampedDay = Math.max(1, dayOfYear);
+  const base = Date.UTC(year, 0, 1);
+  const ms = (clampedDay - 1) * 86400000;
+  return new Date(base + ms);
+}
+
+function onPointingMinElevationChange(event) {
+  const state = UI.state.pointing;
+  const slider = event && event.target ? event.target : null;
+  if (!slider) return;
+  const value = Number(slider.value);
+  if (!Number.isFinite(value)) return;
+  state.minElevation = clampNumber(value, 0, 90);
+  updatePointingMinElevationUi();
+  updatePointingSatellites();
+}
+
+function updatePointingMinElevationUi() {
+  const state = UI.state.pointing;
+  const els = UI.els.pointing;
+  if (!els) return;
+  if (els.minElSlider) {
+    els.minElSlider.value = String(state.minElevation);
+  }
+  if (els.minElValue) {
+    els.minElValue.textContent = formatDegrees(state.minElevation, 0);
+  }
+}
+
+function togglePointingLocationWatch() {
+  const state = UI.state.pointing;
+  if (!navigator.geolocation || typeof navigator.geolocation.watchPosition !== "function") {
+    note("Геолокация не поддерживается браузером");
+    return;
+  }
+  if (state.locationWatchId != null) {
+    stopPointingLocationWatch();
+    note("Отслеживание координат остановлено");
+    return;
+  }
+  try {
+    state.locationWatchId = navigator.geolocation.watchPosition(
+      (position) => handlePointingPosition(position),
+      (error) => handlePointingLocationError(error),
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 },
+    );
+    state.locationError = null;
+    updatePointingLocationStatus();
+    note("Отслеживание координат включено");
+  } catch (err) {
+    console.warn("[pointing] watchPosition", err);
+    note("Не удалось включить отслеживание координат");
+  }
+}
+
+function stopPointingLocationWatch() {
+  const state = UI.state.pointing;
+  if (state.locationWatchId != null && navigator.geolocation && typeof navigator.geolocation.clearWatch === "function") {
+    try {
+      navigator.geolocation.clearWatch(state.locationWatchId);
+    } catch (err) {
+      console.warn("[pointing] clearWatch", err);
+    }
+  }
+  state.locationWatchId = null;
+  updatePointingLocationStatus();
+}
+
+function handlePointingPosition(position) {
+  const state = UI.state.pointing;
+  if (!position || !position.coords) return;
+  const { latitude, longitude, altitude, accuracy } = position.coords;
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+  const observer = {
+    lat: latitude,
+    lon: normalizeDegreesSigned(longitude),
+    heightM: Number.isFinite(altitude) ? altitude : 0,
+    accuracy: Number.isFinite(accuracy) ? accuracy : null,
+    source: "gps",
+    timestamp: new Date(position.timestamp || Date.now()),
+  };
+  state.observer = observer;
+  state.locationError = null;
+  updatePointingLocationUi();
+  updatePointingSatellites();
+}
+
+function handlePointingLocationError(error) {
+  const state = UI.state.pointing;
+  state.locationError = error || { message: "Неизвестная ошибка" };
+  updatePointingLocationStatus();
+  if (error && error.message) note("Геолокация: " + error.message);
+}
+
+function updatePointingLocationUi() {
+  const state = UI.state.pointing;
+  const els = UI.els.pointing;
+  if (!els) return;
+  const observer = state.observer;
+  if (els.lat) els.lat.textContent = observer ? formatDegrees(observer.lat, 4) : "—";
+  if (els.lon) els.lon.textContent = observer ? formatDegrees(normalizeDegrees(observer.lon), 4) : "—";
+  if (els.alt) els.alt.textContent = observer ? formatMeters(observer.heightM) : "—";
+  if (els.accuracy) els.accuracy.textContent = observer && observer.accuracy != null ? formatMeters(observer.accuracy) : "—";
+  if (els.locationSource) {
+    if (!observer) els.locationSource.textContent = "—";
+    else if (observer.source === "manual") els.locationSource.textContent = "ручной ввод";
+    else els.locationSource.textContent = "GPS";
+  }
+  if (els.locationTime) {
+    if (!observer || !observer.timestamp) {
+      els.locationTime.textContent = "—";
+    } else {
+      els.locationTime.textContent = observer.timestamp.toLocaleTimeString();
+    }
+  }
+  updatePointingLocationStatus();
+}
+
+function updatePointingLocationStatus() {
+  const state = UI.state.pointing;
+  const els = UI.els.pointing;
+  if (!els) return;
+  if (els.status) {
+    if (state.locationError) {
+      const message = state.locationError.message || "Ошибка геолокации";
+      els.status.textContent = "Ошибка геолокации: " + message;
+    } else if (state.locationWatchId != null) {
+      els.status.textContent = state.observer
+        ? "Отслеживание включено, координаты обновлены."
+        : "Отслеживание включено, ожидание координат…";
+    } else if (state.observer) {
+      els.status.textContent = "Используются последние сохранённые координаты.";
+    } else if (!state.tleReady) {
+      els.status.textContent = "Список спутников станет доступен после загрузки данных TLE.";
+    } else {
+      els.status.textContent = "Нажмите «Определить координаты» или введите их вручную.";
+    }
+  }
+  if (els.locateBtn) {
+    els.locateBtn.textContent = state.locationWatchId != null ? "Остановить отслеживание" : "Определить координаты";
+  }
+}
+
+function applyPointingManualLocation() {
+  const state = UI.state.pointing;
+  const els = UI.els.pointing;
+  if (!els) return;
+  const lat = Number(els.manualLat ? els.manualLat.value : "");
+  const lon = Number(els.manualLon ? els.manualLon.value : "");
+  const alt = Number(els.manualAlt ? els.manualAlt.value : "");
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+    note("Укажите широту в диапазоне от -90 до 90°");
+    return;
+  }
+  if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
+    note("Укажите долготу в диапазоне от -180 до 180°");
+    return;
+  }
+  const observer = {
+    lat,
+    lon: normalizeDegreesSigned(lon),
+    heightM: Number.isFinite(alt) ? alt : 0,
+    accuracy: null,
+    source: "manual",
+    timestamp: new Date(),
+  };
+  stopPointingLocationWatch();
+  state.observer = observer;
+  state.locationError = null;
+  updatePointingLocationUi();
+  updatePointingSatellites();
+  note("Координаты применены вручную");
+}
+
+function updatePointingSatellites() {
+  const state = UI.state.pointing;
+  const observer = state.observer;
+  if (!observer || !Number.isFinite(observer.lat) || !Number.isFinite(observer.lon)) {
+    state.visible = [];
+    state.selectedSatId = null;
+    renderPointingSatellites();
+    updatePointingSatDetails(null);
+    updatePointingOrientationUi();
+    return;
+  }
+
+  const now = new Date();
+  const gmst = computeGmst(now);
+  const latRad = observer.lat * DEG2RAD;
+  const lonRad = observer.lon * DEG2RAD;
+  const sinLat = Math.sin(latRad);
+  const cosLat = Math.cos(latRad);
+  const sinLon = Math.sin(lonRad);
+  const cosLon = Math.cos(lonRad);
+  const observerRadius = EARTH_RADIUS_KM + (observer.heightM || 0) / 1000;
+  const obsX = observerRadius * cosLat * cosLon;
+  const obsY = observerRadius * cosLat * sinLon;
+  const obsZ = observerRadius * sinLat;
+
+  const visible = [];
+  for (const sat of state.satellites) {
+    const propagated = propagatePointingSatellite(sat, now, gmst);
+    if (!propagated) continue;
+    const { xEcef, yEcef, zEcef, subLon, subLat, radius } = propagated;
+
+    const dx = xEcef - obsX;
+    const dy = yEcef - obsY;
+    const dz = zEcef - obsZ;
+
+    const east = -sinLon * dx + cosLon * dy;
+    const north = -sinLat * cosLon * dx - sinLat * sinLon * dy + cosLat * dz;
+    const up = cosLat * cosLon * dx + cosLat * sinLon * dy + sinLat * dz;
+
+    const azimuth = normalizeDegrees(Math.atan2(east, north) * RAD2DEG);
+    const elevation = Math.atan2(up, Math.hypot(east, north)) * RAD2DEG;
+    const rangeKm = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const altitudeKm = radius - EARTH_RADIUS_KM;
+
+    visible.push({
+      id: sat.id,
+      name: sat.name,
+      azimuth,
+      elevation,
+      rangeKm,
+      subLonDeg: subLon * RAD2DEG,
+      subLatDeg: subLat * RAD2DEG,
+      altitudeKm,
+    });
+  }
+
+  const minEl = state.minElevation != null ? state.minElevation : POINTING_DEFAULT_MIN_ELEVATION;
+  const filtered = visible.filter((sat) => sat.elevation >= minEl);
+  filtered.sort((a, b) => b.elevation - a.elevation);
+  state.visible = filtered;
+
+  if (!filtered.some((sat) => sat.id === state.selectedSatId)) {
+    state.selectedSatId = filtered.length ? filtered[0].id : null;
+  }
+
+  renderPointingSatellites();
+  updatePointingSatDetails(getPointingSelectedSatellite());
+  updatePointingOrientationUi();
+}
+
+function propagatePointingSatellite(sat, date, gmst) {
+  if (!sat) return null;
+  const deltaDays = (date.getTime() - sat.epoch.getTime()) / 86400000;
+  const meanAnomalyDeg = sat.meanAnomaly + sat.meanMotion * 360 * deltaDays;
+  const meanAnomalyRad = meanAnomalyDeg * DEG2RAD;
+  const e = sat.eccentricity || 0;
+  const E = solveKepler(meanAnomalyRad, e);
+  const cosE = Math.cos(E);
+  const sinE = Math.sin(E);
+  const r = sat.semiMajorAxis * (1 - e * cosE);
+  const nu = Math.atan2(Math.sqrt(1 - e * e) * sinE, cosE - e);
+
+  const argPerigeeRad = sat.argPerigee * DEG2RAD;
+  const inclinationRad = sat.inclination * DEG2RAD;
+  const raanRad = sat.raan * DEG2RAD;
+  const u = argPerigeeRad + nu;
+
+  const cosRAAN = Math.cos(raanRad);
+  const sinRAAN = Math.sin(raanRad);
+  const cosInc = Math.cos(inclinationRad);
+  const sinInc = Math.sin(inclinationRad);
+  const cosU = Math.cos(u);
+  const sinU = Math.sin(u);
+
+  const xEci = r * (cosRAAN * cosU - sinRAAN * sinU * cosInc);
+  const yEci = r * (sinRAAN * cosU + cosRAAN * sinU * cosInc);
+  const zEci = r * (sinU * sinInc);
+
+  const cosG = Math.cos(gmst);
+  const sinG = Math.sin(gmst);
+  const xEcef = xEci * cosG + yEci * sinG;
+  const yEcef = -xEci * sinG + yEci * cosG;
+  const zEcef = zEci;
+
+  const subLon = normalizeRadians(Math.atan2(yEcef, xEcef));
+  const subLat = Math.atan2(zEcef, Math.sqrt(xEcef * xEcef + yEcef * yEcef));
+
+  return { xEcef, yEcef, zEcef, subLon, subLat, radius: r };
+}
+
+function computeGmst(date) {
+  const jd = dateToJulian(date);
+  const t = (jd - 2451545.0) / 36525.0;
+  let gmst = 280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * t * t - t * t * t / 38710000;
+  gmst = normalizeDegrees(gmst);
+  return gmst * DEG2RAD;
+}
+
+function dateToJulian(date) {
+  return date.getTime() / 86400000 + 2440587.5;
+}
+
+function renderPointingSatellites() {
+  const state = UI.state.pointing;
+  const els = UI.els.pointing;
+  if (!els) return;
+  const visible = state.visible || [];
+  const observer = state.observer;
+
+  if (els.satSummary) {
+    if (!state.tleReady) {
+      els.satSummary.textContent = "Данные TLE не загружены — список спутников недоступен.";
+    } else if (!observer) {
+      els.satSummary.textContent = "Укажите координаты, чтобы увидеть доступные спутники.";
+    } else if (!visible.length) {
+      els.satSummary.textContent = "Видимых спутников нет (порог " + formatDegrees(state.minElevation, 0) + ").";
+    } else {
+      const maxEl = visible[0].elevation;
+      const minEl = visible[visible.length - 1].elevation;
+      els.satSummary.textContent = "Найдено " + visible.length + " спутника(ов). Возвышение от " +
+        formatDegrees(minEl, 1) + " до " + formatDegrees(maxEl, 1) + ".";
+    }
+  }
+
+  if (els.satSelect) {
+    els.satSelect.innerHTML = "";
+    if (!visible.length) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "Нет спутников";
+      opt.selected = true;
+      opt.disabled = true;
+      els.satSelect.appendChild(opt);
+    } else {
+      for (const sat of visible) {
+        const opt = document.createElement("option");
+        opt.value = sat.id;
+        opt.textContent = sat.name + " (" + formatDegrees(sat.elevation, 1) + ")";
+        if (sat.id === state.selectedSatId) opt.selected = true;
+        els.satSelect.appendChild(opt);
+      }
+    }
+  }
+
+  if (els.satList) {
+    els.satList.innerHTML = "";
+    if (!visible.length) {
+      const empty = document.createElement("div");
+      empty.className = "pointing-empty small muted";
+      empty.textContent = observer ? "Спутники ниже заданного порога возвышения." : "Нет данных для отображения.";
+      els.satList.appendChild(empty);
+    } else {
+      for (const sat of visible) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.dataset.satId = sat.id;
+        btn.className = "pointing-sat-entry" + (sat.id === state.selectedSatId ? " active" : "");
+
+        const nameEl = document.createElement("div");
+        nameEl.className = "pointing-sat-name";
+        nameEl.textContent = sat.name;
+        btn.appendChild(nameEl);
+
+        const metaEl = document.createElement("div");
+        metaEl.className = "pointing-sat-meta";
+
+        const azEl = document.createElement("span");
+        azEl.textContent = "Азимут " + formatDegrees(sat.azimuth, 1);
+        metaEl.appendChild(azEl);
+
+        const elEl = document.createElement("span");
+        elEl.textContent = "Возвышение " + formatDegrees(sat.elevation, 1);
+        metaEl.appendChild(elEl);
+
+        const lonEl = document.createElement("span");
+        lonEl.textContent = "Долгота " + formatLongitude(sat.subLonDeg, 1);
+        metaEl.appendChild(lonEl);
+
+        btn.appendChild(metaEl);
+        els.satList.appendChild(btn);
+      }
+    }
+  }
+}
+
+function setPointingActiveSatellite(id) {
+  const state = UI.state.pointing;
+  if (!id && state.visible && state.visible.length) {
+    state.selectedSatId = state.visible[0].id;
+  } else if (id && state.visible.some((sat) => sat.id === id)) {
+    state.selectedSatId = id;
+  } else {
+    state.selectedSatId = state.visible && state.visible.length ? state.visible[0].id : null;
+  }
+  renderPointingSatellites();
+  updatePointingSatDetails(getPointingSelectedSatellite());
+  updatePointingOrientationUi();
+}
+
+function getPointingSelectedSatellite() {
+  const state = UI.state.pointing;
+  if (!state.visible || !state.visible.length || !state.selectedSatId) return null;
+  return state.visible.find((sat) => sat.id === state.selectedSatId) || null;
+}
+
+function updatePointingSatDetails(sat) {
+  const els = UI.els.pointing;
+  if (!els) return;
+  if (els.satDetails) {
+    els.satDetails.hidden = !sat;
+  }
+  if (!sat) {
+    if (els.subLon) els.subLon.textContent = "—";
+    if (els.subLat) els.subLat.textContent = "—";
+    if (els.satAltitude) els.satAltitude.textContent = "—";
+    if (els.range) els.range.textContent = "—";
+    return;
+  }
+  if (els.subLon) els.subLon.textContent = formatLongitude(sat.subLonDeg, 2);
+  if (els.subLat) els.subLat.textContent = formatLatitude(sat.subLatDeg, 2);
+  if (els.satAltitude) els.satAltitude.textContent = formatKilometers(sat.altitudeKm, 0);
+  if (els.range) els.range.textContent = formatKilometers(sat.rangeKm, 0);
+}
+
+function updatePointingOrientationUi() {
+  const els = UI.els.pointing;
+  if (!els) return;
+  const state = UI.state.pointing;
+  const sat = getPointingSelectedSatellite();
+  const orientation = state.orientation;
+
+  if (els.targetAz) els.targetAz.textContent = sat ? formatDegrees(sat.azimuth, 1) : "—";
+  if (els.targetEl) els.targetEl.textContent = sat ? formatDegrees(sat.elevation, 1) : "—";
+
+  if (els.currentAz) {
+    els.currentAz.textContent = orientation && orientation.heading != null
+      ? formatDegrees(normalizeDegrees(orientation.heading), 1)
+      : "—";
+  }
+  if (els.currentEl) {
+    els.currentEl.textContent = orientation && orientation.elevation != null
+      ? formatDegrees(orientation.elevation, 1)
+      : "—";
+  }
+
+  const deltaAz = sat && orientation && orientation.heading != null
+    ? angleDifference(sat.azimuth, orientation.heading)
+    : null;
+  if (els.deltaAz) {
+    els.deltaAz.textContent = deltaAz != null ? formatSignedDegrees(deltaAz, 1) : "—";
+  }
+
+  const deltaEl = sat && orientation && orientation.elevation != null
+    ? sat.elevation - orientation.elevation
+    : null;
+  if (els.deltaEl) {
+    els.deltaEl.textContent = deltaEl != null ? formatSignedDegrees(deltaEl, 1) : "—";
+  }
+
+  if (els.targetNeedle) {
+    if (sat) {
+      els.targetNeedle.style.transform = "rotate(" + (sat.azimuth - 90) + "deg)";
+      els.targetNeedle.classList.add("active");
+    } else {
+      els.targetNeedle.classList.remove("active");
+    }
+  }
+  if (els.currentNeedle) {
+    if (orientation && orientation.heading != null) {
+      els.currentNeedle.style.transform = "rotate(" + (normalizeDegrees(orientation.heading) - 90) + "deg)";
+      els.currentNeedle.classList.add("active");
+    } else {
+      els.currentNeedle.classList.remove("active");
+    }
+  }
+
+  updatePointingElevationMarkers(sat, orientation);
+}
+
+function updatePointingElevationMarkers(sat, orientation) {
+  const els = UI.els.pointing;
+  if (!els) return;
+  if (els.elevationTarget) {
+    if (sat) {
+      els.elevationTarget.style.left = mapElevationToPercent(sat.elevation) + "%";
+      els.elevationTarget.classList.add("active");
+    } else {
+      els.elevationTarget.classList.remove("active");
+    }
+  }
+  if (els.elevationCurrent) {
+    if (orientation && orientation.elevation != null) {
+      els.elevationCurrent.style.left = mapElevationToPercent(orientation.elevation) + "%";
+      els.elevationCurrent.classList.add("active");
+    } else {
+      els.elevationCurrent.classList.remove("active");
+    }
+  }
+}
+
+function updatePointingSensorButton() {
+  const els = UI.els.pointing;
+  if (!els || !els.sensorsBtn) return;
+  const state = UI.state.pointing;
+  els.sensorsBtn.textContent = state.sensorsActive ? "Отключить датчики" : "Датчики ориентации";
+  els.sensorsBtn.classList.toggle("active", !!state.sensorsActive);
+}
+
+async function togglePointingSensors() {
+  const state = UI.state.pointing;
+  if (state.sensorsActive) {
+    stopPointingSensors();
+    note("Датчики ориентации отключены");
+    return;
+  }
+  if (typeof window === "undefined") {
+    note("Окружение не поддерживает датчики ориентации");
+    return;
+  }
+  if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+    try {
+      const result = await DeviceOrientationEvent.requestPermission();
+      if (result !== "granted") {
+        note("Доступ к датчикам отклонён пользователем");
+        return;
+      }
+    } catch (err) {
+      console.warn("[pointing] requestPermission", err);
+      note("Не удалось получить доступ к датчикам");
+      return;
+    }
+  }
+  const handler = (event) => handlePointingOrientation(event);
+  state.orientationHandler = handler;
+  state.orientationListeners = [];
+  if ("ondeviceorientationabsolute" in window) {
+    window.addEventListener("deviceorientationabsolute", handler, true);
+    state.orientationListeners.push("deviceorientationabsolute");
+  }
+  window.addEventListener("deviceorientation", handler, true);
+  state.orientationListeners.push("deviceorientation");
+  state.sensorsActive = true;
+  state.orientationSource = "sensor";
+  state.manualOrientation = false;
+  updatePointingSensorButton();
+  updatePointingOrientationStatus();
+  note("Датчики ориентации включены");
+}
+
+function stopPointingSensors() {
+  const state = UI.state.pointing;
+  if (Array.isArray(state.orientationListeners) && state.orientationHandler) {
+    for (const type of state.orientationListeners) {
+      window.removeEventListener(type, state.orientationHandler, true);
+    }
+  } else if (state.orientationHandler) {
+    window.removeEventListener("deviceorientation", state.orientationHandler, true);
+    window.removeEventListener("deviceorientationabsolute", state.orientationHandler, true);
+  }
+  state.orientationListeners = [];
+  state.orientationHandler = null;
+  state.sensorsActive = false;
+  updatePointingSensorButton();
+  updatePointingOrientationStatus();
+}
+
+function handlePointingOrientation(event) {
+  const state = UI.state.pointing;
+  const orientation = computeOrientationFromEvent(event);
+  if (!orientation) return;
+  state.orientation = orientation;
+  state.orientationSource = "sensor";
+  state.manualOrientation = false;
+  updatePointingOrientationUi();
+  updatePointingOrientationStatus();
+}
+
+function computeOrientationFromEvent(event) {
+  if (!event) return null;
+  let heading = null;
+  let absolute = false;
+  if (typeof event.webkitCompassHeading === "number") {
+    heading = normalizeDegrees(event.webkitCompassHeading);
+    absolute = true;
+  }
+  const alpha = typeof event.alpha === "number" ? event.alpha : null;
+  const beta = typeof event.beta === "number" ? event.beta : null;
+  const gamma = typeof event.gamma === "number" ? event.gamma : null;
+  let derived = null;
+  if (alpha != null && beta != null && gamma != null) {
+    derived = computeOrientationFromEuler(alpha, beta, gamma);
+    if (derived.heading != null && heading == null) heading = derived.heading;
+  }
+  if (heading == null && typeof event.alpha === "number") {
+    heading = normalizeDegrees(360 - event.alpha);
+  }
+  if (heading == null) return null;
+  return {
+    heading: normalizeDegrees(heading),
+    elevation: derived && derived.elevation != null
+      ? clampNumber(derived.elevation, POINTING_ELEVATION_MIN, POINTING_ELEVATION_MAX)
+      : null,
+    roll: derived && derived.roll != null ? derived.roll : null,
+    absolute: absolute || event.absolute === true,
+    timestamp: Date.now(),
+    source: "sensor",
+  };
+}
+
+function computeOrientationFromEuler(alphaDeg, betaDeg, gammaDeg) {
+  const alpha = alphaDeg * DEG2RAD;
+  const beta = betaDeg * DEG2RAD;
+  const gamma = gammaDeg * DEG2RAD;
+
+  const cA = Math.cos(alpha);
+  const sA = Math.sin(alpha);
+  const cB = Math.cos(beta);
+  const sB = Math.sin(beta);
+  const cG = Math.cos(gamma);
+  const sG = Math.sin(gamma);
+
+  const m11 = cA * cG - sA * sB * sG;
+  const m12 = -cB * sA;
+  const m13 = cA * sG + cG * sA * sB;
+  const m21 = cG * sA + cA * sB * sG;
+  const m22 = cA * cB;
+  const m23 = sA * sG - cA * cG * sB;
+  const m31 = -cB * sG;
+  const m32 = sB;
+  const m33 = cB * cG;
+
+  const fx = -m13;
+  const fy = -m23;
+  const fz = -m33;
+  const norm = Math.hypot(fx, fy, fz) || 1;
+  const nx = fx / norm;
+  const ny = fy / norm;
+  const nz = fz / norm;
+
+  let heading = Math.atan2(nx, ny) * RAD2DEG;
+  if (Number.isFinite(heading)) heading = normalizeDegrees(heading);
+  else heading = null;
+
+  const elevation = Math.asin(clampNumber(nz, -1, 1)) * RAD2DEG;
+  const roll = Math.atan2(m32, m31) * RAD2DEG;
+
+  return { heading, elevation, roll };
+}
+
+function applyPointingManualOrientation() {
+  const state = UI.state.pointing;
+  const els = UI.els.pointing;
+  if (!els) return;
+  const az = Number(els.manualAz ? els.manualAz.value : "");
+  const el = Number(els.manualEl ? els.manualEl.value : "");
+  if (!Number.isFinite(az)) {
+    note("Укажите азимут устройства в градусах");
+    return;
+  }
+  if (!Number.isFinite(el)) {
+    note("Укажите наклон устройства в градусах");
+    return;
+  }
+  stopPointingSensors();
+  state.orientation = {
+    heading: normalizeDegrees(az),
+    elevation: clampNumber(el, POINTING_ELEVATION_MIN, POINTING_ELEVATION_MAX),
+    roll: null,
+    source: "manual",
+    absolute: true,
+    timestamp: Date.now(),
+  };
+  state.manualOrientation = true;
+  state.orientationSource = "manual";
+  updatePointingOrientationUi();
+  updatePointingOrientationStatus();
+  note("Ориентация обновлена вручную");
+}
+
+function updatePointingOrientationStatus() {
+  const els = UI.els.pointing;
+  if (!els || !els.orientationStatus) return;
+  const state = UI.state.pointing;
+  if (state.sensorsActive) {
+    if (state.orientation && state.orientation.heading != null) {
+      els.orientationStatus.textContent = state.orientation.absolute
+        ? "Датчики активны, используются абсолютные показания."
+        : "Датчики активны, используются относительные показания.";
+    } else {
+      els.orientationStatus.textContent = "Датчики активны, ожидание данных…";
+    }
+  } else if (state.orientation && state.orientation.source === "manual") {
+    els.orientationStatus.textContent = "Используются вручную введённые значения.";
+  } else {
+    els.orientationStatus.textContent = "Датчики не активны.";
+  }
+}
+
+function formatDegrees(value, digits = 1) {
+  if (!Number.isFinite(value)) return "—";
+  return value.toFixed(digits) + "°";
+}
+
+function formatSignedDegrees(value, digits = 1) {
+  if (!Number.isFinite(value)) return "—";
+  const sign = value >= 0 ? "+" : "−";
+  return sign + Math.abs(value).toFixed(digits) + "°";
+}
+
+function formatLongitude(value, digits = 1) {
+  if (!Number.isFinite(value)) return "—";
+  const suffix = value >= 0 ? "E" : "W";
+  return Math.abs(value).toFixed(digits) + "°" + suffix;
+}
+
+function formatLatitude(value, digits = 1) {
+  if (!Number.isFinite(value)) return "—";
+  const suffix = value >= 0 ? "N" : "S";
+  return Math.abs(value).toFixed(digits) + "°" + suffix;
+}
+
+function formatMeters(value) {
+  if (!Number.isFinite(value)) return "—";
+  return value.toFixed(0) + " м";
+}
+
+function formatKilometers(value, digits = 0) {
+  if (!Number.isFinite(value)) return "—";
+  return value.toFixed(digits) + " км";
+}
+
+function normalizeDegrees(value) {
+  if (!Number.isFinite(value)) return value;
+  let result = value % 360;
+  if (result < 0) result += 360;
+  return result;
+}
+
+function normalizeDegreesSigned(value) {
+  if (!Number.isFinite(value)) return value;
+  let result = normalizeDegrees(value);
+  if (result > 180) result -= 360;
+  return result;
+}
+
+function normalizeRadians(value) {
+  if (!Number.isFinite(value)) return value;
+  let result = value % TWO_PI;
+  if (result <= -Math.PI) result += TWO_PI;
+  else if (result > Math.PI) result -= TWO_PI;
+  return result;
+}
+
+function angleDifference(target, current) {
+  if (!Number.isFinite(target) || !Number.isFinite(current)) return null;
+  let diff = normalizeDegrees(target) - normalizeDegrees(current);
+  while (diff > 180) diff -= 360;
+  while (diff < -180) diff += 360;
+  return diff;
+}
+
+function clampNumber(value, min, max) {
+  if (!Number.isFinite(value)) return min;
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
+function solveKepler(meanAnomaly, eccentricity) {
+  let E = meanAnomaly;
+  for (let i = 0; i < 10; i++) {
+    const f = E - eccentricity * Math.sin(E) - meanAnomaly;
+    const fPrime = 1 - eccentricity * Math.cos(E);
+    const delta = f / fPrime;
+    E -= delta;
+    if (Math.abs(delta) < 1e-8) break;
+  }
+  return E;
+}
+
+function mapElevationToPercent(value) {
+  const span = POINTING_ELEVATION_MAX - POINTING_ELEVATION_MIN;
+  const clamped = clampNumber(value, POINTING_ELEVATION_MIN, POINTING_ELEVATION_MAX);
+  return ((clamped - POINTING_ELEVATION_MIN) / span) * 100;
+}
+
 
 /* Утилиты */
 // Возвращает управление циклу отрисовки, чтобы элементы UI успевали обновляться

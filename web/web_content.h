@@ -21,6 +21,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <nav class="nav" id="siteNav">
       <a href="#" data-tab="chat">Chat</a>
       <a href="#" data-tab="channels">Channels/Ping</a>
+      <a href="#" data-tab="pointing">Pointing</a>
       <a href="#" data-tab="settings">Settings</a>
       <a href="#" data-tab="security">Security</a>
       <a href="#" data-tab="debug">Debug</a>
@@ -131,6 +132,107 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         </aside>
       </div>
     </section>
+    <!-- Вкладка наведения антенны -->
+    <section id="tab-pointing" class="tab" hidden>
+      <h2>Pointing</h2>
+      <p class="pointing-intro small muted">Интерактивный помощник для наведения антенны на геостационарные спутники. Используйте GPS телефона или введите координаты вручную.</p>
+      <div class="pointing-grid">
+        <article class="pointing-card glass">
+          <h3>Положение наблюдателя</h3>
+          <p id="pointingStatus" class="small muted">Нажмите «Определить координаты», чтобы начать.</p>
+          <div class="pointing-actions">
+            <button id="pointingLocateBtn" class="btn">Определить координаты</button>
+            <button id="pointingSensorsBtn" class="btn ghost">Датчики ориентации</button>
+          </div>
+          <dl class="pointing-info">
+            <div><dt>Широта</dt><dd><span id="pointingLat">—</span></dd></div>
+            <div><dt>Долгота</dt><dd><span id="pointingLon">—</span></dd></div>
+            <div><dt>Высота</dt><dd><span id="pointingAlt">—</span></dd></div>
+            <div><dt>Точность</dt><dd><span id="pointingAccuracy">—</span></dd></div>
+            <div><dt>Источник</dt><dd><span id="pointingLocationSource">—</span></dd></div>
+            <div><dt>Обновлено</dt><dd><span id="pointingLocationTime">—</span></dd></div>
+          </dl>
+          <div class="pointing-manual">
+            <div class="pointing-manual-title">Ручной ввод</div>
+            <div class="pointing-manual-grid">
+              <label>Широта (°)
+                <input id="pointingManualLat" type="number" step="0.0001" min="-90" max="90" placeholder="55.7558" />
+              </label>
+              <label>Долгота (°)
+                <input id="pointingManualLon" type="number" step="0.0001" min="-180" max="180" placeholder="37.6173" />
+              </label>
+              <label>Высота (м)
+                <input id="pointingManualAlt" type="number" step="1" min="-500" max="9000" placeholder="200" />
+              </label>
+            </div>
+            <button id="pointingManualApply" class="btn ghost">Применить</button>
+          </div>
+        </article>
+        <article class="pointing-card glass">
+          <h3>Ориентация антенны</h3>
+          <p id="pointingOrientationStatus" class="small muted">Датчики не активны.</p>
+          <div class="pointing-compass" id="pointingCompass">
+            <div class="pointing-compass-dial">
+              <div class="pointing-compass-needle target" id="pointingTargetNeedle"><span>цель</span></div>
+              <div class="pointing-compass-needle current" id="pointingCurrentNeedle"><span>курс</span></div>
+              <div class="pointing-compass-center"></div>
+              <div class="pointing-compass-graduations"></div>
+            </div>
+          </div>
+          <div class="pointing-angles">
+            <div class="pointing-angle"><span class="label">Азимут цели</span><strong id="pointingTargetAz">—</strong></div>
+            <div class="pointing-angle"><span class="label">Азимут устройства</span><strong id="pointingCurrentAz">—</strong></div>
+            <div class="pointing-angle"><span class="label">Разница</span><strong id="pointingDeltaAz">—</strong></div>
+          </div>
+          <div class="pointing-elevation">
+            <div class="pointing-elevation-scale" id="pointingElevationScale">
+              <div class="pointing-elevation-target" id="pointingElevationTarget"><span>цель</span></div>
+              <div class="pointing-elevation-current" id="pointingElevationCurrent"><span>курс</span></div>
+            </div>
+            <div class="pointing-angles">
+              <div class="pointing-angle"><span class="label">Возвышение цели</span><strong id="pointingTargetEl">—</strong></div>
+              <div class="pointing-angle"><span class="label">Наклон устройства</span><strong id="pointingCurrentEl">—</strong></div>
+              <div class="pointing-angle"><span class="label">Разница</span><strong id="pointingDeltaEl">—</strong></div>
+            </div>
+          </div>
+          <div class="pointing-manual">
+            <div class="pointing-manual-title">Ручная ориентация</div>
+            <div class="pointing-manual-grid">
+              <label>Азимут (°)
+                <input id="pointingManualAz" type="number" step="0.1" min="0" max="360" placeholder="180" />
+              </label>
+              <label>Наклон (°)
+                <input id="pointingManualEl" type="number" step="0.1" min="-30" max="90" placeholder="30" />
+              </label>
+            </div>
+            <button id="pointingManualOrientationApply" class="btn ghost">Сохранить</button>
+          </div>
+        </article>
+        <article class="pointing-card glass pointing-card-wide">
+          <div class="pointing-card-header">
+            <h3>Доступные спутники</h3>
+            <label class="pointing-min-el">
+              <span>Мин. возвышение</span>
+              <input id="pointingMinElevation" type="range" min="0" max="30" step="1" value="5" />
+              <span id="pointingMinElValue" class="pointing-min-el-value">5°</span>
+            </label>
+          </div>
+          <p class="small muted" id="pointingSatSummary">Загрузите координаты, чтобы увидеть список спутников.</p>
+          <label class="pointing-select">
+            <span>Активный спутник</span>
+            <select id="pointingSatSelect"></select>
+          </label>
+          <div class="pointing-sat-details" id="pointingSatDetails" hidden>
+            <div>Долгота подспутника: <strong id="pointingSubLon">—</strong></div>
+            <div>Широта подспутника: <strong id="pointingSubLat">—</strong></div>
+            <div>Высота орбиты: <strong id="pointingSatAltitude">—</strong></div>
+            <div>Дистанция: <strong id="pointingRange">—</strong></div>
+          </div>
+          <div class="pointing-sat-list" id="pointingSatList"></div>
+        </article>
+      </div>
+    </section>
+
     <!-- Вкладка настроек -->
     <section id="tab-settings" class="tab" hidden>
       <h2>Settings</h2>
@@ -283,6 +385,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <div class="footer-meta" id="footerMeta">Powered by AS Systems · <span id="appVersion">—</span></div>
   </footer>
   <div id="toast" class="toast" hidden></div>
+  <script src="libs/geostat_tle.js"></script>
   <script src="libs/sha256.js"></script>
   <script src="script.js"></script>
 </body>
