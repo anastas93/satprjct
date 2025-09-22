@@ -117,6 +117,7 @@ const UI = {
       observer: null,
       locationWatchId: null,
       locationError: null,
+      locationRequestPending: false,
       minElevation: POINTING_DEFAULT_MIN_ELEVATION,
       orientation: null,
       sensorsActive: false,
@@ -125,6 +126,7 @@ const UI = {
       orientationSource: null,
       manualOrientation: false,
       tleReady: false,
+      tleError: null,
     },
   }
 };
@@ -420,6 +422,14 @@ async function init() {
   UI.els.pointing = {
     tab: $("#tab-pointing"),
     status: $("#pointingStatus"),
+    summary: $("#pointingSummary"),
+    tleBadge: $("#pointingTleBadge"),
+    tleBadgeText: $("#pointingTleText"),
+    locationBadge: $("#pointingLocationBadge"),
+    locationBadgeText: $("#pointingLocationText"),
+    satBadge: $("#pointingSatBadge"),
+    satBadgeText: $("#pointingSatText"),
+    locateOnceBtn: $("#pointingLocateOnceBtn"),
     locateBtn: $("#pointingLocateBtn"),
     sensorsBtn: $("#pointingSensorsBtn"),
     lat: $("#pointingLat"),
@@ -440,6 +450,9 @@ async function init() {
     satSelect: $("#pointingSatSelect"),
     satDetails: $("#pointingSatDetails"),
     satList: $("#pointingSatList"),
+    horizon: $("#pointingHorizon"),
+    horizonTrack: $("#pointingHorizonTrack"),
+    horizonEmpty: $("#pointingHorizonEmpty"),
     targetAz: $("#pointingTargetAz"),
     currentAz: $("#pointingCurrentAz"),
     deltaAz: $("#pointingDeltaAz"),
@@ -3941,13 +3954,21 @@ function initPointingTab() {
   }
   state.satellites = parsePointingSatellites(rawTle);
   state.tleReady = state.satellites.length > 0;
+  state.tleError = state.tleReady ? null : (rawTle.length ? "Некорректные TLE" : "Нет данных TLE");
 
   updatePointingLocationUi();
   renderPointingSatellites();
   updatePointingSatDetails(null);
   updatePointingOrientationUi();
   updatePointingOrientationStatus();
+  updatePointingBadges();
 
+  if (els.locateOnceBtn) {
+    els.locateOnceBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      requestPointingLocationOnce();
+    });
+  }
   if (els.locateBtn) {
     els.locateBtn.addEventListener("click", () => togglePointingLocationWatch());
   }
@@ -3981,6 +4002,13 @@ function initPointingTab() {
       setPointingActiveSatellite(btn.dataset.satId || null);
     });
   }
+  if (els.horizon) {
+    els.horizon.addEventListener("click", (event) => {
+      const marker = event && event.target ? event.target.closest("button[data-sat-id]") : null;
+      if (!marker || !marker.dataset) return;
+      setPointingActiveSatellite(marker.dataset.satId || null);
+    });
+  }
   if (els.minElSlider) {
     const handler = (event) => onPointingMinElevationChange(event);
     els.minElSlider.addEventListener("input", handler);
@@ -3988,6 +4016,7 @@ function initPointingTab() {
   }
   updatePointingLocationStatus();
   updatePointingSensorButton();
+  updatePointingLocationControls();
 }
 
 function parsePointingSatellites(rawData) {
@@ -4077,6 +4106,62 @@ function updatePointingMinElevationUi() {
   }
 }
 
+function requestPointingLocationOnce() {
+  const state = UI.state.pointing;
+  if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
+    note("Геолокация не поддерживается браузером");
+    return;
+  }
+  if (state.locationRequestPending) return;
+  state.locationRequestPending = true;
+  updatePointingLocationControls();
+  updatePointingLocationStatus();
+  try {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        state.locationRequestPending = false;
+        handlePointingPosition(position, "browser");
+        updatePointingLocationControls();
+        updatePointingLocationStatus();
+        note("Координаты обновлены по запросу браузера");
+      },
+      (error) => {
+        state.locationRequestPending = false;
+        handlePointingLocationError(error);
+        updatePointingLocationControls();
+        updatePointingLocationStatus();
+      },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 },
+    );
+  } catch (err) {
+    console.warn("[pointing] getCurrentPosition", err);
+    state.locationRequestPending = false;
+    updatePointingLocationControls();
+    updatePointingLocationStatus();
+    note("Не удалось запросить координаты у браузера");
+  }
+}
+
+function updatePointingLocationControls() {
+  const els = UI.els.pointing;
+  if (!els) return;
+  const state = UI.state.pointing;
+  const pending = !!state.locationRequestPending;
+  if (els.locateOnceBtn) {
+    els.locateOnceBtn.disabled = pending;
+    if (pending) {
+      els.locateOnceBtn.setAttribute("aria-busy", "true");
+      els.locateOnceBtn.textContent = "Запрос координат…";
+    } else {
+      els.locateOnceBtn.removeAttribute("aria-busy");
+      els.locateOnceBtn.textContent = "Запросить позицию";
+    }
+  }
+  if (els.locateBtn) {
+    els.locateBtn.disabled = pending && state.locationWatchId == null;
+  }
+}
+
 function togglePointingLocationWatch() {
   const state = UI.state.pointing;
   if (!navigator.geolocation || typeof navigator.geolocation.watchPosition !== "function") {
@@ -4101,6 +4186,8 @@ function togglePointingLocationWatch() {
     console.warn("[pointing] watchPosition", err);
     note("Не удалось включить отслеживание координат");
   }
+  updatePointingLocationControls();
+  updatePointingBadges();
 }
 
 function stopPointingLocationWatch() {
@@ -4114,9 +4201,11 @@ function stopPointingLocationWatch() {
   }
   state.locationWatchId = null;
   updatePointingLocationStatus();
+  updatePointingLocationControls();
+  updatePointingBadges();
 }
 
-function handlePointingPosition(position) {
+function handlePointingPosition(position, source) {
   const state = UI.state.pointing;
   if (!position || !position.coords) return;
   const { latitude, longitude, altitude, accuracy } = position.coords;
@@ -4126,19 +4215,21 @@ function handlePointingPosition(position) {
     lon: normalizeDegreesSigned(longitude),
     heightM: Number.isFinite(altitude) ? altitude : 0,
     accuracy: Number.isFinite(accuracy) ? accuracy : null,
-    source: "gps",
+    source: source === "browser" ? "browser" : "gps",
     timestamp: new Date(position.timestamp || Date.now()),
   };
   state.observer = observer;
   state.locationError = null;
   updatePointingLocationUi();
   updatePointingSatellites();
+  updatePointingBadges();
 }
 
 function handlePointingLocationError(error) {
   const state = UI.state.pointing;
   state.locationError = error || { message: "Неизвестная ошибка" };
   updatePointingLocationStatus();
+  updatePointingBadges();
   if (error && error.message) note("Геолокация: " + error.message);
 }
 
@@ -4154,6 +4245,7 @@ function updatePointingLocationUi() {
   if (els.locationSource) {
     if (!observer) els.locationSource.textContent = "—";
     else if (observer.source === "manual") els.locationSource.textContent = "ручной ввод";
+    else if (observer.source === "browser") els.locationSource.textContent = "браузер";
     else els.locationSource.textContent = "GPS";
   }
   if (els.locationTime) {
@@ -4164,6 +4256,7 @@ function updatePointingLocationUi() {
     }
   }
   updatePointingLocationStatus();
+  updatePointingBadges();
 }
 
 function updatePointingLocationStatus() {
@@ -4171,7 +4264,9 @@ function updatePointingLocationStatus() {
   const els = UI.els.pointing;
   if (!els) return;
   if (els.status) {
-    if (state.locationError) {
+    if (state.locationRequestPending) {
+      els.status.textContent = "Ожидаем ответ браузера с координатами…";
+    } else if (state.locationError) {
       const message = state.locationError.message || "Ошибка геолокации";
       els.status.textContent = "Ошибка геолокации: " + message;
     } else if (state.locationWatchId != null) {
@@ -4187,7 +4282,13 @@ function updatePointingLocationStatus() {
     }
   }
   if (els.locateBtn) {
-    els.locateBtn.textContent = state.locationWatchId != null ? "Остановить отслеживание" : "Определить координаты";
+    if (state.locationWatchId != null) {
+      els.locateBtn.textContent = "Остановить отслеживание";
+    } else if (state.locationRequestPending) {
+      els.locateBtn.textContent = "Ожидание координат";
+    } else {
+      els.locateBtn.textContent = "Включить отслеживание";
+    }
   }
 }
 
@@ -4215,11 +4316,14 @@ function applyPointingManualLocation() {
     timestamp: new Date(),
   };
   stopPointingLocationWatch();
+  state.locationRequestPending = false;
   state.observer = observer;
   state.locationError = null;
   updatePointingLocationUi();
   updatePointingSatellites();
+  updatePointingBadges();
   note("Координаты применены вручную");
+  updatePointingLocationControls();
 }
 
 function updatePointingSatellites() {
@@ -4423,6 +4527,118 @@ function renderPointingSatellites() {
         btn.appendChild(metaEl);
         els.satList.appendChild(btn);
       }
+    }
+  }
+  renderPointingHorizon(visible);
+  updatePointingBadges();
+}
+
+function renderPointingHorizon(visible) {
+  const els = UI.els.pointing;
+  if (!els || !els.horizonTrack) return;
+  const state = UI.state.pointing;
+  els.horizonTrack.innerHTML = "";
+  if (!Array.isArray(visible) || !visible.length) {
+    if (els.horizonEmpty) {
+      els.horizonEmpty.hidden = false;
+      if (!state.tleReady) {
+        els.horizonEmpty.textContent = "Ожидание загрузки TLE.";
+      } else if (!state.observer) {
+        els.horizonEmpty.textContent = "Укажите координаты для визуализации спутников.";
+      } else {
+        els.horizonEmpty.textContent = "Спутники ниже выбранного порога возвышения.";
+      }
+    }
+    return;
+  }
+  if (els.horizonEmpty) {
+    els.horizonEmpty.hidden = true;
+  }
+  for (const sat of visible) {
+    const marker = document.createElement("button");
+    marker.type = "button";
+    marker.dataset.satId = sat.id;
+    marker.className = "pointing-horizon-sat" + (sat.id === state.selectedSatId ? " active" : "");
+    const leftPercent = clampNumber(sat.azimuth / 360, 0, 1) * 100;
+    marker.style.left = leftPercent + "%";
+    marker.style.setProperty("--pointing-sat-color", pointingElevationToColor(sat.elevation));
+    marker.title = sat.name + " — азимут " + formatDegrees(sat.azimuth, 1) + ", возвышение " + formatDegrees(sat.elevation, 1);
+    const label = document.createElement("span");
+    label.className = "pointing-horizon-label";
+    label.textContent = sat.name + " • " + formatDegrees(sat.azimuth, 0) + "/" + formatDegrees(sat.elevation, 0);
+    marker.appendChild(label);
+    els.horizonTrack.appendChild(marker);
+  }
+}
+
+function pointingElevationToColor(elevation) {
+  const normalized = clampNumber((elevation + 5) / 60, 0, 1);
+  const hue = 210 - normalized * 170;
+  const saturation = 80;
+  const lightness = 60 - normalized * 15;
+  return "hsl(" + Math.round(hue) + ", " + saturation + "%, " + Math.round(lightness) + "%)";
+}
+
+function updatePointingBadges() {
+  const els = UI.els.pointing;
+  const state = UI.state.pointing;
+  if (!els) return;
+  if (els.tleBadge) {
+    const total = state.satellites ? state.satellites.length : 0;
+    let status = "warn";
+    let text = "TLE • нет данных";
+    if (state.tleReady && total > 0) {
+      status = "ok";
+      text = "TLE • " + total;
+    } else if (state.tleError) {
+      text = "TLE • " + state.tleError;
+    }
+    els.tleBadge.dataset.state = status;
+    if (els.tleBadgeText) {
+      els.tleBadgeText.textContent = text;
+    } else {
+      els.tleBadge.textContent = text;
+    }
+  }
+  if (els.locationBadge) {
+    let status = "idle";
+    let text = "Позиция • нет данных";
+    if (state.locationRequestPending) {
+      status = "pending";
+      text = "Позиция • запрос";
+    } else if (state.locationError) {
+      status = "warn";
+      text = "Позиция • ошибка";
+    } else if (state.locationWatchId != null) {
+      status = state.observer ? "ok" : "pending";
+      text = state.observer ? "Позиция • GPS" : "Позиция • ожидание";
+    } else if (state.observer) {
+      status = "ok";
+      text = state.observer.source === "manual" ? "Позиция • ручной ввод" : "Позиция • GPS";
+    }
+    els.locationBadge.dataset.state = status;
+    if (els.locationBadgeText) {
+      els.locationBadgeText.textContent = text;
+    } else {
+      els.locationBadge.textContent = text;
+    }
+  }
+  if (els.satBadge) {
+    const count = state.visible ? state.visible.length : 0;
+    const status = count > 0 ? "ok" : state.observer ? "warn" : "idle";
+    let text = "Спутники • —";
+    if (count > 0) {
+      text = "Спутники • " + count;
+    } else if (state.observer && state.tleReady) {
+      text = "Спутники • вне порога";
+    } else if (!state.tleReady) {
+      text = "Спутники • ждём TLE";
+    }
+    els.satBadge.dataset.state = status;
+    if (els.satBadgeText) {
+      els.satBadgeText.textContent = text;
+    } else {
+      els.satBadge.textContent = text;
     }
   }
 }
