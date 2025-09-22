@@ -2616,7 +2616,19 @@ function exportChannelsCsv() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "channels.csv";
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  const datePart = [now.getFullYear(), pad(now.getMonth() + 1), pad(now.getDate())].join("-");
+  const timePart = [pad(now.getHours()), pad(now.getMinutes()), pad(now.getSeconds())].join("-");
+  const foundChannelsCount = channels.reduce((total, channel) => {
+    if (channel.scanState === "signal") return total + 1;
+    const scanText = typeof channel.scan === "string" ? channel.scan.trim() : "";
+    if (!channel.scanState && scanText && !/^err/i.test(scanText)) return total + 1;
+    return total;
+  }, 0);
+  // Имя файла: дата_время_количество найденных каналов
+  const fileName = `${datePart}_${timePart}_${foundChannelsCount}.csv`;
+  a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
 }
