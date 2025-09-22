@@ -23,7 +23,8 @@
 // --- Сеть и веб-интерфейс ---
 #include <WiFi.h>        // работа с Wi-Fi
 #include <WebServer.h>   // встроенный HTTP-сервер
-#include "web/web_content.h" // встроенные файлы веб-интерфейса
+#include "web/web_content.h"      // встроенные файлы веб-интерфейса
+#include "web/geostat_tle_js.h"   // статический набор TLE
 #ifndef ARDUINO
 #include <fstream>
 #else
@@ -568,6 +569,11 @@ void handleScriptJs() {
 // Отдаём библиотеку SHA-256
 void handleSha256Js() {
   server.send_P(200, "application/javascript", SHA256_JS);
+}
+
+// Отдаём постоянный набор TLE для вкладки Pointing
+void handleGeostatTleJs() {
+  server.send_P(200, "application/javascript", GEOSTAT_TLE_JS);
 }
 
 // Принимаем текст и отправляем его по радио
@@ -1156,6 +1162,7 @@ void setupWifi() {
   server.on("/style.css", handleStyleCss);                           // CSS веб-интерфейса
   server.on("/script.js", handleScriptJs);                           // JS логика
   server.on("/libs/sha256.js", handleSha256Js);                      // библиотека SHA-256
+  server.on("/libs/geostat_tle.js", handleGeostatTleJs);             // статический список спутников
   server.on("/ver", handleVer);                                      // версия приложения
   server.on("/api/tx", handleApiTx);                                 // отправка текста по радио
   server.on("/cmd", handleCmdHttp);                                  // обработка команд

@@ -223,6 +223,7 @@
   `CHLIST`, `STS`, `RSTS`, `INFO`, `VER`). Параметры передаются через `v` или `bank`.
 - HTTP-команды для настройки: `BF`, `SF`, `CR`, `PW`, `PAUSE`, `ACK`, `ACKR`, `ACKT`, `BCN`, `TXL`,
   `TX`.
+- `GET /libs/geostat_tle.js` — отдаёт встроенный список TLE для офлайн-работы вкладки Pointing.
 - Команды работы с ключами возвращают JSON (`KEYSTATE`, `KEYGEN`, `KEYRESTORE`, `KEYTRANSFER SEND`,
   `KEYTRANSFER RECEIVE`, а также совместимые `KEYSEND`/`KEYRECV`).
 - Ответ `RSTS full=1` включает список элементов с полями `name`, `type`, `len`, `text`, `hex`.
