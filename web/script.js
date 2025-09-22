@@ -433,6 +433,7 @@ async function init() {
     locateOnceBtn: $("#pointingLocateOnceBtn"),
     locateBtn: $("#pointingLocateBtn"),
     sensorsBtn: $("#pointingSensorsBtn"),
+    locationHint: $("#pointingLocationHint"),
     lat: $("#pointingLat"),
     lon: $("#pointingLon"),
     alt: $("#pointingAlt"),
@@ -464,6 +465,7 @@ async function init() {
     currentNeedle: $("#pointingCurrentNeedle"),
     compass: $("#pointingCompass"),
     compassRadar: $("#pointingCompassRadar"),
+    compassLegend: $("#pointingCompassLegend"),
     elevationScale: $("#pointingElevationScale"),
     elevationTarget: $("#pointingElevationTarget"),
     elevationCurrent: $("#pointingElevationCurrent"),
@@ -4023,6 +4025,7 @@ function initPointingTab() {
     els.minElSlider.addEventListener("input", handler);
     els.minElSlider.addEventListener("change", handler);
   }
+  updatePointingCompassLegend();
   updatePointingLocationStatus();
   updatePointingSensorButton();
   updatePointingLocationControls();
@@ -4314,6 +4317,23 @@ function updatePointingLocationStatus() {
       els.status.textContent = "Нажмите «Определить координаты» или введите их вручную.";
     }
   }
+  if (els.locationHint) {
+    let hint = "";
+    if (state.locationErrorHint === "ios-insecure") {
+      hint = "Safari на iOS блокирует геолокацию для незашифрованного соединения. Откройте интерфейс по HTTPS или разрешите доступ в Настройки → Safari → Местоположение.";
+    } else if (state.locationErrorHint === "denied") {
+      hint = "Проверьте, что браузеру разрешён доступ к геолокации, либо используйте ручной ввод координат.";
+    } else if (!state.locationRequestPending && !state.locationError && !state.observer && !state.locationWatchId && !window.isSecureContext && isProbablyIos()) {
+      hint = "Safari на iOS требует защищённое подключение (HTTPS), иначе геолокация будет заблокирована. При необходимости введите координаты вручную.";
+    }
+    if (hint) {
+      els.locationHint.hidden = false;
+      els.locationHint.textContent = hint;
+    } else {
+      els.locationHint.hidden = true;
+      els.locationHint.textContent = "";
+    }
+  }
   if (els.locateBtn) {
     if (state.locationWatchId != null) {
       els.locateBtn.textContent = "Остановить отслеживание";
@@ -4532,34 +4552,81 @@ function renderPointingSatellites() {
       empty.textContent = observer ? "Спутники ниже заданного порога возвышения." : "Нет данных для отображения.";
       els.satList.appendChild(empty);
     } else {
+      const groups = new Map();
       for (const sat of visible) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.dataset.satId = sat.id;
-        btn.className = "pointing-sat-entry" + (sat.id === state.selectedSatId ? " active" : "");
+        const colorInfo = pointingColorForSat(sat);
+        const quadrant = colorInfo.quadrant || "unknown";
+        if (!groups.has(quadrant)) {
+          groups.set(quadrant, []);
+        }
+        groups.get(quadrant).push({ sat, color: colorInfo.color });
+      }
+      const order = ["north", "east", "south", "west", "unknown"];
+      const handled = new Set();
+      const processGroup = (quadrant) => {
+        const entries = groups.get(quadrant);
+        if (!entries || !entries.length) return;
+        handled.add(quadrant);
+        const groupSection = document.createElement("section");
+        groupSection.className = "pointing-sat-group";
+        groupSection.dataset.quadrant = quadrant;
+        const groupColor = pointingColorForQuadrant(quadrant);
+        if (groupColor) {
+          groupSection.style.setProperty("--pointing-sat-color", groupColor);
+        }
+        const title = document.createElement("div");
+        title.className = "pointing-sat-group-title";
+        title.textContent = pointingQuadrantLabel(quadrant);
+        groupSection.appendChild(title);
+        const list = document.createElement("div");
+        list.className = "pointing-sat-group-list";
+        for (const entry of entries) {
+          const { sat, color } = entry;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.dataset.satId = sat.id;
+          btn.className = "pointing-sat-entry" + (sat.id === state.selectedSatId ? " active" : "");
+          if (color) {
+            btn.style.setProperty("--pointing-sat-color", color);
+          }
+          if (quadrant && quadrant !== "unknown") {
+            btn.dataset.quadrant = quadrant;
+          } else {
+            delete btn.dataset.quadrant;
+          }
 
-        const nameEl = document.createElement("div");
-        nameEl.className = "pointing-sat-name";
-        nameEl.textContent = sat.name;
-        btn.appendChild(nameEl);
+          const nameEl = document.createElement("div");
+          nameEl.className = "pointing-sat-name";
+          nameEl.textContent = sat.name;
+          btn.appendChild(nameEl);
 
-        const metaEl = document.createElement("div");
-        metaEl.className = "pointing-sat-meta";
+          const metaEl = document.createElement("div");
+          metaEl.className = "pointing-sat-meta";
 
-        const azEl = document.createElement("span");
-        azEl.textContent = "Азимут " + formatDegrees(sat.azimuth, 1);
-        metaEl.appendChild(azEl);
+          const azEl = document.createElement("span");
+          azEl.textContent = "Азимут " + formatDegrees(sat.azimuth, 1);
+          metaEl.appendChild(azEl);
 
-        const elEl = document.createElement("span");
-        elEl.textContent = "Возвышение " + formatDegrees(sat.elevation, 1);
-        metaEl.appendChild(elEl);
+          const elEl = document.createElement("span");
+          elEl.textContent = "Возвышение " + formatDegrees(sat.elevation, 1);
+          metaEl.appendChild(elEl);
 
-        const lonEl = document.createElement("span");
-        lonEl.textContent = "Долгота " + formatLongitude(sat.subLonDeg, 1);
-        metaEl.appendChild(lonEl);
+          const lonEl = document.createElement("span");
+          lonEl.textContent = "Долгота " + formatLongitude(sat.subLonDeg, 1);
+          metaEl.appendChild(lonEl);
 
-        btn.appendChild(metaEl);
-        els.satList.appendChild(btn);
+          btn.appendChild(metaEl);
+          list.appendChild(btn);
+        }
+        groupSection.appendChild(list);
+        els.satList.appendChild(groupSection);
+      };
+      for (const quadrant of order) {
+        processGroup(quadrant);
+      }
+      for (const [quadrant] of groups) {
+        if (handled.has(quadrant)) continue;
+        processGroup(quadrant);
       }
     }
   }
@@ -4591,7 +4658,7 @@ function renderPointingHorizon(visible) {
   }
   const sorted = [...visible].sort((a, b) => a.azimuth - b.azimuth);
   const laneLast = [];
-  const minGap = 6; // минимальный зазор между маркерами в процентах ширины трека
+  const minGap = 9; // минимальный зазор между маркерами в процентах ширины трека
   for (const sat of sorted) {
     const marker = document.createElement("button");
     marker.type = "button";
@@ -4628,6 +4695,7 @@ function renderPointingCompassRadar(visible) {
   const state = UI.state.pointing;
   const container = els.compassRadar;
   container.innerHTML = "";
+  resetCompassDots();
   if (!Array.isArray(visible) || !visible.length) return;
   const sorted = [...visible].sort((a, b) => a.azimuth - b.azimuth);
   for (const sat of sorted) {
@@ -4644,31 +4712,105 @@ function renderPointingCompassRadar(visible) {
     }
     const angleRad = sat.azimuth * DEG2RAD;
     const elevationClamped = clampNumber(sat.elevation, 0, 90);
-    const radius = (1 - elevationClamped / 90) * 45; // ближе к центру при большем возвышении
-    const x = 50 + Math.sin(angleRad) * radius;
-    const y = 50 - Math.cos(angleRad) * radius;
+    const baseRadius = (1 - elevationClamped / 90) * 45;
+    const placed = placeCompassDot(angleRad, baseRadius);
+    const x = placed.x;
+    const y = placed.y;
     dot.style.left = x + "%";
     dot.style.top = y + "%";
+    dot.style.zIndex = String(50 + Math.round(60 - baseRadius));
     const description = sat.name + " — азимут " + formatDegrees(sat.azimuth, 1) + ", возвышение " + formatDegrees(sat.elevation, 1);
     dot.title = description;
     dot.setAttribute("aria-label", description);
+    const label = document.createElement("span");
+    label.className = "pointing-compass-label";
+    label.textContent = sat.name + " • " + formatDegrees(sat.azimuth, 0) + "/" + formatDegrees(sat.elevation, 0);
+    label.setAttribute("aria-hidden", "true");
+    dot.appendChild(label);
     container.appendChild(dot);
   }
 }
 
+// Минимизируем перекрытие маркеров на радаре: сдвигаем их ближе к центру при конфликте.
+const compassPlacedDots = [];
+
+function placeCompassDot(angleRad, baseRadius) {
+  const maxAttempts = 4;
+  let radius = baseRadius;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const x = 50 + Math.sin(angleRad) * radius;
+    const y = 50 - Math.cos(angleRad) * radius;
+    const collision = compassPlacedDots.some((pt) => Math.hypot(pt.x - x, pt.y - y) < 6);
+    if (!collision) {
+      compassPlacedDots.push({ x, y });
+      return { x, y };
+    }
+    radius = Math.max(6, radius - 6);
+  }
+  const fallbackX = 50 + Math.sin(angleRad) * baseRadius;
+  const fallbackY = 50 - Math.cos(angleRad) * baseRadius;
+  compassPlacedDots.push({ x: fallbackX, y: fallbackY });
+  return { x: fallbackX, y: fallbackY };
+}
+
+function resetCompassDots() {
+  compassPlacedDots.length = 0;
+}
+
 // Подбор цвета маркера с учётом квадранта и возвышения: так проще визуально различать группы спутников.
+const POINTING_QUADRANT_META = {
+  north: { hue: 205, label: "Север", short: "N", order: 0 },
+  east: { hue: 130, label: "Восток", short: "E", order: 1 },
+  south: { hue: 25, label: "Юг", short: "S", order: 2 },
+  west: { hue: 285, label: "Запад", short: "W", order: 3 },
+  unknown: { hue: 205, label: "Прочие", short: "?", order: 99 },
+};
+
+function pointingQuadrantMeta(quadrant) {
+  return POINTING_QUADRANT_META[quadrant] || POINTING_QUADRANT_META.unknown;
+}
+
+function pointingColorFromHue(hue, elevation) {
+  const normalized = clampNumber(((elevation || 0) + 5) / 65, 0, 1);
+  const saturation = 78;
+  const lightness = 64 - normalized * 20;
+  return "hsl(" + Math.round(hue) + ", " + saturation + "%, " + Math.round(lightness) + "%)";
+}
+
 function pointingColorForSat(sat) {
   const elevation = sat && Number.isFinite(sat.elevation) ? sat.elevation : 0;
   const quadrant = pointingAzimuthToQuadrant(sat ? sat.azimuth : null);
-  const hueMap = { north: 205, east: 130, south: 25, west: 285 };
-  const baseHue = hueMap[quadrant] != null ? hueMap[quadrant] : 205;
-  const normalized = clampNumber((elevation + 5) / 65, 0, 1);
-  const saturation = 78;
-  const lightness = 64 - normalized * 20;
+  const meta = pointingQuadrantMeta(quadrant);
   return {
-    color: "hsl(" + Math.round(baseHue) + ", " + saturation + "%, " + Math.round(lightness) + "%)",
+    color: pointingColorFromHue(meta.hue, elevation),
     quadrant,
   };
+}
+
+function pointingColorForQuadrant(quadrant) {
+  const meta = pointingQuadrantMeta(quadrant);
+  return pointingColorFromHue(meta.hue, 30);
+}
+
+function pointingQuadrantLabel(quadrant) {
+  const meta = pointingQuadrantMeta(quadrant);
+  if (quadrant === "unknown") {
+    return "Прочие направления";
+  }
+  return meta.label + " • " + meta.short;
+}
+
+function updatePointingCompassLegend() {
+  const els = UI.els.pointing;
+  if (!els || !els.compassLegend) return;
+  const entries = els.compassLegend.querySelectorAll("[data-quadrant]");
+  entries.forEach((entry) => {
+    const quadrant = entry.dataset.quadrant || "unknown";
+    const color = pointingColorForQuadrant(quadrant);
+    if (color) {
+      entry.style.setProperty("--pointing-sat-color", color);
+    }
+  });
 }
 
 // Определение квадранта компаса по азимуту (С/В/Ю/З) с нормализацией угла.
@@ -5061,6 +5203,12 @@ function updatePointingOrientationStatus() {
 function formatDegrees(value, digits = 1) {
   if (!Number.isFinite(value)) return "—";
   return value.toFixed(digits) + "°";
+}
+
+function isProbablyIos() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return /iPad|iPhone|iPod/i.test(ua);
 }
 
 function formatSignedDegrees(value, digits = 1) {
