@@ -1577,8 +1577,6 @@ const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
 const TWO_PI = Math.PI * 2;
 const POINTING_DEFAULT_MIN_ELEVATION = 5; // минимальный угол возвышения по умолчанию
-const POINTING_ELEVATION_MIN = -30;       // нижний предел визуальной шкалы
-const POINTING_ELEVATION_MAX = 90;        // верхний предел визуальной шкалы
 
 /* Состояние интерфейса */
 const UI = {
@@ -1620,18 +1618,9 @@ const UI = {
       satellites: [],
       visible: [],
       observer: null,
-      locationWatchId: null,
-      locationError: null,
-      locationErrorHint: null,
-      locationRequestPending: false,
+      observerMgrs: null,
       minElevation: POINTING_DEFAULT_MIN_ELEVATION,
-      orientation: null,
-      orientationErrorHint: null,
-      sensorsActive: false,
-      orientationListeners: [],
       selectedSatId: null,
-      orientationSource: null,
-      manualOrientation: false,
       tleReady: false,
       tleError: null,
     },
@@ -1936,25 +1925,14 @@ async function init() {
     locationBadgeText: $("#pointingLocationText"),
     satBadge: $("#pointingSatBadge"),
     satBadgeText: $("#pointingSatText"),
-    locateOnceBtn: $("#pointingLocateOnceBtn"),
-    locateBtn: $("#pointingLocateBtn"),
-    sensorsBtn: $("#pointingSensorsBtn"),
-    locationHint: $("#pointingLocationHint"),
+    observerDetails: $("#pointingObserverDetails"),
+    observerLabel: $("#pointingObserverLabel"),
+    mgrsInput: $("#pointingMgrsInput"),
     lat: $("#pointingLat"),
     lon: $("#pointingLon"),
     alt: $("#pointingAlt"),
-    accuracy: $("#pointingAccuracy"),
-    locationSource: $("#pointingLocationSource"),
-    locationTime: $("#pointingLocationTime"),
-    manualLat: $("#pointingManualLat"),
-    manualLon: $("#pointingManualLon"),
     manualAlt: $("#pointingManualAlt"),
-    manualApply: $("#pointingManualApply"),
-    orientationStatus: $("#pointingOrientationStatus"),
-    orientationHint: $("#pointingOrientationHint"),
-    manualAz: $("#pointingManualAz"),
-    manualEl: $("#pointingManualEl"),
-    manualOrientationApply: $("#pointingManualOrientationApply"),
+    mgrsApply: $("#pointingMgrsApply"),
     satSummary: $("#pointingSatSummary"),
     satSelect: $("#pointingSatSelect"),
     satDetails: $("#pointingSatDetails"),
@@ -1963,19 +1941,10 @@ async function init() {
     horizonTrack: $("#pointingHorizonTrack"),
     horizonEmpty: $("#pointingHorizonEmpty"),
     targetAz: $("#pointingTargetAz"),
-    currentAz: $("#pointingCurrentAz"),
-    deltaAz: $("#pointingDeltaAz"),
     targetEl: $("#pointingTargetEl"),
-    currentEl: $("#pointingCurrentEl"),
-    deltaEl: $("#pointingDeltaEl"),
-    targetNeedle: $("#pointingTargetNeedle"),
-    currentNeedle: $("#pointingCurrentNeedle"),
     compass: $("#pointingCompass"),
     compassRadar: $("#pointingCompassRadar"),
     compassLegend: $("#pointingCompassLegend"),
-    elevationScale: $("#pointingElevationScale"),
-    elevationTarget: $("#pointingElevationTarget"),
-    elevationCurrent: $("#pointingElevationCurrent"),
     minElSlider: $("#pointingMinElevation"),
     minElValue: $("#pointingMinElValue"),
     subLon: $("#pointingSubLon"),
@@ -5467,37 +5436,40 @@ function initPointingTab() {
   state.tleReady = state.satellites.length > 0;
   state.tleError = state.tleReady ? null : (rawTle.length ? "Некорректные TLE" : "Нет данных TLE");
 
-  updatePointingLocationUi();
+  const storedMgrs = pointingCanonicalMgrs(storage.get("pointingMgrs")) || "43UCR";
+  const storedAltRaw = Number(storage.get("pointingAlt"));
+  const initialAlt = Number.isFinite(storedAltRaw) ? storedAltRaw : 0;
+  if (!setPointingObserverFromMgrs(storedMgrs, initialAlt, { silent: true, skipStore: true })) {
+    setPointingObserverFromMgrs("43UCR", 0, { silent: true, skipStore: true });
+  }
+  updatePointingObserverUi();
   renderPointingSatellites();
-  updatePointingSatDetails(null);
-  updatePointingOrientationUi();
-  updatePointingOrientationStatus();
+  updatePointingSatDetails(getPointingSelectedSatellite());
   updatePointingBadges();
 
-  if (els.locateOnceBtn) {
-    els.locateOnceBtn.addEventListener("click", (event) => {
+  if (els.mgrsApply) {
+    els.mgrsApply.addEventListener("click", (event) => {
       event.preventDefault();
-      requestPointingLocationOnce();
+      applyPointingMgrs();
     });
   }
-  if (els.locateBtn) {
-    els.locateBtn.addEventListener("click", () => togglePointingLocationWatch());
-  }
-  if (els.manualApply) {
-    els.manualApply.addEventListener("click", (event) => {
-      event.preventDefault();
-      applyPointingManualLocation();
+  if (els.mgrsInput) {
+    els.mgrsInput.addEventListener("keydown", (event) => {
+      if (event && event.key === "Enter") {
+        event.preventDefault();
+        applyPointingMgrs();
+      }
+    });
+    els.mgrsInput.addEventListener("blur", () => {
+      updatePointingObserverUi();
     });
   }
-  if (els.sensorsBtn) {
-    els.sensorsBtn.addEventListener("click", () => {
-      togglePointingSensors().catch((err) => console.warn("[pointing] sensors", err));
-    });
-  }
-  if (els.manualOrientationApply) {
-    els.manualOrientationApply.addEventListener("click", (event) => {
-      event.preventDefault();
-      applyPointingManualOrientation();
+  if (els.manualAlt) {
+    els.manualAlt.addEventListener("keydown", (event) => {
+      if (event && event.key === "Enter") {
+        event.preventDefault();
+        applyPointingMgrs();
+      }
     });
   }
   if (els.satSelect) {
@@ -5533,9 +5505,6 @@ function initPointingTab() {
     els.minElSlider.addEventListener("change", handler);
   }
   updatePointingCompassLegend();
-  updatePointingLocationStatus();
-  updatePointingSensorButton();
-  updatePointingLocationControls();
 }
 
 function parsePointingSatellites(rawData) {
@@ -5625,326 +5594,112 @@ function updatePointingMinElevationUi() {
   }
 }
 
-// Проверяем, доступен ли защищённый контекст для работы с геолокацией/датчиками.
-function pointingIsSecureContext() {
-  if (typeof window === "undefined") return false;
-  if (window.isSecureContext === true) return true;
-  if (typeof location !== "undefined" && location.protocol === "https:") return true;
-  return false;
+// Поддержка ручного ввода координат в формате MGRS (100 км).
+function pointingMgrsApi() {
+  if (typeof window === "undefined") return null;
+  const api = window.satMgrs;
+  if (!api || typeof api.toLatLon100k !== "function") return null;
+  return api;
 }
 
-// Сохраняем ошибку геолокации и сразу обновляем связанные элементы UI.
-function setPointingLocationError(error, hint) {
-  const state = UI.state.pointing;
-  state.locationError = error;
-  state.locationErrorHint = hint || null;
-  updatePointingLocationStatus();
-  updatePointingBadges();
+function pointingFormatMgrs(text) {
+  if (!text) return "—";
+  const normalized = String(text).toUpperCase();
+  const match = normalized.match(/^(\d{1,2}[C-HJ-NP-X])([A-HJ-NP-Z]{2})$/);
+  if (!match) return normalized;
+  return match[1] + " " + match[2];
 }
 
-// Удостоверяемся, что браузер позволяет запрашивать координаты.
-function ensurePointingGeolocationSupported() {
+function pointingCanonicalMgrs(value) {
+  const api = pointingMgrsApi();
+  if (!api || typeof api.normalize100k !== "function") return null;
+  const normalized = api.normalize100k(value);
+  return normalized ? normalized.text : null;
+}
+
+function pointingObserverFromMgrs(value, altitude) {
+  const api = pointingMgrsApi();
+  if (!api) return null;
+  const solved = api.toLatLon100k(value);
+  if (!solved) return null;
+  const altNumber = Number(altitude);
+  const heightM = Number.isFinite(altNumber) ? altNumber : 0;
+  return {
+    lat: solved.lat,
+    lon: normalizeDegreesSigned(solved.lon),
+    heightM,
+    accuracy: null,
+    source: "mgrs",
+    timestamp: new Date(),
+    mgrs: pointingFormatMgrs(solved.text),
+    mgrsRaw: solved.text,
+  };
+}
+
+function setPointingObserverFromMgrs(value, altitude, options = {}) {
   const state = UI.state.pointing;
-  if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
-    if (state.locationErrorHint !== "unsupported") {
-      setPointingLocationError({ message: "Геолокация не поддерживается этим браузером." }, "unsupported");
-      note("Геолокация не поддерживается браузером");
-    }
+  const observer = pointingObserverFromMgrs(value, altitude);
+  if (!observer) {
+    if (!options.silent) note("Не удалось разобрать координаты MGRS");
     return false;
   }
-  if (!pointingIsSecureContext()) {
-    const hint = isProbablyIos() ? "ios-insecure" : "insecure";
-    if (state.locationErrorHint !== hint) {
-      setPointingLocationError({ message: "Геолокация заблокирована браузером: требуется HTTPS." }, hint);
-      note("Геолокация требует защищённое соединение (HTTPS)");
-    }
-    return false;
+  state.observer = observer;
+  state.observerMgrs = observer.mgrs;
+  if (!options.skipStore) {
+    if (observer.mgrsRaw) storage.set("pointingMgrs", observer.mgrsRaw);
+    storage.set("pointingAlt", String(observer.heightM || 0));
   }
-  if (state.locationErrorHint && (state.locationErrorHint === "unsupported" || state.locationErrorHint === "insecure" || state.locationErrorHint === "ios-insecure")) {
-    setPointingLocationError(null, null);
+  updatePointingObserverUi();
+  updatePointingSatellites();
+  if (!options.silent) {
+    note("Координаты обновлены по MGRS");
   }
   return true;
 }
 
-function requestPointingLocationOnce() {
-  const state = UI.state.pointing;
-  if (state.locationRequestPending) return;
-  if (!ensurePointingGeolocationSupported()) {
-    updatePointingLocationControls();
-    return;
-  }
-  state.locationRequestPending = true;
-  updatePointingLocationControls();
-  updatePointingLocationStatus();
-  try {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        state.locationRequestPending = false;
-        handlePointingPosition(position, "browser");
-        updatePointingLocationControls();
-        updatePointingLocationStatus();
-        note("Координаты обновлены по запросу браузера");
-      },
-      (error) => {
-        state.locationRequestPending = false;
-        handlePointingLocationError(error);
-        updatePointingLocationControls();
-        updatePointingLocationStatus();
-      },
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 },
-    );
-  } catch (err) {
-    console.warn("[pointing] getCurrentPosition", err);
-    state.locationRequestPending = false;
-    updatePointingLocationControls();
-    updatePointingLocationStatus();
-    note("Не удалось запросить координаты у браузера");
-  }
-}
-
-function updatePointingLocationControls() {
+function updatePointingObserverUi() {
   const els = UI.els.pointing;
   if (!els) return;
   const state = UI.state.pointing;
-  const pending = !!state.locationRequestPending;
-  if (els.locateOnceBtn) {
-    els.locateOnceBtn.disabled = pending;
-    if (pending) {
-      els.locateOnceBtn.setAttribute("aria-busy", "true");
-      els.locateOnceBtn.textContent = "Запрос координат…";
-    } else {
-      els.locateOnceBtn.removeAttribute("aria-busy");
-      els.locateOnceBtn.textContent = "Запросить позицию";
-    }
-  }
-  if (els.locateBtn) {
-    els.locateBtn.disabled = pending && state.locationWatchId == null;
-  }
-}
-
-function togglePointingLocationWatch() {
-  const state = UI.state.pointing;
-  if (state.locationWatchId != null) {
-    stopPointingLocationWatch();
-    note("Отслеживание координат остановлено");
-    return;
-  }
-  if (!ensurePointingGeolocationSupported()) {
-    updatePointingLocationControls();
-    return;
-  }
-  try {
-    state.locationWatchId = navigator.geolocation.watchPosition(
-      (position) => handlePointingPosition(position),
-      (error) => handlePointingLocationError(error),
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 },
-    );
-    setPointingLocationError(null, null);
-    note("Отслеживание координат включено");
-  } catch (err) {
-    console.warn("[pointing] watchPosition", err);
-    note("Не удалось включить отслеживание координат");
-  }
-  updatePointingLocationControls();
-  updatePointingBadges();
-}
-
-function stopPointingLocationWatch() {
-  const state = UI.state.pointing;
-  if (state.locationWatchId != null && navigator.geolocation && typeof navigator.geolocation.clearWatch === "function") {
-    try {
-      navigator.geolocation.clearWatch(state.locationWatchId);
-    } catch (err) {
-      console.warn("[pointing] clearWatch", err);
-    }
-  }
-  state.locationWatchId = null;
-  updatePointingLocationStatus();
-  updatePointingLocationControls();
-  updatePointingBadges();
-}
-
-function handlePointingPosition(position, source) {
-  const state = UI.state.pointing;
-  if (!position || !position.coords) return;
-  const { latitude, longitude, altitude, accuracy } = position.coords;
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-  const observer = {
-    lat: latitude,
-    lon: normalizeDegreesSigned(longitude),
-    heightM: Number.isFinite(altitude) ? altitude : 0,
-    accuracy: Number.isFinite(accuracy) ? accuracy : null,
-    source: source === "browser" ? "browser" : "gps",
-    timestamp: new Date(position.timestamp || Date.now()),
-  };
-  state.observer = observer;
-  setPointingLocationError(null, null);
-  updatePointingLocationUi();
-  updatePointingSatellites();
-}
-
-  function handlePointingLocationError(error) {
-    const state = UI.state.pointing;
-    const fallbackError = { message: "Неизвестная ошибка" };
-    const messageText = error && typeof error.message === "string" ? error.message : "";
-    let hint = null;
-    if (messageText && /Origin does not have permission to use Geolocation service/i.test(messageText)) {
-      hint = "ios-insecure";
-    } else if (messageText && /Only secure origins are allowed/i.test(messageText)) {
-      hint = "insecure";
-    } else if (error && typeof error.code === "number") {
-      if (error.code === 1) hint = "denied";
-      else if (error.code === 2) hint = "unavailable";
-      else if (error.code === 3) hint = "timeout";
-    }
-    setPointingLocationError(error || fallbackError, hint);
-    let readableMessage = messageText || fallbackError.message;
-    if (hint === "ios-insecure") {
-      readableMessage = "Safari блокирует геолокацию для незашифрованного соединения.";
-    } else if (hint === "insecure") {
-      readableMessage = "Браузер блокирует геолокацию без защищённого соединения.";
-    } else if (hint === "denied") {
-      readableMessage = "Доступ к геолокации запрещён браузером.";
-    } else if (hint === "timeout") {
-      readableMessage = "Не удалось получить координаты: тайм-аут.";
-    } else if (hint === "unavailable") {
-      readableMessage = "Геолокация временно недоступна.";
-    }
-    note("Геолокация: " + readableMessage +
-      (hint === "ios-insecure" ? " Откройте интерфейс по HTTPS или разрешите доступ в Настройки → Safari → Местоположение." : ""));
-  }
-
-function updatePointingLocationUi() {
-  const state = UI.state.pointing;
-  const els = UI.els.pointing;
-  if (!els) return;
   const observer = state.observer;
-  if (els.lat) els.lat.textContent = observer ? formatDegrees(observer.lat, 4) : "—";
-  if (els.lon) els.lon.textContent = observer ? formatDegrees(normalizeDegrees(observer.lon), 4) : "—";
-  if (els.alt) els.alt.textContent = observer ? formatMeters(observer.heightM) : "—";
-  if (els.accuracy) els.accuracy.textContent = observer && observer.accuracy != null ? formatMeters(observer.accuracy) : "—";
-  if (els.locationSource) {
-    if (!observer) els.locationSource.textContent = "—";
-    else if (observer.source === "manual") els.locationSource.textContent = "ручной ввод";
-    else if (observer.source === "browser") els.locationSource.textContent = "браузер";
-    else els.locationSource.textContent = "GPS";
+  const displayMgrs = state.observerMgrs || (observer && observer.mgrs) || "—";
+
+  if (els.observerLabel) {
+    els.observerLabel.textContent = displayMgrs;
   }
-  if (els.locationTime) {
-    if (!observer || !observer.timestamp) {
-      els.locationTime.textContent = "—";
-    } else {
-      els.locationTime.textContent = observer.timestamp.toLocaleTimeString();
+  if (els.mgrsInput) {
+    if (document.activeElement !== els.mgrsInput) {
+      els.mgrsInput.value = observer ? displayMgrs : "";
     }
   }
-  updatePointingLocationStatus();
+  if (els.manualAlt) {
+    if (document.activeElement !== els.manualAlt) {
+      els.manualAlt.value = observer ? String(observer.heightM || 0) : "";
+    }
+  }
+  if (els.lat) {
+    els.lat.textContent = observer ? formatLatitude(observer.lat, 4) : "—";
+  }
+  if (els.lon) {
+    els.lon.textContent = observer ? formatLongitude(observer.lon, 4) : "—";
+  }
+  if (els.alt) {
+    els.alt.textContent = observer ? formatMeters(observer.heightM) : "—";
+  }
   updatePointingBadges();
 }
 
-function updatePointingLocationStatus() {
-  const state = UI.state.pointing;
+function applyPointingMgrs() {
   const els = UI.els.pointing;
   if (!els) return;
-  if (els.status) {
-    if (state.locationRequestPending) {
-      els.status.textContent = "Ожидаем ответ браузера с координатами…";
-    } else if (state.locationError) {
-      const message = state.locationError.message || "Ошибка геолокации";
-      if (state.locationErrorHint === "ios-insecure") {
-        els.status.textContent = "Safari блокирует геолокацию для незашифрованного соединения. Используйте HTTPS или разрешите доступ в Настройки → Safari → Местоположение.";
-      } else if (state.locationErrorHint === "insecure") {
-        els.status.textContent = "Браузер блокирует геолокацию без защищённого соединения. Используйте HTTPS или введите координаты вручную.";
-      } else if (state.locationErrorHint === "denied") {
-        els.status.textContent = "Геолокация запрещена браузером. Разрешите доступ или введите координаты вручную.";
-      } else if (state.locationErrorHint === "timeout") {
-        els.status.textContent = "Не удалось получить координаты: тайм-аут.";
-      } else if (state.locationErrorHint === "unavailable") {
-        els.status.textContent = "Геолокация временно недоступна. Попробуйте повторить позже или введите координаты вручную.";
-      } else if (state.locationErrorHint === "unsupported") {
-        els.status.textContent = "Геолокация не поддерживается этим браузером. Используйте ручной ввод координат.";
-      } else {
-        els.status.textContent = "Ошибка геолокации: " + message;
-      }
-    } else if (state.locationWatchId != null) {
-      els.status.textContent = state.observer
-        ? "Отслеживание включено, координаты обновлены."
-        : "Отслеживание включено, ожидание координат…";
-    } else if (state.observer) {
-      els.status.textContent = "Используются последние сохранённые координаты.";
-    } else if (!state.tleReady) {
-      els.status.textContent = "Список спутников станет доступен после загрузки данных TLE.";
-    } else {
-      els.status.textContent = "Нажмите «Определить координаты» или введите их вручную.";
-    }
-  }
-  if (els.locationHint) {
-    let hint = "";
-    if (state.locationErrorHint === "ios-insecure") {
-      hint = "Safari на iOS блокирует геолокацию для незашифрованного соединения. Откройте интерфейс по HTTPS или разрешите доступ в Настройки → Safari → Местоположение.";
-    } else if (state.locationErrorHint === "insecure") {
-      hint = "Браузер требует защищённое подключение (HTTPS) для доступа к геолокации. Используйте HTTPS или заполните поля вручную.";
-    } else if (state.locationErrorHint === "denied") {
-      hint = "Проверьте, что браузеру разрешён доступ к геолокации, либо используйте ручной ввод координат.";
-    } else if (state.locationErrorHint === "timeout") {
-      hint = "Повторите попытку после включения GPS и хорошего сигнала или укажите координаты вручную.";
-    } else if (state.locationErrorHint === "unavailable") {
-      hint = "Геолокация недоступна: проверьте включение службы позиционирования или задайте координаты вручную.";
-    } else if (state.locationErrorHint === "unsupported") {
-      hint = "Этот браузер не предоставляет геолокацию. Воспользуйтесь ручным вводом координат.";
-    } else if (!state.locationRequestPending && !state.locationError && !state.observer && !state.locationWatchId && !pointingIsSecureContext()) {
-      hint = isProbablyIos()
-        ? "Safari на iOS требует защищённое подключение (HTTPS), иначе геолокация будет заблокирована. При необходимости введите координаты вручную."
-        : "Браузер может блокировать геолокацию без HTTPS. Используйте защищённое подключение или заполните координаты вручную.";
-    }
-    if (hint) {
-      els.locationHint.hidden = false;
-      els.locationHint.textContent = hint;
-    } else {
-      els.locationHint.hidden = true;
-      els.locationHint.textContent = "";
-    }
-  }
-  if (els.locateBtn) {
-    if (state.locationWatchId != null) {
-      els.locateBtn.textContent = "Остановить отслеживание";
-    } else if (state.locationRequestPending) {
-      els.locateBtn.textContent = "Ожидание координат";
-    } else {
-      els.locateBtn.textContent = "Включить отслеживание";
-    }
-  }
-}
-
-function applyPointingManualLocation() {
-  const state = UI.state.pointing;
-  const els = UI.els.pointing;
-  if (!els) return;
-  const lat = Number(els.manualLat ? els.manualLat.value : "");
-  const lon = Number(els.manualLon ? els.manualLon.value : "");
-  const alt = Number(els.manualAlt ? els.manualAlt.value : "");
-  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
-    note("Укажите широту в диапазоне от -90 до 90°");
+  const inputValue = els.mgrsInput ? els.mgrsInput.value : "";
+  const normalized = pointingCanonicalMgrs(inputValue);
+  if (!normalized) {
+    note("Введите квадрат MGRS вида 43U CR");
     return;
   }
-  if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
-    note("Укажите долготу в диапазоне от -180 до 180°");
-    return;
-  }
-  const observer = {
-    lat,
-    lon: normalizeDegreesSigned(lon),
-    heightM: Number.isFinite(alt) ? alt : 0,
-    accuracy: null,
-    source: "manual",
-    timestamp: new Date(),
-  };
-  stopPointingLocationWatch();
-  state.locationRequestPending = false;
-  state.observer = observer;
-  setPointingLocationError(null, null);
-  updatePointingLocationUi();
-  updatePointingSatellites();
-  note("Координаты применены вручную");
-  updatePointingLocationControls();
+  const altValue = els.manualAlt ? Number(els.manualAlt.value) : 0;
+  setPointingObserverFromMgrs(normalized, altValue, { silent: false });
 }
 
 function updatePointingSatellites() {
@@ -5955,7 +5710,6 @@ function updatePointingSatellites() {
     state.selectedSatId = null;
     renderPointingSatellites();
     updatePointingSatDetails(null);
-    updatePointingOrientationUi();
     return;
   }
 
@@ -6014,7 +5768,6 @@ function updatePointingSatellites() {
 
   renderPointingSatellites();
   updatePointingSatDetails(getPointingSelectedSatellite());
-  updatePointingOrientationUi();
 }
 
 function propagatePointingSatellite(sat, date, gmst) {
@@ -6412,21 +6165,20 @@ function updatePointingBadges() {
     }
   }
   if (els.locationBadge) {
-    let status = "idle";
-    let text = "Позиция • нет данных";
-    if (state.locationRequestPending) {
-      status = "pending";
-      text = "Позиция • запрос";
-    } else if (state.locationError) {
-      status = "warn";
-      text = "Позиция • ошибка";
-    } else if (state.locationWatchId != null) {
-      status = state.observer ? "ok" : "pending";
-      text = state.observer ? "Позиция • GPS" : "Позиция • ожидание";
-    } else if (state.observer) {
-      status = "ok";
-      text = state.observer.source === "manual" ? "Позиция • ручной ввод" : "Позиция • GPS";
+    const observer = state.observer;
+    const hasObserver = !!(observer && Number.isFinite(observer.lat) && Number.isFinite(observer.lon));
+    let label = "нет данных";
+    if (observer) {
+      if (observer.mgrs) {
+        label = observer.mgrs;
+      } else if (state.observerMgrs) {
+        label = state.observerMgrs;
+      } else if (hasObserver) {
+        label = formatLatitude(observer.lat, 2) + ", " + formatLongitude(observer.lon, 2);
+      }
     }
+    const status = hasObserver ? "ok" : "idle";
+    const text = hasObserver ? "Позиция • " + label : "Позиция • нет данных";
     els.locationBadge.dataset.state = status;
     if (els.locationBadgeText) {
       els.locationBadgeText.textContent = text;
@@ -6465,7 +6217,6 @@ function setPointingActiveSatellite(id) {
   }
   renderPointingSatellites();
   updatePointingSatDetails(getPointingSelectedSatellite());
-  updatePointingOrientationUi();
 }
 
 function getPointingSelectedSatellite() {
@@ -6477,6 +6228,8 @@ function getPointingSelectedSatellite() {
 function updatePointingSatDetails(sat) {
   const els = UI.els.pointing;
   if (!els) return;
+  if (els.targetAz) els.targetAz.textContent = sat ? formatDegrees(sat.azimuth, 1) : "—";
+  if (els.targetEl) els.targetEl.textContent = sat ? formatDegrees(sat.elevation, 1) : "—";
   if (els.satDetails) {
     els.satDetails.hidden = !sat;
   }
@@ -6491,364 +6244,6 @@ function updatePointingSatDetails(sat) {
   if (els.subLat) els.subLat.textContent = formatLatitude(sat.subLatDeg, 2);
   if (els.satAltitude) els.satAltitude.textContent = formatKilometers(sat.altitudeKm, 0);
   if (els.range) els.range.textContent = formatKilometers(sat.rangeKm, 0);
-}
-
-function updatePointingOrientationUi() {
-  const els = UI.els.pointing;
-  if (!els) return;
-  const state = UI.state.pointing;
-  const sat = getPointingSelectedSatellite();
-  const orientation = state.orientation;
-
-  if (els.targetAz) els.targetAz.textContent = sat ? formatDegrees(sat.azimuth, 1) : "—";
-  if (els.targetEl) els.targetEl.textContent = sat ? formatDegrees(sat.elevation, 1) : "—";
-
-  if (els.currentAz) {
-    els.currentAz.textContent = orientation && orientation.heading != null
-      ? formatDegrees(normalizeDegrees(orientation.heading), 1)
-      : "—";
-  }
-  if (els.currentEl) {
-    els.currentEl.textContent = orientation && orientation.elevation != null
-      ? formatDegrees(orientation.elevation, 1)
-      : "—";
-  }
-
-  const deltaAz = sat && orientation && orientation.heading != null
-    ? angleDifference(sat.azimuth, orientation.heading)
-    : null;
-  if (els.deltaAz) {
-    els.deltaAz.textContent = deltaAz != null ? formatSignedDegrees(deltaAz, 1) : "—";
-  }
-
-  const deltaEl = sat && orientation && orientation.elevation != null
-    ? sat.elevation - orientation.elevation
-    : null;
-  if (els.deltaEl) {
-    els.deltaEl.textContent = deltaEl != null ? formatSignedDegrees(deltaEl, 1) : "—";
-  }
-
-  if (els.targetNeedle) {
-    if (sat) {
-      els.targetNeedle.style.transform = "rotate(" + (sat.azimuth - 90) + "deg)";
-      els.targetNeedle.classList.add("active");
-    } else {
-      els.targetNeedle.classList.remove("active");
-    }
-  }
-  if (els.currentNeedle) {
-    if (orientation && orientation.heading != null) {
-      els.currentNeedle.style.transform = "rotate(" + (normalizeDegrees(orientation.heading) - 90) + "deg)";
-      els.currentNeedle.classList.add("active");
-    } else {
-      els.currentNeedle.classList.remove("active");
-    }
-  }
-
-  updatePointingElevationMarkers(sat, orientation);
-}
-
-function updatePointingElevationMarkers(sat, orientation) {
-  const els = UI.els.pointing;
-  if (!els) return;
-  if (els.elevationTarget) {
-    if (sat) {
-      els.elevationTarget.style.left = mapElevationToPercent(sat.elevation) + "%";
-      els.elevationTarget.classList.add("active");
-    } else {
-      els.elevationTarget.classList.remove("active");
-    }
-  }
-  if (els.elevationCurrent) {
-    if (orientation && orientation.elevation != null) {
-      els.elevationCurrent.style.left = mapElevationToPercent(orientation.elevation) + "%";
-      els.elevationCurrent.classList.add("active");
-    } else {
-      els.elevationCurrent.classList.remove("active");
-    }
-  }
-}
-
-// Проверяем поддержку датчиков ориентации и условия доступа к ним.
-function ensurePointingOrientationSupported() {
-  const state = UI.state.pointing;
-  if (typeof window === "undefined") {
-    if (state.orientationErrorHint !== "unsupported") {
-      state.orientationErrorHint = "unsupported";
-      updatePointingOrientationHint();
-      note("Окружение не поддерживает датчики ориентации");
-    }
-    return false;
-  }
-  const hasDeviceOrientation = typeof DeviceOrientationEvent !== "undefined";
-  const hasAbsoluteSensor = typeof window.AbsoluteOrientationSensor === "function";
-  if (!hasDeviceOrientation && !hasAbsoluteSensor) {
-    if (state.orientationErrorHint !== "unsupported") {
-      state.orientationErrorHint = "unsupported";
-      updatePointingOrientationHint();
-      note("Датчики ориентации не поддерживаются этим браузером");
-    }
-    return false;
-  }
-  if (!pointingIsSecureContext()) {
-    if (state.orientationErrorHint !== "insecure") {
-      state.orientationErrorHint = "insecure";
-      updatePointingOrientationHint();
-      note("Датчики ориентации требуют защищённое соединение (HTTPS)");
-    }
-    return false;
-  }
-  if (state.orientationErrorHint && state.orientationErrorHint !== "manual") {
-    state.orientationErrorHint = null;
-    updatePointingOrientationHint();
-  }
-  return true;
-}
-
-// Обновляем подсказку по датчикам ориентации в интерфейсе.
-function updatePointingOrientationHint() {
-  const els = UI.els.pointing;
-  if (!els || !els.orientationHint) return;
-  const hint = UI.state.pointing.orientationErrorHint;
-  let text = "";
-  if (hint === "insecure") {
-    text = "Браузер блокирует датчики ориентации без HTTPS. Подключитесь по защищённому протоколу или введите азимут и наклон вручную.";
-  } else if (hint === "unsupported") {
-    text = "Датчики ориентации не поддерживаются на этом устройстве. Используйте ручной ввод значений.";
-  } else if (hint === "denied") {
-    text = "Доступ к датчикам ориентации запрещён. Разрешите его в настройках браузера или задайте параметры вручную.";
-  } else {
-    els.orientationHint.hidden = true;
-    els.orientationHint.textContent = "";
-    return;
-  }
-  els.orientationHint.hidden = false;
-  els.orientationHint.textContent = text;
-}
-
-function updatePointingSensorButton() {
-  const els = UI.els.pointing;
-  if (!els || !els.sensorsBtn) return;
-  const state = UI.state.pointing;
-  els.sensorsBtn.textContent = state.sensorsActive ? "Отключить датчики" : "Датчики ориентации";
-  els.sensorsBtn.classList.toggle("active", !!state.sensorsActive);
-}
-
-async function togglePointingSensors() {
-  const state = UI.state.pointing;
-  if (state.sensorsActive) {
-    stopPointingSensors();
-    note("Датчики ориентации отключены");
-    return;
-  }
-  if (!ensurePointingOrientationSupported()) {
-    updatePointingOrientationStatus();
-    return;
-  }
-  if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
-    try {
-      const result = await DeviceOrientationEvent.requestPermission();
-      if (result !== "granted") {
-        note("Доступ к датчикам отклонён пользователем");
-        state.orientationErrorHint = "denied";
-        updatePointingOrientationHint();
-        updatePointingOrientationStatus();
-        return;
-      }
-    } catch (err) {
-      console.warn("[pointing] requestPermission", err);
-      note("Не удалось получить доступ к датчикам");
-      state.orientationErrorHint = "denied";
-      updatePointingOrientationHint();
-      updatePointingOrientationStatus();
-      return;
-    }
-  }
-  const handler = (event) => handlePointingOrientation(event);
-  state.orientationHandler = handler;
-  state.orientationListeners = [];
-  if ("ondeviceorientationabsolute" in window) {
-    window.addEventListener("deviceorientationabsolute", handler, true);
-    state.orientationListeners.push("deviceorientationabsolute");
-  }
-  window.addEventListener("deviceorientation", handler, true);
-  state.orientationListeners.push("deviceorientation");
-  state.sensorsActive = true;
-  state.orientationSource = "sensor";
-  state.manualOrientation = false;
-  if (state.orientationErrorHint) {
-    state.orientationErrorHint = null;
-    updatePointingOrientationHint();
-  }
-  updatePointingSensorButton();
-  updatePointingOrientationStatus();
-  note("Датчики ориентации включены");
-}
-
-function stopPointingSensors() {
-  const state = UI.state.pointing;
-  if (Array.isArray(state.orientationListeners) && state.orientationHandler) {
-    for (const type of state.orientationListeners) {
-      window.removeEventListener(type, state.orientationHandler, true);
-    }
-  } else if (state.orientationHandler) {
-    window.removeEventListener("deviceorientation", state.orientationHandler, true);
-    window.removeEventListener("deviceorientationabsolute", state.orientationHandler, true);
-  }
-  state.orientationListeners = [];
-  state.orientationHandler = null;
-  state.sensorsActive = false;
-  updatePointingSensorButton();
-  updatePointingOrientationStatus();
-}
-
-function handlePointingOrientation(event) {
-  const state = UI.state.pointing;
-  const orientation = computeOrientationFromEvent(event);
-  if (!orientation) return;
-  state.orientation = orientation;
-  state.orientationSource = "sensor";
-  state.manualOrientation = false;
-  if (state.orientationErrorHint) {
-    state.orientationErrorHint = null;
-    updatePointingOrientationHint();
-  }
-  updatePointingOrientationUi();
-  updatePointingOrientationStatus();
-}
-
-function computeOrientationFromEvent(event) {
-  if (!event) return null;
-  let heading = null;
-  let absolute = false;
-  if (typeof event.webkitCompassHeading === "number") {
-    heading = normalizeDegrees(event.webkitCompassHeading);
-    absolute = true;
-  }
-  const alpha = typeof event.alpha === "number" ? event.alpha : null;
-  const beta = typeof event.beta === "number" ? event.beta : null;
-  const gamma = typeof event.gamma === "number" ? event.gamma : null;
-  let derived = null;
-  if (alpha != null && beta != null && gamma != null) {
-    derived = computeOrientationFromEuler(alpha, beta, gamma);
-    if (derived.heading != null && heading == null) heading = derived.heading;
-  }
-  if (heading == null && typeof event.alpha === "number") {
-    heading = normalizeDegrees(360 - event.alpha);
-  }
-  if (heading == null) return null;
-  return {
-    heading: normalizeDegrees(heading),
-    elevation: derived && derived.elevation != null
-      ? clampNumber(derived.elevation, POINTING_ELEVATION_MIN, POINTING_ELEVATION_MAX)
-      : null,
-    roll: derived && derived.roll != null ? derived.roll : null,
-    absolute: absolute || event.absolute === true,
-    timestamp: Date.now(),
-    source: "sensor",
-  };
-}
-
-function computeOrientationFromEuler(alphaDeg, betaDeg, gammaDeg) {
-  const alpha = alphaDeg * DEG2RAD;
-  const beta = betaDeg * DEG2RAD;
-  const gamma = gammaDeg * DEG2RAD;
-
-  const cA = Math.cos(alpha);
-  const sA = Math.sin(alpha);
-  const cB = Math.cos(beta);
-  const sB = Math.sin(beta);
-  const cG = Math.cos(gamma);
-  const sG = Math.sin(gamma);
-
-  const m11 = cA * cG - sA * sB * sG;
-  const m12 = -cB * sA;
-  const m13 = cA * sG + cG * sA * sB;
-  const m21 = cG * sA + cA * sB * sG;
-  const m22 = cA * cB;
-  const m23 = sA * sG - cA * cG * sB;
-  const m31 = -cB * sG;
-  const m32 = sB;
-  const m33 = cB * cG;
-
-  const fx = -m13;
-  const fy = -m23;
-  const fz = -m33;
-  const norm = Math.hypot(fx, fy, fz) || 1;
-  const nx = fx / norm;
-  const ny = fy / norm;
-  const nz = fz / norm;
-
-  let heading = Math.atan2(nx, ny) * RAD2DEG;
-  if (Number.isFinite(heading)) heading = normalizeDegrees(heading);
-  else heading = null;
-
-  const elevation = Math.asin(clampNumber(nz, -1, 1)) * RAD2DEG;
-  const roll = Math.atan2(m32, m31) * RAD2DEG;
-
-  return { heading, elevation, roll };
-}
-
-function applyPointingManualOrientation() {
-  const state = UI.state.pointing;
-  const els = UI.els.pointing;
-  if (!els) return;
-  const az = Number(els.manualAz ? els.manualAz.value : "");
-  const el = Number(els.manualEl ? els.manualEl.value : "");
-  if (!Number.isFinite(az)) {
-    note("Укажите азимут устройства в градусах");
-    return;
-  }
-  if (!Number.isFinite(el)) {
-    note("Укажите наклон устройства в градусах");
-    return;
-  }
-  stopPointingSensors();
-  state.orientation = {
-    heading: normalizeDegrees(az),
-    elevation: clampNumber(el, POINTING_ELEVATION_MIN, POINTING_ELEVATION_MAX),
-    roll: null,
-    source: "manual",
-    absolute: true,
-    timestamp: Date.now(),
-  };
-  state.manualOrientation = true;
-  state.orientationSource = "manual";
-  if (state.orientationErrorHint) {
-    state.orientationErrorHint = null;
-    updatePointingOrientationHint();
-  }
-  updatePointingOrientationUi();
-  updatePointingOrientationStatus();
-  note("Ориентация обновлена вручную");
-}
-
-function updatePointingOrientationStatus() {
-  const els = UI.els.pointing;
-  if (!els || !els.orientationStatus) return;
-  const state = UI.state.pointing;
-  let text = "";
-  if (state.orientationErrorHint === "insecure") {
-    text = "Датчики заблокированы браузером: требуется защищённое соединение.";
-  } else if (state.orientationErrorHint === "unsupported") {
-    text = "Датчики ориентации не поддерживаются. Используйте ручной ввод.";
-  } else if (state.orientationErrorHint === "denied") {
-    text = "Доступ к датчикам запрещён. Разрешите его или задайте данные вручную.";
-  } else if (state.sensorsActive) {
-    if (state.orientation && state.orientation.heading != null) {
-      text = state.orientation.absolute
-        ? "Датчики активны, используются абсолютные показания."
-        : "Датчики активны, используются относительные показания.";
-    } else {
-      text = "Датчики активны, ожидание данных…";
-    }
-  } else if (state.orientation && state.orientation.source === "manual") {
-    text = "Используются вручную введённые значения.";
-  } else {
-    text = "Датчики не активны.";
-  }
-  els.orientationStatus.textContent = text;
-  updatePointingOrientationHint();
 }
 
 function formatDegrees(value, digits = 1) {
@@ -6937,12 +6332,6 @@ function solveKepler(meanAnomaly, eccentricity) {
     if (Math.abs(delta) < 1e-8) break;
   }
   return E;
-}
-
-function mapElevationToPercent(value) {
-  const span = POINTING_ELEVATION_MAX - POINTING_ELEVATION_MIN;
-  const clamped = clampNumber(value, POINTING_ELEVATION_MIN, POINTING_ELEVATION_MAX);
-  return ((clamped - POINTING_ELEVATION_MIN) / span) * 100;
 }
 
 
