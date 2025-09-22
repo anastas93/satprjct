@@ -135,7 +135,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <!-- Вкладка наведения антенны -->
     <section id="tab-pointing" class="tab" hidden>
       <h2>Pointing</h2>
-      <p class="pointing-intro small muted">Интерактивный помощник для наведения антенны на геостационарные спутники. Используйте GPS телефона или введите координаты вручную.</p>
+      <p class="pointing-intro small muted">Помощник для наведения антенны на геостационарные спутники с ручным вводом координат в формате MGRS (100 км).</p>
       <div id="pointingSummary" class="pointing-summary glass">
         <div class="pointing-summary-chip" id="pointingTleBadge" data-state="warn">
           <span class="pointing-summary-icon">🛰️</span>
@@ -152,48 +152,38 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
       </div>
       <div class="pointing-grid">
         <article class="pointing-card glass">
-          <h3>Положение наблюдателя</h3>
-          <p id="pointingStatus" class="small muted">Нажмите «Запросить позицию» или включите отслеживание.</p>
-          <div class="pointing-actions">
-            <button id="pointingLocateOnceBtn" class="btn">Запросить позицию</button>
-            <button id="pointingLocateBtn" class="btn ghost">Включить отслеживание</button>
-          </div>
-          <p id="pointingLocationHint" class="pointing-location-hint" hidden>Safari на iOS требует защищённое подключение для доступа к геолокации. При необходимости используйте ручной ввод координат.</p>
-          <dl class="pointing-info">
-            <div><dt>Широта</dt><dd><span id="pointingLat">—</span></dd></div>
-            <div><dt>Долгота</dt><dd><span id="pointingLon">—</span></dd></div>
-            <div><dt>Высота</dt><dd><span id="pointingAlt">—</span></dd></div>
-            <div><dt>Точность</dt><dd><span id="pointingAccuracy">—</span></dd></div>
-            <div><dt>Источник</dt><dd><span id="pointingLocationSource">—</span></dd></div>
-            <div><dt>Обновлено</dt><dd><span id="pointingLocationTime">—</span></dd></div>
-          </dl>
-          <div class="pointing-manual">
-            <div class="pointing-manual-title">Ручной ввод</div>
-            <div class="pointing-manual-grid">
-              <label>Широта (°)
-                <input id="pointingManualLat" type="number" step="0.0001" min="-90" max="90" placeholder="55.7558" />
-              </label>
-              <label>Долгота (°)
-                <input id="pointingManualLon" type="number" step="0.0001" min="-180" max="180" placeholder="37.6173" />
-              </label>
-              <label>Высота (м)
-                <input id="pointingManualAlt" type="number" step="1" min="-500" max="9000" placeholder="200" />
-              </label>
+          <details id="pointingObserverDetails" class="pointing-observer">
+            <summary class="pointing-observer-summary">
+              <span class="title">Положение наблюдателя</span>
+              <span class="value" id="pointingObserverLabel">—</span>
+            </summary>
+            <div class="pointing-observer-body">
+              <p class="small muted">Укажите квадрат MGRS (100 км) и при необходимости высоту. По умолчанию используется сектор 43U CR.</p>
+              <div class="pointing-observer-grid">
+                <label>MGRS 100 км
+                  <input id="pointingMgrsInput" type="text" maxlength="8" placeholder="43U CR" />
+                </label>
+                <label>Высота (м)
+                  <input id="pointingManualAlt" type="number" step="1" min="-500" max="9000" placeholder="0" />
+                </label>
+              </div>
+              <div class="pointing-observer-meta">
+                <div><span class="label">Широта</span><strong id="pointingLat">—</strong></div>
+                <div><span class="label">Долгота</span><strong id="pointingLon">—</strong></div>
+                <div><span class="label">Высота</span><strong id="pointingAlt">—</strong></div>
+              </div>
+              <button id="pointingMgrsApply" class="btn ghost">Применить</button>
             </div>
-            <button id="pointingManualApply" class="btn ghost">Применить</button>
-          </div>
+          </details>
         </article>
         <article class="pointing-card glass">
-          <h3>Ориентация антенны</h3>
-          <div class="pointing-actions">
-            <button id="pointingSensorsBtn" class="btn ghost">Датчики ориентации</button>
+          <h3>Наведение на спутник</h3>
+          <div class="pointing-target-grid">
+            <div class="pointing-target-metric"><span class="label">Азимут</span><strong id="pointingTargetAz">—</strong></div>
+            <div class="pointing-target-metric"><span class="label">Возвышение</span><strong id="pointingTargetEl">—</strong></div>
           </div>
-          <p id="pointingOrientationStatus" class="small muted">Датчики не активны.</p>
-          <p id="pointingOrientationHint" class="pointing-location-hint" hidden>Датчики ориентации требуют защищённое подключение.</p>
           <div class="pointing-compass" id="pointingCompass">
             <div class="pointing-compass-dial">
-              <div class="pointing-compass-needle target" id="pointingTargetNeedle"><span>цель</span></div>
-              <div class="pointing-compass-needle current" id="pointingCurrentNeedle"><span>курс</span></div>
               <div class="pointing-compass-radar" id="pointingCompassRadar"></div>
               <div class="pointing-compass-north" aria-hidden="true">N</div>
               <div class="pointing-compass-center"></div>
@@ -206,34 +196,6 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
               <span data-quadrant="west">Запад • W</span>
             </div>
           </div>
-          <div class="pointing-angles">
-            <div class="pointing-angle"><span class="label">Азимут цели</span><strong id="pointingTargetAz">—</strong></div>
-            <div class="pointing-angle"><span class="label">Азимут устройства</span><strong id="pointingCurrentAz">—</strong></div>
-            <div class="pointing-angle"><span class="label">Разница</span><strong id="pointingDeltaAz">—</strong></div>
-          </div>
-          <div class="pointing-elevation">
-            <div class="pointing-elevation-scale" id="pointingElevationScale">
-              <div class="pointing-elevation-target" id="pointingElevationTarget"><span>цель</span></div>
-              <div class="pointing-elevation-current" id="pointingElevationCurrent"><span>курс</span></div>
-            </div>
-            <div class="pointing-angles">
-              <div class="pointing-angle"><span class="label">Возвышение цели</span><strong id="pointingTargetEl">—</strong></div>
-              <div class="pointing-angle"><span class="label">Наклон устройства</span><strong id="pointingCurrentEl">—</strong></div>
-              <div class="pointing-angle"><span class="label">Разница</span><strong id="pointingDeltaEl">—</strong></div>
-            </div>
-          </div>
-          <div class="pointing-manual">
-            <div class="pointing-manual-title">Ручная ориентация</div>
-            <div class="pointing-manual-grid">
-              <label>Азимут (°)
-                <input id="pointingManualAz" type="number" step="0.1" min="0" max="360" placeholder="180" />
-              </label>
-              <label>Наклон (°)
-                <input id="pointingManualEl" type="number" step="0.1" min="-30" max="90" placeholder="30" />
-              </label>
-            </div>
-            <button id="pointingManualOrientationApply" class="btn ghost">Сохранить</button>
-          </div>
         </article>
         <article class="pointing-card glass pointing-card-wide">
           <div class="pointing-card-header">
@@ -245,10 +207,16 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             </label>
           </div>
           <div class="pointing-horizon" id="pointingHorizon">
+            <div class="pointing-horizon-azimuths" aria-hidden="true">
+              <span data-az="0">0° • N</span>
+              <span data-az="90">90° • E</span>
+              <span data-az="180">180° • S</span>
+              <span data-az="270">270° • W</span>
+            </div>
             <div class="pointing-horizon-track" id="pointingHorizonTrack"></div>
-            <div class="pointing-horizon-empty small muted" id="pointingHorizonEmpty">Загрузите координаты, чтобы увидеть спутники.</div>
+            <div class="pointing-horizon-empty small muted" id="pointingHorizonEmpty">Укажите координаты, чтобы увидеть спутники.</div>
           </div>
-          <p class="small muted" id="pointingSatSummary">После загрузки координат здесь появится статистика по видимым спутникам.</p>
+          <p class="small muted" id="pointingSatSummary">После выбора квадрата MGRS появится список видимых спутников и их параметры.</p>
           <div class="pointing-sat-list" id="pointingSatList"></div>
           <label class="pointing-select">
             <span>Активный спутник</span>
@@ -418,6 +386,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
   <div id="toast" class="toast" hidden></div>
   <script src="libs/geostat_tle.js"></script>
   <script src="libs/sha256.js"></script>
+  <script src="libs/mgrs.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
@@ -967,22 +936,18 @@ main {
 .pointing-compass { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.6rem; }
 .pointing-compass-dial { position:relative; width:min(280px, 75vw); aspect-ratio:1 / 1; border-radius:50%; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--panel-2) 95%, white 5%), color-mix(in oklab, var(--panel) 88%, black 12%)); display:flex; align-items:center; justify-content:center; overflow:hidden; }
 .pointing-compass-radar { position:absolute; left:12%; top:12%; width:76%; height:76%; border-radius:50%; pointer-events:none; }
-.pointing-compass-sat { position:absolute; left:50%; top:50%; width:18px; height:18px; border-radius:50%; padding:0; display:flex; align-items:center; justify-content:center; transform:translate(-50%, -50%); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, var(--panel) 55%); border:3px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, black 35%); box-shadow:0 6px 16px rgba(0,0,0,.35); pointer-events:auto; cursor:pointer; transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease, filter .2s ease; box-sizing:border-box; line-height:1; aspect-ratio:1 / 1; }
-.pointing-compass-sat:hover { transform:translate(-50%, -50%) scale(1.16); box-shadow:0 10px 24px rgba(0,0,0,.45); }
+.pointing-compass-sat { position:absolute; left:50%; top:50%; width:10px; height:10px; border-radius:50%; padding:0; display:flex; align-items:center; justify-content:center; transform:translate(-50%, -50%) scale(.55); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 50%, var(--panel) 50%); border:2px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 60%, black 40%); box-shadow:0 3px 8px rgba(0,0,0,.28); pointer-events:auto; cursor:pointer; transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease, filter .2s ease; box-sizing:border-box; line-height:1; aspect-ratio:1 / 1; }
+.pointing-compass-sat:hover { transform:translate(-50%, -50%) scale(.8); box-shadow:0 6px 14px rgba(0,0,0,.32); }
 .pointing-compass-sat:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
-.pointing-compass-sat.active { transform:translate(-50%, -52%) scale(1.18); border-color: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 72%, white 28%); filter:brightness(1.08); box-shadow:0 0 0 3px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 42%, white 58%); }
-.pointing-compass-sat .pointing-compass-label { position:absolute; left:50%; top:-.6rem; transform:translate(-50%, -100%); padding:.32rem .6rem; border-radius:.65rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); font-size:.72rem; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.3); white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .2s ease, transform .2s ease; z-index:5; }
-.pointing-compass-sat .pointing-compass-label::after { content:""; position:absolute; left:50%; top:100%; width:9px; height:9px; transform:translate(-50%, -6px) rotate(45deg); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); border-left:none; border-top:none; box-shadow:0 4px 8px rgba(0,0,0,.25); }
-.pointing-compass-sat:hover .pointing-compass-label, .pointing-compass-sat:focus-visible .pointing-compass-label, .pointing-compass-sat.active .pointing-compass-label { opacity:1; transform:translate(-50%, -120%); }
-.pointing-compass-north { position:absolute; top:6%; left:50%; transform:translate(-50%, -50%); font-size:.78rem; font-weight:700; letter-spacing:.22em; text-transform:uppercase; color: color-mix(in oklab, var(--accent) 45%, var(--text) 55%); pointer-events:none; text-align:center; }
-.pointing-compass-north::after { content:""; display:block; margin:.3rem auto 0; width:0; height:0; border:6px solid transparent; border-bottom:9px solid color-mix(in oklab, var(--accent) 55%, white 45%); filter:drop-shadow(0 2px 2px rgba(0,0,0,.35)); }
-.pointing-compass-legend { display:flex; flex-wrap:wrap; justify-content:center; gap:.6rem 1rem; margin-top:.75rem; }
-.pointing-compass-legend span { display:flex; align-items:center; gap:.4rem; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color: color-mix(in oklab, var(--text) 80%, var(--panel-2) 20%); opacity:.85; }
-.pointing-compass-legend span::before { content:""; width:11px; height:11px; border-radius:50%; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 78%, white 22%); box-shadow:0 0 0 2px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, black 55%); }
-.pointing-compass-needle { position:absolute; left:50%; top:50%; width:45%; height:3px; transform-origin:0% 50%; border-radius:3px; background: color-mix(in oklab, var(--accent) 65%, white 35%); color: var(--accent); opacity:.35; transition:transform .2s ease, opacity .2s ease; }
-.pointing-compass-needle span { position:absolute; top:-1.9rem; right:-.4rem; font-size:.65rem; text-transform:uppercase; letter-spacing:.05em; font-weight:700; }
-.pointing-compass-needle.current { background: color-mix(in oklab, var(--good) 70%, white 30%); color: var(--good); }
-.pointing-compass-needle.active { opacity:1; }
+.pointing-compass-sat.active { transform:translate(-50%, -52%) scale(.88); border-color: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 72%, white 28%); filter:brightness(1.08); box-shadow:0 0 0 2px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 38%, white 62%); }
+.pointing-compass-sat .pointing-compass-label { position:absolute; left:50%; top:-.4rem; transform:translate(-50%, -100%); padding:.25rem .55rem; border-radius:.55rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); font-size:.68rem; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.28); white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .2s ease, transform .2s ease; z-index:5; }
+.pointing-compass-sat .pointing-compass-label::after { content:""; position:absolute; left:50%; top:100%; width:8px; height:8px; transform:translate(-50%, -5px) rotate(45deg); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); border-left:none; border-top:none; box-shadow:0 3px 6px rgba(0,0,0,.22); }
+.pointing-compass-sat:hover .pointing-compass-label, .pointing-compass-sat:focus-visible .pointing-compass-label, .pointing-compass-sat.active .pointing-compass-label { opacity:1; transform:translate(-50%, -115%); }
+.pointing-compass-north { position:absolute; top:7%; left:50%; transform:translate(-50%, -50%); font-size:.75rem; font-weight:700; letter-spacing:.2em; text-transform:uppercase; color: color-mix(in oklab, var(--accent) 45%, var(--text) 55%); pointer-events:none; text-align:center; }
+.pointing-compass-north::after { content:""; display:block; margin:.3rem auto 0; width:0; height:0; border:6px solid transparent; border-bottom:8px solid color-mix(in oklab, var(--accent) 55%, white 45%); filter:drop-shadow(0 2px 2px rgba(0,0,0,.3)); }
+.pointing-compass-legend { display:flex; flex-wrap:wrap; justify-content:center; gap:.5rem .9rem; margin-top:.6rem; }
+.pointing-compass-legend span { display:flex; align-items:center; gap:.35rem; font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color: color-mix(in oklab, var(--text) 78%, var(--panel-2) 22%); opacity:.85; }
+.pointing-compass-legend span::before { content:""; width:8px; height:8px; border-radius:50%; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 78%, white 22%); box-shadow:0 0 0 2px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, black 55%); }
 .pointing-compass-center { width:18px; height:18px; border-radius:50%; background: color-mix(in oklab, var(--panel-2) 85%, black 15%); border:2px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); }
 .pointing-compass-graduations { position:absolute; inset:12%; border-radius:50%; border:1px dashed color-mix(in oklab, var(--panel-2) 70%, black 30%); opacity:.5; }
 .pointing-angles { display:flex; flex-wrap:wrap; gap:.6rem 1rem; font-size:.9rem; }
@@ -1017,17 +982,20 @@ main {
 .pointing-empty { padding:.8rem; border-radius:.8rem; background: color-mix(in oklab, var(--panel-2) 90%, black 10%); border:1px dashed color-mix(in oklab, var(--panel-2) 65%, black 35%); text-align:center; }
 .pointing-card-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.5rem; }
 .pointing-card-wide { grid-column:1 / -1; }
-.pointing-horizon { position:relative; border-radius:1rem; padding:1.2rem 1rem 2.1rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 70%, var(--accent-2) 10%), color-mix(in oklab, var(--panel) 88%, black 12%)); overflow:hidden; min-height:160px; }
-.pointing-horizon::before { content:""; position:absolute; inset:auto 0 0; height:35%; background: linear-gradient(180deg, color-mix(in oklab, var(--panel) 80%, black 20%), color-mix(in oklab, #020617 85%, black 15%)); opacity:.8; }
-.pointing-horizon-track { position:absolute; inset:20px 12px 26px 12px; z-index:1; }
-.pointing-horizon-empty { position:relative; z-index:1; margin:0; text-align:center; padding-top:2.2rem; }
-.pointing-horizon-sat { position:absolute; bottom:0; --pointing-sat-offset:0; transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -2.3rem)); border:none; width:18px; height:18px; border-radius:50%; padding:0; display:flex; align-items:center; justify-content:center; line-height:1; aspect-ratio:1 / 1; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 48%, var(--panel) 52%); border:3px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, black 35%); box-shadow:0 6px 18px rgba(0,0,0,.35); cursor:pointer; transition:transform .2s ease, box-shadow .2s ease, filter .2s ease; z-index:2; box-sizing:border-box; }
-.pointing-horizon-sat:hover { transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -2.3rem - 6px)) scale(1.12); box-shadow:0 14px 28px rgba(0,0,0,.45); }
+.pointing-horizon { position:relative; border-radius:1rem; padding:1.4rem 1.1rem 1.9rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 72%, var(--accent-2) 6%), color-mix(in oklab, var(--panel) 90%, black 10%)); overflow:hidden; min-height:160px; }
+.pointing-horizon::before { content:""; position:absolute; inset:auto 0 0; height:32%; background: linear-gradient(180deg, color-mix(in oklab, var(--panel) 82%, black 18%), color-mix(in oklab, #020617 88%, black 12%)); opacity:.85; }
+.pointing-horizon-azimuths { position:absolute; top:14px; left:18px; right:18px; display:flex; justify-content:space-between; font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; color: color-mix(in oklab, var(--muted) 70%, var(--text) 30%); pointer-events:none; z-index:0; opacity:.85; }
+.pointing-horizon-azimuths span { display:flex; align-items:center; gap:.35rem; }
+.pointing-horizon-azimuths span::before { content:""; display:block; width:1px; height:14px; background: color-mix(in oklab, var(--panel-2) 60%, black 40%); }
+.pointing-horizon-track { position:absolute; inset:46px 18px 24px; z-index:1; }
+.pointing-horizon-empty { position:relative; z-index:1; margin:0; text-align:center; padding-top:2.1rem; }
+.pointing-horizon-sat { position:absolute; bottom:0; --pointing-sat-offset:0; transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -1.8rem)) scale(.55); border:none; width:18px; height:18px; border-radius:50%; padding:0; display:flex; align-items:center; justify-content:center; line-height:1; aspect-ratio:1 / 1; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 48%, var(--panel) 52%); border:3px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, black 35%); box-shadow:0 4px 12px rgba(0,0,0,.32); cursor:pointer; transition:transform .2s ease, box-shadow .2s ease, filter .2s ease; z-index:2; box-sizing:border-box; }
+.pointing-horizon-sat:hover { transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -1.8rem - 4px)) scale(.8); box-shadow:0 10px 20px rgba(0,0,0,.4); }
 .pointing-horizon-sat.active { filter:brightness(1.08); box-shadow:0 0 0 3px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, white 55%); }
 .pointing-horizon-sat:focus-visible { outline:2px solid var(--ring); outline-offset:4px; }
-.pointing-horizon-sat .pointing-horizon-label { position:absolute; left:50%; bottom:140%; transform:translate(-50%, 8px); padding:.35rem .65rem; border-radius:.7rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 20%, var(--panel-2) 80%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); font-weight:600; font-size:.75rem; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .2s ease, transform .2s ease; text-shadow:0 1px 2px rgba(0,0,0,.3); }
-.pointing-horizon-sat .pointing-horizon-label::after { content:""; position:absolute; left:50%; top:100%; width:10px; height:10px; transform:translate(-50%, -6px) rotate(45deg); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 20%, var(--panel-2) 80%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); border-left:none; border-top:none; box-shadow:0 4px 8px rgba(0,0,0,.25); }
-.pointing-horizon-sat:hover .pointing-horizon-label, .pointing-horizon-sat:focus-visible .pointing-horizon-label, .pointing-horizon-sat.active .pointing-horizon-label { opacity:1; transform:translate(-50%, -6px); }
+.pointing-horizon-sat .pointing-horizon-label { position:absolute; left:50%; bottom:130%; transform:translate(-50%, 6px); padding:.3rem .55rem; border-radius:.65rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); font-weight:600; font-size:.72rem; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .2s ease, transform .2s ease; text-shadow:0 1px 2px rgba(0,0,0,.28); }
+.pointing-horizon-sat .pointing-horizon-label::after { content:""; position:absolute; left:50%; top:100%; width:8px; height:8px; transform:translate(-50%, -5px) rotate(45deg); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); border-left:none; border-top:none; box-shadow:0 3px 6px rgba(0,0,0,.22); }
+.pointing-horizon-sat:hover .pointing-horizon-label, .pointing-horizon-sat:focus-visible .pointing-horizon-label, .pointing-horizon-sat.active .pointing-horizon-label { opacity:1; transform:translate(-50%, -4px); }
 @media (min-width: 960px) { .pointing-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 
 
@@ -6107,7 +6075,7 @@ function renderPointingHorizon(visible) {
   }
   const sorted = [...visible].sort((a, b) => a.azimuth - b.azimuth);
   const laneLast = [];
-  const minGap = 9; // минимальный зазор между маркерами в процентах ширины трека
+  const minGap = 6; // минимальный зазор между маркерами с учётом уменьшенного размера
   for (const sat of sorted) {
     const marker = document.createElement("button");
     marker.type = "button";
@@ -6189,12 +6157,12 @@ function placeCompassDot(angleRad, baseRadius) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const x = 50 + Math.sin(angleRad) * radius;
     const y = 50 - Math.cos(angleRad) * radius;
-    const collision = compassPlacedDots.some((pt) => Math.hypot(pt.x - x, pt.y - y) < 6);
+    const collision = compassPlacedDots.some((pt) => Math.hypot(pt.x - x, pt.y - y) < 5);
     if (!collision) {
       compassPlacedDots.push({ x, y });
       return { x, y };
     }
-    radius = Math.max(6, radius - 6);
+    radius = Math.max(4, radius - 5);
   }
   const fallbackX = 50 + Math.sin(angleRad) * baseRadius;
   const fallbackY = 50 - Math.cos(angleRad) * baseRadius;
