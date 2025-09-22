@@ -121,6 +121,7 @@ const UI = {
       locationRequestPending: false,
       minElevation: POINTING_DEFAULT_MIN_ELEVATION,
       orientation: null,
+      orientationErrorHint: null,
       sensorsActive: false,
       orientationListeners: [],
       selectedSatId: null,
@@ -445,6 +446,7 @@ async function init() {
     manualAlt: $("#pointingManualAlt"),
     manualApply: $("#pointingManualApply"),
     orientationStatus: $("#pointingOrientationStatus"),
+    orientationHint: $("#pointingOrientationHint"),
     manualAz: $("#pointingManualAz"),
     manualEl: $("#pointingManualEl"),
     manualOrientationApply: $("#pointingManualOrientationApply"),
@@ -4118,13 +4120,54 @@ function updatePointingMinElevationUi() {
   }
 }
 
-function requestPointingLocationOnce() {
+// Проверяем, доступен ли защищённый контекст для работы с геолокацией/датчиками.
+function pointingIsSecureContext() {
+  if (typeof window === "undefined") return false;
+  if (window.isSecureContext === true) return true;
+  if (typeof location !== "undefined" && location.protocol === "https:") return true;
+  return false;
+}
+
+// Сохраняем ошибку геолокации и сразу обновляем связанные элементы UI.
+function setPointingLocationError(error, hint) {
+  const state = UI.state.pointing;
+  state.locationError = error;
+  state.locationErrorHint = hint || null;
+  updatePointingLocationStatus();
+  updatePointingBadges();
+}
+
+// Удостоверяемся, что браузер позволяет запрашивать координаты.
+function ensurePointingGeolocationSupported() {
   const state = UI.state.pointing;
   if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
-    note("Геолокация не поддерживается браузером");
+    if (state.locationErrorHint !== "unsupported") {
+      setPointingLocationError({ message: "Геолокация не поддерживается этим браузером." }, "unsupported");
+      note("Геолокация не поддерживается браузером");
+    }
+    return false;
+  }
+  if (!pointingIsSecureContext()) {
+    const hint = isProbablyIos() ? "ios-insecure" : "insecure";
+    if (state.locationErrorHint !== hint) {
+      setPointingLocationError({ message: "Геолокация заблокирована браузером: требуется HTTPS." }, hint);
+      note("Геолокация требует защищённое соединение (HTTPS)");
+    }
+    return false;
+  }
+  if (state.locationErrorHint && (state.locationErrorHint === "unsupported" || state.locationErrorHint === "insecure" || state.locationErrorHint === "ios-insecure")) {
+    setPointingLocationError(null, null);
+  }
+  return true;
+}
+
+function requestPointingLocationOnce() {
+  const state = UI.state.pointing;
+  if (state.locationRequestPending) return;
+  if (!ensurePointingGeolocationSupported()) {
+    updatePointingLocationControls();
     return;
   }
-  if (state.locationRequestPending) return;
   state.locationRequestPending = true;
   updatePointingLocationControls();
   updatePointingLocationStatus();
@@ -4176,13 +4219,13 @@ function updatePointingLocationControls() {
 
 function togglePointingLocationWatch() {
   const state = UI.state.pointing;
-  if (!navigator.geolocation || typeof navigator.geolocation.watchPosition !== "function") {
-    note("Геолокация не поддерживается браузером");
-    return;
-  }
   if (state.locationWatchId != null) {
     stopPointingLocationWatch();
     note("Отслеживание координат остановлено");
+    return;
+  }
+  if (!ensurePointingGeolocationSupported()) {
+    updatePointingLocationControls();
     return;
   }
   try {
@@ -4191,9 +4234,7 @@ function togglePointingLocationWatch() {
       (error) => handlePointingLocationError(error),
       { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 },
     );
-    state.locationError = null;
-    state.locationErrorHint = null;
-    updatePointingLocationStatus();
+    setPointingLocationError(null, null);
     note("Отслеживание координат включено");
   } catch (err) {
     console.warn("[pointing] watchPosition", err);
@@ -4232,36 +4273,41 @@ function handlePointingPosition(position, source) {
     timestamp: new Date(position.timestamp || Date.now()),
   };
   state.observer = observer;
-  state.locationError = null;
-  state.locationErrorHint = null;
+  setPointingLocationError(null, null);
   updatePointingLocationUi();
   updatePointingSatellites();
-  updatePointingBadges();
 }
 
-function handlePointingLocationError(error) {
-  const state = UI.state.pointing;
-  const fallbackError = { message: "Неизвестная ошибка" };
-  const messageText = error && typeof error.message === "string" ? error.message : "";
-  let hint = null;
-  if (messageText && /Origin does not have permission to use Geolocation service/i.test(messageText)) {
-    hint = "ios-insecure";
-  } else if (error && typeof error.code === "number" && error.code === 1) {
-    hint = "denied";
+  function handlePointingLocationError(error) {
+    const state = UI.state.pointing;
+    const fallbackError = { message: "Неизвестная ошибка" };
+    const messageText = error && typeof error.message === "string" ? error.message : "";
+    let hint = null;
+    if (messageText && /Origin does not have permission to use Geolocation service/i.test(messageText)) {
+      hint = "ios-insecure";
+    } else if (messageText && /Only secure origins are allowed/i.test(messageText)) {
+      hint = "insecure";
+    } else if (error && typeof error.code === "number") {
+      if (error.code === 1) hint = "denied";
+      else if (error.code === 2) hint = "unavailable";
+      else if (error.code === 3) hint = "timeout";
+    }
+    setPointingLocationError(error || fallbackError, hint);
+    let readableMessage = messageText || fallbackError.message;
+    if (hint === "ios-insecure") {
+      readableMessage = "Safari блокирует геолокацию для незашифрованного соединения.";
+    } else if (hint === "insecure") {
+      readableMessage = "Браузер блокирует геолокацию без защищённого соединения.";
+    } else if (hint === "denied") {
+      readableMessage = "Доступ к геолокации запрещён браузером.";
+    } else if (hint === "timeout") {
+      readableMessage = "Не удалось получить координаты: тайм-аут.";
+    } else if (hint === "unavailable") {
+      readableMessage = "Геолокация временно недоступна.";
+    }
+    note("Геолокация: " + readableMessage +
+      (hint === "ios-insecure" ? " Откройте интерфейс по HTTPS или разрешите доступ в Настройки → Safari → Местоположение." : ""));
   }
-  state.locationError = error || fallbackError;
-  state.locationErrorHint = hint;
-  updatePointingLocationStatus();
-  updatePointingBadges();
-  let readableMessage = messageText || fallbackError.message;
-  if (hint === "ios-insecure") {
-    readableMessage = "Safari блокирует геолокацию для незашифрованного соединения.";
-  } else if (hint === "denied") {
-    readableMessage = "Доступ к геолокации запрещён браузером.";
-  }
-  note("Геолокация: " + readableMessage +
-    (hint === "ios-insecure" ? " Откройте интерфейс по HTTPS или разрешите доступ в Настройки → Safari → Местоположение." : ""));
-}
 
 function updatePointingLocationUi() {
   const state = UI.state.pointing;
@@ -4300,8 +4346,16 @@ function updatePointingLocationStatus() {
       const message = state.locationError.message || "Ошибка геолокации";
       if (state.locationErrorHint === "ios-insecure") {
         els.status.textContent = "Safari блокирует геолокацию для незашифрованного соединения. Используйте HTTPS или разрешите доступ в Настройки → Safari → Местоположение.";
+      } else if (state.locationErrorHint === "insecure") {
+        els.status.textContent = "Браузер блокирует геолокацию без защищённого соединения. Используйте HTTPS или введите координаты вручную.";
       } else if (state.locationErrorHint === "denied") {
         els.status.textContent = "Геолокация запрещена браузером. Разрешите доступ или введите координаты вручную.";
+      } else if (state.locationErrorHint === "timeout") {
+        els.status.textContent = "Не удалось получить координаты: тайм-аут.";
+      } else if (state.locationErrorHint === "unavailable") {
+        els.status.textContent = "Геолокация временно недоступна. Попробуйте повторить позже или введите координаты вручную.";
+      } else if (state.locationErrorHint === "unsupported") {
+        els.status.textContent = "Геолокация не поддерживается этим браузером. Используйте ручной ввод координат.";
       } else {
         els.status.textContent = "Ошибка геолокации: " + message;
       }
@@ -4321,10 +4375,20 @@ function updatePointingLocationStatus() {
     let hint = "";
     if (state.locationErrorHint === "ios-insecure") {
       hint = "Safari на iOS блокирует геолокацию для незашифрованного соединения. Откройте интерфейс по HTTPS или разрешите доступ в Настройки → Safari → Местоположение.";
+    } else if (state.locationErrorHint === "insecure") {
+      hint = "Браузер требует защищённое подключение (HTTPS) для доступа к геолокации. Используйте HTTPS или заполните поля вручную.";
     } else if (state.locationErrorHint === "denied") {
       hint = "Проверьте, что браузеру разрешён доступ к геолокации, либо используйте ручной ввод координат.";
-    } else if (!state.locationRequestPending && !state.locationError && !state.observer && !state.locationWatchId && !window.isSecureContext && isProbablyIos()) {
-      hint = "Safari на iOS требует защищённое подключение (HTTPS), иначе геолокация будет заблокирована. При необходимости введите координаты вручную.";
+    } else if (state.locationErrorHint === "timeout") {
+      hint = "Повторите попытку после включения GPS и хорошего сигнала или укажите координаты вручную.";
+    } else if (state.locationErrorHint === "unavailable") {
+      hint = "Геолокация недоступна: проверьте включение службы позиционирования или задайте координаты вручную.";
+    } else if (state.locationErrorHint === "unsupported") {
+      hint = "Этот браузер не предоставляет геолокацию. Воспользуйтесь ручным вводом координат.";
+    } else if (!state.locationRequestPending && !state.locationError && !state.observer && !state.locationWatchId && !pointingIsSecureContext()) {
+      hint = isProbablyIos()
+        ? "Safari на iOS требует защищённое подключение (HTTPS), иначе геолокация будет заблокирована. При необходимости введите координаты вручную."
+        : "Браузер может блокировать геолокацию без HTTPS. Используйте защищённое подключение или заполните координаты вручную.";
     }
     if (hint) {
       els.locationHint.hidden = false;
@@ -4371,11 +4435,9 @@ function applyPointingManualLocation() {
   stopPointingLocationWatch();
   state.locationRequestPending = false;
   state.observer = observer;
-  state.locationError = null;
-  state.locationErrorHint = null;
+  setPointingLocationError(null, null);
   updatePointingLocationUi();
   updatePointingSatellites();
-  updatePointingBadges();
   note("Координаты применены вручную");
   updatePointingLocationControls();
 }
@@ -5002,6 +5064,63 @@ function updatePointingElevationMarkers(sat, orientation) {
   }
 }
 
+// Проверяем поддержку датчиков ориентации и условия доступа к ним.
+function ensurePointingOrientationSupported() {
+  const state = UI.state.pointing;
+  if (typeof window === "undefined") {
+    if (state.orientationErrorHint !== "unsupported") {
+      state.orientationErrorHint = "unsupported";
+      updatePointingOrientationHint();
+      note("Окружение не поддерживает датчики ориентации");
+    }
+    return false;
+  }
+  const hasDeviceOrientation = typeof DeviceOrientationEvent !== "undefined";
+  const hasAbsoluteSensor = typeof window.AbsoluteOrientationSensor === "function";
+  if (!hasDeviceOrientation && !hasAbsoluteSensor) {
+    if (state.orientationErrorHint !== "unsupported") {
+      state.orientationErrorHint = "unsupported";
+      updatePointingOrientationHint();
+      note("Датчики ориентации не поддерживаются этим браузером");
+    }
+    return false;
+  }
+  if (!pointingIsSecureContext()) {
+    if (state.orientationErrorHint !== "insecure") {
+      state.orientationErrorHint = "insecure";
+      updatePointingOrientationHint();
+      note("Датчики ориентации требуют защищённое соединение (HTTPS)");
+    }
+    return false;
+  }
+  if (state.orientationErrorHint && state.orientationErrorHint !== "manual") {
+    state.orientationErrorHint = null;
+    updatePointingOrientationHint();
+  }
+  return true;
+}
+
+// Обновляем подсказку по датчикам ориентации в интерфейсе.
+function updatePointingOrientationHint() {
+  const els = UI.els.pointing;
+  if (!els || !els.orientationHint) return;
+  const hint = UI.state.pointing.orientationErrorHint;
+  let text = "";
+  if (hint === "insecure") {
+    text = "Браузер блокирует датчики ориентации без HTTPS. Подключитесь по защищённому протоколу или введите азимут и наклон вручную.";
+  } else if (hint === "unsupported") {
+    text = "Датчики ориентации не поддерживаются на этом устройстве. Используйте ручной ввод значений.";
+  } else if (hint === "denied") {
+    text = "Доступ к датчикам ориентации запрещён. Разрешите его в настройках браузера или задайте параметры вручную.";
+  } else {
+    els.orientationHint.hidden = true;
+    els.orientationHint.textContent = "";
+    return;
+  }
+  els.orientationHint.hidden = false;
+  els.orientationHint.textContent = text;
+}
+
 function updatePointingSensorButton() {
   const els = UI.els.pointing;
   if (!els || !els.sensorsBtn) return;
@@ -5017,8 +5136,8 @@ async function togglePointingSensors() {
     note("Датчики ориентации отключены");
     return;
   }
-  if (typeof window === "undefined") {
-    note("Окружение не поддерживает датчики ориентации");
+  if (!ensurePointingOrientationSupported()) {
+    updatePointingOrientationStatus();
     return;
   }
   if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
@@ -5026,11 +5145,17 @@ async function togglePointingSensors() {
       const result = await DeviceOrientationEvent.requestPermission();
       if (result !== "granted") {
         note("Доступ к датчикам отклонён пользователем");
+        state.orientationErrorHint = "denied";
+        updatePointingOrientationHint();
+        updatePointingOrientationStatus();
         return;
       }
     } catch (err) {
       console.warn("[pointing] requestPermission", err);
       note("Не удалось получить доступ к датчикам");
+      state.orientationErrorHint = "denied";
+      updatePointingOrientationHint();
+      updatePointingOrientationStatus();
       return;
     }
   }
@@ -5046,6 +5171,10 @@ async function togglePointingSensors() {
   state.sensorsActive = true;
   state.orientationSource = "sensor";
   state.manualOrientation = false;
+  if (state.orientationErrorHint) {
+    state.orientationErrorHint = null;
+    updatePointingOrientationHint();
+  }
   updatePointingSensorButton();
   updatePointingOrientationStatus();
   note("Датчики ориентации включены");
@@ -5075,6 +5204,10 @@ function handlePointingOrientation(event) {
   state.orientation = orientation;
   state.orientationSource = "sensor";
   state.manualOrientation = false;
+  if (state.orientationErrorHint) {
+    state.orientationErrorHint = null;
+    updatePointingOrientationHint();
+  }
   updatePointingOrientationUi();
   updatePointingOrientationStatus();
 }
@@ -5176,6 +5309,10 @@ function applyPointingManualOrientation() {
   };
   state.manualOrientation = true;
   state.orientationSource = "manual";
+  if (state.orientationErrorHint) {
+    state.orientationErrorHint = null;
+    updatePointingOrientationHint();
+  }
   updatePointingOrientationUi();
   updatePointingOrientationStatus();
   note("Ориентация обновлена вручную");
@@ -5185,19 +5322,28 @@ function updatePointingOrientationStatus() {
   const els = UI.els.pointing;
   if (!els || !els.orientationStatus) return;
   const state = UI.state.pointing;
-  if (state.sensorsActive) {
+  let text = "";
+  if (state.orientationErrorHint === "insecure") {
+    text = "Датчики заблокированы браузером: требуется защищённое соединение.";
+  } else if (state.orientationErrorHint === "unsupported") {
+    text = "Датчики ориентации не поддерживаются. Используйте ручной ввод.";
+  } else if (state.orientationErrorHint === "denied") {
+    text = "Доступ к датчикам запрещён. Разрешите его или задайте данные вручную.";
+  } else if (state.sensorsActive) {
     if (state.orientation && state.orientation.heading != null) {
-      els.orientationStatus.textContent = state.orientation.absolute
+      text = state.orientation.absolute
         ? "Датчики активны, используются абсолютные показания."
         : "Датчики активны, используются относительные показания.";
     } else {
-      els.orientationStatus.textContent = "Датчики активны, ожидание данных…";
+      text = "Датчики активны, ожидание данных…";
     }
   } else if (state.orientation && state.orientation.source === "manual") {
-    els.orientationStatus.textContent = "Используются вручную введённые значения.";
+    text = "Используются вручную введённые значения.";
   } else {
-    els.orientationStatus.textContent = "Датчики не активны.";
+    text = "Датчики не активны.";
   }
+  els.orientationStatus.textContent = text;
+  updatePointingOrientationHint();
 }
 
 function formatDegrees(value, digits = 1) {
