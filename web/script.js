@@ -462,6 +462,7 @@ async function init() {
     targetNeedle: $("#pointingTargetNeedle"),
     currentNeedle: $("#pointingCurrentNeedle"),
     compass: $("#pointingCompass"),
+    compassRadar: $("#pointingCompassRadar"),
     elevationScale: $("#pointingElevationScale"),
     elevationTarget: $("#pointingElevationTarget"),
     elevationCurrent: $("#pointingElevationCurrent"),
@@ -4009,6 +4010,13 @@ function initPointingTab() {
       setPointingActiveSatellite(marker.dataset.satId || null);
     });
   }
+  if (els.compass) {
+    els.compass.addEventListener("click", (event) => {
+      const dot = event && event.target ? event.target.closest("button[data-sat-id]") : null;
+      if (!dot || !dot.dataset) return;
+      setPointingActiveSatellite(dot.dataset.satId || null);
+    });
+  }
   if (els.minElSlider) {
     const handler = (event) => onPointingMinElevationChange(event);
     els.minElSlider.addEventListener("input", handler);
@@ -4529,6 +4537,7 @@ function renderPointingSatellites() {
       }
     }
   }
+  renderPointingCompassRadar(visible);
   renderPointingHorizon(visible);
   updatePointingBadges();
 }
@@ -4554,13 +4563,23 @@ function renderPointingHorizon(visible) {
   if (els.horizonEmpty) {
     els.horizonEmpty.hidden = true;
   }
-  for (const sat of visible) {
+  const sorted = [...visible].sort((a, b) => a.azimuth - b.azimuth);
+  const laneLast = [];
+  const minGap = 6; // минимальный зазор между маркерами в процентах ширины трека
+  for (const sat of sorted) {
     const marker = document.createElement("button");
     marker.type = "button";
     marker.dataset.satId = sat.id;
     marker.className = "pointing-horizon-sat" + (sat.id === state.selectedSatId ? " active" : "");
     const leftPercent = clampNumber(sat.azimuth / 360, 0, 1) * 100;
     marker.style.left = leftPercent + "%";
+    let laneIndex = 0;
+    while (laneLast[laneIndex] != null && leftPercent - laneLast[laneIndex] < minGap) {
+      laneIndex += 1;
+    }
+    laneLast[laneIndex] = leftPercent;
+    marker.style.setProperty("--pointing-sat-offset", String(laneIndex));
+    marker.style.zIndex = String(10 + laneIndex);
     marker.style.setProperty("--pointing-sat-color", pointingElevationToColor(sat.elevation));
     marker.title = sat.name + " — азимут " + formatDegrees(sat.azimuth, 1) + ", возвышение " + formatDegrees(sat.elevation, 1);
     const label = document.createElement("span");
@@ -4568,6 +4587,34 @@ function renderPointingHorizon(visible) {
     label.textContent = sat.name + " • " + formatDegrees(sat.azimuth, 0) + "/" + formatDegrees(sat.elevation, 0);
     marker.appendChild(label);
     els.horizonTrack.appendChild(marker);
+  }
+}
+
+function renderPointingCompassRadar(visible) {
+  const els = UI.els.pointing;
+  if (!els || !els.compassRadar) return;
+  const state = UI.state.pointing;
+  const container = els.compassRadar;
+  container.innerHTML = "";
+  if (!Array.isArray(visible) || !visible.length) return;
+  const sorted = [...visible].sort((a, b) => a.azimuth - b.azimuth);
+  for (const sat of sorted) {
+    const dot = document.createElement("button");
+    dot.type = "button";
+    dot.dataset.satId = sat.id;
+    dot.className = "pointing-compass-sat" + (sat.id === state.selectedSatId ? " active" : "");
+    dot.style.setProperty("--pointing-sat-color", pointingElevationToColor(sat.elevation));
+    const angleRad = sat.azimuth * DEG2RAD;
+    const elevationClamped = clampNumber(sat.elevation, 0, 90);
+    const radius = (1 - elevationClamped / 90) * 45; // ближе к центру при большем возвышении
+    const x = 50 + Math.sin(angleRad) * radius;
+    const y = 50 - Math.cos(angleRad) * radius;
+    dot.style.left = x + "%";
+    dot.style.top = y + "%";
+    const description = sat.name + " — азимут " + formatDegrees(sat.azimuth, 1) + ", возвышение " + formatDegrees(sat.elevation, 1);
+    dot.title = description;
+    dot.setAttribute("aria-label", description);
+    container.appendChild(dot);
   }
 }
 
