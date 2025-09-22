@@ -571,6 +571,11 @@ void handleSha256Js() {
   server.send_P(200, "application/javascript", SHA256_JS);
 }
 
+// Отдаём библиотеку преобразования MGRS → широта/долгота
+void handleMgrsJs() {
+  server.send_P(200, "application/javascript", MGRS_JS);
+}
+
 // Отдаём постоянный набор TLE для вкладки Pointing
 void handleGeostatTleJs() {
   server.send_P(200, "application/javascript", GEOSTAT_TLE_JS);
@@ -1162,6 +1167,7 @@ void setupWifi() {
   server.on("/style.css", handleStyleCss);                           // CSS веб-интерфейса
   server.on("/script.js", handleScriptJs);                           // JS логика
   server.on("/libs/sha256.js", handleSha256Js);                      // библиотека SHA-256
+  server.on("/libs/mgrs.js", handleMgrsJs);                          // преобразование MGRS
   server.on("/libs/geostat_tle.js", handleGeostatTleJs);             // статический список спутников
   server.on("/ver", handleVer);                                      // версия приложения
   server.on("/api/tx", handleApiTx);                                 // отправка текста по радио
