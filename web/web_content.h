@@ -187,9 +187,16 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
               <dl class="channel-info-list">
                 <div><dt>RX (MHz)</dt><dd id="channelInfoRxRef">—</dd></div>
                 <div><dt>TX (MHz)</dt><dd id="channelInfoTxRef">—</dd></div>
+                <div><dt>Частота (MHz)</dt><dd id="channelInfoFrequency">—</dd></div>
                 <div><dt>Система</dt><dd id="channelInfoSystem">—</dd></div>
                 <div><dt>План</dt><dd id="channelInfoBand">—</dd></div>
+                <div><dt>Полоса</dt><dd id="channelInfoBandwidth">—</dd></div>
                 <div><dt>Назначение</dt><dd id="channelInfoPurpose">—</dd></div>
+                <div><dt>Спутник</dt><dd id="channelInfoSatellite">—</dd></div>
+                <div><dt>Позиция</dt><dd id="channelInfoPosition">—</dd></div>
+                <div><dt>Модуляция</dt><dd id="channelInfoModulation">—</dd></div>
+                <div><dt>Использование</dt><dd id="channelInfoUsage">—</dd></div>
+                <div><dt>Комментарий</dt><dd id="channelInfoComments">—</dd></div>
               </dl>
             </div>
             <div class="channel-info-actions">
