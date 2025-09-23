@@ -2693,63 +2693,73 @@ async function onChannelCrTest(event) {
   }
   tests.cr.previous = previousCr;
   let cancelled = false;
-  for (let i = 0; i < CHANNEL_CR_PRESETS.length; i++) {
-    const preset = CHANNEL_CR_PRESETS[i];
-    if (UI.state.infoChannel !== channel) {
-      cancelled = true;
-      break;
-    }
-    setChannelTestsStatus(`CR test: CR ${preset.label}`, "info", channel);
-    applyChannelTestsStatus();
-    const response = await sendCommand("CR", { v: String(preset.value) }, { silent: true, timeoutMs: 3000, debugLabel: `CR test set ${preset.value}` });
-    const setOk = response != null && /OK/i.test(response);
-    let success = false;
-    let summary = setOk ? "" : "Ошибка установки";
-    let rssi = null;
-    let snr = null;
-    if (setOk) {
-      await new Promise((resolve) => setTimeout(resolve, 120));
-      const pingRes = await sendCommand("PI", undefined, { silent: true, timeoutMs: 5000, debugLabel: `PI CR test ${preset.value}` });
-      if (pingRes != null) {
-        const metrics = extractPingMetrics(pingRes);
-        rssi = metrics.rssi;
-        snr = metrics.snr;
-        const state = detectScanState(pingRes);
-        const trimmed = String(pingRes).trim();
-        success = state === "signal" || (!state && trimmed.length > 0);
-        summary = summarizeResponse(pingRes, success ? "ОК" : trimmed || "Нет ответа");
-      } else {
-        summary = "Нет ответа";
-      }
-    }
-    tests.cr.results.push({
-      value: preset.value,
-      success: setOk && success,
-      summary: summary,
-      rssi: rssi,
-      snr: snr,
-    });
-    updateChannelTestsUi();
-    await uiYield();
-  }
   let restoreState = "unknown";
-  if (previousCr != null) {
-    try {
-      setChannelTestsStatus("CR test: восстанавливаем исходный CR…", "info", channel);
-      const restore = await sendCommand("CR", { v: String(previousCr) }, { silent: true, timeoutMs: 3000, debugLabel: "CR test restore" });
-      restoreState = restore != null && /OK/i.test(restore) ? "ok" : "fail";
-      if (restoreState === "ok") {
-        const crSelect = $("#CR");
-        if (crSelect) crSelect.value = String(previousCr);
+  let failed = false;
+  try {
+    for (let i = 0; i < CHANNEL_CR_PRESETS.length; i++) {
+      const preset = CHANNEL_CR_PRESETS[i];
+      if (UI.state.infoChannel !== channel) {
+        cancelled = true;
+        break;
       }
-    } catch (err) {
-      console.warn("[channels] CR test: restore", err);
-      restoreState = "fail";
+      setChannelTestsStatus(`CR test: CR ${preset.label}`, "info", channel);
+      applyChannelTestsStatus();
+      const response = await sendCommand("CR", { v: String(preset.value) }, { silent: true, timeoutMs: 3000, debugLabel: `CR test set ${preset.value}` });
+      const setOk = response != null && /OK/i.test(response);
+      let success = false;
+      let summary = setOk ? "" : "Ошибка установки";
+      let rssi = null;
+      let snr = null;
+      if (setOk) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        const pingRes = await sendCommand("PI", undefined, { silent: true, timeoutMs: 5000, debugLabel: `PI CR test ${preset.value}` });
+        if (pingRes != null) {
+          const metrics = extractPingMetrics(pingRes);
+          rssi = metrics.rssi;
+          snr = metrics.snr;
+          const state = detectScanState(pingRes);
+          const trimmed = String(pingRes).trim();
+          success = state === "signal" || (!state && trimmed.length > 0);
+          summary = summarizeResponse(pingRes, success ? "ОК" : trimmed || "Нет ответа");
+        } else {
+          summary = "Нет ответа";
+        }
+      }
+      tests.cr.results.push({
+        value: preset.value,
+        success: setOk && success,
+        summary: summary,
+        rssi: rssi,
+        snr: snr,
+      });
+      updateChannelTestsUi();
+      await uiYield();
     }
-  } else restoreState = "skip";
-  tests.cr.running = false;
-  if (btn) btn.removeAttribute("aria-busy");
-  updateChannelTestsUi();
+    if (previousCr != null) {
+      try {
+        setChannelTestsStatus("CR test: восстанавливаем исходный CR…", "info", channel);
+        const restore = await sendCommand("CR", { v: String(previousCr) }, { silent: true, timeoutMs: 3000, debugLabel: "CR test restore" });
+        restoreState = restore != null && /OK/i.test(restore) ? "ok" : "fail";
+        if (restoreState === "ok") {
+          const crSelect = $("#CR");
+          if (crSelect) crSelect.value = String(previousCr);
+        }
+      } catch (err) {
+        console.warn("[channels] CR test: restore", err);
+        restoreState = "fail";
+      }
+    } else restoreState = "skip";
+  } catch (err) {
+    console.warn("[channels] CR test: выполнение завершилось с ошибкой", err);
+    const reason = err && err.message ? err.message : String(err);
+    setChannelTestsStatus(`CR test: ошибка выполнения: ${reason}`, "warn", channel);
+    failed = true;
+  } finally {
+    tests.cr.running = false;
+    if (btn) btn.removeAttribute("aria-busy");
+    updateChannelTestsUi();
+  }
+  if (failed) return;
   if (cancelled) {
     setChannelTestsStatus("CR test остановлен: выбран другой канал.", "warn", channel);
     return;
