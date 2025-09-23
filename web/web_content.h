@@ -1267,8 +1267,21 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
     text-transform: uppercase;
     letter-spacing: .05em;
   }
+  #channelsTable tbody tr.channel-info-row {
+    display: block;
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+  .channel-info-cell {
+    max-width: 100%;
+    width: 100%;
+  }
   .channel-info-row .channel-info {
-    margin: 0;
+    width: 90vw;
+    max-width: 90vw;
+    margin: 0 auto;
   }
   #channelsTable tbody tr.selected-info {
     background: color-mix(in oklab, var(--accent-2) 25%, var(--panel-2) 75%);
