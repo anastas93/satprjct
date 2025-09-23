@@ -4,6 +4,7 @@
 #include <array>
 #include "tx_module.h"
 #include "rx_module.h"
+#include "libs/received_buffer/received_buffer.h"
 
 // Радио, которое сохраняет кадры, но не передаёт их автоматически
 class CollectRadio : public IRadio {
@@ -42,6 +43,19 @@ int main() {
 
   // Проверяем, что собранное сообщение совпадает с исходным
   assert(received == data);
+  ReceivedBuffer rawBuffer;
+  rx.setBuffer(&rawBuffer); // подключаем буфер, чтобы проверить сохранение сырых пакетов
+
+  std::vector<uint8_t> shortData{0xAB, 0xCD, 0xEF};
+  rx.onReceive(shortData.data(), shortData.size());
+  assert(received == shortData); // короткое сообщение должно напрямую попасть в колбэк
+
+  ReceivedBuffer::Item rawItem{};
+  assert(rawBuffer.popRaw(rawItem));
+  assert(rawItem.id == 0);          // для сырых пакетов используется специальный идентификатор
+  assert(rawItem.part == 0);        // первый пакет получает нулевой порядковый номер
+  assert(rawItem.data == shortData);
+
   std::cout << "OK" << std::endl;
   return 0;
 }

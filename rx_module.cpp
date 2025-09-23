@@ -43,7 +43,24 @@ RxModule::RxModule()
 
 // Передаём данные колбэку, если заголовок валиден
 void RxModule::onReceive(const uint8_t* data, size_t len) {
-  if (!cb_ || !data || len < FrameHeader::SIZE * 2) return; // проверка указателя
+  if (!data || len == 0) return;                     // защита от пустого указателя
+
+  auto forward_raw = [&](const uint8_t* raw, size_t raw_len) {
+    if (!raw || raw_len == 0) return;               // пропускаем пустые вызовы
+    if (buf_) {                                     // сохраняем сырые пакеты по отдельному счётчику
+      buf_->pushRaw(0, raw_counter_++, raw, raw_len);
+    }
+    if (cb_) {                                      // передаём оригинальные данные напрямую
+      cb_(raw, raw_len);
+    }
+  };
+
+  if (len < FrameHeader::SIZE * 2) {                // недостаточно данных для заголовков
+    forward_raw(data, len);
+    return;
+  }
+
+  if (!cb_ && !buf_) return;                        // некому отдавать результат
 
   frame_buf_.assign(data, data + len);                     // переиспользуемый буфер кадра
   scrambler::descramble(frame_buf_.data(), frame_buf_.size()); // дескремблируем весь кадр
@@ -53,7 +70,10 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   if (!ok)
     ok = FrameHeader::decode(frame_buf_.data() + FrameHeader::SIZE,
                              frame_buf_.size() - FrameHeader::SIZE, hdr);
-  if (!ok) return; // оба заголовка повреждены
+  if (!ok) {                                         // оба заголовка повреждены
+    forward_raw(data, len);
+    return;
+  }
 
   const uint8_t* payload_p = frame_buf_.data() + FrameHeader::SIZE * 2;
   size_t payload_len = frame_buf_.size() - FrameHeader::SIZE * 2;
@@ -122,7 +142,9 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     if (buf_) {                                       // при наличии внешнего буфера сохраняем данные
       buf_->pushReady(hdr.msg_id, full.data(), full.size());
     }
-    cb_(full.data(), full.size());                    // передаём сообщение пользователю
+    if (cb_) {                                        // передаём сообщение пользователю
+      cb_(full.data(), full.size());
+    }
     gatherer_.reset();
   }
 }
