@@ -154,6 +154,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         <button id="btnRefresh" class="btn">Обновить</button>
         <button id="btnExportCsv" class="btn">CSV</button>
       </div>
+      <div id="channelRefStatus" class="channel-ref-status small" hidden></div>
       <div class="channel-layout">
         <div class="table-wrap pretty">
           <table id="channelsTable">
@@ -765,7 +766,8 @@ main {
 .chat-area { position: relative; }
 .chat-log {
   height: min(52vh, 560px);
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   display:flex; flex-direction:column; gap:.55rem;
   padding:.5rem;
   border-radius: .8rem;
@@ -814,6 +816,7 @@ main {
   padding:.6rem .7rem; border-radius: .9rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
   max-width: 85%;
   word-wrap: break-word;
+  overflow-wrap: anywhere;
   transition: transform .12s ease;
   position: relative;
   margin-right:auto;
@@ -844,6 +847,19 @@ main {
 .msg.rx .bubble-text { font-weight:600; }
 .msg.rx time { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); }
 .bubble-text { line-height:1.55; }
+/* Полный текст системного ответа */
+.bubble-detail {
+  margin-top:.45rem;
+  padding:.45rem .55rem;
+  background: color-mix(in oklab, var(--panel) 88%, black 12%);
+  border-radius:.6rem;
+  border:1px dashed color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size:.78rem;
+  line-height:1.5;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
 .bubble-meta {
   display:flex;
   align-items:center;
@@ -1018,6 +1034,15 @@ main {
   gap:.35rem;
   max-height:240px;
   overflow-y:auto;
+}
+.received-empty {
+  padding: .75rem .9rem;
+  border-radius: .75rem;
+  border: 1px dashed color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  background: color-mix(in oklab, var(--panel) 80%, transparent);
+  color: var(--muted);
+  font-size: .9rem;
+  text-align: center;
 }
 .received-list li {
   display:flex;
@@ -1235,12 +1260,34 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   gap: 1rem;
   margin-top: 1rem;
 }
+.channel-ref-status {
+  margin: .75rem 0 0;
+  padding: .55rem .85rem;
+  border-radius: .75rem;
+  background: color-mix(in oklab, var(--panel-2) 85%, black 15%);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 60%, black 40%);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.channel-ref-status[data-state="loading"] {
+  color: color-mix(in oklab, var(--muted) 85%, var(--text) 15%);
+}
+.channel-ref-status[data-state="fallback"] {
+  color: color-mix(in oklab, var(--danger) 70%, var(--text) 30%);
+  border-color: color-mix(in oklab, var(--danger) 55%, var(--text) 45%);
+}
+.channel-ref-status[data-state="error"] {
+  color: color-mix(in oklab, var(--danger) 80%, var(--text) 20%);
+  border-color: color-mix(in oklab, var(--danger) 65%, var(--text) 35%);
+  background: color-mix(in oklab, var(--danger) 20%, black 80%);
+}
 .channel-info {
   border-radius: .9rem;
   padding: 1rem;
   display: flex;
   flex-direction: column;
   gap: .75rem;
+  color: var(--text);
 }
 .channel-info-header {
   display: flex;
@@ -1278,7 +1325,8 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   background: transparent;
 }
 .channel-info-row .channel-info {
-  margin: .8rem .6rem;
+  width: 100%;
+  margin: .8rem 0;
 }
 .channel-info-cell { background: transparent; }
 @media (max-width: 720px) {
@@ -1313,6 +1361,11 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   }
   .channel-info-row .channel-info {
     margin: 0;
+  }
+  #channelsTable tbody tr.selected-info {
+    background: color-mix(in oklab, var(--accent-2) 25%, var(--panel-2) 75%);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-2) 45%, var(--panel-2) 55%);
+    color: color-mix(in oklab, var(--text) 90%, white 10%);
   }
 }
 .channel-info-caption {
@@ -1565,7 +1618,8 @@ tbody tr.selected-info td { font-weight:600; }
 /* Отладочный вывод */
 .debug-log {
   height: min(52vh, 560px);
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: .25rem;
@@ -1575,13 +1629,182 @@ tbody tr.selected-info td { font-weight:600; }
   border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: .85rem;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
-.debug-line { opacity:.85; color: var(--text); }
+.debug-line { opacity:.85; color: var(--text); word-break: break-word; overflow-wrap: anywhere; }
 .debug-line--success { color: color-mix(in oklab, var(--good) 65%, var(--text) 35%); }
 .debug-line--error { color: color-mix(in oklab, var(--danger) 75%, var(--text) 25%); }
 .debug-line--warn { color: color-mix(in oklab, #facc15 70%, var(--text) 30%); }
 .debug-line--action { color: color-mix(in oklab, var(--accent) 70%, var(--text) 30%); }
+)~~~";
 
+// libs/freq-info.csv — справочник частот каналов
+const char FREQ_INFO_CSV[] PROGMEM = R"~~~(
+Channel,RX (MHz),TX (MHz),System,Band Plan,Purpose,Frequency (MHz),Bandwidth,Satellite Name,Satellite Position,Comments,Modulation,Usage
+0,243.625,316.725,UHF military,225-328.6 MHz,Military communications,243.625,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+1,243.625,300.4,UHF military,225-328.6 MHz,Military communications,243.625,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+2,243.8,298.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+3,244.135,296.075,UHF FO,Band Plan P,Tactical communications,244.135,5KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+4,244.275,300.25,UHF military,225-328.6 MHz,Military communications,,,,,,,
+5,245.2,312.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
+6,245.8,298.65,UHF military,225-328.6 MHz,Military communications,245.8,35KHz,Skynet 5C,17.8 West,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
+7,245.85,314.23,UHF military,225-328.6 MHz,Military communications,245.85,35KHz,Skynet 5A,5.9 East,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
+8,245.95,299.4,UHF military,225-328.6 MHz,Military communications,,,,,,,
+9,247.45,298.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
+10,248.75,306.9,Marisat,B,Tactical voice/data,248.75,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+11,248.825,294.375,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder,248.825,30KHz,? IOR,,? March 2010,,
+12,249.375,316.975,UHF military,225-328.6 MHz,Military communications,249.375,30KHz,?,,IOR March 2010,,
+13,249.4,300.975,UHF military,225-328.6 MHz,Military communications,,,,,,,
+14,249.45,299.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
+15,249.45,312.75,UHF military,225-328.6 MHz,Military communications,,,,,,,
+16,249.49,313.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
+17,249.53,318.28,UHF military,225-328.6 MHz,Military communications,249.5295,8KHz,Skynet 5A,5.9 East,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
+18,249.85,316.25,UHF military,225-328.6 MHz,Military communications,,,,,,,
+19,249.85,298.83,UHF military,225-328.6 MHz,Military communications,,,,,,,
+20,249.89,300.5,UHF military,225-328.6 MHz,Military communications,,,,,,,
+21,249.93,308.75,UHF FO,Q,Tactical communications,,,,,,,
+22,250.09,312.6,UHF military,225-328.6 MHz,Military communications,,,,,,,
+23,250.9,308.3,UHF FO,Q,Tactical communications,250.9,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+24,251.275,296.5,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder,,,,,,,
+25,251.575,308.45,UHF military,225-328.6 MHz,Military communications,,,,,,,
+26,251.6,298.225,UHF military,225-328.6 MHz,Military communications,,,,,,,
+27,251.85,292.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,251.85,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+28,251.9,292.9,FLTSATCOM/Leasat,A/X,Tactical communications,251.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+29,251.95,292.95,Navy 25 kHz,Navy 25K,Tactical voice/data communications,251.95,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+30,252.0,293.1,FLTSATCOM,B,Tactical communications,252.0,30KHz,UFO-10/11,70.0 East,March 2010,Narrowband FM/AM,Тактические голос/данные каналы
+31,252.05,293.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,252.05,25KHz,UFO-7,23.3 West,DAMA kg_net= 7 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+32,252.15,293.15,UHF military,225-328.6 MHz,Military communications,252.15,25KHz,Fltsatcom 8,15.5 West,DAMA kg_net= 5 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+33,252.2,299.15,UHF military,225-328.6 MHz,Military communications,,,,,,,
+34,252.4,309.7,UHF FO,Q,Tactical communications,252.4,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+35,252.45,309.75,UHF military,225-328.6 MHz,Military communications,252.45,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+36,252.5,309.8,UHF military,225-328.6 MHz,Military communications,252.5,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+37,252.55,309.85,UHF military,225-328.6 MHz,Military communications,252.55,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+38,252.625,309.925,UHF military,225-328.6 MHz,Military communications,,,,,,,
+39,253.55,294.55,UHF military,225-328.6 MHz,Military communications,253.55,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+40,253.6,295.95,UHF military,225-328.6 MHz,Military communications,253.6,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+41,253.65,294.65,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.65,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+42,253.7,294.7,FLTSATCOM/Leasat/UHF FO,A/X/O,Tactical communications,253.7,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+43,253.75,294.75,UHF military,225-328.6 MHz,Military communications,253.75,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+44,253.8,296.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
+45,253.85,294.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.85,25KHz,UFO-7,23.3 West,DAMA kg_net= 9 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+46,253.85,294.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.85,25KHz,UFO-7,23.3 West,DAMA kg_net= 9 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+47,253.9,307.5,UHF military,225-328.6 MHz,Military communications,,,,,,,
+48,254.0,298.63,UHF military,225-328.6 MHz,Military communications,,,,,,,
+49,254.73,312.55,UHF military,225-328.6 MHz,Military communications,,,,,,,
+50,254.775,310.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
+51,254.83,296.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+52,255.25,302.425,UHF military,225-328.6 MHz,Military communications,255.25,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+53,255.35,296.35,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.35,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+54,255.4,296.4,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+55,255.45,296.45,UHF military,225-328.6 MHz,Military communications,255.45,25KHz,UFO-7,23.3 West,DAMA kg_net= 3 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+56,255.55,296.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.55,25KHz,Fltsatcom 8,15.5 West,,Narrowband FM/AM,Тактические голос/данные каналы
+57,255.55,296.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.55,25KHz,Fltsatcom 8,15.5 West,,Narrowband FM/AM,Тактические голос/данные каналы
+58,255.775,309.3,UHF military,225-328.6 MHz,Military communications,,,,,,,
+59,256.45,313.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
+60,256.6,305.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
+61,256.85,297.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,256.85,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+62,256.9,296.1,UHF military,225-328.6 MHz,Military communications,256.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+63,256.95,297.95,UHF military,225-328.6 MHz,Military communications,256.95,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+64,257.0,297.675,Navy 25 kHz,Navy 25K,Tactical voice/data communications,257.0,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+65,257.05,298.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,257.05,25KHz,UFO-7,23.3 West,DAMA kg_net= 4 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+66,257.1,295.65,UHF military,225-328.6 MHz,Military communications,257.1,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+67,257.15,298.15,UHF military,225-328.6 MHz,Military communications,257.15,25KHz,Fltsatcom 8,15.5 West,DAMA kg_net= 6 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+68,257.2,308.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
+69,257.25,309.475,UHF military,225-328.6 MHz,Military communications,,,,,,,
+70,257.3,309.725,UHF military,225-328.6 MHz,Military communications,,,,,,,
+71,257.35,307.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+72,257.5,311.35,UHF military,225-328.6 MHz,Military communications,,,,,,,
+73,257.7,316.15,UHF military,225-328.6 MHz,Military communications,,,,,,,
+74,257.775,311.375,UHF military,225-328.6 MHz,Military communications,,,,,,,
+75,257.825,297.075,UHF military,225-328.6 MHz,Military communications,,,,,,,
+76,257.9,298.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
+77,258.15,293.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+78,258.35,299.35,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.35,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+79,258.45,299.45,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.45,25KHz,UFO-2,28.3 East,PSK modem,PSK (Phase Shift Keying),Модемные каналы данных
+80,258.5,299.5,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.5,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+81,258.55,299.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.55,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+82,258.65,299.65,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.65,25KHz,Fltsatcom 8,15.5 West,Strong GMSK,GMSK (Gaussian Minimum Shift Keying),Цифровая передача (тактическая/мобильная)
+83,259.0,317.925,UHF military,225-328.6 MHz,Military communications,,,,,,,
+84,259.05,317.975,UHF military,225-328.6 MHz,Military communications,,,,,,,
+85,259.975,310.05,UHF military,225-328.6 MHz,Military communications,259.975,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+86,260.025,310.225,UHF military,225-328.6 MHz,Military communications,260.025,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+87,260.075,310.275,UHF military,225-328.6 MHz,Military communications,260.075,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+88,260.125,310.125,UHF military,225-328.6 MHz,Military communications,260.125,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+89,260.175,310.325,UHF military,225-328.6 MHz,Military communications,,,,,,,
+90,260.375,292.975,UHF military,225-328.6 MHz,Military communications,260.375,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+91,260.425,297.575,UHF military,225-328.6 MHz,Military communications,260.425,25KHz,UFO-7,23.3 West,DAMA kg_net= 8 9k6+19k2,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+92,260.425,294.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.425,25KHz,UFO-7,23.3 West,DAMA kg_net= 8 9k6+19k2,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+93,260.475,294.075,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.475,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+94,260.525,294.125,UHF military,225-328.6 MHz,Military communications,260.525,25KHz,UFO-7,23.3 West,BPSK modem,BPSK (Binary Phase Shift Keying),Модемные каналы данных
+95,260.55,296.775,UHF military,225-328.6 MHz,Military communications,,,,,,,
+96,260.575,294.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.575,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+97,260.625,294.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.625,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+98,260.675,294.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.675,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+99,260.675,294.275,UHF military,225-328.6 MHz,Military communications,260.675,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+100,260.725,294.325,UHF military,225-328.6 MHz,Military communications,260.725,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+101,260.9,313.9,UHF military,225-328.6 MHz,Military communications,,,,,,,
+102,261.1,298.38,UHF military,225-328.6 MHz,Military communications,,,,,,,
+103,261.1,298.7,UHF military,225-328.6 MHz,Military communications,,,,,,,
+104,261.2,294.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
+105,262.0,314.2,UHF military,225-328.6 MHz,Military communications,262.0,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+106,262.04,307.075,UHF military,225-328.6 MHz,Military communications,,,,,,,
+107,262.075,306.975,UHF military,225-328.6 MHz,Military communications,262.075,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+108,262.125,295.725,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.125,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+109,262.175,297.025,UHF military,225-328.6 MHz,Military communications,262.175,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+110,262.175,295.775,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.175,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+111,262.225,295.825,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.225,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+112,262.275,295.875,UHF military,225-328.6 MHz,Military communications,262.275,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+113,262.275,300.275,UHF military,225-328.6 MHz,Military communications,262.275,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+114,262.325,295.925,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.325,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+115,262.375,295.975,UHF military,225-328.6 MHz,Military communications,262.375,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+116,262.425,296.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.425,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+117,263.45,311.4,UHF military,225-328.6 MHz,Military communications,,,,,,,
+118,263.5,309.875,UHF military,225-328.6 MHz,Military communications,,,,,,,
+119,263.575,297.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.575,25Khz,UFO-10/11,70.0 East,Data March 2010,Digital Narrowband Data,Цифровые данные (низкая/средняя скорость)
+120,263.625,297.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.625,25KHz,UFO-7,23.3 West,BPSK modem,BPSK (Binary Phase Shift Keying),Модемные каналы данных
+121,263.675,297.275,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.675,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+122,263.725,297.325,UHF military,225-328.6 MHz,Military communications,263.725,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+123,263.775,297.375,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.775,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+124,263.825,297.425,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.825,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+125,263.875,297.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.875,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+126,263.925,297.525,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.925,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+127,265.25,306.25,UHF military,225-328.6 MHz,Military communications,265.25,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+128,265.35,306.35,UHF military,225-328.6 MHz,Military communications,265.35,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+129,265.4,294.425,FLTSATCOM/Leasat,A/X,Tactical communications,265.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+130,265.45,306.45,UHF military,225-328.6 MHz,Military communications,265.45,25KHz,UFO-7,23.3 West,Daily RATT transmissions,Narrowband FM/AM,Тактические голос/данные каналы
+131,265.5,302.525,UHF military,225-328.6 MHz,Military communications,265.5,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+132,265.55,306.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,265.55,25KHz,Fltsatcom 8,15.5 West,Many interfering carriers in tpx,Narrowband FM/AM,Тактические голос/данные каналы
+133,265.675,306.675,UHF military,225-328.6 MHz,Military communications,,,,,,,
+134,265.85,306.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
+135,266.75,316.575,UHF military,225-328.6 MHz,Military communications,266.75,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+136,266.85,307.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,266.85,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+137,266.9,297.625,UHF military,225-328.6 MHz,Military communications,266.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+138,266.95,307.95,Navy 25 kHz,Navy 25K,Tactical voice/data communications,266.95,25KHz,UFO-7,23.3 West,Russian phone relays,Narrowband FM/AM,Тактические голос/данные каналы
+139,267.05,308.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,267.05,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+140,267.1,308.1,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+141,267.15,308.15,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+142,267.2,308.2,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+143,267.25,308.25,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+144,267.4,294.9,UHF military,225-328.6 MHz,Military communications,,,,,,,
+145,267.875,310.375,UHF military,225-328.6 MHz,Military communications,267.875,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+146,267.95,310.45,UHF military,225-328.6 MHz,Military communications,267.95,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+147,268.0,310.475,UHF military,225-328.6 MHz,Military communications,268.0,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+148,268.025,309.025,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+149,268.05,310.55,UHF military,225-328.6 MHz,Military communications,268.05,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+150,268.1,310.6,UHF military,225-328.6 MHz,Military communications,268.1,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+151,268.15,309.15,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.15,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+152,268.2,296.05,UHF military,225-328.6 MHz,Military communications,268.2,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+153,268.25,309.25,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.25,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+154,268.3,309.3,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.3,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+155,268.35,309.35,UHF military,225-328.6 MHz,Military communications,268.35,25KHz,UFO-7,23.3 West,DAMA kg_net= 1 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+156,268.4,295.9,FLTSATCOM/Leasat,C/Z,Tactical communications,268.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+157,268.45,309.45,UHF military,225-328.6 MHz,Military communications,268.45,25KHz,UFO-7,23.3 West,Many interfering carriers in tpx,Narrowband FM/AM,Тактические голос/данные каналы
+158,269.7,309.925,UHF military,225-328.6 MHz,Military communications,269.7,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+159,269.75,310.75,UHF military,225-328.6 MHz,Military communications,269.75,25KHz,UFO-2,28.3 East,Wheel,Narrowband FM/AM,Тактические голос/данные каналы
+160,269.8,310.025,UHF military,225-328.6 MHz,Military communications,269.8,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+161,269.85,310.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,269.85,30KHz,UFO-7,23.3 West,DAMA kg_net= 2 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+162,269.95,310.95,DOD 25 kHz,DOD 25K,Tactical communications (DoD),269.95,25KHz,UFO-7,23.3 West,PSK mode,PSK (Phase Shift Keying),Цифровые данные
 )~~~";
 
 // libs/mgrs.js — преобразование квадрата MGRS в широту и долготу (центр 100‑км сектора)
@@ -1878,181 +2101,173 @@ const channelReference = {
   loading: false,
   error: null,
   promise: null,
+  source: null,
+  lastError: null,
 };
-const CHANNEL_REFERENCE_FALLBACK = `Channel,RX (MHz),TX (MHz),System,Band Plan,Purpose
-0,243.625,316.725,UHF military,225-328.6 MHz,Military communications
-1,243.625,300.400,UHF military,225-328.6 MHz,Military communications
-2,243.800,298.200,UHF military,225-328.6 MHz,Military communications
-3,244.135,296.075,UHF FO,Band Plan P,Tactical communications
-4,244.275,300.250,UHF military,225-328.6 MHz,Military communications
-5,245.200,312.850,UHF military,225-328.6 MHz,Military communications
-6,245.800,298.650,UHF military,225-328.6 MHz,Military communications
-7,245.850,314.230,UHF military,225-328.6 MHz,Military communications
-8,245.950,299.400,UHF military,225-328.6 MHz,Military communications
-9,247.450,298.800,UHF military,225-328.6 MHz,Military communications
-10,248.750,306.900,Marisat,B,Tactical voice/data
-11,248.825,294.375,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder
-12,249.375,316.975,UHF military,225-328.6 MHz,Military communications
-13,249.400,300.975,UHF military,225-328.6 MHz,Military communications
-14,249.450,299.000,UHF military,225-328.6 MHz,Military communications
-15,249.450,312.750,UHF military,225-328.6 MHz,Military communications
-16,249.490,313.950,UHF military,225-328.6 MHz,Military communications
-17,249.530,318.280,UHF military,225-328.6 MHz,Military communications
-18,249.850,316.250,UHF military,225-328.6 MHz,Military communications
-19,249.850,298.830,UHF military,225-328.6 MHz,Military communications
-20,249.890,300.500,UHF military,225-328.6 MHz,Military communications
-21,249.930,308.750,UHF FO,Q,Tactical communications
-22,250.090,312.600,UHF military,225-328.6 MHz,Military communications
-23,250.900,308.300,UHF FO,Q,Tactical communications
-24,251.275,296.500,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder
-25,251.575,308.450,UHF military,225-328.6 MHz,Military communications
-26,251.600,298.225,UHF military,225-328.6 MHz,Military communications
-27,251.850,292.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-28,251.900,292.900,FLTSATCOM/Leasat,A/X,Tactical communications
-29,251.950,292.950,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-30,252.000,293.100,FLTSATCOM,B,Tactical communications
-31,252.050,293.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-32,252.150,293.150,UHF military,225-328.6 MHz,Military communications
-33,252.200,299.150,UHF military,225-328.6 MHz,Military communications
-34,252.400,309.700,UHF FO,Q,Tactical communications
-35,252.450,309.750,UHF military,225-328.6 MHz,Military communications
-36,252.500,309.800,UHF military,225-328.6 MHz,Military communications
-37,252.550,309.850,UHF military,225-328.6 MHz,Military communications
-38,252.625,309.925,UHF military,225-328.6 MHz,Military communications
-39,253.550,294.550,UHF military,225-328.6 MHz,Military communications
-40,253.600,295.950,UHF military,225-328.6 MHz,Military communications
-41,253.650,294.650,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-42,253.700,294.700,FLTSATCOM/Leasat/UHF FO,A/X/O,Tactical communications
-43,253.750,294.750,UHF military,225-328.6 MHz,Military communications
-44,253.800,296.000,UHF military,225-328.6 MHz,Military communications
-45,253.850,294.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-46,253.850,294.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-47,253.900,307.500,UHF military,225-328.6 MHz,Military communications
-48,254.000,298.630,UHF military,225-328.6 MHz,Military communications
-49,254.730,312.550,UHF military,225-328.6 MHz,Military communications
-50,254.775,310.800,UHF military,225-328.6 MHz,Military communications
-51,254.830,296.200,UHF military,225-328.6 MHz,Military communications
-52,255.250,302.425,UHF military,225-328.6 MHz,Military communications
-53,255.350,296.350,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-54,255.400,296.400,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-55,255.450,296.450,UHF military,225-328.6 MHz,Military communications
-56,255.550,296.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-57,255.550,296.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-58,255.775,309.300,UHF military,225-328.6 MHz,Military communications
-59,256.450,313.850,UHF military,225-328.6 MHz,Military communications
-60,256.600,305.950,UHF military,225-328.6 MHz,Military communications
-61,256.850,297.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-62,256.900,296.100,UHF military,225-328.6 MHz,Military communications
-63,256.950,297.950,UHF military,225-328.6 MHz,Military communications
-64,257.000,297.675,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-65,257.050,298.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-66,257.100,295.650,UHF military,225-328.6 MHz,Military communications
-67,257.150,298.150,UHF military,225-328.6 MHz,Military communications
-68,257.200,308.800,UHF military,225-328.6 MHz,Military communications
-69,257.250,309.475,UHF military,225-328.6 MHz,Military communications
-70,257.300,309.725,UHF military,225-328.6 MHz,Military communications
-71,257.350,307.200,UHF military,225-328.6 MHz,Military communications
-72,257.500,311.350,UHF military,225-328.6 MHz,Military communications
-73,257.700,316.150,UHF military,225-328.6 MHz,Military communications
-74,257.775,311.375,UHF military,225-328.6 MHz,Military communications
-75,257.825,297.075,UHF military,225-328.6 MHz,Military communications
-76,257.900,298.000,UHF military,225-328.6 MHz,Military communications
-77,258.150,293.200,UHF military,225-328.6 MHz,Military communications
-78,258.350,299.350,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-79,258.450,299.450,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-80,258.500,299.500,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-81,258.550,299.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-82,258.650,299.650,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-83,259.000,317.925,UHF military,225-328.6 MHz,Military communications
-84,259.050,317.975,UHF military,225-328.6 MHz,Military communications
-85,259.975,310.050,UHF military,225-328.6 MHz,Military communications
-86,260.025,310.225,UHF military,225-328.6 MHz,Military communications
-87,260.075,310.275,UHF military,225-328.6 MHz,Military communications
-88,260.125,310.125,UHF military,225-328.6 MHz,Military communications
-89,260.175,310.325,UHF military,225-328.6 MHz,Military communications
-90,260.375,292.975,UHF military,225-328.6 MHz,Military communications
-91,260.425,297.575,UHF military,225-328.6 MHz,Military communications
-92,260.425,294.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-93,260.475,294.075,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-94,260.525,294.125,UHF military,225-328.6 MHz,Military communications
-95,260.550,296.775,UHF military,225-328.6 MHz,Military communications
-96,260.575,294.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-97,260.625,294.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-98,260.675,294.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-99,260.675,294.275,UHF military,225-328.6 MHz,Military communications
-100,260.725,294.325,UHF military,225-328.6 MHz,Military communications
-101,260.900,313.900,UHF military,225-328.6 MHz,Military communications
-102,261.100,298.380,UHF military,225-328.6 MHz,Military communications
-103,261.100,298.700,UHF military,225-328.6 MHz,Military communications
-104,261.200,294.950,UHF military,225-328.6 MHz,Military communications
-105,262.000,314.200,UHF military,225-328.6 MHz,Military communications
-106,262.040,307.075,UHF military,225-328.6 MHz,Military communications
-107,262.075,306.975,UHF military,225-328.6 MHz,Military communications
-108,262.125,295.725,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-109,262.175,297.025,UHF military,225-328.6 MHz,Military communications
-110,262.175,295.775,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-111,262.225,295.825,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-112,262.275,295.875,UHF military,225-328.6 MHz,Military communications
-113,262.275,300.275,UHF military,225-328.6 MHz,Military communications
-114,262.325,295.925,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-115,262.375,295.975,UHF military,225-328.6 MHz,Military communications
-116,262.425,296.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-117,263.450,311.400,UHF military,225-328.6 MHz,Military communications
-118,263.500,309.875,UHF military,225-328.6 MHz,Military communications
-119,263.575,297.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-120,263.625,297.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-121,263.675,297.275,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-122,263.725,297.325,UHF military,225-328.6 MHz,Military communications
-123,263.775,297.375,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-124,263.825,297.425,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-125,263.875,297.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-126,263.925,297.525,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-127,265.250,306.250,UHF military,225-328.6 MHz,Military communications
-128,265.350,306.350,UHF military,225-328.6 MHz,Military communications
-129,265.400,294.425,FLTSATCOM/Leasat,A/X,Tactical communications
-130,265.450,306.450,UHF military,225-328.6 MHz,Military communications
-131,265.500,302.525,UHF military,225-328.6 MHz,Military communications
-132,265.550,306.550,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-133,265.675,306.675,UHF military,225-328.6 MHz,Military communications
-134,265.850,306.850,UHF military,225-328.6 MHz,Military communications
-135,266.750,316.575,UHF military,225-328.6 MHz,Military communications
-136,266.850,307.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-137,266.900,297.625,UHF military,225-328.6 MHz,Military communications
-138,266.950,307.950,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-139,267.050,308.050,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-140,267.100,308.100,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-141,267.150,308.150,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-142,267.200,308.200,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-143,267.250,308.250,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-144,267.400,294.900,UHF military,225-328.6 MHz,Military communications
-145,267.875,310.375,UHF military,225-328.6 MHz,Military communications
-146,267.950,310.450,UHF military,225-328.6 MHz,Military communications
-147,268.000,310.475,UHF military,225-328.6 MHz,Military communications
-148,268.025,309.025,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-149,268.050,310.550,UHF military,225-328.6 MHz,Military communications
-150,268.100,310.600,UHF military,225-328.6 MHz,Military communications
-151,268.150,309.150,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-152,268.200,296.050,UHF military,225-328.6 MHz,Military communications
-153,268.250,309.250,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-154,268.300,309.300,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-155,268.350,309.350,UHF military,225-328.6 MHz,Military communications
-156,268.400,295.900,FLTSATCOM/Leasat,C/Z,Tactical communications
-157,268.450,309.450,UHF military,225-328.6 MHz,Military communications
-158,269.700,309.925,UHF military,225-328.6 MHz,Military communications
-159,269.750,310.750,UHF military,225-328.6 MHz,Military communications
-160,269.800,310.025,UHF military,225-328.6 MHz,Military communications
-161,269.850,310.850,Navy 25 kHz,Navy 25K,Tactical voice/data communications
-162,269.950,310.950,DOD 25 kHz,DOD 25K,Tactical communications (DoD)
-800,250.000,250.000,sattest,Random,Testing frequency mode
-801,260.000,260.000,sattest,Random,Testing frequency mode
-802,270.000,270.000,sattest,Random,Testing frequency mode
-803,280.000,280.000,sattest,Random,Testing frequency mode
-804,290.000,290.000,sattest,Random,Testing frequency mode
-805,300.000,300.000,sattest,Random,Testing frequency mode
-806,310.000,310.000,sattest,Random,Testing frequency mode
-807,433.000,433.000,sattest,Random,Testing frequency mode
-808,434.000,434.000,sattest,Random,Testing frequency mode
-809,446.000,446.000,sattest,Random,Testing frequency mode`;
+const CHANNEL_REFERENCE_FALLBACK = `Channel,RX (MHz),TX (MHz),System,Band Plan,Purpose,Frequency (MHz),Bandwidth,Satellite Name,Satellite Position,Comments,Modulation,Usage
+0,243.625,316.725,UHF military,225-328.6 MHz,Military communications,243.625,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+1,243.625,300.4,UHF military,225-328.6 MHz,Military communications,243.625,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+2,243.8,298.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+3,244.135,296.075,UHF FO,Band Plan P,Tactical communications,244.135,5KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+4,244.275,300.25,UHF military,225-328.6 MHz,Military communications,,,,,,,
+5,245.2,312.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
+6,245.8,298.65,UHF military,225-328.6 MHz,Military communications,245.8,35KHz,Skynet 5C,17.8 West,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
+7,245.85,314.23,UHF military,225-328.6 MHz,Military communications,245.85,35KHz,Skynet 5A,5.9 East,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
+8,245.95,299.4,UHF military,225-328.6 MHz,Military communications,,,,,,,
+9,247.45,298.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
+10,248.75,306.9,Marisat,B,Tactical voice/data,248.75,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+11,248.825,294.375,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder,248.825,30KHz,? IOR,,? March 2010,,
+12,249.375,316.975,UHF military,225-328.6 MHz,Military communications,249.375,30KHz,?,,IOR March 2010,,
+13,249.4,300.975,UHF military,225-328.6 MHz,Military communications,,,,,,,
+14,249.45,299.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
+15,249.45,312.75,UHF military,225-328.6 MHz,Military communications,,,,,,,
+16,249.49,313.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
+17,249.53,318.28,UHF military,225-328.6 MHz,Military communications,249.5295,8KHz,Skynet 5A,5.9 East,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
+18,249.85,316.25,UHF military,225-328.6 MHz,Military communications,,,,,,,
+19,249.85,298.83,UHF military,225-328.6 MHz,Military communications,,,,,,,
+20,249.89,300.5,UHF military,225-328.6 MHz,Military communications,,,,,,,
+21,249.93,308.75,UHF FO,Q,Tactical communications,,,,,,,
+22,250.09,312.6,UHF military,225-328.6 MHz,Military communications,,,,,,,
+23,250.9,308.3,UHF FO,Q,Tactical communications,250.9,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+24,251.275,296.5,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder,,,,,,,
+25,251.575,308.45,UHF military,225-328.6 MHz,Military communications,,,,,,,
+26,251.6,298.225,UHF military,225-328.6 MHz,Military communications,,,,,,,
+27,251.85,292.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,251.85,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+28,251.9,292.9,FLTSATCOM/Leasat,A/X,Tactical communications,251.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+29,251.95,292.95,Navy 25 kHz,Navy 25K,Tactical voice/data communications,251.95,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+30,252.0,293.1,FLTSATCOM,B,Tactical communications,252.0,30KHz,UFO-10/11,70.0 East,March 2010,Narrowband FM/AM,Тактические голос/данные каналы
+31,252.05,293.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,252.05,25KHz,UFO-7,23.3 West,DAMA kg_net= 7 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+32,252.15,293.15,UHF military,225-328.6 MHz,Military communications,252.15,25KHz,Fltsatcom 8,15.5 West,DAMA kg_net= 5 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+33,252.2,299.15,UHF military,225-328.6 MHz,Military communications,,,,,,,
+34,252.4,309.7,UHF FO,Q,Tactical communications,252.4,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+35,252.45,309.75,UHF military,225-328.6 MHz,Military communications,252.45,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+36,252.5,309.8,UHF military,225-328.6 MHz,Military communications,252.5,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+37,252.55,309.85,UHF military,225-328.6 MHz,Military communications,252.55,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+38,252.625,309.925,UHF military,225-328.6 MHz,Military communications,,,,,,,
+39,253.55,294.55,UHF military,225-328.6 MHz,Military communications,253.55,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+40,253.6,295.95,UHF military,225-328.6 MHz,Military communications,253.6,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+41,253.65,294.65,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.65,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+42,253.7,294.7,FLTSATCOM/Leasat/UHF FO,A/X/O,Tactical communications,253.7,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+43,253.75,294.75,UHF military,225-328.6 MHz,Military communications,253.75,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+44,253.8,296.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
+45,253.85,294.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.85,25KHz,UFO-7,23.3 West,DAMA kg_net= 9 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+46,253.85,294.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.85,25KHz,UFO-7,23.3 West,DAMA kg_net= 9 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+47,253.9,307.5,UHF military,225-328.6 MHz,Military communications,,,,,,,
+48,254.0,298.63,UHF military,225-328.6 MHz,Military communications,,,,,,,
+49,254.73,312.55,UHF military,225-328.6 MHz,Military communications,,,,,,,
+50,254.775,310.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
+51,254.83,296.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+52,255.25,302.425,UHF military,225-328.6 MHz,Military communications,255.25,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+53,255.35,296.35,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.35,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+54,255.4,296.4,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+55,255.45,296.45,UHF military,225-328.6 MHz,Military communications,255.45,25KHz,UFO-7,23.3 West,DAMA kg_net= 3 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+56,255.55,296.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.55,25KHz,Fltsatcom 8,15.5 West,,Narrowband FM/AM,Тактические голос/данные каналы
+57,255.55,296.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.55,25KHz,Fltsatcom 8,15.5 West,,Narrowband FM/AM,Тактические голос/данные каналы
+58,255.775,309.3,UHF military,225-328.6 MHz,Military communications,,,,,,,
+59,256.45,313.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
+60,256.6,305.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
+61,256.85,297.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,256.85,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+62,256.9,296.1,UHF military,225-328.6 MHz,Military communications,256.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+63,256.95,297.95,UHF military,225-328.6 MHz,Military communications,256.95,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+64,257.0,297.675,Navy 25 kHz,Navy 25K,Tactical voice/data communications,257.0,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+65,257.05,298.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,257.05,25KHz,UFO-7,23.3 West,DAMA kg_net= 4 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+66,257.1,295.65,UHF military,225-328.6 MHz,Military communications,257.1,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+67,257.15,298.15,UHF military,225-328.6 MHz,Military communications,257.15,25KHz,Fltsatcom 8,15.5 West,DAMA kg_net= 6 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+68,257.2,308.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
+69,257.25,309.475,UHF military,225-328.6 MHz,Military communications,,,,,,,
+70,257.3,309.725,UHF military,225-328.6 MHz,Military communications,,,,,,,
+71,257.35,307.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+72,257.5,311.35,UHF military,225-328.6 MHz,Military communications,,,,,,,
+73,257.7,316.15,UHF military,225-328.6 MHz,Military communications,,,,,,,
+74,257.775,311.375,UHF military,225-328.6 MHz,Military communications,,,,,,,
+75,257.825,297.075,UHF military,225-328.6 MHz,Military communications,,,,,,,
+76,257.9,298.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
+77,258.15,293.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+78,258.35,299.35,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.35,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+79,258.45,299.45,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.45,25KHz,UFO-2,28.3 East,PSK modem,PSK (Phase Shift Keying),Модемные каналы данных
+80,258.5,299.5,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.5,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+81,258.55,299.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.55,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+82,258.65,299.65,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.65,25KHz,Fltsatcom 8,15.5 West,Strong GMSK,GMSK (Gaussian Minimum Shift Keying),Цифровая передача (тактическая/мобильная)
+83,259.0,317.925,UHF military,225-328.6 MHz,Military communications,,,,,,,
+84,259.05,317.975,UHF military,225-328.6 MHz,Military communications,,,,,,,
+85,259.975,310.05,UHF military,225-328.6 MHz,Military communications,259.975,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+86,260.025,310.225,UHF military,225-328.6 MHz,Military communications,260.025,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+87,260.075,310.275,UHF military,225-328.6 MHz,Military communications,260.075,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+88,260.125,310.125,UHF military,225-328.6 MHz,Military communications,260.125,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+89,260.175,310.325,UHF military,225-328.6 MHz,Military communications,,,,,,,
+90,260.375,292.975,UHF military,225-328.6 MHz,Military communications,260.375,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+91,260.425,297.575,UHF military,225-328.6 MHz,Military communications,260.425,25KHz,UFO-7,23.3 West,DAMA kg_net= 8 9k6+19k2,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+92,260.425,294.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.425,25KHz,UFO-7,23.3 West,DAMA kg_net= 8 9k6+19k2,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+93,260.475,294.075,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.475,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+94,260.525,294.125,UHF military,225-328.6 MHz,Military communications,260.525,25KHz,UFO-7,23.3 West,BPSK modem,BPSK (Binary Phase Shift Keying),Модемные каналы данных
+95,260.55,296.775,UHF military,225-328.6 MHz,Military communications,,,,,,,
+96,260.575,294.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.575,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+97,260.625,294.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.625,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+98,260.675,294.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.675,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+99,260.675,294.275,UHF military,225-328.6 MHz,Military communications,260.675,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+100,260.725,294.325,UHF military,225-328.6 MHz,Military communications,260.725,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+101,260.9,313.9,UHF military,225-328.6 MHz,Military communications,,,,,,,
+102,261.1,298.38,UHF military,225-328.6 MHz,Military communications,,,,,,,
+103,261.1,298.7,UHF military,225-328.6 MHz,Military communications,,,,,,,
+104,261.2,294.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
+105,262.0,314.2,UHF military,225-328.6 MHz,Military communications,262.0,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+106,262.04,307.075,UHF military,225-328.6 MHz,Military communications,,,,,,,
+107,262.075,306.975,UHF military,225-328.6 MHz,Military communications,262.075,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+108,262.125,295.725,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.125,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+109,262.175,297.025,UHF military,225-328.6 MHz,Military communications,262.175,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+110,262.175,295.775,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.175,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+111,262.225,295.825,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.225,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+112,262.275,295.875,UHF military,225-328.6 MHz,Military communications,262.275,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+113,262.275,300.275,UHF military,225-328.6 MHz,Military communications,262.275,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+114,262.325,295.925,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.325,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+115,262.375,295.975,UHF military,225-328.6 MHz,Military communications,262.375,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+116,262.425,296.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.425,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+117,263.45,311.4,UHF military,225-328.6 MHz,Military communications,,,,,,,
+118,263.5,309.875,UHF military,225-328.6 MHz,Military communications,,,,,,,
+119,263.575,297.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.575,25Khz,UFO-10/11,70.0 East,Data March 2010,Digital Narrowband Data,Цифровые данные (низкая/средняя скорость)
+120,263.625,297.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.625,25KHz,UFO-7,23.3 West,BPSK modem,BPSK (Binary Phase Shift Keying),Модемные каналы данных
+121,263.675,297.275,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.675,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+122,263.725,297.325,UHF military,225-328.6 MHz,Military communications,263.725,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+123,263.775,297.375,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.775,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+124,263.825,297.425,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.825,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+125,263.875,297.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.875,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+126,263.925,297.525,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.925,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+127,265.25,306.25,UHF military,225-328.6 MHz,Military communications,265.25,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+128,265.35,306.35,UHF military,225-328.6 MHz,Military communications,265.35,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+129,265.4,294.425,FLTSATCOM/Leasat,A/X,Tactical communications,265.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+130,265.45,306.45,UHF military,225-328.6 MHz,Military communications,265.45,25KHz,UFO-7,23.3 West,Daily RATT transmissions,Narrowband FM/AM,Тактические голос/данные каналы
+131,265.5,302.525,UHF military,225-328.6 MHz,Military communications,265.5,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+132,265.55,306.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,265.55,25KHz,Fltsatcom 8,15.5 West,Many interfering carriers in tpx,Narrowband FM/AM,Тактические голос/данные каналы
+133,265.675,306.675,UHF military,225-328.6 MHz,Military communications,,,,,,,
+134,265.85,306.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
+135,266.75,316.575,UHF military,225-328.6 MHz,Military communications,266.75,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+136,266.85,307.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,266.85,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+137,266.9,297.625,UHF military,225-328.6 MHz,Military communications,266.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+138,266.95,307.95,Navy 25 kHz,Navy 25K,Tactical voice/data communications,266.95,25KHz,UFO-7,23.3 West,Russian phone relays,Narrowband FM/AM,Тактические голос/данные каналы
+139,267.05,308.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,267.05,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+140,267.1,308.1,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+141,267.15,308.15,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+142,267.2,308.2,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+143,267.25,308.25,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+144,267.4,294.9,UHF military,225-328.6 MHz,Military communications,,,,,,,
+145,267.875,310.375,UHF military,225-328.6 MHz,Military communications,267.875,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+146,267.95,310.45,UHF military,225-328.6 MHz,Military communications,267.95,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+147,268.0,310.475,UHF military,225-328.6 MHz,Military communications,268.0,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+148,268.025,309.025,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+149,268.05,310.55,UHF military,225-328.6 MHz,Military communications,268.05,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+150,268.1,310.6,UHF military,225-328.6 MHz,Military communications,268.1,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+151,268.15,309.15,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.15,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+152,268.2,296.05,UHF military,225-328.6 MHz,Military communications,268.2,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+153,268.25,309.25,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.25,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+154,268.3,309.3,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.3,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+155,268.35,309.35,UHF military,225-328.6 MHz,Military communications,268.35,25KHz,UFO-7,23.3 West,DAMA kg_net= 1 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+156,268.4,295.9,FLTSATCOM/Leasat,C/Z,Tactical communications,268.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+157,268.45,309.45,UHF military,225-328.6 MHz,Military communications,268.45,25KHz,UFO-7,23.3 West,Many interfering carriers in tpx,Narrowband FM/AM,Тактические голос/данные каналы
+158,269.7,309.925,UHF military,225-328.6 MHz,Military communications,269.7,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+159,269.75,310.75,UHF military,225-328.6 MHz,Military communications,269.75,25KHz,UFO-2,28.3 East,Wheel,Narrowband FM/AM,Тактические голос/данные каналы
+160,269.8,310.025,UHF military,225-328.6 MHz,Military communications,269.8,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+161,269.85,310.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,269.85,30KHz,UFO-7,23.3 West,DAMA kg_net= 2 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+162,269.95,310.95,DOD 25 kHz,DOD 25K,Tactical communications (DoD),269.95,25KHz,UFO-7,23.3 West,PSK mode,PSK (Phase Shift Keying),Цифровые данные`;
 const POWER_PRESETS = [-5, -2, 1, 4, 7, 10, 13, 16, 19, 22];
 const ACK_RETRY_MAX = 10;
 const ACK_RETRY_DEFAULT = 3;
@@ -2126,6 +2341,7 @@ async function init() {
   UI.els.recvAuto = $("#recvAuto");
   UI.els.recvLimit = $("#recvLimit");
   UI.els.recvRefresh = $("#btnRecvRefresh");
+  UI.els.recvClear = $("#btnRecvClear");
   UI.els.autoNightSwitch = $("#autoNightMode");
   UI.els.autoNightHint = $("#autoNightHint");
   UI.els.channelInfoPanel = $("#channelInfoPanel");
@@ -2133,6 +2349,7 @@ async function init() {
   UI.els.channelInfoBody = $("#channelInfoBody");
   UI.els.channelInfoEmpty = $("#channelInfoEmpty");
   UI.els.channelInfoStatus = $("#channelInfoStatus");
+  UI.els.channelRefStatus = $("#channelRefStatus");
   UI.els.channelInfoSetBtn = $("#channelInfoSetCurrent");
   UI.els.channelInfoRow = null;
   UI.els.channelInfoCell = null;
@@ -2145,9 +2362,16 @@ async function init() {
     scan: $("#channelInfoScan"),
     rxRef: $("#channelInfoRxRef"),
     txRef: $("#channelInfoTxRef"),
+    frequency: $("#channelInfoFrequency"),
     system: $("#channelInfoSystem"),
     band: $("#channelInfoBand"),
+    bandwidth: $("#channelInfoBandwidth"),
     purpose: $("#channelInfoPurpose"),
+    satellite: $("#channelInfoSatellite"),
+    position: $("#channelInfoPosition"),
+    modulation: $("#channelInfoModulation"),
+    usage: $("#channelInfoUsage"),
+    comments: $("#channelInfoComments"),
   };
   UI.els.encTest = {
     container: $("#encTest"),
@@ -2351,6 +2575,9 @@ async function init() {
   }
   if (UI.els.recvRefresh) {
     UI.els.recvRefresh.addEventListener("click", () => refreshReceivedList({ manual: true }));
+  }
+  if (UI.els.recvClear) {
+    UI.els.recvClear.addEventListener("click", () => clearReceivedList());
   }
   loadChatHistory();
   setRecvAuto(savedAuto, { skipImmediate: true });
@@ -2856,6 +3083,18 @@ function applyChatBubbleContent(node, entry) {
     setBubbleText(textBox, raw);
   }
   node.appendChild(textBox);
+  const detailRaw = entry && entry.detail != null ? String(entry.detail) : "";
+  const detail = detailRaw.trim();
+  if (detail) {
+    // Показываем полный текст ответа устройства отдельно от заголовка
+    const visibleText = (textBox.textContent || "").trim();
+    if (!visibleText || detail !== visibleText) {
+      const detailBox = document.createElement("pre");
+      detailBox.className = "bubble-detail";
+      detailBox.textContent = detail;
+      node.appendChild(detailBox);
+    }
+  }
   const tx = entry && entry.txStatus;
   if (tx && typeof tx === "object") {
     const footer = document.createElement("div");
@@ -3064,11 +3303,14 @@ function summarizeResponse(text, fallback) {
 function logSystemCommand(cmd, payload, state) {
   const clean = (cmd || "").toUpperCase();
   const ok = state === "ok";
-  const detail = payload != null ? String(payload) : "";
-  const summary = summarizeResponse(detail, ok ? "выполнено" : "ошибка");
-  const message = ok ? `СИСТЕМА · ${clean} → ${summary}` : `СИСТЕМА · ${clean} ✗ ${summary}`;
-  const meta = { role: "system", tag: "cmd", cmd: clean, status: ok ? "ok" : "error", detail };
-  const saved = persistChat(message, "dev", meta);
+  const statusText = ok ? "выполнено" : "ошибка";
+  const detailRaw = payload != null ? String(payload) : "";
+  const messageText = ok
+    ? `СИСТЕМА · ${clean} → ${statusText}`
+    : `СИСТЕМА · ${clean} ✗ ${statusText}`;
+  const meta = { role: "system", tag: "cmd", cmd: clean, status: ok ? "ok" : "error" };
+  if (detailRaw) meta.detail = detailRaw;
+  const saved = persistChat(messageText, "dev", meta);
   addChatMessage(saved.record, saved.index);
 }
 async function sendCommand(cmd, params, opts) {
@@ -3719,6 +3961,13 @@ function renderReceivedList(items) {
   if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = list.length > 0;
 }
 
+// Полностью очищаем список входящих сообщений без запроса к устройству
+function clearReceivedList() {
+  UI.state.receivedKnown = new Set();
+  if (UI.els.recvList) UI.els.recvList.innerHTML = "";
+  if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = false;
+}
+
 // Оцениваем количество элементов в JSON-ответе RSTS для подсказок пользователю
 function countRstsJsonItems(value) {
   if (!value) return 0;
@@ -4083,15 +4332,28 @@ function updateChannelInfoPanel() {
 
   setChannelInfoText(fields.rxRef, ref ? formatChannelNumber(ref.rx, 3) : "—");
   setChannelInfoText(fields.txRef, ref ? formatChannelNumber(ref.tx, 3) : "—");
+  const freqValue = ref && ref.frequency != null ? ref.frequency : ref && ref.rx != null ? ref.rx : null;
+  setChannelInfoText(fields.frequency, freqValue != null ? formatChannelNumber(freqValue, 3) : "—");
   setChannelInfoText(fields.system, ref && ref.system ? ref.system : "—");
   setChannelInfoText(fields.band, ref && ref.band ? ref.band : "—");
+  setChannelInfoText(fields.bandwidth, ref && ref.bandwidth ? ref.bandwidth : "—");
   setChannelInfoText(fields.purpose, ref && ref.purpose ? ref.purpose : "—");
+  setChannelInfoText(fields.satellite, ref && ref.satellite ? ref.satellite : "—");
+  setChannelInfoText(fields.position, ref && ref.position ? ref.position : "—");
+  setChannelInfoText(fields.modulation, ref && ref.modulation ? ref.modulation : "—");
+  setChannelInfoText(fields.usage, ref && ref.usage ? ref.usage : "—");
+  setChannelInfoText(fields.comments, ref && ref.comments ? ref.comments : "—");
 
   const messages = [];
   if (channelReference.loading) messages.push("Загружаем справочник частот…");
   if (channelReference.error) {
-    const errText = channelReference.error && channelReference.error.message ? channelReference.error.message : String(channelReference.error);
+    const errText = describeChannelReferenceError(channelReference.error) || "неизвестная ошибка";
     messages.push("Не удалось загрузить справочник: " + errText);
+  }
+  if (!channelReference.loading && !channelReference.error && channelReference.source && channelReference.source.kind === "fallback") {
+    const rawReason = channelReference.source.reason || describeChannelReferenceError(channelReference.lastError);
+    const reason = rawReason ? rawReason.replace(/\s+/g, " ").trim() : "";
+    messages.push("Используется встроенный справочник каналов." + (reason ? " Причина: " + reason : ""));
   }
   if (!channelReference.loading && !channelReference.error && !ref) messages.push("В справочнике нет данных для этого канала.");
   if (!actualEntry) messages.push("Канал отсутствует в текущем списке.");
@@ -4138,7 +4400,9 @@ function updateChannelInfoPanel() {
 // Записываем значение в элемент, если он существует
 function setChannelInfoText(el, text) {
   if (!el) return;
-  el.textContent = text;
+  const value = text == null ? "" : String(text);
+  el.textContent = value;
+  el.title = value && value !== "—" ? value : "";
 }
 
 // Устанавливаем канал из карточки в качестве текущего
@@ -4178,14 +4442,91 @@ function formatChannelNumber(value, digits) {
   return typeof digits === "number" ? num.toFixed(digits) : String(num);
 }
 
+// Преобразуем ошибку загрузки справочника в читаемую строку
+function describeChannelReferenceError(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  if (typeof error.message === "string" && error.message.trim()) return error.message.trim();
+  if (typeof error.status === "number") {
+    const statusText = typeof error.statusText === "string" && error.statusText ? " " + error.statusText : "";
+    return "HTTP " + error.status + statusText;
+  }
+  try {
+    const serialized = JSON.stringify(error);
+    return serialized && serialized !== "{}" ? serialized : String(error);
+  } catch (err) {
+    return String(error);
+  }
+}
+
+// Обновляем индикатор состояния справочника каналов в UI
+function updateChannelReferenceStatusIndicator() {
+  const el = UI.els.channelRefStatus || $("#channelRefStatus");
+  if (!el) return;
+  if (channelReference.loading) {
+    el.textContent = "⏳ Загружаем справочник частот…";
+    el.setAttribute("data-state", "loading");
+    el.hidden = false;
+    return;
+  }
+  if (channelReference.error) {
+    const errText = describeChannelReferenceError(channelReference.error) || "неизвестная ошибка";
+    el.textContent = "⚠️ Справочник частот недоступен: " + errText;
+    el.setAttribute("data-state", "error");
+    el.hidden = false;
+    return;
+  }
+  if (channelReference.source && channelReference.source.kind === "fallback") {
+    const rawReason = channelReference.source.reason || describeChannelReferenceError(channelReference.lastError);
+    const reason = rawReason ? rawReason.replace(/\s+/g, " ").trim() : "";
+    const details = reason ? " Причина: " + reason : "";
+    el.textContent = "⚠️ Используются встроенные данные справочника (fallback)." + details;
+    el.setAttribute("data-state", "fallback");
+    el.hidden = false;
+    return;
+  }
+  el.hidden = true;
+  el.textContent = "";
+  el.removeAttribute("data-state");
+}
+
 // Загружаем CSV со справочной информацией
 async function loadChannelReferenceData() {
   if (channelReference.ready) return channelReference.map;
   if (channelReference.promise) return channelReference.promise;
   channelReference.loading = true;
   channelReference.error = null;
+  channelReference.source = null;
+  channelReference.lastError = null;
+  updateChannelReferenceStatusIndicator();
   channelReference.promise = (async () => {
-    const sources = ["libs/freq-info.csv", "./libs/freq-info.csv", "/libs/freq-info.csv"];
+    const sources = [];
+    const seen = new Set();
+    const addSource = (value) => {
+      if (!value) return;
+      const url = String(value);
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      sources.push(url);
+    };
+    try {
+      if (typeof document !== "undefined" && document.baseURI) {
+        addSource(new URL("libs/freq-info.csv", document.baseURI).toString());
+      }
+    } catch (err) {
+      console.warn("[freq-info] не удалось сформировать путь от baseURI:", err);
+    }
+    try {
+      if (typeof document !== "undefined") {
+        const currentScript = document.currentScript && document.currentScript.src ? document.currentScript.src : null;
+        if (currentScript) addSource(new URL("./libs/freq-info.csv", currentScript).toString());
+      }
+    } catch (err) {
+      console.warn("[freq-info] не удалось сформировать путь от script.src:", err);
+    }
+    addSource("libs/freq-info.csv");
+    addSource("./libs/freq-info.csv");
+    addSource("/libs/freq-info.csv");
     let lastErr = null;
     try {
       for (let i = 0; i < sources.length; i++) {
@@ -4200,24 +4541,39 @@ async function loadChannelReferenceData() {
           applyChannelReferenceData(parseChannelReferenceCsv(text));
           channelReference.ready = true;
           channelReference.error = null;
+          channelReference.source = { kind: "remote", url };
+          channelReference.lastError = null;
+          console.info("[freq-info] справочник загружен по адресу:", url);
           return channelReference.map;
         } catch (err) {
           lastErr = err;
+          channelReference.lastError = err;
+          const errText = describeChannelReferenceError(err);
+          if (errText) console.warn("[freq-info] не удалось загрузить " + url + ": " + errText, err);
+          else console.warn("[freq-info] не удалось загрузить " + url + ":", err);
         }
       }
       if (CHANNEL_REFERENCE_FALLBACK) {
+        const reason = lastErr ? describeChannelReferenceError(lastErr) : "";
         if (lastErr) console.warn("[freq-info] основной источник недоступен, используем встроенные данные:", lastErr);
         applyChannelReferenceData(parseChannelReferenceCsv(CHANNEL_REFERENCE_FALLBACK));
         channelReference.ready = true;
         channelReference.error = null;
+        channelReference.source = { kind: "fallback", reason };
+        channelReference.lastError = lastErr;
+        const msg = reason ? " Причина: " + reason : "";
+        console.warn("[freq-info] используется резервный справочник частот (fallback)." + msg);
         return channelReference.map;
       }
       const error = lastErr || new Error("Не удалось загрузить справочник");
       channelReference.error = error;
+      channelReference.source = null;
+      channelReference.lastError = error;
       throw error;
     } finally {
       channelReference.loading = false;
       channelReference.promise = null;
+      updateChannelReferenceStatusIndicator();
     }
   })();
   return channelReference.promise;
@@ -4296,6 +4652,14 @@ function parseChannelReferenceCsv(text) {
     if (!Number.isFinite(ch)) continue;
     const rx = cells[1] ? Number(cells[1].trim()) : NaN;
     const tx = cells[2] ? Number(cells[2].trim()) : NaN;
+    const freqCell = cells[6] ? cells[6].trim() : "";
+    const freq = freqCell ? Number(freqCell) : NaN;
+    const bandwidth = cells[7] ? cells[7].trim() : "";
+    const satellite = cells[8] ? cells[8].trim() : "";
+    const position = cells[9] ? cells[9].trim() : "";
+    const comments = cells[10] ? cells[10].trim() : "";
+    const modulation = cells[11] ? cells[11].trim() : "";
+    const usage = cells[12] ? cells[12].trim() : "";
     const entry = {
       ch,
       rx: Number.isFinite(rx) ? rx : null,
@@ -4303,6 +4667,13 @@ function parseChannelReferenceCsv(text) {
       system: cells[3] ? cells[3].trim() : "",
       band: cells[4] ? cells[4].trim() : "",
       purpose: cells[5] ? cells[5].trim() : "",
+      frequency: Number.isFinite(freq) ? freq : null,
+      bandwidth,
+      satellite,
+      position,
+      comments,
+      modulation,
+      usage,
     };
     byChannel.set(ch, entry);
     if (entry.tx != null) {
@@ -4380,10 +4751,30 @@ function renderChannels() {
       { label: "Статус", value: c.st || "" },
       { label: "SCAN", value: scanText },
     ];
+    const ref = findChannelReferenceByTx(c);
+    if (ref) {
+      const tooltipLines = [];
+      if (ref.frequency != null) tooltipLines.push("Частота: " + formatChannelNumber(ref.frequency, 3) + " МГц");
+      if (ref.system) tooltipLines.push("Система: " + ref.system);
+      if (ref.band) tooltipLines.push("План: " + ref.band);
+      if (ref.bandwidth) tooltipLines.push("Полоса: " + ref.bandwidth);
+      if (ref.purpose) tooltipLines.push("Назначение: " + ref.purpose);
+      if (ref.satellite) tooltipLines.push("Спутник: " + ref.satellite);
+      if (ref.position) tooltipLines.push("Позиция: " + ref.position);
+      if (ref.modulation) tooltipLines.push("Модуляция: " + ref.modulation);
+      if (ref.usage) tooltipLines.push("Использование: " + ref.usage);
+      if (ref.comments) tooltipLines.push("Комментарий: " + ref.comments);
+      const tooltip = tooltipLines.join("\n");
+      if (tooltip) tr.title = tooltip;
+      else tr.removeAttribute("title");
+    } else {
+      tr.removeAttribute("title");
+    }
     cells.forEach((info) => {
       const td = document.createElement("td");
       td.dataset.label = info.label;
       td.textContent = info.value != null ? String(info.value) : "";
+      td.title = info.value != null && info.value !== "" ? String(info.value) : "";
       tr.appendChild(td);
     });
     tr.dataset.ch = String(c.ch);
@@ -7070,6 +7461,4 @@ async function resyncAfterEndpointChange() {
     console.warn("[endpoint] resync error", err);
   }
 }
-
-
 )~~~";

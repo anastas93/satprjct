@@ -760,6 +760,27 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   gap: 1rem;
   margin-top: 1rem;
 }
+.channel-ref-status {
+  margin: .75rem 0 0;
+  padding: .55rem .85rem;
+  border-radius: .75rem;
+  background: color-mix(in oklab, var(--panel-2) 85%, black 15%);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 60%, black 40%);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.channel-ref-status[data-state="loading"] {
+  color: color-mix(in oklab, var(--muted) 85%, var(--text) 15%);
+}
+.channel-ref-status[data-state="fallback"] {
+  color: color-mix(in oklab, var(--danger) 70%, var(--text) 30%);
+  border-color: color-mix(in oklab, var(--danger) 55%, var(--text) 45%);
+}
+.channel-ref-status[data-state="error"] {
+  color: color-mix(in oklab, var(--danger) 80%, var(--text) 20%);
+  border-color: color-mix(in oklab, var(--danger) 65%, var(--text) 35%);
+  background: color-mix(in oklab, var(--danger) 20%, black 80%);
+}
 .channel-info {
   border-radius: .9rem;
   padding: 1rem;
