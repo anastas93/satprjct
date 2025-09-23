@@ -1861,6 +1861,8 @@ const UI = {
       selectedSatId: null,
       tleReady: false,
       tleError: null,
+      mgrsReady: false,
+      mgrsError: null,
     },
   }
 };
@@ -5843,6 +5845,9 @@ function initPointingTab() {
   const els = UI.els.pointing;
   const state = UI.state.pointing;
   if (!els || !els.tab) return;
+  if (els.mgrsInput && !els.mgrsInput.dataset.defaultPlaceholder) {
+    els.mgrsInput.dataset.defaultPlaceholder = els.mgrsInput.getAttribute("placeholder") || "";
+  }
 
   state.minElevation = POINTING_DEFAULT_MIN_ELEVATION;
   updatePointingMinElevationUi();
@@ -5855,11 +5860,52 @@ function initPointingTab() {
   state.tleReady = state.satellites.length > 0;
   state.tleError = state.tleReady ? null : (rawTle.length ? "Некорректные TLE" : "Нет данных TLE");
 
-  const storedMgrs = pointingCanonicalMgrs(storage.get("pointingMgrs")) || "43UCR";
+  const storedMgrsRaw = storage.get("pointingMgrs");
   const storedAltRaw = Number(storage.get("pointingAlt"));
-  const initialAlt = Number.isFinite(storedAltRaw) ? storedAltRaw : 0;
-  if (!setPointingObserverFromMgrs(storedMgrs, initialAlt, { silent: true, skipStore: true })) {
-    setPointingObserverFromMgrs("43UCR", 0, { silent: true, skipStore: true });
+  const hasStoredAlt = Number.isFinite(storedAltRaw);
+  const mgrsApi = pointingMgrsApi();
+  if (!mgrsApi) {
+    state.mgrsReady = false;
+    state.mgrsError = "Не удалось загрузить /libs/mgrs.js";
+    state.observerMgrs = storedMgrsRaw ? pointingFormatMgrs(storedMgrsRaw) : null;
+    state.observer = hasStoredAlt ? {
+      lat: null,
+      lon: null,
+      heightM: storedAltRaw,
+      mgrs: state.observerMgrs,
+      mgrsRaw: storedMgrsRaw || null,
+      source: "mgrs",
+    } : null;
+    if (els.mgrsInput) {
+      els.mgrsInput.disabled = true;
+      const fallbackPlaceholder = state.mgrsError || "Конвертер MGRS не загружен";
+      els.mgrsInput.value = state.observerMgrs || "";
+      els.mgrsInput.placeholder = fallbackPlaceholder;
+    }
+    if (els.mgrsApply) {
+      els.mgrsApply.disabled = true;
+      els.mgrsApply.title = state.mgrsError;
+    }
+    console.error("[pointing] " + state.mgrsError + " — проверьте отдачу файла");
+    note("MGRS недоступен: проверьте /libs/mgrs.js");
+    status("Позиция • ошибка загрузки MGRS");
+  } else {
+    state.mgrsReady = true;
+    state.mgrsError = null;
+    if (els.mgrsInput) {
+      els.mgrsInput.disabled = false;
+      const basePlaceholder = els.mgrsInput.dataset.defaultPlaceholder || "43U CR";
+      els.mgrsInput.placeholder = basePlaceholder;
+    }
+    if (els.mgrsApply) {
+      els.mgrsApply.disabled = false;
+      els.mgrsApply.removeAttribute("title");
+    }
+    const storedMgrs = pointingCanonicalMgrs(storedMgrsRaw) || "43UCR";
+    const initialAlt = hasStoredAlt ? storedAltRaw : 0;
+    if (!setPointingObserverFromMgrs(storedMgrs, initialAlt, { silent: true, skipStore: true })) {
+      setPointingObserverFromMgrs("43UCR", 0, { silent: true, skipStore: true });
+    }
   }
   updatePointingObserverUi();
   renderPointingSatellites();
@@ -6060,6 +6106,10 @@ function pointingObserverFromMgrs(value, altitude) {
 
 function setPointingObserverFromMgrs(value, altitude, options = {}) {
   const state = UI.state.pointing;
+  if (state.mgrsReady === false) {
+    if (!options.silent) note("Конвертер MGRS ещё не загружен");
+    return false;
+  }
   const observer = pointingObserverFromMgrs(value, altitude);
   if (!observer) {
     if (!options.silent) note("Не удалось разобрать координаты MGRS");
@@ -6107,19 +6157,37 @@ function updatePointingObserverUi() {
   if (!els) return;
   const state = UI.state.pointing;
   const observer = state.observer;
-  const displayMgrs = state.observerMgrs || (observer && observer.mgrs) || "—";
+  const errorText = state.mgrsError;
+  const displayMgrs = errorText || state.observerMgrs || (observer && observer.mgrs) || "—";
 
   if (els.observerLabel) {
     els.observerLabel.textContent = displayMgrs;
   }
   if (els.mgrsInput) {
+    const defaultPlaceholder = els.mgrsInput.dataset.defaultPlaceholder || "43U CR";
     if (document.activeElement !== els.mgrsInput) {
-      els.mgrsInput.value = observer ? displayMgrs : "";
+      if (errorText) {
+        els.mgrsInput.value = state.observerMgrs || "";
+      } else {
+        const nextValue = observer ? (observer.mgrs || state.observerMgrs || "") : (state.observerMgrs || "");
+        els.mgrsInput.value = nextValue;
+      }
     }
+    els.mgrsInput.placeholder = errorText || defaultPlaceholder;
+    els.mgrsInput.disabled = state.mgrsReady === false;
   }
   if (els.manualAlt) {
     if (document.activeElement !== els.manualAlt) {
       els.manualAlt.value = observer ? String(observer.heightM || 0) : "";
+    }
+    els.manualAlt.disabled = state.mgrsReady === false;
+  }
+  if (els.mgrsApply) {
+    els.mgrsApply.disabled = state.mgrsReady === false;
+    if (state.mgrsReady === false) {
+      els.mgrsApply.title = errorText || "Конвертер MGRS не загружен";
+    } else {
+      els.mgrsApply.removeAttribute("title");
     }
   }
   if (els.lat) {
@@ -6138,6 +6206,10 @@ function applyPointingMgrs() {
   const els = UI.els.pointing;
   if (!els) return;
   const state = UI.state.pointing;
+  if (state.mgrsReady === false) {
+    note("Конвертер MGRS ещё не загружен");
+    return;
+  }
   const inputValue = els.mgrsInput ? els.mgrsInput.value : "";
   let normalized = pointingCanonicalMgrs(inputValue);
   if (!normalized) {
@@ -6167,6 +6239,10 @@ function applyPointingAltitude() {
   const els = UI.els.pointing;
   if (!els) return;
   const state = UI.state.pointing;
+  if (state.mgrsReady === false) {
+    note("Сначала дождитесь загрузки конвертера MGRS");
+    return;
+  }
   const raw = els.manualAlt ? String(els.manualAlt.value || "").trim() : "";
   let value = 0;
   if (!raw) {
@@ -6628,6 +6704,8 @@ function updatePointingBadges() {
   const els = UI.els.pointing;
   const state = UI.state.pointing;
   if (!els) return;
+  const observer = state.observer;
+  const hasObserver = !!(observer && Number.isFinite(observer.lat) && Number.isFinite(observer.lon));
   if (els.tleBadge) {
     const total = state.satellites ? state.satellites.length : 0;
     let status = "warn";
@@ -6646,20 +6724,33 @@ function updatePointingBadges() {
     }
   }
   if (els.locationBadge) {
-    const observer = state.observer;
-    const hasObserver = !!(observer && Number.isFinite(observer.lat) && Number.isFinite(observer.lon));
     let label = "нет данных";
     if (observer) {
       if (observer.mgrs) {
         label = observer.mgrs;
-      } else if (state.observerMgrs) {
-        label = state.observerMgrs;
       } else if (hasObserver) {
         label = formatLatitude(observer.lat, 2) + ", " + formatLongitude(observer.lon, 2);
+      } else if (state.observerMgrs) {
+        label = state.observerMgrs;
       }
+    } else if (state.observerMgrs) {
+      label = state.observerMgrs;
     }
-    const status = hasObserver ? "ok" : "idle";
-    const text = hasObserver ? "Позиция • " + label : "Позиция • нет данных";
+    let status;
+    let text;
+    if (state.mgrsError) {
+      status = "warn";
+      text = "Позиция • " + state.mgrsError;
+    } else if (hasObserver) {
+      status = "ok";
+      text = "Позиция • " + label;
+    } else if (state.observerMgrs) {
+      status = "idle";
+      text = "Позиция • " + label;
+    } else {
+      status = "idle";
+      text = "Позиция • нет данных";
+    }
     els.locationBadge.dataset.state = status;
     if (els.locationBadgeText) {
       els.locationBadgeText.textContent = text;
@@ -6669,11 +6760,11 @@ function updatePointingBadges() {
   }
   if (els.satBadge) {
     const count = state.visible ? state.visible.length : 0;
-    const status = count > 0 ? "ok" : state.observer ? "warn" : "idle";
+    const status = count > 0 ? "ok" : hasObserver ? "warn" : (state.mgrsError ? "warn" : "idle");
     let text = "Спутники • —";
     if (count > 0) {
       text = "Спутники • " + count;
-    } else if (state.observer && state.tleReady) {
+    } else if (hasObserver && state.tleReady) {
       text = "Спутники • вне порога";
     } else if (!state.tleReady) {
       text = "Спутники • ждём TLE";
