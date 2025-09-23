@@ -35,5 +35,6 @@ private:
   std::vector<uint8_t> work_buf_;    // временный буфер для декодеров
   std::vector<uint8_t> result_buf_;  // буфер результата перед дешифрованием
   std::vector<uint8_t> plain_buf_;   // буфер расшифрованных данных
+  uint32_t raw_counter_ = 0;         // счётчик сырых пакетов без заголовка
   bool encryption_forced_ = DefaultSettings::USE_ENCRYPTION; // ожидание шифрования по умолчанию
 };
