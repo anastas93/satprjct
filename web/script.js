@@ -406,9 +406,16 @@ async function init() {
     scan: $("#channelInfoScan"),
     rxRef: $("#channelInfoRxRef"),
     txRef: $("#channelInfoTxRef"),
+    frequency: $("#channelInfoFrequency"),
     system: $("#channelInfoSystem"),
     band: $("#channelInfoBand"),
+    bandwidth: $("#channelInfoBandwidth"),
     purpose: $("#channelInfoPurpose"),
+    satellite: $("#channelInfoSatellite"),
+    position: $("#channelInfoPosition"),
+    modulation: $("#channelInfoModulation"),
+    usage: $("#channelInfoUsage"),
+    comments: $("#channelInfoComments"),
   };
   UI.els.encTest = {
     container: $("#encTest"),
@@ -2354,9 +2361,17 @@ function updateChannelInfoPanel() {
 
   setChannelInfoText(fields.rxRef, ref ? formatChannelNumber(ref.rx, 3) : "—");
   setChannelInfoText(fields.txRef, ref ? formatChannelNumber(ref.tx, 3) : "—");
+  const freqValue = ref && ref.frequency != null ? ref.frequency : ref && ref.rx != null ? ref.rx : null;
+  setChannelInfoText(fields.frequency, freqValue != null ? formatChannelNumber(freqValue, 3) : "—");
   setChannelInfoText(fields.system, ref && ref.system ? ref.system : "—");
   setChannelInfoText(fields.band, ref && ref.band ? ref.band : "—");
+  setChannelInfoText(fields.bandwidth, ref && ref.bandwidth ? ref.bandwidth : "—");
   setChannelInfoText(fields.purpose, ref && ref.purpose ? ref.purpose : "—");
+  setChannelInfoText(fields.satellite, ref && ref.satellite ? ref.satellite : "—");
+  setChannelInfoText(fields.position, ref && ref.position ? ref.position : "—");
+  setChannelInfoText(fields.modulation, ref && ref.modulation ? ref.modulation : "—");
+  setChannelInfoText(fields.usage, ref && ref.usage ? ref.usage : "—");
+  setChannelInfoText(fields.comments, ref && ref.comments ? ref.comments : "—");
 
   const messages = [];
   if (channelReference.loading) messages.push("Загружаем справочник частот…");
@@ -2409,7 +2424,9 @@ function updateChannelInfoPanel() {
 // Записываем значение в элемент, если он существует
 function setChannelInfoText(el, text) {
   if (!el) return;
-  el.textContent = text;
+  const value = text == null ? "" : String(text);
+  el.textContent = value;
+  el.title = value && value !== "—" ? value : "";
 }
 
 // Устанавливаем канал из карточки в качестве текущего
@@ -2567,6 +2584,14 @@ function parseChannelReferenceCsv(text) {
     if (!Number.isFinite(ch)) continue;
     const rx = cells[1] ? Number(cells[1].trim()) : NaN;
     const tx = cells[2] ? Number(cells[2].trim()) : NaN;
+    const freqCell = cells[6] ? cells[6].trim() : "";
+    const freq = freqCell ? Number(freqCell) : NaN;
+    const bandwidth = cells[7] ? cells[7].trim() : "";
+    const satellite = cells[8] ? cells[8].trim() : "";
+    const position = cells[9] ? cells[9].trim() : "";
+    const comments = cells[10] ? cells[10].trim() : "";
+    const modulation = cells[11] ? cells[11].trim() : "";
+    const usage = cells[12] ? cells[12].trim() : "";
     const entry = {
       ch,
       rx: Number.isFinite(rx) ? rx : null,
@@ -2574,6 +2599,13 @@ function parseChannelReferenceCsv(text) {
       system: cells[3] ? cells[3].trim() : "",
       band: cells[4] ? cells[4].trim() : "",
       purpose: cells[5] ? cells[5].trim() : "",
+      frequency: Number.isFinite(freq) ? freq : null,
+      bandwidth,
+      satellite,
+      position,
+      comments,
+      modulation,
+      usage,
     };
     byChannel.set(ch, entry);
     if (entry.tx != null) {
@@ -2651,10 +2683,30 @@ function renderChannels() {
       { label: "Статус", value: c.st || "" },
       { label: "SCAN", value: scanText },
     ];
+    const ref = findChannelReferenceByTx(c);
+    if (ref) {
+      const tooltipLines = [];
+      if (ref.frequency != null) tooltipLines.push("Частота: " + formatChannelNumber(ref.frequency, 3) + " МГц");
+      if (ref.system) tooltipLines.push("Система: " + ref.system);
+      if (ref.band) tooltipLines.push("План: " + ref.band);
+      if (ref.bandwidth) tooltipLines.push("Полоса: " + ref.bandwidth);
+      if (ref.purpose) tooltipLines.push("Назначение: " + ref.purpose);
+      if (ref.satellite) tooltipLines.push("Спутник: " + ref.satellite);
+      if (ref.position) tooltipLines.push("Позиция: " + ref.position);
+      if (ref.modulation) tooltipLines.push("Модуляция: " + ref.modulation);
+      if (ref.usage) tooltipLines.push("Использование: " + ref.usage);
+      if (ref.comments) tooltipLines.push("Комментарий: " + ref.comments);
+      const tooltip = tooltipLines.join("\n");
+      if (tooltip) tr.title = tooltip;
+      else tr.removeAttribute("title");
+    } else {
+      tr.removeAttribute("title");
+    }
     cells.forEach((info) => {
       const td = document.createElement("td");
       td.dataset.label = info.label;
       td.textContent = info.value != null ? String(info.value) : "";
+      td.title = info.value != null && info.value !== "" ? String(info.value) : "";
       tr.appendChild(td);
     });
     tr.dataset.ch = String(c.ch);
