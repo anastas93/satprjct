@@ -655,8 +655,29 @@ a { color: inherit; }
 }
 .nav-overlay.visible { opacity: 1; pointer-events: auto; }
 body.nav-open { overflow: hidden; }
-.brand { display:flex; gap:.6rem; align-items:center; font-weight:800; letter-spacing:.3px; }
+.brand {
+  display:flex;
+  gap:.6rem;
+  align-items:center;
+  font-weight:800;
+  letter-spacing:.3px;
+  white-space: nowrap;
+  font-size: clamp(1rem, 2.8vw, 1.5rem);
+}
 .brand .tag { font-size:.75rem; padding:.15rem .45rem; border-radius:.5rem; background: var(--panel-2); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); color: var(--muted); }
+
+/* Дополнительная подстройка логотипа на очень узких экранах */
+@media (max-width: 480px) {
+  .brand {
+    gap: .45rem;
+    font-size: clamp(.95rem, 6vw, 1.2rem);
+  }
+
+  .brand .tag {
+    font-size: .62rem;
+    padding: .1rem .3rem;
+  }
+}
 
 .nav { display:flex; gap:.5rem; flex-wrap:wrap; }
 .nav a {
