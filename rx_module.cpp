@@ -17,6 +17,7 @@ static constexpr size_t TAG_LEN = 8;              // длина тега аут�
 static constexpr size_t RS_ENC_LEN = 255;      // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
 static constexpr bool USE_RS = DefaultSettings::USE_RS; // использовать RS(255,223)
+static constexpr size_t CONV_TAIL_BYTES = 1;      // «хвост» для сброса регистра свёрточного кодера
 
 // Удаление пилотов из полезной нагрузки
 static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
@@ -85,7 +86,78 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   result_buf_.clear();
   work_buf_.clear();
   size_t result_len = 0;
-  if (USE_RS && payload_buf_.size() == RS_ENC_LEN * 2) {
+  const bool conv_flag = (hdr.flags & FrameHeader::FLAG_CONV_ENCODED) != 0;
+  const uint16_t cipher_len_hint = static_cast<uint16_t>(hdr.ack_mask >> 16);
+  const uint16_t chunk_idx_hint = static_cast<uint16_t>(hdr.ack_mask & 0xFFFF);
+  std::vector<uint8_t> assembled_payload;
+  std::vector<uint8_t>* payload_ptr = &payload_buf_;
+
+  if (conv_flag) {
+    size_t expected_conv_len = cipher_len_hint ? static_cast<size_t>(cipher_len_hint + CONV_TAIL_BYTES) * 2 : 0;
+    const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | chunk_idx_hint;
+    if (expected_conv_len && payload_buf_.size() < expected_conv_len) {
+      auto& slot = pending_conv_[conv_key];
+      if (slot.expected_len != expected_conv_len) {
+        slot.expected_len = expected_conv_len;        // запоминаем ожидаемую длину
+        slot.data.clear();                            // обнуляем накопленный буфер
+      }
+      slot.data.insert(slot.data.end(), payload_buf_.begin(), payload_buf_.end());
+      if (slot.data.size() < expected_conv_len) {
+        return;                                      // ждём остальные части до полного блока
+      }
+      if (slot.data.size() > expected_conv_len) {
+        pending_conv_.erase(conv_key);               // превышение означает ошибку, сбрасываем
+        return;
+      }
+      assembled_payload.swap(slot.data);
+      pending_conv_.erase(conv_key);
+      payload_ptr = &assembled_payload;
+    } else {
+      auto it = pending_conv_.find(conv_key);
+      if (it != pending_conv_.end()) {
+        it->second.data.insert(it->second.data.end(), payload_buf_.begin(), payload_buf_.end());
+        if (!it->second.expected_len && expected_conv_len) {
+          it->second.expected_len = expected_conv_len; // инициализация ожидания если не было
+        }
+        if (it->second.expected_len && it->second.data.size() == it->second.expected_len) {
+          assembled_payload.swap(it->second.data);
+          pending_conv_.erase(it);
+          payload_ptr = &assembled_payload;
+        } else {
+          if (!it->second.expected_len || it->second.data.size() < it->second.expected_len) {
+            return;                                  // ждём продолжение
+          }
+          pending_conv_.erase(it);                   // превышение длины — ошибка
+          return;
+        }
+      } else if (expected_conv_len && payload_buf_.size() > expected_conv_len) {
+        return;                                      // пришло больше, чем ожидалось
+      }
+    }
+  } else if (chunk_idx_hint || cipher_len_hint) {
+    const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | chunk_idx_hint;
+    pending_conv_.erase(conv_key);                   // очищаем возможные остатки при смене режима
+  }
+
+  if (conv_flag) {
+    if (!payload_ptr->empty() && USE_BIT_INTERLEAVER) {
+      bit_interleaver::deinterleave(payload_ptr->data(), payload_ptr->size());
+    }
+    if (!conv_codec::viterbiDecode(payload_ptr->data(), payload_ptr->size(), result_buf_)) return;
+    if (cipher_len_hint) {
+      size_t required = static_cast<size_t>(cipher_len_hint) + CONV_TAIL_BYTES;
+      if (result_buf_.size() < required) {
+        return;                                      // получили меньше, чем ожидалось
+      }
+      if (result_buf_.size() > required) {
+        result_buf_.resize(required);                // отбрасываем лишние байты декодера
+      }
+      if (result_buf_.size() >= CONV_TAIL_BYTES) {
+        result_buf_.erase(result_buf_.end() - CONV_TAIL_BYTES, result_buf_.end());
+      }
+    }
+    result_len = result_buf_.size();
+  } else if (USE_RS && payload_buf_.size() == RS_ENC_LEN * 2) {
     if (USE_BIT_INTERLEAVER)
       bit_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // деинтерливинг бит
     if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), work_buf_)) return;
@@ -118,7 +190,8 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   if (!encrypted && encryption_forced_) encrypted = true; // совместимость со старыми кадрами
 
   if (encrypted) {
-    nonce_ = KeyLoader::makeNonce(hdr.msg_id, hdr.frag_idx);
+    uint16_t nonce_idx = conv_flag ? chunk_idx_hint : hdr.frag_idx; // используем исходный индекс блока для нонса
+    nonce_ = KeyLoader::makeNonce(hdr.msg_id, nonce_idx);
     if (!decrypt_ccm(key_.data(), key_.size(), nonce_.data(), nonce_.size(),
                      nullptr, 0, cipher, cipher_len,
                      tag, TAG_LEN, plain_buf_)) {

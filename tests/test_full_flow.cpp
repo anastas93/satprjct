@@ -22,22 +22,28 @@ public:
 static void run_message(size_t size) {
   LoopbackRadio radio;
   TxModule tx(radio, std::array<size_t,4>{64,64,64,64}, PayloadMode::SMALL);
+  tx.setSendPause(0);                                   // убираем задержку, чтобы тест шёл без ожиданий
   RxModule rx;
-  std::vector<uint8_t> received;
+  std::vector<uint8_t> received_total;
 
-  rx.setCallback([&](const uint8_t* d, size_t l) { received.assign(d, d + l); });
+  rx.setCallback([&](const uint8_t* d, size_t l) {
+    received_total.insert(received_total.end(), d, d + l); // аккумулируем все куски сообщения
+  });
   radio.setReceiveCallback([&](const uint8_t* d, size_t l) { rx.onReceive(d, l); });
 
   std::vector<uint8_t> data(size);
   for (size_t i = 0; i < size; ++i) data[i] = static_cast<uint8_t>(i);
   tx.queue(data.data(), data.size());
-  tx.loop();
-  assert(received == data);                      // проверяем целостность
+  for (int i = 0; i < 100 && received_total.size() < data.size(); ++i) {
+    tx.loop();
+  }
+  assert(received_total == data);                      // проверяем целостность
 }
 
 int main() {
   run_message(10);
   run_message(20);
+  run_message(400); // проверяем сборку длинного сообщения (более одного блока)
 
   // Проверка паузы между отправками
   LoopbackRadio radio;

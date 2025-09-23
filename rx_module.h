@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include <vector>
+#include <unordered_map>
 #include "libs/packetizer/packet_gatherer.h" // сборщик пакетов
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
 #include "default_settings.h"
@@ -37,4 +38,9 @@ private:
   std::vector<uint8_t> plain_buf_;   // буфер расшифрованных данных
   uint32_t raw_counter_ = 0;         // счётчик сырых пакетов без заголовка
   bool encryption_forced_ = DefaultSettings::USE_ENCRYPTION; // ожидание шифрования по умолчанию
+  struct PendingConvBlock {
+    size_t expected_len = 0;           // ожидаемая длина свёрнутого блока
+    std::vector<uint8_t> data;         // накопленные байты для последующего декодирования
+  };
+  std::unordered_map<uint64_t, PendingConvBlock> pending_conv_; // буферизация неполных свёрточных блоков
 };

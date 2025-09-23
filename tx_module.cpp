@@ -29,6 +29,16 @@ static constexpr size_t TAG_LEN = 8;              // длина тега аут�
 static constexpr size_t RS_ENC_LEN = 255;         // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
 static constexpr bool USE_RS = DefaultSettings::USE_RS; // включение кода RS(255,223)
+static constexpr size_t CONV_TAIL_BYTES = 1;      // добавочные байты для сброса свёрточного кодера
+static constexpr size_t RS_DATA_PAYLOAD = RS_DATA_LEN > TAG_LEN ? RS_DATA_LEN - TAG_LEN : 0; // размер полезных данных до тега
+static constexpr size_t MAX_CONV_PLAINTEXT =
+    (MAX_FRAGMENT_LEN / 2 > TAG_LEN) ? (MAX_FRAGMENT_LEN / 2 - TAG_LEN) : 0; // максимум данных для свёрточного кодера
+static constexpr size_t EFFECTIVE_DATA_CHUNK =
+    (MAX_CONV_PLAINTEXT && RS_DATA_PAYLOAD)
+        ? (MAX_CONV_PLAINTEXT < RS_DATA_PAYLOAD ? MAX_CONV_PLAINTEXT : RS_DATA_PAYLOAD)
+        : (RS_DATA_PAYLOAD ? RS_DATA_PAYLOAD : MAX_CONV_PLAINTEXT);
+static_assert(EFFECTIVE_DATA_CHUNK > 0, "Размер части для кодирования должен быть положительным");
+static constexpr size_t MAX_CIPHER_CHUNK = EFFECTIVE_DATA_CHUNK + TAG_LEN; // максимум байт шифртекста в одном блоке
 
 // Вставка пилотов каждые 64 байта
 static std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
@@ -242,11 +252,19 @@ bool TxModule::transmit(const PendingMessage& message) {
     prefix = extractStatusPrefix(msg);
   }
 
-  PacketSplitter rs_splitter(PayloadMode::SMALL, RS_DATA_LEN - TAG_LEN);
-  MessageBuffer tmp((msg.size() + (RS_DATA_LEN - TAG_LEN) - 1) / (RS_DATA_LEN - TAG_LEN));
+  PacketSplitter rs_splitter(PayloadMode::SMALL, EFFECTIVE_DATA_CHUNK);
+  MessageBuffer tmp((msg.size() + EFFECTIVE_DATA_CHUNK - 1) / EFFECTIVE_DATA_CHUNK);
   rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size(), false);
 
-  std::vector<std::vector<uint8_t>> fragments;
+  struct PreparedFragment {
+    std::vector<uint8_t> payload;   // полезная нагрузка готового кадра
+    bool conv_encoded = false;      // применялось ли свёрточное кодирование
+    uint16_t cipher_len = 0;        // длина шифртекста вместе с тегом
+    uint16_t plain_len = 0;         // длина исходных данных до шифрования
+    uint16_t chunk_idx = 0;         // номер блока внутри сообщения для нонса
+  };
+
+  std::vector<PreparedFragment> fragments;
   bool sent = false;
 
   while (tmp.hasPending()) {
@@ -256,6 +274,7 @@ bool TxModule::transmit(const PendingMessage& message) {
 
     std::vector<uint8_t> enc;
     std::vector<uint8_t> tag;
+    const size_t plain_len = part.size();
     uint16_t current_idx = static_cast<uint16_t>(fragments.size());
     auto nonce = KeyLoader::makeNonce(message.id, current_idx);
     if (encryption_enabled_) {
@@ -270,53 +289,76 @@ bool TxModule::transmit(const PendingMessage& message) {
       enc.insert(enc.end(), TAG_LEN, 0x00);              // добавляем пустой тег для выравнивания
     }
 
-    std::vector<uint8_t> conv;
-    if (enc.size() == RS_DATA_LEN) {
-      if (USE_RS) {
-        uint8_t rs_buf[RS_ENC_LEN];
-        rs255223::encode(enc.data(), rs_buf);
-        byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
-        conv_codec::encodeBits(rs_buf, RS_ENC_LEN, conv);
-      } else {
-        conv_codec::encodeBits(enc.data(), enc.size(), conv);
-      }
-      if (USE_BIT_INTERLEAVER) {
-        bit_interleaver::interleave(conv.data(), conv.size());
-      }
-    } else {
-      conv = enc;
+    const size_t cipher_len = enc.size();
+    if (cipher_len > MAX_CIPHER_CHUNK) {
+      LOG_WARN_VAL("TxModule: блок шифртекста превышает лимит=", cipher_len);
+      continue;                                       // пропускаем некорректный блок
     }
 
-    if (conv.size() > MAX_FRAGMENT_LEN) {
-      size_t pieces = (conv.size() + MAX_FRAGMENT_LEN - 1) / MAX_FRAGMENT_LEN;
-      PacketSplitter frag_splitter(PayloadMode::SMALL, MAX_FRAGMENT_LEN);
-      MessageBuffer fb(pieces);
-      frag_splitter.splitAndEnqueue(fb, conv.data(), conv.size(), false);
-      LOG_WARN_VAL("TxModule: фрагмент превышает лимит, частей=", pieces);
-      while (fb.hasPending()) {
-        std::vector<uint8_t> sub;
-        fb.pop(dummy, sub);
-        fragments.push_back(std::move(sub));
+    std::vector<uint8_t> conv;
+    bool conv_applied = false;
+    if (USE_RS && cipher_len == RS_DATA_LEN) {
+      uint8_t rs_buf[RS_ENC_LEN];
+      rs255223::encode(enc.data(), rs_buf);
+      byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
+      std::vector<uint8_t> conv_input(rs_buf, rs_buf + RS_ENC_LEN);
+      conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00);
+      conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
+      conv_applied = true;
+      if (USE_BIT_INTERLEAVER && !conv.empty()) {
+        bit_interleaver::interleave(conv.data(), conv.size());
       }
-    } else {
-      fragments.push_back(std::move(conv));
+    } else if (!enc.empty()) {
+      std::vector<uint8_t> conv_input(enc.begin(), enc.end());
+      conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00); // добавляем «хвост» для сброса регистра
+      conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
+      conv_applied = true;
+      if (USE_BIT_INTERLEAVER && !conv.empty()) {
+        bit_interleaver::interleave(conv.data(), conv.size());
+      }
     }
+
+    if (!conv_applied) {
+      conv = enc;                                     // fallback: отправляем без свёртки
+    }
+
+    if (conv_applied && conv.size() > MAX_FRAGMENT_LEN) {
+      LOG_WARN_VAL("TxModule: свёрнутый блок превышает лимит=", conv.size());
+      conv = enc;                                     // возвращаемся к исходному варианту
+      conv_applied = false;
+    }
+
+    PreparedFragment frag;
+    frag.payload = std::move(conv);
+    if (conv_applied) {
+      frag.conv_encoded = true;
+      frag.cipher_len = static_cast<uint16_t>(cipher_len);
+      frag.plain_len = static_cast<uint16_t>(plain_len);
+    }
+    frag.chunk_idx = current_idx;
+    fragments.push_back(std::move(frag));
   }
 
   uint16_t frag_cnt = static_cast<uint16_t>(fragments.size());
   for (size_t idx = 0; idx < fragments.size(); ++idx) {
-    auto& conv = fragments[idx];
+    auto& frag = fragments[idx];
     FrameHeader hdr;
     hdr.msg_id = message.id;
     hdr.frag_idx = static_cast<uint16_t>(idx);
     hdr.frag_cnt = frag_cnt;
-    hdr.payload_len = static_cast<uint16_t>(conv.size());
+    hdr.payload_len = static_cast<uint16_t>(frag.payload.size());
     hdr.flags = 0;
     if (encryption_enabled_) hdr.flags |= FrameHeader::FLAG_ENCRYPTED;
     if (message.expect_ack) hdr.flags |= FrameHeader::FLAG_ACK_REQUIRED;
+    if (frag.conv_encoded) {
+      hdr.flags |= FrameHeader::FLAG_CONV_ENCODED;
+      hdr.ack_mask = (static_cast<uint32_t>(frag.cipher_len) << 16) | frag.chunk_idx; // старшие биты — длина, младшие — индекс блока
+    } else {
+      hdr.ack_mask = 0;
+    }
 
     uint8_t hdr_buf[FrameHeader::SIZE];
-    if (!hdr.encode(hdr_buf, sizeof(hdr_buf), conv.data(), conv.size())) {
+    if (!hdr.encode(hdr_buf, sizeof(hdr_buf), frag.payload.data(), frag.payload.size())) {
       DEBUG_LOG("TxModule: ошибка кодирования заголовка");
       continue;
     }
@@ -324,7 +366,7 @@ bool TxModule::transmit(const PendingMessage& message) {
     std::vector<uint8_t> frame;
     frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE);
     frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE);
-    auto payload = insertPilots(conv);
+    auto payload = insertPilots(frag.payload);
     frame.insert(frame.end(), payload.begin(), payload.end());
     scrambler::scramble(frame.data(), frame.size());
 
