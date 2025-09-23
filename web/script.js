@@ -126,6 +126,12 @@ const UI = {
       polling: false,
       lastName: null,
     },
+    received: {
+      timer: null,
+      running: false,
+      known: new Set(),
+      limit: null,
+    },
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
@@ -635,6 +641,7 @@ async function init() {
   if (UI.els.rstsDownloadBtn) UI.els.rstsDownloadBtn.addEventListener("click", downloadRstsFullJson);
 
   loadChatHistory();
+  startReceivedMonitor({ immediate: true });
 
   // Управление ACK и тестами
   if (UI.els.ackChip) UI.els.ackChip.addEventListener("click", onAckChipToggle);
@@ -2104,6 +2111,191 @@ async function downloadRstsFullJson() {
   URL.revokeObjectURL(url);
   debugLog("RSTS FULL JSON сохранён (" + normalized.length + " элементов)");
   note("RSTS FULL JSON: файл сохранён");
+}
+
+/* Фоновый монитор входящих сообщений */
+function logReceivedMessage(entry, opts) {
+  if (!entry) return;
+  const options = opts || {};
+  const name = entry.name != null ? String(entry.name).trim() : "";
+  const entryType = normalizeReceivedType(name, entry.type);
+  const isGoPacket = name.toUpperCase().startsWith("GO-");
+  if (!isGoPacket || entryType !== "ready") {
+    // В чат попадают только финальные GO-пакеты.
+    return;
+  }
+  const textValue = resolveReceivedText(entry);
+  const fallbackTextRaw = entry.text != null ? String(entry.text) : "";
+  const fallbackText = fallbackTextRaw.trim();
+  const messageBody = textValue || fallbackText;
+  const message = messageBody || "—";
+  let length = getReceivedLength(entry);
+  if (!Number.isFinite(length) || length < 0) length = null;
+  if (length == null && messageBody) length = messageBody.length;
+  const rxMeta = {
+    name,
+    type: entryType,
+    hex: entry.hex || "",
+    text: messageBody || "",
+  };
+  if (length != null) rxMeta.len = length;
+  const history = getChatHistory();
+  let existingIndex = -1;
+  if (name && Array.isArray(history)) {
+    existingIndex = history.findIndex((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
+    if (existingIndex < 0) {
+      const legacyMessage = "RX: " + name;
+      existingIndex = history.findIndex((item) => item && item.tag === "rx-name" && typeof item.m === "string" && item.m.trim() === legacyMessage);
+    }
+  }
+  if (existingIndex >= 0) {
+    const existing = history[existingIndex];
+    let changed = false;
+    const desiredBody = message;
+    const desiredMessage = desiredBody || "—";
+    if (existing.m !== desiredMessage) {
+      existing.m = desiredMessage;
+      changed = true;
+    }
+    if (existing.tag !== "rx-message") {
+      existing.tag = "rx-message";
+      changed = true;
+    }
+    if (existing.role !== "rx") {
+      existing.role = "rx";
+      changed = true;
+    }
+    if (!existing.rx || typeof existing.rx !== "object") {
+      existing.rx = { ...rxMeta };
+      changed = true;
+    } else {
+      if (existing.rx.name !== name) {
+        existing.rx.name = name;
+        changed = true;
+      }
+      if (rxMeta.type && existing.rx.type !== rxMeta.type) {
+        existing.rx.type = rxMeta.type;
+        changed = true;
+      }
+      if (rxMeta.hex && existing.rx.hex !== rxMeta.hex) {
+        existing.rx.hex = rxMeta.hex;
+        changed = true;
+      }
+      if (rxMeta.len != null && existing.rx.len !== rxMeta.len) {
+        existing.rx.len = rxMeta.len;
+        changed = true;
+      }
+      if (rxMeta.len == null && existing.rx.len != null) {
+        existing.rx.len = rxMeta.len;
+        changed = true;
+      }
+      const nextText = rxMeta.text || "";
+      if (existing.rx.text !== nextText) {
+        existing.rx.text = nextText;
+        changed = true;
+      }
+    }
+    if (!existing.t) {
+      existing.t = Date.now();
+      changed = true;
+    }
+    if (changed) {
+      saveChatHistory();
+      updateChatMessageContent(existingIndex);
+    }
+    return;
+  }
+  if (options.isNew === false && !messageBody) {
+    // Для старых записей без текста не добавляем дубль.
+    return;
+  }
+  const meta = { role: "rx", tag: "rx-message", rx: rxMeta };
+  const saved = persistChat(message, "dev", meta);
+  addChatMessage(saved.record, saved.index);
+}
+
+function getReceivedMonitorState() {
+  if (!UI.state || typeof UI.state !== "object") UI.state = {};
+  let state = UI.state.received;
+  if (!state || typeof state !== "object") {
+    state = { timer: null, running: false, known: new Set(), limit: null };
+    UI.state.received = state;
+  }
+  if (!(state.known instanceof Set)) {
+    state.known = new Set(state.known ? Array.from(state.known) : []);
+  }
+  let limit = Number(state.limit);
+  if (!Number.isFinite(limit) || limit <= 0) {
+    const storedRaw = storage.get("recvLimit");
+    const parsed = storedRaw != null ? parseInt(storedRaw, 10) : NaN;
+    limit = Number.isFinite(parsed) && parsed > 0 ? parsed : 20;
+  }
+  if (!Number.isFinite(limit) || limit <= 0) limit = 20;
+  state.limit = Math.min(Math.max(Math.round(limit), 1), 200);
+  return state;
+}
+
+function handleReceivedSnapshot(items) {
+  const state = getReceivedMonitorState();
+  const prev = state.known;
+  const next = new Set();
+  const list = Array.isArray(items) ? items : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const entry = list[i];
+    const name = entry && entry.name ? String(entry.name).trim() : "";
+    if (name) next.add(name);
+    const isNew = !!(name && !prev.has(name));
+    logReceivedMessage(entry, { isNew });
+  }
+  state.known = next;
+}
+
+async function pollReceivedMessages(opts) {
+  const state = getReceivedMonitorState();
+  if (state.running) return null;
+  state.running = true;
+  const options = opts || {};
+  const params = { full: "1", n: String(state.limit) };
+  try {
+    const res = await deviceFetch("RSTS", params, options.timeoutMs || 3000);
+    if (!res.ok) {
+      if (res.error) console.warn("[recv] RSTS недоступен:", res.error);
+      return null;
+    }
+    const items = parseReceivedResponse(res.text);
+    handleReceivedSnapshot(items);
+    return items;
+  } catch (err) {
+    console.warn("[recv] ошибка фонового опроса:", err);
+    return null;
+  } finally {
+    state.running = false;
+  }
+}
+
+function stopReceivedMonitor() {
+  const state = UI.state && UI.state.received;
+  if (state && state.timer) {
+    clearInterval(state.timer);
+    state.timer = null;
+  }
+}
+
+function startReceivedMonitor(opts) {
+  const options = opts || {};
+  const state = getReceivedMonitorState();
+  const intervalRaw = Number(options.intervalMs);
+  const interval = Number.isFinite(intervalRaw) && intervalRaw >= 1000 ? intervalRaw : 5000;
+  stopReceivedMonitor();
+  const tick = () => {
+    pollReceivedMessages({ silentError: true }).catch((err) => {
+      console.warn("[recv] непредвиденная ошибка опроса:", err);
+    });
+  };
+  if (options.immediate !== false) {
+    tick();
+  }
+  state.timer = setInterval(tick, interval);
 }
 
 /* Таблица каналов */
@@ -5818,6 +6010,9 @@ async function resyncAfterEndpointChange() {
     await refreshKeyState({ silent: true });
     await loadVersion().catch(() => {});
     probe().catch(() => {});
+    const monitor = getReceivedMonitorState();
+    if (monitor && monitor.known) monitor.known = new Set();
+    await pollReceivedMessages({ silentError: true });
   } catch (err) {
     console.warn("[endpoint] resync error", err);
   }
