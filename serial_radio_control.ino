@@ -89,7 +89,7 @@ static const char kTestRxmLorem[] =
     "ultricies et maximus vitae, porttitor condimentum erat. Nam commodo porttitor.";
 
 // Пользовательский шаблон для TESTRXM и ограничение длины строки
-static constexpr size_t kTestRxmMaxSourceLength = 256;
+static constexpr size_t kTestRxmMaxSourceLength = 2048; // соответствует лимиту интерфейса (~2 КиБ)
 String testRxmSourceText;
 
 // Состояние процесса обмена корневым ключом по LoRa
@@ -249,8 +249,10 @@ void setTestRxmSourceText(const String& text) {
     DEBUG_LOG("TESTRXM: используется стандартный шаблон");
     return;
   }
-  if (normalized.length() > static_cast<int>(kTestRxmMaxSourceLength)) {
-    normalized.remove(kTestRxmMaxSourceLength);
+  const size_t limit = kTestRxmMaxSourceLength;
+  const size_t normalizedLen = static_cast<size_t>(normalized.length());
+  if (normalizedLen > limit) {
+    normalized.remove(static_cast<unsigned int>(limit));
   }
   testRxmSourceText = normalized;
   DEBUG_LOG_VAL("TESTRXM: пользовательский шаблон, длина=", static_cast<int>(testRxmSourceText.length()));
@@ -273,7 +275,8 @@ String makeTestRxmPayload(uint8_t index, const TestRxmSpec& spec) {
   if (take == 0) take = sourceLen;                                 // страховка на случай нуля
   if (take > sourceLen) take = sourceLen;                          // ограничение длиной источника
   String payload;
-  payload.reserve(48 + take);                                      // резерв памяти под строку
+  const size_t prefixReserve = spec.useGatherer ? 96 : 64;         // запас под префикс и UTF-8
+  payload.reserve(static_cast<unsigned int>(prefixReserve + take)); // резерв памяти под строку
   payload += "RXM Lorem ";
   payload += String(static_cast<int>(index + 1));
   payload += " (";
