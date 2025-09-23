@@ -1127,6 +1127,18 @@ function applyChatBubbleContent(node, entry) {
     setBubbleText(textBox, raw);
   }
   node.appendChild(textBox);
+  const detailRaw = entry && entry.detail != null ? String(entry.detail) : "";
+  const detail = detailRaw.trim();
+  if (detail) {
+    // Показываем полный текст ответа устройства отдельно от заголовка
+    const visibleText = (textBox.textContent || "").trim();
+    if (!visibleText || detail !== visibleText) {
+      const detailBox = document.createElement("pre");
+      detailBox.className = "bubble-detail";
+      detailBox.textContent = detail;
+      node.appendChild(detailBox);
+    }
+  }
   const tx = entry && entry.txStatus;
   if (tx && typeof tx === "object") {
     const footer = document.createElement("div");
@@ -1335,11 +1347,14 @@ function summarizeResponse(text, fallback) {
 function logSystemCommand(cmd, payload, state) {
   const clean = (cmd || "").toUpperCase();
   const ok = state === "ok";
-  const detail = payload != null ? String(payload) : "";
-  const summary = summarizeResponse(detail, ok ? "выполнено" : "ошибка");
-  const message = ok ? `СИСТЕМА · ${clean} → ${summary}` : `СИСТЕМА · ${clean} ✗ ${summary}`;
-  const meta = { role: "system", tag: "cmd", cmd: clean, status: ok ? "ok" : "error", detail };
-  const saved = persistChat(message, "dev", meta);
+  const statusText = ok ? "выполнено" : "ошибка";
+  const detailRaw = payload != null ? String(payload) : "";
+  const messageText = ok
+    ? `СИСТЕМА · ${clean} → ${statusText}`
+    : `СИСТЕМА · ${clean} ✗ ${statusText}`;
+  const meta = { role: "system", tag: "cmd", cmd: clean, status: ok ? "ok" : "error" };
+  if (detailRaw) meta.detail = detailRaw;
+  const saved = persistChat(messageText, "dev", meta);
   addChatMessage(saved.record, saved.index);
 }
 async function sendCommand(cmd, params, opts) {
