@@ -43,6 +43,8 @@ public:
   bool setCodingRate(int cr);
   // Установка уровня мощности по индексу пресета
   bool setPower(uint8_t preset);
+  // Включение режима повышенного усиления приёмника
+  bool setRxBoostedGainMode(bool enabled);
   // Получение текущих параметров
     ChannelBank getBank() const { return bank_; }
     uint8_t getChannel() const { return channel_; }
@@ -58,6 +60,7 @@ public:
   int getSpreadingFactor() const { return SF_[sf_preset_]; }
   int getCodingRate() const { return CR_[cr_preset_]; }
   int getPower() const { return Pwr_[pw_preset_]; }
+  bool isRxBoostedGainEnabled() const { return rxBoostedGainEnabled_; }
     float getRxFrequency() const { return fRX_bank_[static_cast<int>(bank_)][channel_]; }
     float getTxFrequency() const { return fTX_bank_[static_cast<int>(bank_)][channel_]; }
   // Сброс параметров к значениям по умолчанию с перезапуском приёма
@@ -82,6 +85,7 @@ private:
   int sf_preset_ = 2;
   int cr_preset_ = 0;
   float tcxo_ = 0;
+  bool rxBoostedGainEnabled_ = false;
 
   float lastSnr_ = 0.0f;     // SNR последнего пакета
   float lastRssi_ = 0.0f;    // RSSI последнего пакета
