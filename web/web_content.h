@@ -76,7 +76,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
   <div class="bg"><div class="grid"></div><div class="aurora"></div><div class="stars"></div></div>
   <!-- Шапка сайта с навигацией -->
   <header class="site-header glass">
-    <div class="brand">sat<span class="tag">web</span></div>
+    <div class="brand">SAT-COMMUNICATION<span class="tag">web</span></div>
     <nav class="nav" id="siteNav">
       <a href="#" data-tab="chat">Chat</a>
       <a href="#" data-tab="channels">Channels/Ping</a>
@@ -198,7 +198,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     </section>
     <!-- Вкладка наведения антенны -->
     <section id="tab-pointing" class="tab" hidden>
-      <h2 class="pointing-title">Antenna helper</h2>
+      <!-- Заголовок вкладки скрыт по требованию макета -->
       <div id="pointingSummary" class="pointing-summary glass">
         <div class="pointing-summary-chip" id="pointingTleBadge" data-state="warn">
           <span class="pointing-summary-icon">🛰️</span>
