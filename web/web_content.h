@@ -2007,11 +2007,39 @@ const UI = {
     infoChannel: null,
     infoChannelTx: null,
     infoChannelRx: null,
+    channelTests: {
+      message: "",
+      messageType: null,
+      messageChannel: null,
+      stability: {
+        running: false,
+        channel: null,
+        total: 0,
+        success: 0,
+        points: [],
+      },
+      cr: {
+        running: false,
+        channel: null,
+        results: [],
+        previous: null,
+      },
+    },
     chatHistory: [],
     chatHydrating: false,
     chatScrollPinned: true,
     chatSoundCtx: null,
     chatSoundLast: 0,
+    testRxm: {
+      polling: false,
+      lastName: null,
+    },
+    received: {
+      timer: null,
+      running: false,
+      known: new Set(),
+      limit: null,
+    },
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
@@ -2035,6 +2063,15 @@ const UI = {
 
 // Максимальная длина текста пользовательского сообщения для TESTRXM
 const TEST_RXM_MESSAGE_MAX = 2048;
+// Настройки тестов вкладки Channels/Ping
+const CHANNEL_STABILITY_ATTEMPTS = 20; // количество ping для Stability test
+const CHANNEL_STABILITY_INTERVAL_MS = 300; // задержка между ping в миллисекундах
+const CHANNEL_CR_PRESETS = [ // допустимые значения CR для перебора
+  { value: 5, label: "4/5" },
+  { value: 6, label: "4/6" },
+  { value: 7, label: "4/7" },
+  { value: 8, label: "4/8" },
+];
 
 // Справочные данные по каналам из CSV
 const channelReference = {
@@ -2288,6 +2325,15 @@ async function init() {
   UI.els.channelInfoStatus = $("#channelInfoStatus");
   UI.els.channelRefStatus = $("#channelRefStatus");
   UI.els.channelInfoSetBtn = $("#channelInfoSetCurrent");
+  UI.els.channelInfoStabilityBtn = $("#channelInfoStabilityTest");
+  UI.els.channelInfoCrBtn = $("#channelInfoCrTest");
+  UI.els.channelInfoTestsStatus = $("#channelInfoTestsStatus");
+  UI.els.channelInfoStabilitySummary = $("#channelInfoStabilitySummary");
+  UI.els.channelInfoStabilitySuccess = $("#channelInfoStabilitySuccess");
+  UI.els.channelInfoStabilityWrap = $("#channelInfoStabilityResult");
+  UI.els.channelInfoStabilityChart = $("#channelInfoStabilityChart");
+  UI.els.channelInfoCrResult = $("#channelInfoCrResult");
+  UI.els.channelInfoCrTableBody = $("#channelInfoCrTableBody");
   UI.els.channelInfoRow = null;
   UI.els.channelInfoCell = null;
   UI.els.channelInfoFields = {
@@ -2361,6 +2407,12 @@ async function init() {
   if (UI.els.channelInfoSetBtn) {
     UI.els.channelInfoSetBtn.addEventListener("click", onChannelInfoSetCurrent);
   }
+  if (UI.els.channelInfoStabilityBtn) {
+    UI.els.channelInfoStabilityBtn.addEventListener("click", onChannelStabilityTest);
+  }
+  if (UI.els.channelInfoCrBtn) {
+    UI.els.channelInfoCrBtn.addEventListener("click", onChannelCrTest);
+  }
   const infoClose = $("#channelInfoClose");
   if (infoClose) infoClose.addEventListener("click", hideChannelInfo);
   const channelsTable = $("#channelsTable");
@@ -2373,6 +2425,7 @@ async function init() {
     }
   }
   updateFooterVersion();
+  updateChannelTestsUi();
   if (channelsTable) {
     // Обрабатываем клики по строкам таблицы каналов, чтобы открыть карточку информации
     channelsTable.addEventListener("click", (event) => {
@@ -2496,6 +2549,7 @@ async function init() {
   if (UI.els.rstsDownloadBtn) UI.els.rstsDownloadBtn.addEventListener("click", downloadRstsFullJson);
 
   loadChatHistory();
+  startReceivedMonitor({ immediate: true });
 
   // Управление ACK и тестами
   if (UI.els.ackChip) UI.els.ackChip.addEventListener("click", onAckChipToggle);
@@ -3391,6 +3445,9 @@ function handleCommandSideEffects(cmd, text) {
     if (info) {
       if (info.status === "scheduled") {
         note("TESTRXM запланирован");
+        pollReceivedAfterTestRxm(info.count).catch((err) => {
+          console.warn("[testrxm] не удалось запустить автоматический опрос:", err);
+        });
       } else if (info.status === "busy") {
         note("TESTRXM уже выполняется");
       }
@@ -3813,6 +3870,89 @@ async function requestRstsJsonDebug() {
   else note("RSTS JSON: ответ получен");
 }
 
+// Периодически опрашиваем список полученных сообщений после TESTRXM и выводим новые пакеты в чат
+async function pollReceivedAfterTestRxm(threshold, options) {
+  const state = UI.state && UI.state.testRxm ? UI.state.testRxm : null;
+  if (!state || state.polling) return;
+  state.polling = true;
+  const opts = options || {};
+  const limitRaw = Number(threshold);
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.ceil(limitRaw) : 5;
+  const maxAttemptsRaw = Number(opts.maxAttempts);
+  const maxAttempts = Number.isFinite(maxAttemptsRaw) && maxAttemptsRaw > 0 ? Math.ceil(maxAttemptsRaw) : 6;
+  const delayRaw = Number(opts.delayMs);
+  const delayMs = Number.isFinite(delayRaw) && delayRaw >= 0 ? delayRaw : 1500;
+  const ensureLastName = () => {
+    if (state.lastName) return state.lastName;
+    const history = getChatHistory();
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      const entry = history[i];
+      if (entry && entry.role === "rx" && entry.rx && typeof entry.rx === "object" && entry.rx.name) {
+        state.lastName = String(entry.rx.name);
+        break;
+      }
+    }
+    return state.lastName;
+  };
+  ensureLastName();
+  try {
+    let attempt = 0;
+    let lastName = state.lastName || null;
+    while (attempt < maxAttempts) {
+      attempt += 1;
+      const res = await deviceFetch("RSTS", { json: "1", n: String(limit) }, 4000);
+      if (res.ok) {
+        const items = parseReceivedResponse(res.text) || [];
+        const readyItems = items.filter((item) => item && item.type === "ready");
+        let startIndex = 0;
+        if (lastName) {
+          const existingIdx = readyItems.findIndex((item) => item && item.name === lastName);
+          if (existingIdx >= 0) startIndex = existingIdx + 1;
+        }
+        const fresh = readyItems.slice(startIndex);
+        if (fresh.length > 0) {
+          for (let i = 0; i < fresh.length; i += 1) {
+            const entry = fresh[i];
+            if (!entry) continue;
+            const rxName = entry.name != null ? String(entry.name) : "";
+            const rxTextRaw = entry.text != null ? String(entry.text) : "";
+            const rxText = rxTextRaw.trim() || (entry.resolvedText != null ? String(entry.resolvedText).trim() : "");
+            const rxHex = entry.hex != null ? String(entry.hex) : "";
+            const rxLenRaw = Number(entry.len);
+            const rxLen = Number.isFinite(rxLenRaw) && rxLenRaw >= 0 ? rxLenRaw : getReceivedLength(entry);
+            const messageText = rxText || rxName || "RX сообщение";
+            const saved = persistChat(messageText, "dev", {
+              role: "rx",
+              tag: "rx-message",
+              rx: {
+                name: rxName,
+                text: rxText || messageText,
+                hex: rxHex,
+                len: rxLen != null ? rxLen : 0,
+              },
+            });
+            addChatMessage(saved.record, saved.index);
+            if (rxName) {
+              lastName = rxName;
+              state.lastName = rxName;
+            }
+          }
+          break;
+        }
+      } else {
+        console.warn("[testrxm] RSTS недоступен:", res.error);
+      }
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  } catch (err) {
+    console.warn("[testrxm] ошибка опроса TESTRXM:", err);
+  } finally {
+    state.polling = false;
+  }
+}
+
 // Загрузка полного списка RSTS в формате JSON из вкладки Debug
 async function downloadRstsFullJson() {
   debugLog("→ RSTS FULL (подготовка JSON для скачивания)");
@@ -3879,6 +4019,191 @@ async function downloadRstsFullJson() {
   URL.revokeObjectURL(url);
   debugLog("RSTS FULL JSON сохранён (" + normalized.length + " элементов)");
   note("RSTS FULL JSON: файл сохранён");
+}
+
+/* Фоновый монитор входящих сообщений */
+function logReceivedMessage(entry, opts) {
+  if (!entry) return;
+  const options = opts || {};
+  const name = entry.name != null ? String(entry.name).trim() : "";
+  const entryType = normalizeReceivedType(name, entry.type);
+  const isGoPacket = name.toUpperCase().startsWith("GO-");
+  if (!isGoPacket || entryType !== "ready") {
+    // В чат попадают только финальные GO-пакеты.
+    return;
+  }
+  const textValue = resolveReceivedText(entry);
+  const fallbackTextRaw = entry.text != null ? String(entry.text) : "";
+  const fallbackText = fallbackTextRaw.trim();
+  const messageBody = textValue || fallbackText;
+  const message = messageBody || "—";
+  let length = getReceivedLength(entry);
+  if (!Number.isFinite(length) || length < 0) length = null;
+  if (length == null && messageBody) length = messageBody.length;
+  const rxMeta = {
+    name,
+    type: entryType,
+    hex: entry.hex || "",
+    text: messageBody || "",
+  };
+  if (length != null) rxMeta.len = length;
+  const history = getChatHistory();
+  let existingIndex = -1;
+  if (name && Array.isArray(history)) {
+    existingIndex = history.findIndex((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
+    if (existingIndex < 0) {
+      const legacyMessage = "RX: " + name;
+      existingIndex = history.findIndex((item) => item && item.tag === "rx-name" && typeof item.m === "string" && item.m.trim() === legacyMessage);
+    }
+  }
+  if (existingIndex >= 0) {
+    const existing = history[existingIndex];
+    let changed = false;
+    const desiredBody = message;
+    const desiredMessage = desiredBody || "—";
+    if (existing.m !== desiredMessage) {
+      existing.m = desiredMessage;
+      changed = true;
+    }
+    if (existing.tag !== "rx-message") {
+      existing.tag = "rx-message";
+      changed = true;
+    }
+    if (existing.role !== "rx") {
+      existing.role = "rx";
+      changed = true;
+    }
+    if (!existing.rx || typeof existing.rx !== "object") {
+      existing.rx = { ...rxMeta };
+      changed = true;
+    } else {
+      if (existing.rx.name !== name) {
+        existing.rx.name = name;
+        changed = true;
+      }
+      if (rxMeta.type && existing.rx.type !== rxMeta.type) {
+        existing.rx.type = rxMeta.type;
+        changed = true;
+      }
+      if (rxMeta.hex && existing.rx.hex !== rxMeta.hex) {
+        existing.rx.hex = rxMeta.hex;
+        changed = true;
+      }
+      if (rxMeta.len != null && existing.rx.len !== rxMeta.len) {
+        existing.rx.len = rxMeta.len;
+        changed = true;
+      }
+      if (rxMeta.len == null && existing.rx.len != null) {
+        existing.rx.len = rxMeta.len;
+        changed = true;
+      }
+      const nextText = rxMeta.text || "";
+      if (existing.rx.text !== nextText) {
+        existing.rx.text = nextText;
+        changed = true;
+      }
+    }
+    if (!existing.t) {
+      existing.t = Date.now();
+      changed = true;
+    }
+    if (changed) {
+      saveChatHistory();
+      updateChatMessageContent(existingIndex);
+    }
+    return;
+  }
+  if (options.isNew === false && !messageBody) {
+    // Для старых записей без текста не добавляем дубль.
+    return;
+  }
+  const meta = { role: "rx", tag: "rx-message", rx: rxMeta };
+  const saved = persistChat(message, "dev", meta);
+  addChatMessage(saved.record, saved.index);
+}
+
+function getReceivedMonitorState() {
+  if (!UI.state || typeof UI.state !== "object") UI.state = {};
+  let state = UI.state.received;
+  if (!state || typeof state !== "object") {
+    state = { timer: null, running: false, known: new Set(), limit: null };
+    UI.state.received = state;
+  }
+  if (!(state.known instanceof Set)) {
+    state.known = new Set(state.known ? Array.from(state.known) : []);
+  }
+  let limit = Number(state.limit);
+  if (!Number.isFinite(limit) || limit <= 0) {
+    const storedRaw = storage.get("recvLimit");
+    const parsed = storedRaw != null ? parseInt(storedRaw, 10) : NaN;
+    limit = Number.isFinite(parsed) && parsed > 0 ? parsed : 20;
+  }
+  if (!Number.isFinite(limit) || limit <= 0) limit = 20;
+  state.limit = Math.min(Math.max(Math.round(limit), 1), 200);
+  return state;
+}
+
+function handleReceivedSnapshot(items) {
+  const state = getReceivedMonitorState();
+  const prev = state.known;
+  const next = new Set();
+  const list = Array.isArray(items) ? items : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const entry = list[i];
+    const name = entry && entry.name ? String(entry.name).trim() : "";
+    if (name) next.add(name);
+    const isNew = !!(name && !prev.has(name));
+    logReceivedMessage(entry, { isNew });
+  }
+  state.known = next;
+}
+
+async function pollReceivedMessages(opts) {
+  const state = getReceivedMonitorState();
+  if (state.running) return null;
+  state.running = true;
+  const options = opts || {};
+  const params = { full: "1", n: String(state.limit) };
+  try {
+    const res = await deviceFetch("RSTS", params, options.timeoutMs || 3000);
+    if (!res.ok) {
+      if (res.error) console.warn("[recv] RSTS недоступен:", res.error);
+      return null;
+    }
+    const items = parseReceivedResponse(res.text);
+    handleReceivedSnapshot(items);
+    return items;
+  } catch (err) {
+    console.warn("[recv] ошибка фонового опроса:", err);
+    return null;
+  } finally {
+    state.running = false;
+  }
+}
+
+function stopReceivedMonitor() {
+  const state = UI.state && UI.state.received;
+  if (state && state.timer) {
+    clearInterval(state.timer);
+    state.timer = null;
+  }
+}
+
+function startReceivedMonitor(opts) {
+  const options = opts || {};
+  const state = getReceivedMonitorState();
+  const intervalRaw = Number(options.intervalMs);
+  const interval = Number.isFinite(intervalRaw) && intervalRaw >= 1000 ? intervalRaw : 5000;
+  stopReceivedMonitor();
+  const tick = () => {
+    pollReceivedMessages({ silentError: true }).catch((err) => {
+      console.warn("[recv] непредвиденная ошибка опроса:", err);
+    });
+  };
+  if (options.immediate !== false) {
+    tick();
+  }
+  state.timer = setInterval(tick, interval);
 }
 
 /* Таблица каналов */
@@ -3978,6 +4303,7 @@ function updateChannelInfoPanel() {
       setBtn.textContent = "Установить текущим каналом";
     }
     removeChannelInfoRow();
+    updateChannelTestsUi();
     updateChannelInfoHighlight();
     return;
   }
@@ -4070,6 +4396,7 @@ function updateChannelInfoPanel() {
     removeChannelInfoRow();
   }
 
+  updateChannelTestsUi();
   updateChannelInfoHighlight();
 }
 
@@ -4079,6 +4406,472 @@ function setChannelInfoText(el, text) {
   const value = text == null ? "" : String(text);
   el.textContent = value;
   el.title = value && value !== "—" ? value : "";
+}
+
+/* Тесты вкладки Channels/Ping */
+function setChannelTestsStatus(text, type, channel) {
+  const tests = UI.state.channelTests;
+  if (!tests) return;
+  tests.message = text || "";
+  tests.messageType = type || null;
+  if (typeof channel === "number") tests.messageChannel = channel;
+  else if (UI.state.infoChannel != null) tests.messageChannel = UI.state.infoChannel;
+  else tests.messageChannel = null;
+  applyChannelTestsStatus();
+}
+function applyChannelTestsStatus() {
+  const statusEl = UI.els.channelInfoTestsStatus || $("#channelInfoTestsStatus");
+  if (!statusEl) return;
+  const tests = UI.state.channelTests;
+  const infoChannel = UI.state.infoChannel;
+  const message = tests ? tests.message : "";
+  const messageChannel = tests ? tests.messageChannel : null;
+  const type = tests ? tests.messageType : null;
+  if (!message || messageChannel == null || infoChannel == null || messageChannel !== infoChannel) {
+    statusEl.textContent = "";
+    statusEl.hidden = true;
+    statusEl.removeAttribute("data-state");
+    return;
+  }
+  statusEl.textContent = message;
+  statusEl.hidden = false;
+  if (type) statusEl.setAttribute("data-state", type);
+  else statusEl.removeAttribute("data-state");
+}
+function findCrPreset(value) {
+  const num = Number(value);
+  return CHANNEL_CR_PRESETS.find((preset) => Number(preset.value) === num) || null;
+}
+function formatCrLabel(value) {
+  const preset = findCrPreset(value);
+  if (!preset) return String(value);
+  return preset.label + " (" + preset.value + ")";
+}
+function updateChannelTestsUi() {
+  const tests = UI.state.channelTests;
+  const infoChannel = UI.state.infoChannel;
+  const hasChannel = infoChannel != null;
+  const running = tests && (tests.stability.running || tests.cr.running);
+  const stabilityBtn = UI.els.channelInfoStabilityBtn || $("#channelInfoStabilityTest");
+  const crBtn = UI.els.channelInfoCrBtn || $("#channelInfoCrTest");
+  if (stabilityBtn) {
+    stabilityBtn.disabled = !hasChannel || running;
+  }
+  if (crBtn) {
+    crBtn.disabled = !hasChannel || running;
+  }
+  applyChannelTestsStatus();
+
+  const summary = UI.els.channelInfoStabilitySummary || $("#channelInfoStabilitySummary");
+  const successEl = UI.els.channelInfoStabilitySuccess || $("#channelInfoStabilitySuccess");
+  const chartWrap = UI.els.channelInfoStabilityWrap || $("#channelInfoStabilityResult");
+  const crWrap = UI.els.channelInfoCrResult || $("#channelInfoCrResult");
+
+  if (!tests || !hasChannel || tests.stability.channel !== infoChannel || !tests.stability.points.length) {
+    if (summary) summary.hidden = true;
+    if (chartWrap) chartWrap.hidden = true;
+  } else {
+    const attempts = tests.stability.points.length;
+    const success = tests.stability.success;
+    const percent = attempts ? (success / attempts) * 100 : 0;
+    const rounded = attempts ? Math.round(percent * 10) / 10 : 0;
+    const formattedPercent = attempts ? (Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)) : "0";
+    if (successEl) successEl.textContent = success + "/" + attempts + " (" + formattedPercent + "%)";
+    if (summary) summary.hidden = false;
+    if (chartWrap) {
+      chartWrap.hidden = false;
+      renderChannelStabilityChart(tests.stability.points);
+    }
+  }
+
+  if (!tests || !hasChannel || tests.cr.channel !== infoChannel || !tests.cr.results.length) {
+    if (crWrap) crWrap.hidden = true;
+  } else {
+    if (crWrap) crWrap.hidden = false;
+    renderChannelCrResults(tests.cr.results);
+  }
+}
+function renderChannelCrResults(results) {
+  const tbody = UI.els.channelInfoCrTableBody || $("#channelInfoCrTableBody");
+  if (!tbody) return;
+  while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+  for (let i = 0; i < results.length; i++) {
+    const item = results[i];
+    const tr = document.createElement("tr");
+    const crCell = document.createElement("td");
+    crCell.textContent = formatCrLabel(item.value);
+    tr.appendChild(crCell);
+    const pingCell = document.createElement("td");
+    const summary = item.summary ? String(item.summary) : item.success ? "ОК" : "Нет ответа";
+    pingCell.textContent = summary;
+    pingCell.classList.add(item.success ? "ok" : "fail");
+    tr.appendChild(pingCell);
+    const rssiCell = document.createElement("td");
+    rssiCell.textContent = Number.isFinite(item.rssi) ? String(item.rssi) : "—";
+    tr.appendChild(rssiCell);
+    const snrCell = document.createElement("td");
+    snrCell.textContent = Number.isFinite(item.snr) ? item.snr.toFixed(1) : "—";
+    tr.appendChild(snrCell);
+    tbody.appendChild(tr);
+  }
+}
+function renderChannelStabilityChart(points) {
+  const canvas = UI.els.channelInfoStabilityChart || $("#channelInfoStabilityChart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const width = canvas.clientWidth || canvas.width;
+  const height = canvas.clientHeight || canvas.height;
+  if (!width || !height) return;
+  const dpr = window.devicePixelRatio || 1;
+  const pixelWidth = Math.max(1, Math.round(width * dpr));
+  const pixelHeight = Math.max(1, Math.round(height * dpr));
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.scale(dpr, dpr);
+
+  const displayWidth = width;
+  const displayHeight = height;
+  const paddingLeft = 46;
+  const paddingRight = 16;
+  const paddingTop = 18;
+  const paddingBottom = 36;
+  const chartWidth = Math.max(10, displayWidth - paddingLeft - paddingRight);
+  const chartHeight = Math.max(10, displayHeight - paddingTop - paddingBottom);
+  const left = paddingLeft;
+  const top = paddingTop;
+  const right = left + chartWidth;
+  const bottom = top + chartHeight;
+  const styles = getComputedStyle(document.documentElement);
+  const themeLight = document.documentElement.classList.contains("light");
+  const rssiColor = (styles.getPropertyValue("--stability-rssi") || "#f97316").trim() || "#f97316";
+  const snrColor = (styles.getPropertyValue("--stability-snr") || "#38bdf8").trim() || "#38bdf8";
+  const dangerColor = (styles.getPropertyValue("--danger") || "#ef4444").trim() || "#ef4444";
+  const backgroundFill = themeLight ? "rgba(148,163,184,0.14)" : "rgba(15,23,42,0.32)";
+  const gridColor = themeLight ? "rgba(15,23,42,0.12)" : "rgba(255,255,255,0.12)";
+  const axisColor = themeLight ? "rgba(15,23,42,0.6)" : "rgba(255,255,255,0.65)";
+
+  ctx.fillStyle = backgroundFill;
+  ctx.fillRect(0, 0, displayWidth, displayHeight);
+
+  const values = [];
+  if (Array.isArray(points)) {
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (Number.isFinite(p.rssi)) values.push(p.rssi);
+      if (Number.isFinite(p.snr)) values.push(p.snr);
+    }
+  }
+  if (!values.length) {
+    ctx.fillStyle = axisColor;
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Нет данных для построения графика", displayWidth / 2, displayHeight / 2);
+    return;
+  }
+  let min = Math.min.apply(Math, values);
+  let max = Math.max.apply(Math, values);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    min = -10;
+    max = 10;
+  }
+  if (min === max) {
+    min -= 1;
+    max += 1;
+  }
+  const span = max - min;
+  const padding = span * 0.1;
+  min -= padding;
+  max += padding;
+  const mapX = (index) => {
+    if (points.length <= 1) return left + chartWidth / 2;
+    return left + (chartWidth * index) / (points.length - 1);
+  };
+  const mapY = (value) => {
+    const clamped = value <= min ? min : value >= max ? max : value;
+    const ratio = (clamped - min) / (max - min);
+    return bottom - ratio * chartHeight;
+  };
+
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  const horizontalSteps = 4;
+  for (let i = 0; i <= horizontalSteps; i++) {
+    const y = top + (chartHeight * i) / horizontalSteps;
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+  }
+  const verticalSteps = Math.min(points.length - 1, 5);
+  for (let i = 0; i <= verticalSteps; i++) {
+    const ratio = verticalSteps ? i / verticalSteps : 0;
+    const x = left + chartWidth * ratio;
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+  }
+  if (min < 0 && max > 0) {
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(left, mapY(0));
+    ctx.lineTo(right, mapY(0));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.strokeStyle = axisColor;
+  ctx.beginPath();
+  ctx.moveTo(left, bottom);
+  ctx.lineTo(right, bottom);
+  ctx.stroke();
+
+  ctx.fillStyle = axisColor;
+  ctx.font = "11px sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  ctx.fillText(max.toFixed(1), left - 6, top);
+  ctx.fillText(min.toFixed(1), left - 6, bottom);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillText("1", left, bottom + 8);
+  ctx.fillText(String(points.length), right, bottom + 8);
+
+  const drawDataset = (key, color) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < points.length; i++) {
+      const value = Number(points[i][key]);
+      if (!Number.isFinite(value)) continue;
+      const x = mapX(i);
+      const y = mapY(value);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else ctx.lineTo(x, y);
+    }
+    if (started) ctx.stroke();
+    ctx.fillStyle = color;
+    for (let i = 0; i < points.length; i++) {
+      const value = Number(points[i][key]);
+      if (!Number.isFinite(value)) continue;
+      const x = mapX(i);
+      const y = mapY(value);
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+  drawDataset("rssi", rssiColor);
+  drawDataset("snr", snrColor);
+
+  ctx.fillStyle = dangerColor;
+  for (let i = 0; i < points.length; i++) {
+    if (points[i].success) continue;
+    const x = mapX(i);
+    const markerY = bottom + 14;
+    ctx.beginPath();
+    ctx.arc(x, markerY, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+}
+async function onChannelStabilityTest(event) {
+  if (event) event.preventDefault();
+  const tests = UI.state.channelTests;
+  if (!tests || tests.stability.running || tests.cr.running) return;
+  const channel = UI.state.infoChannel;
+  if (channel == null) {
+    note("Выберите канал в таблице");
+    return;
+  }
+  if (UI.state.channel !== channel) {
+    setChannelTestsStatus("Stability test: установите канал кнопкой «Установить текущим каналом».", "warn", channel);
+    note("Сначала сделайте канал активным.");
+    return;
+  }
+  const btn = UI.els.channelInfoStabilityBtn || $("#channelInfoStabilityTest");
+  if (btn) btn.setAttribute("aria-busy", "true");
+  tests.stability.running = true;
+  tests.stability.channel = channel;
+  tests.stability.total = CHANNEL_STABILITY_ATTEMPTS;
+  tests.stability.success = 0;
+  tests.stability.points = [];
+  setChannelTestsStatus("Stability test: запуск…", "info", channel);
+  updateChannelTestsUi();
+  let cancelled = false;
+  try {
+    for (let i = 0; i < CHANNEL_STABILITY_ATTEMPTS; i++) {
+      if (UI.state.infoChannel !== channel) {
+        cancelled = true;
+        break;
+      }
+      setChannelTestsStatus(`Stability test: пакет ${i + 1} из ${CHANNEL_STABILITY_ATTEMPTS}`, "info", channel);
+      applyChannelTestsStatus();
+      const res = await sendCommand("PI", undefined, { silent: true, timeoutMs: 5000, debugLabel: `PI stability #${i + 1}` });
+      let success = false;
+      let rssi = null;
+      let snr = null;
+      if (res != null) {
+        const metrics = extractPingMetrics(res);
+        rssi = metrics.rssi;
+        snr = metrics.snr;
+        const state = detectScanState(res);
+        const trimmed = String(res).trim();
+        success = state === "signal" || (!state && trimmed.length > 0);
+      }
+      if (success) tests.stability.success += 1;
+      tests.stability.points.push({ index: i + 1, success, rssi, snr });
+      updateChannelTestsUi();
+      await uiYield();
+      if (i < CHANNEL_STABILITY_ATTEMPTS - 1) {
+        await new Promise((resolve) => setTimeout(resolve, CHANNEL_STABILITY_INTERVAL_MS));
+      }
+    }
+  } finally {
+    tests.stability.running = false;
+    if (btn) btn.removeAttribute("aria-busy");
+    updateChannelTestsUi();
+  }
+  if (cancelled) {
+    setChannelTestsStatus("Stability test остановлен: выбран другой канал.", "warn", channel);
+    return;
+  }
+  const attempts = tests.stability.points.length;
+  const success = tests.stability.success;
+  const percent = attempts ? (success / attempts) * 100 : 0;
+  const rounded = attempts ? Math.round(percent * 10) / 10 : 0;
+  const formattedPercent = attempts ? (Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)) : "0";
+  setChannelTestsStatus(`Stability test завершён: ${success}/${attempts} (${formattedPercent}% успешных пакетов)`, attempts ? "success" : "warn", channel);
+  updateChannelTestsUi();
+}
+async function onChannelCrTest(event) {
+  if (event) event.preventDefault();
+  const tests = UI.state.channelTests;
+  if (!tests || tests.cr.running || tests.stability.running) return;
+  const channel = UI.state.infoChannel;
+  if (channel == null) {
+    note("Выберите канал в таблице");
+    return;
+  }
+  if (UI.state.channel !== channel) {
+    setChannelTestsStatus("CR test: установите канал кнопкой «Установить текущим каналом».", "warn", channel);
+    note("Сначала сделайте канал активным.");
+    return;
+  }
+  const btn = UI.els.channelInfoCrBtn || $("#channelInfoCrTest");
+  if (btn) btn.setAttribute("aria-busy", "true");
+  tests.cr.running = true;
+  tests.cr.channel = channel;
+  tests.cr.results = [];
+  tests.cr.previous = null;
+  setChannelTestsStatus("CR test: считываем текущий CR…", "info", channel);
+  updateChannelTestsUi();
+  let previousCr = null;
+  try {
+    const current = await deviceFetch("CR", {}, 2000);
+    if (current.ok) {
+      const token = extractNumericToken(current.text);
+      if (token != null) {
+        const parsed = Number(token);
+        if (Number.isFinite(parsed)) previousCr = parsed;
+      }
+    }
+  } catch (err) {
+    console.warn("[channels] CR test: fetch current", err);
+  }
+  tests.cr.previous = previousCr;
+  let cancelled = false;
+  let restoreState = "unknown";
+  let failed = false;
+  try {
+    for (let i = 0; i < CHANNEL_CR_PRESETS.length; i++) {
+      const preset = CHANNEL_CR_PRESETS[i];
+      if (UI.state.infoChannel !== channel) {
+        cancelled = true;
+        break;
+      }
+      setChannelTestsStatus(`CR test: CR ${preset.label}`, "info", channel);
+      applyChannelTestsStatus();
+      const response = await sendCommand("CR", { v: String(preset.value) }, { silent: true, timeoutMs: 3000, debugLabel: `CR test set ${preset.value}` });
+      const setOk = response != null && /OK/i.test(response);
+      let success = false;
+      let summary = setOk ? "" : "Ошибка установки";
+      let rssi = null;
+      let snr = null;
+      if (setOk) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        const pingRes = await sendCommand("PI", undefined, { silent: true, timeoutMs: 5000, debugLabel: `PI CR test ${preset.value}` });
+        if (pingRes != null) {
+          const metrics = extractPingMetrics(pingRes);
+          rssi = metrics.rssi;
+          snr = metrics.snr;
+          const state = detectScanState(pingRes);
+          const trimmed = String(pingRes).trim();
+          success = state === "signal" || (!state && trimmed.length > 0);
+          summary = summarizeResponse(pingRes, success ? "ОК" : trimmed || "Нет ответа");
+        } else {
+          summary = "Нет ответа";
+        }
+      }
+      tests.cr.results.push({
+        value: preset.value,
+        success: setOk && success,
+        summary: summary,
+        rssi: rssi,
+        snr: snr,
+      });
+      updateChannelTestsUi();
+      await uiYield();
+    }
+    if (previousCr != null) {
+      try {
+        setChannelTestsStatus("CR test: восстанавливаем исходный CR…", "info", channel);
+        const restore = await sendCommand("CR", { v: String(previousCr) }, { silent: true, timeoutMs: 3000, debugLabel: "CR test restore" });
+        restoreState = restore != null && /OK/i.test(restore) ? "ok" : "fail";
+        if (restoreState === "ok") {
+          const crSelect = $("#CR");
+          if (crSelect) crSelect.value = String(previousCr);
+        }
+      } catch (err) {
+        console.warn("[channels] CR test: restore", err);
+        restoreState = "fail";
+      }
+    } else restoreState = "skip";
+  } catch (err) {
+    console.warn("[channels] CR test: выполнение завершилось с ошибкой", err);
+    const reason = err && err.message ? err.message : String(err);
+    setChannelTestsStatus(`CR test: ошибка выполнения: ${reason}`, "warn", channel);
+    failed = true;
+  } finally {
+    tests.cr.running = false;
+    if (btn) btn.removeAttribute("aria-busy");
+    updateChannelTestsUi();
+  }
+  if (failed) return;
+  if (cancelled) {
+    setChannelTestsStatus("CR test остановлен: выбран другой канал.", "warn", channel);
+    return;
+  }
+  if (restoreState === "ok") {
+    setChannelTestsStatus("CR test завершён: исходный CR восстановлен.", "success", channel);
+  } else if (restoreState === "skip") {
+    setChannelTestsStatus("CR test завершён, но исходный CR неизвестен.", "warn", channel);
+  } else {
+    setChannelTestsStatus("CR test завершён, но восстановить исходный CR не удалось.", "warn", channel);
+  }
+  updateChannelTestsUi();
 }
 
 // Устанавливаем канал из карточки в качестве текущего
@@ -4699,13 +5492,23 @@ function detectScanState(text) {
   return null;
 }
 // Обновляем данные канала после пинга
+// Извлекаем RSSI и SNR из текста ответа PI
+function extractPingMetrics(text) {
+  const raw = text != null ? String(text).trim() : "";
+  const matchNumber = /-?\d+(?:\.\d+)?/;
+  const rssiMatch = raw.match(/RSSI\s*(-?\d+(?:\.\d+)?)/i);
+  const snrMatch = raw.match(/SNR\s*(-?\d+(?:\.\d+)?)/i);
+  return {
+    rssi: rssiMatch && matchNumber.test(rssiMatch[1]) ? Number(rssiMatch[1]) : null,
+    snr: snrMatch && matchNumber.test(snrMatch[1]) ? Number(snrMatch[1]) : null,
+  };
+}
 function applyPingToEntry(entry, text) {
   if (!entry) return null;
   const raw = (text || "").trim();
-  const rssiMatch = raw.match(/RSSI\s*(-?\d+(?:\.\d+)?)/i);
-  const snrMatch = raw.match(/SNR\s*(-?\d+(?:\.\d+)?)/i);
-  if (rssiMatch) entry.rssi = Number(rssiMatch[1]);
-  if (snrMatch) entry.snr = Number(snrMatch[1]);
+  const metrics = extractPingMetrics(raw);
+  if (metrics.rssi != null) entry.rssi = metrics.rssi;
+  if (metrics.snr != null) entry.snr = metrics.snr;
   entry.scan = raw;
   const state = detectScanState(raw);
   entry.scanState = state || "signal";
@@ -7115,10 +7918,11 @@ async function resyncAfterEndpointChange() {
     await refreshKeyState({ silent: true });
     await loadVersion().catch(() => {});
     probe().catch(() => {});
+    const monitor = getReceivedMonitorState();
+    if (monitor && monitor.known) monitor.known = new Set();
+    await pollReceivedMessages({ silentError: true });
   } catch (err) {
     console.warn("[endpoint] resync error", err);
   }
 }
-
-
 )~~~";
