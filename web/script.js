@@ -992,12 +992,7 @@ function normalizeChatEntries(rawEntries) {
       let name = cleanString(rawMeta.name || obj.name);
       if (!name) name = parseKnownName(rawMessage);
       if (!name && rxText) name = parseKnownName(rxText);
-      let type = cleanString(rawMeta.type || obj.type || obj.kind || obj.queue);
-      if (!type && name) {
-        if (/^GO-/i.test(name)) type = "ready";
-        else if (/^SP-/i.test(name)) type = "split";
-        else if (/^R-/i.test(name)) type = "raw";
-      }
+      const type = normalizeReceivedType(name, rawMeta.type || obj.type || obj.kind || obj.queue);
       const hex = cleanString(rawMeta.hex || obj.hex);
       let lenValue = toNumber(rawMeta.len != null ? rawMeta.len : (obj.len != null ? obj.len : obj.length));
       if ((!lenValue || lenValue <= 0) && rawMeta && rawMeta.hex) {
@@ -1902,6 +1897,19 @@ function getReceivedLength(entry) {
   return len;
 }
 
+// Нормализуем статус принятого сообщения по имени и исходному типу
+function normalizeReceivedType(name, rawType) {
+  const typeText = rawType != null ? String(rawType).trim().toLowerCase() : "";
+  if (typeText === "ready" || typeText === "split" || typeText === "raw") {
+    return typeText;
+  }
+  const cleanName = name != null ? String(name).trim().toUpperCase() : "";
+  if (cleanName.startsWith("GO-")) return "ready";
+  if (cleanName.startsWith("SP-")) return "split";
+  if (cleanName.startsWith("R-")) return "raw";
+  return typeText || "raw";
+}
+
 function parseReceivedResponse(raw) {
   if (raw == null) return [];
   const trimmed = String(raw).trim();
@@ -1914,8 +1922,7 @@ function parseReceivedResponse(raw) {
         return list.map((entry) => {
           if (!entry) return null;
           const name = entry.name != null ? String(entry.name).trim() : "";
-          const typeRaw = entry.type != null ? String(entry.type).toLowerCase() : "";
-          const type = typeRaw || (/^GO-/i.test(name) ? "ready" : "raw");
+          const type = normalizeReceivedType(name, entry.type);
           const text = entry.text != null ? String(entry.text) : "";
           const hex = entry.hex != null ? String(entry.hex) : "";
           const bytes = hexToBytes(hex);
@@ -1937,7 +1944,10 @@ function parseReceivedResponse(raw) {
   return trimmed.split(/\r?\n/)
                 .map((line) => line.trim())
                 .filter((line) => line.length > 0)
-                .map((name) => ({ name, type: /^GO-/i.test(name) ? "ready" : "raw", text: "", hex: "", len: 0 }));
+                .map((name) => {
+                  const type = normalizeReceivedType(name, null);
+                  return { name, type, text: "", hex: "", len: 0 };
+                });
 }
 function renderReceivedList(items) {
   const hasList = !!UI.els.recvList;
@@ -1952,7 +1962,8 @@ function renderReceivedList(items) {
     const isNew = name && !prev.has(name);
     if (hasList && frag) {
       const li = document.createElement("li");
-      li.classList.add("received-type-" + (entry && entry.type ? entry.type : "ready"));
+      const entryType = normalizeReceivedType(name, entry && entry.type);
+      li.classList.add("received-type-" + entryType);
       const body = document.createElement("div");
       body.className = "received-body";
       const textNode = document.createElement("div");
@@ -2079,8 +2090,7 @@ async function downloadRstsFullJson() {
   const normalized = items.map((item) => {
     const source = item && typeof item === "object" ? item : {};
     const name = source.name != null ? String(source.name) : "";
-    const typeRaw = source.type != null ? String(source.type) : "";
-    const type = typeRaw || (/^GO-/i.test(name) ? "ready" : "raw");
+    const type = normalizeReceivedType(name, source.type);
     const textRaw = source.text != null ? String(source.text) : "";
     const resolvedRaw = source.resolvedText != null ? String(source.resolvedText) : "";
     const textValue = textRaw || resolvedRaw;
@@ -2122,6 +2132,12 @@ function logReceivedMessage(entry, opts) {
   if (!entry) return;
   const options = opts || {};
   const name = entry.name != null ? String(entry.name).trim() : "";
+  const entryType = normalizeReceivedType(name, entry.type);
+  const isGoPacket = name.toUpperCase().startsWith("GO-");
+  if (!isGoPacket || entryType !== "ready") {
+    // В чат попадают только финальные GO-пакеты.
+    return;
+  }
   const textValue = resolveReceivedText(entry);
   const fallbackTextRaw = entry.text != null ? String(entry.text) : "";
   const fallbackText = fallbackTextRaw.trim();
@@ -2132,7 +2148,7 @@ function logReceivedMessage(entry, opts) {
   if (length == null && messageBody) length = messageBody.length;
   const rxMeta = {
     name,
-    type: entry.type || "",
+    type: entryType,
     hex: entry.hex || "",
     text: messageBody || "",
   };
