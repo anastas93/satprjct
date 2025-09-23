@@ -579,6 +579,11 @@ void handleMgrsJs() {
   server.send_P(200, "application/javascript", MGRS_JS);
 }
 
+// Отдаём CSV-справочник частот каналов
+void handleFreqInfoCsv() {
+  server.send_P(200, "text/csv", FREQ_INFO_CSV);
+}
+
 // Отдаём постоянный набор TLE для вкладки Pointing
 void handleGeostatTleJs() {
   server.send_P(200, "application/javascript", GEOSTAT_TLE_JS);
@@ -1171,6 +1176,7 @@ void setupWifi() {
   server.on("/script.js", handleScriptJs);                           // JS логика
   server.on("/libs/sha256.js", handleSha256Js);                      // библиотека SHA-256
   server.on("/libs/mgrs.js", handleMgrsJs);                          // преобразование MGRS
+  server.on("/libs/freq-info.csv", handleFreqInfoCsv);               // справочник частот каналов
   server.on("/libs/geostat_tle.js", handleGeostatTleJs);             // статический список спутников
   server.on("/ver", handleVer);                                      // версия приложения
   server.on("/api/tx", handleApiTx);                                 // отправка текста по радио
