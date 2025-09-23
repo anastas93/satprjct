@@ -104,6 +104,10 @@ const UI = {
     chatScrollPinned: true,
     chatSoundCtx: null,
     chatSoundLast: 0,
+    testRxm: {
+      polling: false,
+      lastName: null,
+    },
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
@@ -1483,6 +1487,9 @@ function handleCommandSideEffects(cmd, text) {
     if (info) {
       if (info.status === "scheduled") {
         note("TESTRXM запланирован");
+        pollReceivedAfterTestRxm(info.count).catch((err) => {
+          console.warn("[testrxm] не удалось запустить автоматический опрос:", err);
+        });
       } else if (info.status === "busy") {
         note("TESTRXM уже выполняется");
       }
@@ -1903,6 +1910,89 @@ async function requestRstsJsonDebug() {
   const count = countRstsJsonItems(text);
   if (count > 0) note("RSTS JSON: получено " + count + " элементов");
   else note("RSTS JSON: ответ получен");
+}
+
+// Периодически опрашиваем список полученных сообщений после TESTRXM и выводим новые пакеты в чат
+async function pollReceivedAfterTestRxm(threshold, options) {
+  const state = UI.state && UI.state.testRxm ? UI.state.testRxm : null;
+  if (!state || state.polling) return;
+  state.polling = true;
+  const opts = options || {};
+  const limitRaw = Number(threshold);
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.ceil(limitRaw) : 5;
+  const maxAttemptsRaw = Number(opts.maxAttempts);
+  const maxAttempts = Number.isFinite(maxAttemptsRaw) && maxAttemptsRaw > 0 ? Math.ceil(maxAttemptsRaw) : 6;
+  const delayRaw = Number(opts.delayMs);
+  const delayMs = Number.isFinite(delayRaw) && delayRaw >= 0 ? delayRaw : 1500;
+  const ensureLastName = () => {
+    if (state.lastName) return state.lastName;
+    const history = getChatHistory();
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      const entry = history[i];
+      if (entry && entry.role === "rx" && entry.rx && typeof entry.rx === "object" && entry.rx.name) {
+        state.lastName = String(entry.rx.name);
+        break;
+      }
+    }
+    return state.lastName;
+  };
+  ensureLastName();
+  try {
+    let attempt = 0;
+    let lastName = state.lastName || null;
+    while (attempt < maxAttempts) {
+      attempt += 1;
+      const res = await deviceFetch("RSTS", { json: "1", n: String(limit) }, 4000);
+      if (res.ok) {
+        const items = parseReceivedResponse(res.text) || [];
+        const readyItems = items.filter((item) => item && item.type === "ready");
+        let startIndex = 0;
+        if (lastName) {
+          const existingIdx = readyItems.findIndex((item) => item && item.name === lastName);
+          if (existingIdx >= 0) startIndex = existingIdx + 1;
+        }
+        const fresh = readyItems.slice(startIndex);
+        if (fresh.length > 0) {
+          for (let i = 0; i < fresh.length; i += 1) {
+            const entry = fresh[i];
+            if (!entry) continue;
+            const rxName = entry.name != null ? String(entry.name) : "";
+            const rxTextRaw = entry.text != null ? String(entry.text) : "";
+            const rxText = rxTextRaw.trim() || (entry.resolvedText != null ? String(entry.resolvedText).trim() : "");
+            const rxHex = entry.hex != null ? String(entry.hex) : "";
+            const rxLenRaw = Number(entry.len);
+            const rxLen = Number.isFinite(rxLenRaw) && rxLenRaw >= 0 ? rxLenRaw : getReceivedLength(entry);
+            const messageText = rxText || rxName || "RX сообщение";
+            const saved = persistChat(messageText, "dev", {
+              role: "rx",
+              tag: "rx-message",
+              rx: {
+                name: rxName,
+                text: rxText || messageText,
+                hex: rxHex,
+                len: rxLen != null ? rxLen : 0,
+              },
+            });
+            addChatMessage(saved.record, saved.index);
+            if (rxName) {
+              lastName = rxName;
+              state.lastName = rxName;
+            }
+          }
+          break;
+        }
+      } else {
+        console.warn("[testrxm] RSTS недоступен:", res.error);
+      }
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  } catch (err) {
+    console.warn("[testrxm] ошибка опроса TESTRXM:", err);
+  } finally {
+    state.polling = false;
+  }
 }
 
 // Загрузка полного списка RSTS в формате JSON из вкладки Debug
