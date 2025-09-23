@@ -918,6 +918,8 @@ String cmdInfo() {
   s += "\nPause: "; s += String(tx.getSendPause()); s += " ms";
   s += "\nACK timeout: "; s += String(tx.getAckTimeout()); s += " ms";
   s += "\nACK: "; s += ackEnabled ? "включён" : "выключен";
+  s += "\nRX boosted gain: ";
+  s += radio.isRxBoostedGainEnabled() ? "включён" : "выключен";
   return s;
 }
 
@@ -1002,6 +1004,18 @@ void handleCmdHttp() {
       resp = radio.setPower(pw) ? String("PW:OK") : String("PW:ERR");
     } else {
       resp = String(radio.getPower());
+    }
+  } else if (cmd == "RXBG") {
+    if (server.hasArg("v")) {
+      bool enable = server.arg("v").toInt() != 0;           // интерпретируем любое ненулевое значение как "вкл"
+      if (radio.setRxBoostedGainMode(enable)) {
+        resp = String("RXBG:");
+        resp += radio.isRxBoostedGainEnabled() ? "1" : "0"; // подтверждаем фактическое состояние
+      } else {
+        resp = String("RXBG:ERR");
+      }
+    } else {
+      resp = radio.isRxBoostedGainEnabled() ? String("1") : String("0");
     }
   } else if (cmd == "BANK") {
     if (server.hasArg("v")) {
@@ -1220,7 +1234,7 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
 }
 
 void loop() {
@@ -1279,14 +1293,45 @@ void loop() {
         int pw = line.substring(3).toInt();
         if (radio.setPower(pw)) {
           Serial.println("Мощность установлена");
-        } else {
-          Serial.println("Ошибка установки мощности");
+      } else {
+        Serial.println("Ошибка установки мощности");
+      }
+      // управление режимом повышенного усиления приёмника
+    } else if (line.startsWith("RXBG")) {
+      if (line.length() <= 4) {
+        Serial.print("RXBG: ");
+        Serial.println(radio.isRxBoostedGainEnabled() ? "включён" : "выключен");
+      } else {
+        String arg = line.substring(4);
+        arg.trim();
+        bool desired = radio.isRxBoostedGainEnabled();
+        bool parsed = false;
+        if (arg.equalsIgnoreCase("1") || arg.equalsIgnoreCase("ON") || arg.equalsIgnoreCase("TRUE") ||
+            arg.equalsIgnoreCase("ВКЛ")) {
+          desired = true;
+          parsed = true;
+        } else if (arg.equalsIgnoreCase("0") || arg.equalsIgnoreCase("OFF") || arg.equalsIgnoreCase("FALSE") ||
+                   arg.equalsIgnoreCase("ВЫКЛ")) {
+          desired = false;
+          parsed = true;
+        } else if (arg.equalsIgnoreCase("TOGGLE") || arg.equalsIgnoreCase("SWAP")) {
+          desired = !desired;
+          parsed = true;
         }
-      } else if (line.equalsIgnoreCase("BCN")) {
-        tx.prepareExternalSend();
-        radio.sendBeacon();
-        tx.completeExternalSend();
-        Serial.println("Маяк отправлен");
+        if (!parsed) {
+          Serial.println("RXBG: используйте RXBG <0|1|toggle>");
+        } else if (radio.setRxBoostedGainMode(desired)) {
+          Serial.print("RXBG: ");
+          Serial.println(radio.isRxBoostedGainEnabled() ? "включён" : "выключен");
+        } else {
+          Serial.println("RXBG: ошибка установки режима");
+        }
+      }
+    } else if (line.equalsIgnoreCase("BCN")) {
+      tx.prepareExternalSend();
+      radio.sendBeacon();
+      tx.completeExternalSend();
+      Serial.println("Маяк отправлен");
       } else if (line.equalsIgnoreCase("INFO")) {
         // выводим текущие настройки радиомодуля
         Serial.print("Банк: ");

@@ -267,6 +267,15 @@ bool RadioSX1262::setPower(uint8_t preset) {
   return state == RADIOLIB_ERR_NONE;                   // возвращаем успех
 }
 
+bool RadioSX1262::setRxBoostedGainMode(bool enabled) {
+  int state = radio_.setRxBoostedGainMode(enabled, true); // устанавливаем режим LNA
+  if (state == RADIOLIB_ERR_NONE) {
+    rxBoostedGainEnabled_ = enabled;                     // сохраняем текущее состояние
+    return true;
+  }
+  return false;
+}
+
 bool RadioSX1262::resetToDefaults() {
   // возвращаем все параметры к значениям из файла default_settings.h
   bank_ = DefaultSettings::BANK;       // банк каналов
@@ -284,6 +293,10 @@ bool RadioSX1262::resetToDefaults() {
     return false;                                         // ошибка инициализации
   }
   radio_.setDio1Action(onDio1Static);                     // колбэк приёма
+  if (!setRxBoostedGainMode(DefaultSettings::RX_BOOSTED_GAIN)) { // применение усиления по умолчанию
+    rxBoostedGainEnabled_ = false;                         // фиксируем фактическое состояние
+    LOG_WARN("RadioSX1262: не удалось установить RX boosted gain");
+  }
   radio_.startReceive();                                  // начинаем приём
   return true;
 }

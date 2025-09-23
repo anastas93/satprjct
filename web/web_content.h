@@ -377,6 +377,13 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
               </select>
             </label>
           </div>
+          <div class="settings-toggle" id="rxBoostedGainControl">
+            <label class="chip switch">
+              <input type="checkbox" id="RXBG" />
+              <span>RX boosted gain</span>
+            </label>
+            <div id="rxBoostedGainHint" class="field-hint">Состояние не загружено.</div>
+          </div>
         </section>
         <section class="settings-section">
           <h3>ACK и задержки</h3>
@@ -2002,6 +2009,7 @@ const UI = {
     ack: null,
     ackRetry: null,
     ackBusy: false,
+    rxBoostedGain: null,
     encBusy: false,
     encryption: null,
     infoChannel: null,
@@ -2311,6 +2319,8 @@ async function init() {
   UI.els.pauseHint = $("#pauseHint");
   UI.els.ackTimeout = $("#ACKT");
   UI.els.ackTimeoutHint = $("#ackTimeoutHint");
+  UI.els.rxBoostedGain = $("#RXBG");
+  UI.els.rxBoostedGainHint = $("#rxBoostedGainHint");
   UI.els.testRxmMessage = $("#TESTRXMMSG");
   UI.els.testRxmMessageHint = $("#testRxmMessageHint");
   UI.els.channelSelect = $("#CH");
@@ -2563,6 +2573,13 @@ async function init() {
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
   if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
+  if (UI.els.rxBoostedGain) {
+    UI.els.rxBoostedGain.addEventListener("change", () => {
+      UI.els.rxBoostedGain.indeterminate = false;
+      UI.state.rxBoostedGain = UI.els.rxBoostedGain.checked;
+      updateRxBoostedGainUi();
+    });
+  }
   if (UI.els.testRxmMessage) {
     UI.els.testRxmMessage.addEventListener("input", updateTestRxmMessageHint);
     UI.els.testRxmMessage.addEventListener("change", onTestRxmMessageChange);
@@ -3410,6 +3427,13 @@ function handleCommandSideEffects(cmd, text) {
     if (state !== null) {
       UI.state.encryption = state;
       updateEncryptionUi();
+    }
+  } else if (upper === "RXBG") {
+    const state = parseRxBoostedGainResponse(text);
+    if (state !== null) {
+      UI.state.rxBoostedGain = state;
+      storage.set("set.RXBG", state ? "1" : "0");
+      updateRxBoostedGainUi();
     }
   } else if (upper === "CH") {
     const value = parseInt(text, 10);
@@ -5725,6 +5749,40 @@ function parseAckTimeoutResponse(text) {
   if (token == null) return null;
   return clampAckTimeoutMs(Number(token));
 }
+function parseRxBoostedGainResponse(text) {
+  if (!text) return null;
+  const trimmed = String(text).trim();
+  if (trimmed.length === 0) return null;
+  const normalized = trimmed.toLowerCase();
+  if (normalized.indexOf("err") >= 0) return null;
+  if (trimmed === "1") return true;
+  if (trimmed === "0") return false;
+  const match = trimmed.match(/(?:^|[^0-9])([01])(?:[^0-9]|$)/);
+  if (match) return match[1] === "1";
+  if (normalized.indexOf("on") >= 0 || normalized.indexOf("включ") >= 0) return true;
+  if (normalized.indexOf("off") >= 0 || normalized.indexOf("выключ") >= 0) return false;
+  return null;
+}
+function updateRxBoostedGainUi() {
+  const state = UI.state.rxBoostedGain;
+  const input = UI.els.rxBoostedGain;
+  if (input) {
+    if (state === null) {
+      input.indeterminate = true;
+    } else {
+      input.indeterminate = false;
+      input.checked = state;
+    }
+  }
+  const hint = UI.els.rxBoostedGainHint;
+  if (hint) {
+    if (state === null) {
+      hint.textContent = "Состояние не загружено.";
+    } else {
+      hint.textContent = state ? "Повышенное усиление включено." : "Повышенное усиление выключено.";
+    }
+  }
+}
 function updateAckRetryUi() {
   const input = UI.els.ackRetry;
   const state = UI.state.ackRetry;
@@ -5885,6 +5943,21 @@ async function refreshAckRetry() {
   }
   UI.state.ackRetry = null;
   updateAckRetryUi();
+  return null;
+}
+async function refreshRxBoostedGain() {
+  const res = await deviceFetch("RXBG", {}, 2000);
+  if (res.ok) {
+    const state = parseRxBoostedGainResponse(res.text);
+    if (state !== null) {
+      UI.state.rxBoostedGain = state;
+      storage.set("set.RXBG", state ? "1" : "0");
+      updateRxBoostedGainUi();
+      return state;
+    }
+  }
+  UI.state.rxBoostedGain = null;
+  updateRxBoostedGainUi();
   return null;
 }
 async function onAckRetryInput() {
@@ -6101,7 +6174,7 @@ async function refreshEncryptionState() {
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","SF","PAUSE","ACKT","ACKR","TESTRXMMSG"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","TESTRXMMSG"];
 function normalizePowerPreset(raw) {
   if (raw == null) return null;
   const str = String(raw).trim();
@@ -6127,6 +6200,10 @@ function loadSettings() {
     if (el.type === "checkbox") {
       el.checked = v === "1";
       if (typeof el.indeterminate === "boolean") el.indeterminate = false;
+      if (key === "RXBG") {
+        UI.state.rxBoostedGain = el.checked;
+        updateRxBoostedGainUi();
+      }
     } else if (key === "PW") {
       const resolved = normalizePowerPreset(v);
       if (resolved) {
@@ -6163,8 +6240,9 @@ function loadSettings() {
       el.value = v;
       if (key === "BANK") {
         UI.state.bank = v;
-      }
     }
+  updateRxBoostedGainUi();
+}
   }
 }
 function saveSettingsLocal() {
@@ -6189,6 +6267,10 @@ function saveSettingsLocal() {
       updateTestRxmMessageHint();
     }
     storage.set("set." + key, v);
+    if (key === "RXBG") {
+      UI.state.rxBoostedGain = (v === "1");
+      updateRxBoostedGainUi();
+    }
   }
   note("Сохранено локально.");
 }
@@ -6264,6 +6346,7 @@ async function applySettingsToDevice() {
   note("Применение завершено.");
   await refreshChannels().catch(() => {});
   await refreshAckState();
+  await refreshRxBoostedGain();
 }
 function exportSettings() {
   const obj = {};
@@ -6321,6 +6404,15 @@ function importSettings() {
         UI.state.ackRetry = num;
         updateAckRetryUi();
         storage.set("set.ACKR", String(num));
+        continue;
+      }
+      if (key === "RXBG") {
+        const enabled = obj[key] === "1" || obj[key] === 1 || obj[key] === true;
+        el.checked = enabled;
+        if (typeof el.indeterminate === "boolean") el.indeterminate = false;
+        UI.state.rxBoostedGain = enabled;
+        storage.set("set.RXBG", enabled ? "1" : "0");
+        updateRxBoostedGainUi();
         continue;
       }
       if (key === "PAUSE") {
@@ -6451,6 +6543,23 @@ async function syncSettingsFromDevice() {
     if (pwRes.ok) applyNumeric("PW", pwRes.text);
   } catch (err) {
     console.warn("[settings] PW", err);
+  }
+  try {
+    const rxbgRes = await deviceFetch("RXBG", {}, 2000);
+    if (rxbgRes.ok) {
+      const state = parseRxBoostedGainResponse(rxbgRes.text);
+      if (state !== null) {
+        UI.state.rxBoostedGain = state;
+        if (UI.els.rxBoostedGain) {
+          UI.els.rxBoostedGain.checked = state;
+          UI.els.rxBoostedGain.indeterminate = false;
+        }
+        storage.set("set.RXBG", state ? "1" : "0");
+        updateRxBoostedGainUi();
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] RXBG", err);
   }
   try {
     const pauseRes = await deviceFetch("PAUSE", {}, 2000);
