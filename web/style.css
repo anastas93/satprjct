@@ -326,6 +326,19 @@ main {
 .msg.rx .bubble-text { font-weight:600; }
 .msg.rx time { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); }
 .bubble-text { line-height:1.55; }
+/* Полный текст системного ответа */
+.bubble-detail {
+  margin-top:.45rem;
+  padding:.45rem .55rem;
+  background: color-mix(in oklab, var(--panel) 88%, black 12%);
+  border-radius:.6rem;
+  border:1px dashed color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size:.78rem;
+  line-height:1.5;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
 .bubble-meta {
   display:flex;
   align-items:center;
