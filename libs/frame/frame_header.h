@@ -19,8 +19,9 @@ struct FrameHeader {
   uint16_t frame_crc = 0;   // CRC всего кадра
 
   static constexpr size_t SIZE = 20; // размер заголовка в байтах
-  static constexpr uint8_t FLAG_ENCRYPTED = 0x01;   // полезная нагрузка зашифрована
+  static constexpr uint8_t FLAG_ENCRYPTED = 0x01;    // полезная нагрузка зашифрована
   static constexpr uint8_t FLAG_ACK_REQUIRED = 0x02; // требуется подтверждение доставки
+  static constexpr uint8_t FLAG_CONV_ENCODED = 0x04; // полезная нагрузка прошла свёрточное кодирование
 
   // Кодирование заголовка в буфер (big-endian) с подсчётом CRC
   bool encode(uint8_t* out, size_t out_len, const uint8_t* payload, size_t payload_len);
