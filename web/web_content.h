@@ -189,6 +189,32 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             <div class="channel-info-actions">
               <button id="channelInfoSetCurrent" class="btn">Установить текущим каналом</button>
             </div>
+            <div class="channel-info-block channel-info-tests-block">
+              <div class="channel-info-caption">Тесты</div>
+              <div class="channel-info-tests">
+                <button id="channelInfoStabilityTest" class="btn">Stability test</button>
+                <button id="channelInfoCrTest" class="btn">CR test</button>
+              </div>
+              <div id="channelInfoTestsStatus" class="channel-info-status small muted" hidden></div>
+              <div id="channelInfoStabilitySummary" class="channel-info-test-summary" hidden>
+                <div>Успешных пакетов: <strong id="channelInfoStabilitySuccess">—</strong></div>
+                <div class="channel-info-test-legend small">
+                  <span data-type="rssi">RSSI</span>
+                  <span data-type="snr">SNR</span>
+                </div>
+              </div>
+              <div id="channelInfoStabilityResult" class="channel-info-test-chart" hidden>
+                <canvas id="channelInfoStabilityChart" width="360" height="200"></canvas>
+              </div>
+              <div id="channelInfoCrResult" class="channel-info-cr" hidden>
+                <table class="channel-info-cr-table">
+                  <thead>
+                    <tr><th>CR</th><th>Ping</th><th>RSSI</th><th>SNR</th></tr>
+                  </thead>
+                  <tbody id="channelInfoCrTableBody"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
