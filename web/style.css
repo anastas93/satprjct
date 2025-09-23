@@ -869,14 +869,23 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
     border: none;
     box-shadow: none;
   }
+  #channelsTable tbody tr.channel-info-row td {
+    display: block;
+    justify-content: initial;
+    align-items: initial;
+    gap: 0;
+  }
+  #channelsTable tbody tr.channel-info-row td::before {
+    content: none;
+  }
   .channel-info-cell {
     max-width: 100%;
     width: 100%;
   }
   .channel-info-row .channel-info {
-    width: 90vw;
-    max-width: 90vw;
-    margin: 0 auto;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
   }
   #channelsTable tbody tr.selected-info {
     background: color-mix(in oklab, var(--accent-2) 25%, var(--panel-2) 75%);
