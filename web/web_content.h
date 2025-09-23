@@ -132,6 +132,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
       </details>
       <div class="chat-recv-controls received-controls">
         <button id="btnRecvRefresh" class="btn ghost">Обновить входящие</button>
+        <button id="btnRecvClear" class="btn ghost">Очистить список</button>
         <label class="chip switch">
           <input type="checkbox" id="recvAuto" />
           <span>Автообновление</span>
@@ -141,6 +142,8 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           <input id="recvLimit" type="number" min="1" max="200" value="20" />
         </label>
       </div>
+      <ul id="recvList" class="received-list"></ul>
+      <div id="recvEmpty" class="received-empty">Входящих сообщений пока нет</div>
     </section>
     <!-- Вкладка каналов и пинга -->
     <section id="tab-channels" class="tab" hidden>

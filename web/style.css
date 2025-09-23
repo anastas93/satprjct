@@ -501,6 +501,15 @@ main {
   max-height:240px;
   overflow-y:auto;
 }
+.received-empty {
+  padding: .75rem .9rem;
+  border-radius: .75rem;
+  border: 1px dashed color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  background: color-mix(in oklab, var(--panel) 80%, transparent);
+  color: var(--muted);
+  font-size: .9rem;
+  text-align: center;
+}
 .received-list li {
   display:flex;
   align-items:flex-start;

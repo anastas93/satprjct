@@ -386,6 +386,7 @@ async function init() {
   UI.els.recvAuto = $("#recvAuto");
   UI.els.recvLimit = $("#recvLimit");
   UI.els.recvRefresh = $("#btnRecvRefresh");
+  UI.els.recvClear = $("#btnRecvClear");
   UI.els.autoNightSwitch = $("#autoNightMode");
   UI.els.autoNightHint = $("#autoNightHint");
   UI.els.channelInfoPanel = $("#channelInfoPanel");
@@ -611,6 +612,9 @@ async function init() {
   }
   if (UI.els.recvRefresh) {
     UI.els.recvRefresh.addEventListener("click", () => refreshReceivedList({ manual: true }));
+  }
+  if (UI.els.recvClear) {
+    UI.els.recvClear.addEventListener("click", () => clearReceivedList());
   }
   loadChatHistory();
   setRecvAuto(savedAuto, { skipImmediate: true });
@@ -1977,6 +1981,13 @@ function renderReceivedList(items) {
   }
   UI.state.receivedKnown = next;
   if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = list.length > 0;
+}
+
+// Полностью очищаем список входящих сообщений без запроса к устройству
+function clearReceivedList() {
+  UI.state.receivedKnown = new Set();
+  if (UI.els.recvList) UI.els.recvList.innerHTML = "";
+  if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = false;
 }
 
 // Оцениваем количество элементов в JSON-ответе RSTS для подсказок пользователю
