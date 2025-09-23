@@ -72,6 +72,7 @@ const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
 const TWO_PI = Math.PI * 2;
 const POINTING_DEFAULT_MIN_ELEVATION = 10; // минимальный угол возвышения по умолчанию
+const POINTING_COMPASS_OFFSET_DEG = 180; // отображаем юг в верхней части компаса
 
 /* Состояние интерфейса */
 const UI = {
@@ -102,6 +103,10 @@ const UI = {
     infoChannelTx: null,
     infoChannelRx: null,
     chatHistory: [],
+    chatHydrating: false,
+    chatScrollPinned: true,
+    chatSoundCtx: null,
+    chatSoundLast: 0,
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
@@ -356,6 +361,7 @@ async function init() {
   UI.els.rstsDownloadBtn = $("#btnRstsDownloadJson");
   UI.els.chatLog = $("#chatLog");
   UI.els.chatInput = $("#chatInput");
+  UI.els.chatScrollBtn = $("#chatScrollBottom");
   UI.els.sendBtn = $("#sendBtn");
   UI.els.ackChip = $("#ackStateChip");
   UI.els.ackText = $("#ackStateText");
@@ -388,6 +394,8 @@ async function init() {
   UI.els.channelInfoEmpty = $("#channelInfoEmpty");
   UI.els.channelInfoStatus = $("#channelInfoStatus");
   UI.els.channelInfoSetBtn = $("#channelInfoSetCurrent");
+  UI.els.channelInfoRow = null;
+  UI.els.channelInfoCell = null;
   UI.els.channelInfoFields = {
     rxCurrent: $("#channelInfoRxCurrent"),
     txCurrent: $("#channelInfoTxCurrent"),
@@ -554,6 +562,23 @@ async function init() {
       if (event.key === "Enter") onSendChat();
     });
   }
+  if (UI.els.chatLog) {
+    UI.els.chatLog.addEventListener("scroll", onChatScroll);
+    updateChatScrollButton();
+  }
+  if (UI.els.chatScrollBtn) {
+    UI.els.chatScrollBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      scrollChatToBottom(true);
+    });
+  }
+  if (typeof document !== "undefined") {
+    const unlockAudio = () => {
+      ensureChatAudioContext();
+    };
+    document.addEventListener("pointerdown", unlockAudio, { once: true, capture: true });
+    document.addEventListener("keydown", unlockAudio, { once: true, capture: true });
+  }
   $all('[data-cmd]').forEach((btn) => {
     const cmd = btn.dataset ? btn.dataset.cmd : null;
     if (!cmd) return;
@@ -680,6 +705,7 @@ function setTab(tab) {
   }
   storage.set("activeTab", tab);
   if (tab !== "channels") hideChannelInfo();
+  if (tab === "chat") updateChatScrollButton();
 }
 
 /* Тема */
@@ -770,6 +796,88 @@ function toggleAccent() {
 }
 
 /* Работа чата */
+const CHAT_SCROLL_EPSILON = 32;
+
+function chatIsNearBottom(log) {
+  if (!log) return true;
+  const diff = log.scrollHeight - log.scrollTop - log.clientHeight;
+  return diff <= CHAT_SCROLL_EPSILON;
+}
+
+function updateChatScrollButton() {
+  const log = UI.els.chatLog;
+  const btn = UI.els.chatScrollBtn;
+  if (!btn || !log) return;
+  const pinned = chatIsNearBottom(log);
+  btn.hidden = pinned;
+}
+
+function scrollChatToBottom(force) {
+  const log = UI.els.chatLog;
+  if (!log) return;
+  if (force || UI.state.chatScrollPinned || chatIsNearBottom(log)) {
+    log.scrollTop = log.scrollHeight;
+    UI.state.chatScrollPinned = true;
+  }
+  updateChatScrollButton();
+}
+
+function onChatScroll() {
+  const log = UI.els.chatLog;
+  if (!log) return;
+  UI.state.chatScrollPinned = chatIsNearBottom(log);
+  updateChatScrollButton();
+}
+
+function shouldPlayIncomingSound(entry) {
+  if (!entry) return false;
+  const role = entry.role || (entry.a === "you" ? "user" : "system");
+  return role === "rx";
+}
+
+function ensureChatAudioContext() {
+  if (typeof window === "undefined") return null;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!UI.state.chatSoundCtx) {
+    try {
+      UI.state.chatSoundCtx = new Ctx();
+    } catch (err) {
+      UI.state.chatSoundCtx = null;
+      return null;
+    }
+  }
+  const ctx = UI.state.chatSoundCtx;
+  if (ctx && typeof ctx.resume === "function" && ctx.state === "suspended") {
+    ctx.resume().catch(() => {});
+  }
+  return ctx;
+}
+
+function playIncomingChatSound() {
+  const now = Date.now();
+  if (now - UI.state.chatSoundLast < 250) return;
+  const ctx = ensureChatAudioContext();
+  if (!ctx) return;
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const start = ctx.currentTime;
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(660, start);
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(0.09, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.38);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + 0.4);
+    UI.state.chatSoundLast = now;
+  } catch (err) {
+    console.warn("[chat] аудио уведомление недоступно:", err);
+  }
+}
+
 function getChatHistory() {
   if (!Array.isArray(UI.state.chatHistory)) UI.state.chatHistory = [];
   return UI.state.chatHistory;
@@ -924,9 +1032,12 @@ function loadChatHistory() {
   const normalized = normalizeChatEntries(entries);
   UI.state.chatHistory = normalized;
   if (UI.els.chatLog) UI.els.chatLog.innerHTML = "";
+  UI.state.chatHydrating = true;
   for (let i = 0; i < normalized.length; i++) {
-    addChatMessage(normalized[i], i);
+    addChatMessage(normalized[i], i, { skipSound: true, skipScroll: true });
   }
+  UI.state.chatHydrating = false;
+  scrollChatToBottom(true);
   saveChatHistory();
 }
 function persistChat(message, author, meta) {
@@ -945,7 +1056,8 @@ function persistChat(message, author, meta) {
   saveChatHistory();
   return { record, index: entries.length - 1 };
 }
-function addChatMessage(entry, index) {
+function addChatMessage(entry, index, options) {
+  const opts = options || {};
   if (!UI.els.chatLog) return null;
   const data = typeof entry === "string" ? { t: Date.now(), a: "dev", m: entry, role: "system" } : entry;
   const wrap = document.createElement("div");
@@ -968,7 +1080,14 @@ function addChatMessage(entry, index) {
   wrap.appendChild(bubble);
   wrap.appendChild(time);
   UI.els.chatLog.appendChild(wrap);
-  UI.els.chatLog.scrollTop = UI.els.chatLog.scrollHeight;
+  if (!opts.skipSound && !UI.state.chatHydrating && shouldPlayIncomingSound(data)) {
+    playIncomingChatSound();
+  }
+  if (opts.skipScroll) {
+    updateChatScrollButton();
+  } else {
+    scrollChatToBottom(opts.forceScroll === true);
+  }
   return wrap;
 }
 function setBubbleText(node, text) {
@@ -2102,6 +2221,40 @@ let channels = [];
 // Служебное состояние поиска по каналам
 const searchState = { running: false, cancel: false };
 
+function getChannelTableColumnCount() {
+  const table = $("#channelsTable");
+  if (!table) return 0;
+  const head = table.tHead && table.tHead.rows && table.tHead.rows[0];
+  if (head) return head.cells.length;
+  const firstBodyRow = table.tBodies && table.tBodies[0] && table.tBodies[0].rows && table.tBodies[0].rows[0];
+  return firstBodyRow ? firstBodyRow.cells.length : 0;
+}
+
+function ensureChannelInfoRow() {
+  let row = UI.els.channelInfoRow;
+  if (!row) {
+    row = document.createElement("tr");
+    row.className = "channel-info-row";
+    const cell = document.createElement("td");
+    cell.className = "channel-info-cell";
+    row.appendChild(cell);
+    UI.els.channelInfoRow = row;
+    UI.els.channelInfoCell = cell;
+  }
+  const cell = UI.els.channelInfoCell;
+  if (cell) {
+    const cols = getChannelTableColumnCount() || 7;
+    cell.colSpan = cols;
+  }
+  return row;
+}
+
+function removeChannelInfoRow() {
+  if (UI.els.channelInfoRow && UI.els.channelInfoRow.parentNode) {
+    UI.els.channelInfoRow.parentNode.removeChild(UI.els.channelInfoRow);
+  }
+}
+
 // Скрываем панель информации о канале
 function hideChannelInfo() {
   UI.state.infoChannel = null;
@@ -2159,6 +2312,7 @@ function updateChannelInfoPanel() {
       setBtn.disabled = true;
       setBtn.textContent = "Установить текущим каналом";
     }
+    removeChannelInfoRow();
     updateChannelInfoHighlight();
     return;
   }
@@ -2202,9 +2356,13 @@ function updateChannelInfoPanel() {
   if (!channelReference.loading && !channelReference.error && !ref) messages.push("В справочнике нет данных для этого канала.");
   if (!actualEntry) messages.push("Канал отсутствует в текущем списке.");
   if (statusEl) {
-    const text = messages.join(" ");
-    statusEl.textContent = text;
-    statusEl.hidden = !text;
+    if (messages.length) {
+      statusEl.textContent = messages.join(" ");
+      statusEl.hidden = false;
+    } else {
+      statusEl.textContent = "";
+      statusEl.hidden = true;
+    }
   }
 
   const setBtn = UI.els.channelInfoSetBtn || $("#channelInfoSetCurrent");
@@ -2212,6 +2370,26 @@ function updateChannelInfoPanel() {
     const same = UI.state.channel != null && UI.state.channel === UI.state.infoChannel;
     setBtn.disabled = !!same;
     setBtn.textContent = same ? "Канал уже активен" : "Установить текущим каналом";
+  }
+
+  const table = $("#channelsTable");
+  const tbody = table && table.tBodies ? table.tBodies[0] : null;
+  let targetRow = null;
+  if (tbody) {
+    const rows = Array.from(tbody.querySelectorAll("tr[data-ch]"));
+    targetRow = rows.find((tr) => Number(tr.dataset.ch) === UI.state.infoChannel) || null;
+  }
+  if (targetRow && tbody) {
+    const infoRow = ensureChannelInfoRow();
+    const cell = UI.els.channelInfoCell;
+    if (cell) {
+      while (cell.firstChild) cell.removeChild(cell.firstChild);
+      cell.appendChild(panel);
+    }
+    infoRow.hidden = false;
+    tbody.insertBefore(infoRow, targetRow.nextSibling);
+  } else {
+    removeChannelInfoRow();
   }
 
   updateChannelInfoHighlight();
@@ -2453,13 +2631,21 @@ function renderChannels() {
     } else if (scanLower) {
       tr.classList.add("signal");
     }
-    tr.innerHTML = "<td>" + c.ch + "</td>" +
-                   "<td>" + c.tx.toFixed(3) + "</td>" +
-                   "<td>" + c.rx.toFixed(3) + "</td>" +
-                   "<td>" + (isNaN(c.rssi) ? "" : c.rssi) + "</td>" +
-                   "<td>" + (isNaN(c.snr) ? "" : c.snr) + "</td>" +
-                   "<td>" + (c.st || "") + "</td>" +
-                   "<td>" + scanText + "</td>";
+    const cells = [
+      { label: "Канал", value: c.ch != null ? c.ch : "—" },
+      { label: "TX (МГц)", value: Number.isFinite(c.tx) ? c.tx.toFixed(3) : "—" },
+      { label: "RX (МГц)", value: Number.isFinite(c.rx) ? c.rx.toFixed(3) : "—" },
+      { label: "RSSI", value: Number.isFinite(c.rssi) ? String(c.rssi) : "" },
+      { label: "SNR", value: Number.isFinite(c.snr) ? c.snr.toFixed(1) : "" },
+      { label: "Статус", value: c.st || "" },
+      { label: "SCAN", value: scanText },
+    ];
+    cells.forEach((info) => {
+      const td = document.createElement("td");
+      td.dataset.label = info.label;
+      td.textContent = info.value != null ? String(info.value) : "";
+      tr.appendChild(td);
+    });
     tr.dataset.ch = String(c.ch);
     tr.tabIndex = 0;
     tr.setAttribute("role", "button");
@@ -3960,10 +4146,13 @@ function initPointingTab() {
     });
   }
   if (els.manualAlt) {
+    const commitAlt = () => applyPointingAltitude();
+    els.manualAlt.addEventListener("change", commitAlt);
+    els.manualAlt.addEventListener("blur", commitAlt);
     els.manualAlt.addEventListener("keydown", (event) => {
       if (event && event.key === "Enter") {
         event.preventDefault();
-        applyPointingMgrs();
+        commitAlt();
       }
     });
   }
@@ -4152,6 +4341,29 @@ function setPointingObserverFromMgrs(value, altitude, options = {}) {
   return true;
 }
 
+function setPointingObserverAltitude(height, options = {}) {
+  const state = UI.state.pointing;
+  const observer = state && state.observer;
+  if (!observer) {
+    if (!options.silent) note("Сначала укажите квадрат MGRS");
+    return false;
+  }
+  const altNumber = Number(height);
+  const next = Number.isFinite(altNumber) ? altNumber : 0;
+  const prev = Number.isFinite(observer.heightM) ? observer.heightM : 0;
+  if (Math.abs(prev - next) < 0.01) {
+    storage.set("pointingAlt", String(next || 0));
+    updatePointingObserverUi();
+    return true;
+  }
+  observer.heightM = next;
+  storage.set("pointingAlt", String(next || 0));
+  updatePointingObserverUi();
+  updatePointingSatellites();
+  if (!options.silent) note("Высота обновлена");
+  return true;
+}
+
 function updatePointingObserverUi() {
   const els = UI.els.pointing;
   if (!els) return;
@@ -4187,14 +4399,49 @@ function updatePointingObserverUi() {
 function applyPointingMgrs() {
   const els = UI.els.pointing;
   if (!els) return;
+  const state = UI.state.pointing;
   const inputValue = els.mgrsInput ? els.mgrsInput.value : "";
-  const normalized = pointingCanonicalMgrs(inputValue);
+  let normalized = pointingCanonicalMgrs(inputValue);
   if (!normalized) {
-    note("Введите квадрат MGRS вида 43U CR");
-    return;
+    const fallback = state && state.observer ? (state.observer.mgrsRaw || state.observerMgrs) : null;
+    normalized = pointingCanonicalMgrs(fallback);
+    if (!normalized) {
+      note("Введите квадрат MGRS вида 43U CR");
+      return;
+    }
   }
-  const altValue = els.manualAlt ? Number(els.manualAlt.value) : 0;
+  const rawAlt = els.manualAlt ? String(els.manualAlt.value || "").trim() : "";
+  let altValue;
+  if (!rawAlt) {
+    altValue = state && state.observer && Number.isFinite(state.observer.heightM) ? state.observer.heightM : 0;
+  } else {
+    const parsed = Number(rawAlt.replace(",", "."));
+    if (!Number.isFinite(parsed)) {
+      note("Высота должна быть числом");
+      return;
+    }
+    altValue = parsed;
+  }
   setPointingObserverFromMgrs(normalized, altValue, { silent: false });
+}
+
+function applyPointingAltitude() {
+  const els = UI.els.pointing;
+  if (!els) return;
+  const state = UI.state.pointing;
+  const raw = els.manualAlt ? String(els.manualAlt.value || "").trim() : "";
+  let value = 0;
+  if (!raw) {
+    value = state && state.observer && Number.isFinite(state.observer.heightM) ? state.observer.heightM : 0;
+  } else {
+    const parsed = Number(raw.replace(",", "."));
+    if (!Number.isFinite(parsed)) {
+      note("Высота должна быть числом");
+      return;
+    }
+    value = parsed;
+  }
+  setPointingObserverAltitude(value, { silent: !raw });
 }
 
 function updatePointingSatellites() {
@@ -4525,7 +4772,8 @@ function renderPointingCompassRadar(visible) {
     } else {
       delete dot.dataset.quadrant;
     }
-    const angleRad = sat.azimuth * DEG2RAD;
+    const displayAngle = normalizeDegrees((Number.isFinite(sat.azimuth) ? sat.azimuth : 0) + POINTING_COMPASS_OFFSET_DEG);
+    const angleRad = displayAngle * DEG2RAD;
     const elevationClamped = clampNumber(sat.elevation, 0, 90);
     const baseRadius = (1 - elevationClamped / 90) * 45;
     const placed = placeCompassDot(angleRad, baseRadius);
@@ -4854,10 +5102,23 @@ function note(text) {
   toast.classList.add("show");
   setTimeout(() => { toast.hidden = true; }, 2200);
 }
+function classifyDebugMessage(text) {
+  const raw = text != null ? String(text) : "";
+  const trimmed = raw.trim();
+  const low = trimmed.toLowerCase();
+  if (!trimmed) return "info";
+  if (/[✗×]/.test(trimmed) || low.includes("fail") || low.includes("ошиб") || low.startsWith("err")) return "error";
+  if (low.includes("warn") || low.includes("предупр")) return "warn";
+  if (trimmed.includes("✓") || low.includes("успех") || /\bok\b/.test(low)) return "success";
+  if (trimmed.startsWith("→") || low.startsWith("tx") || low.startsWith("cmd") || low.startsWith("send")) return "action";
+  return "info";
+}
 function debugLog(text) {
   const log = UI.els.debugLog;
   if (!log) return;
   const line = document.createElement("div");
+  const type = classifyDebugMessage(text);
+  line.className = "debug-line debug-line--" + type;
   line.textContent = "[" + new Date().toLocaleTimeString() + "] " + text;
   log.appendChild(line);
   log.scrollTop = log.scrollHeight;

@@ -21,7 +21,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <nav class="nav" id="siteNav">
       <a href="#" data-tab="chat">Chat</a>
       <a href="#" data-tab="channels">Channels/Ping</a>
-      <a href="#" data-tab="pointing">Pointing</a>
+      <a href="#" data-tab="pointing">Antenna helper</a>
       <a href="#" data-tab="settings">Settings</a>
       <a href="#" data-tab="security">Security</a>
       <a href="#" data-tab="debug">Debug</a>
@@ -37,7 +37,10 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <!-- Вкладка чата -->
     <section id="tab-chat" class="tab">
       <h2>Chat</h2>
-      <div id="chatLog" class="chat-log"></div>
+      <div class="chat-area">
+        <div id="chatLog" class="chat-log"></div>
+        <button type="button" id="chatScrollBottom" class="chat-scroll-down" aria-label="Прокрутить вниз"><span>↓</span></button>
+      </div>
       <div class="chat-input">
         <input id="chatInput" type="text" placeholder="Сообщение" maxlength="2000" />
         <button id="sendBtn" class="btn">Отправить</button>
@@ -53,19 +56,21 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           <span id="encStateText">—</span>
         </button>
       </div>
-      <div class="group-title"><span>Команды</span><span class="line"></span></div>
-      <div class="cmd-buttons actions">
-        <button class="btn" data-cmd="INFO">INFO</button>
-        <button class="btn" data-cmd="STS">STS</button>
-        <button class="btn" data-cmd="RSTS">RSTS</button>
-        <button class="btn" data-cmd="BCN">BCN</button>
-        <button class="btn" data-cmd="TESTRXM">TESTRXM</button>
-      </div>
-      <div class="cmd-inline">
-        <label for="txlSize">TXL (байт)</label>
-        <input id="txlSize" type="number" min="1" max="8192" value="1024" />
-        <button id="btnTxlSend" class="btn">Отправить тест</button>
-      </div>
+      <details id="chatCommands" class="chat-commands">
+        <summary>Команды</summary>
+        <div class="cmd-buttons actions">
+          <button class="btn" data-cmd="INFO">INFO</button>
+          <button class="btn" data-cmd="STS">STS</button>
+          <button class="btn" data-cmd="RSTS">RSTS</button>
+          <button class="btn" data-cmd="BCN">BCN</button>
+          <button class="btn" data-cmd="TESTRXM">TESTRXM</button>
+        </div>
+        <div class="cmd-inline">
+          <label for="txlSize">TXL (байт)</label>
+          <input id="txlSize" type="number" min="1" max="8192" value="1024" />
+          <button id="btnTxlSend" class="btn">Отправить тест</button>
+        </div>
+      </details>
       <div class="chat-recv-controls received-controls">
         <button id="btnRecvRefresh" class="btn ghost">Обновить входящие</button>
         <label class="chip switch">
@@ -96,7 +101,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             <tbody></tbody>
           </table>
         </div>
-        <aside id="channelInfoPanel" class="channel-info glass" hidden>
+        <div id="channelInfoPanel" class="channel-info glass" hidden>
           <div class="channel-info-header">
             <div class="channel-info-title">Канал <span id="channelInfoTitle">—</span></div>
             <button id="channelInfoClose" type="button" class="icon-btn ghost small" aria-label="Скрыть информацию">✕</button>
@@ -129,12 +134,12 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
               <button id="channelInfoSetCurrent" class="btn">Установить текущим каналом</button>
             </div>
           </div>
-        </aside>
+        </div>
       </div>
     </section>
     <!-- Вкладка наведения антенны -->
     <section id="tab-pointing" class="tab" hidden>
-      <h2 class="pointing-title">pointing</h2>
+      <h2 class="pointing-title">Antenna helper</h2>
       <div id="pointingSummary" class="pointing-summary glass">
         <div class="pointing-summary-chip" id="pointingTleBadge" data-state="warn">
           <span class="pointing-summary-icon">🛰️</span>
@@ -172,7 +177,13 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           <div class="pointing-compass" id="pointingCompass">
             <div class="pointing-compass-dial">
               <div class="pointing-compass-radar" id="pointingCompassRadar"></div>
-              <div class="pointing-compass-north" aria-hidden="true">N</div>
+              <div class="pointing-compass-axes" aria-hidden="true"></div>
+              <div class="pointing-compass-rose" aria-hidden="true">
+                <span data-dir="south">S</span>
+                <span data-dir="east">E</span>
+                <span data-dir="north">N</span>
+                <span data-dir="west">W</span>
+              </div>
               <div class="pointing-compass-center"></div>
               <div class="pointing-compass-graduations"></div>
             </div>
@@ -237,80 +248,89 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
     <section id="tab-settings" class="tab" hidden>
       <h2>Settings</h2>
       <form id="settingsForm" class="settings-form">
-        <label>Endpoint
-          <input id="endpoint" type="text" placeholder="http://192.168.4.1" />
-        </label>
-        <div class="settings-toggle" id="autoNightControl">
-          <label class="chip switch">
-            <input type="checkbox" id="autoNightMode" />
-            <span>Авто ночной режим</span>
-          </label>
-          <div id="autoNightHint" class="field-hint">Ночная тема включается автоматически с 21:00 до 07:00.</div>
-        </div>
-        <label>Bank
-          <select id="BANK">
-            <option value="e">EAST</option>
-            <option value="w">WEST</option>
-            <option value="t">TEST</option>
-            <option value="a">ALL</option>
-          </select>
-        </label>
-        <label>BW (kHz)
-          <select id="BF">
-            <option value="7.81">7.81</option>
-            <option value="10.42">10.42</option>
-            <option value="15.63">15.63</option>
-            <option value="20.83" selected>20.83</option>
-            <option value="31.25">31.25</option>
-          </select>
-        </label>
-        <label>Channel
-          <select id="CH"></select>
-          <div id="channelSelectHint" class="field-hint"></div>
-        </label>
-        <label>CR
-          <select id="CR">
-            <option value="5">4/5</option>
-            <option value="6">4/6</option>
-            <option value="7">4/7</option>
-            <option value="8">4/8</option>
-          </select>
-        </label>
-        <label>Power
-          <select id="PW">
-            <option value="-5">-5 dBm</option><option value="-2">-2 dBm</option><option value="1">1 dBm</option><option value="4">4 dBm</option>
-            <option value="7">7 dBm</option><option value="10">10 dBm</option><option value="13">13 dBm</option><option value="16">16 dBm</option>
-            <option value="19">19 dBm</option><option value="22">22 dBm</option>
-          </select>
-        </label>
-        <label>SF
-          <select id="SF">
-            <option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option>
-          </select>
-        </label>
-        <div class="settings-toggle" id="ackSettingControl">
-          <label class="chip switch">
-            <input type="checkbox" id="ACK" />
-            <span>ACK (подтверждения)</span>
-          </label>
-          <div id="ackSettingHint" class="field-hint">Состояние не загружено.</div>
-        </div>
-        <label>ACK повторы
-          <input id="ACKR" type="number" min="0" max="10" value="3" />
-          <div id="ackRetryHint" class="field-hint">Доступно после включения ACK.</div>
-        </label>
-        <label>Пауза между пакетами (мс)
-          <input id="PAUSE" type="number" min="0" max="60000" value="370" />
-          <div id="pauseHint" class="field-hint">Пауза между пакетами не загружена.</div>
-        </label>
-        <label>ACK тайм-аут (мс)
-          <input id="ACKT" type="number" min="0" max="60000" value="1500" />
-          <div id="ackTimeoutHint" class="field-hint">Время ожидания ACK не загружено.</div>
-        </label>
-        <label>Сообщение для TESTRXM
-          <input id="TESTRXMMSG" type="text" maxlength="2048" placeholder="Lorem ipsum dolor sit amet" />
-          <div id="testRxmMessageHint" class="field-hint">Будет использован встроенный шаблон Lorem ipsum.</div>
-        </label>
+        <section class="settings-section">
+          <h3>Канал</h3>
+          <div class="settings-group two">
+            <label>Bank
+              <select id="BANK">
+                <option value="e">EAST</option>
+                <option value="w">WEST</option>
+                <option value="t">TEST</option>
+                <option value="a">ALL</option>
+              </select>
+            </label>
+            <label>Channel
+              <select id="CH"></select>
+              <div id="channelSelectHint" class="field-hint"></div>
+            </label>
+          </div>
+          <div class="settings-group two">
+            <label>BW (kHz)
+              <select id="BF">
+                <option value="7.81">7.81</option>
+                <option value="10.42">10.42</option>
+                <option value="15.63">15.63</option>
+                <option value="20.83" selected>20.83</option>
+                <option value="31.25">31.25</option>
+              </select>
+            </label>
+            <label>SF
+              <select id="SF">
+                <option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option>
+              </select>
+            </label>
+            <label>CR
+              <select id="CR">
+                <option value="5">4/5</option>
+                <option value="6">4/6</option>
+                <option value="7">4/7</option>
+                <option value="8">4/8</option>
+              </select>
+            </label>
+            <label>Power
+              <select id="PW">
+                <option value="-5">-5 dBm</option><option value="-2">-2 dBm</option><option value="1">1 dBm</option><option value="4">4 dBm</option>
+                <option value="7">7 dBm</option><option value="10">10 dBm</option><option value="13">13 dBm</option><option value="16">16 dBm</option>
+                <option value="19">19 dBm</option><option value="22">22 dBm</option>
+              </select>
+            </label>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3>ACK и задержки</h3>
+          <div class="settings-group">
+            <div class="settings-toggle" id="ackSettingControl">
+              <label class="chip switch">
+                <input type="checkbox" id="ACK" />
+                <span>ACK (подтверждения)</span>
+              </label>
+              <div id="ackSettingHint" class="field-hint">Состояние не загружено.</div>
+            </div>
+            <div class="settings-group two">
+              <label>ACK повторы
+                <input id="ACKR" type="number" min="0" max="10" value="3" />
+                <div id="ackRetryHint" class="field-hint">Доступно после включения ACK.</div>
+              </label>
+              <label>ACK тайм-аут (мс)
+                <input id="ACKT" type="number" min="0" max="60000" value="1500" />
+                <div id="ackTimeoutHint" class="field-hint">Время ожидания ACK не загружено.</div>
+              </label>
+            </div>
+            <label>Пауза между пакетами (мс)
+              <input id="PAUSE" type="number" min="0" max="60000" value="370" />
+              <div id="pauseHint" class="field-hint">Пауза между пакетами не загружена.</div>
+            </label>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3>Тестовые сообщения</h3>
+          <div class="settings-group">
+            <label>Сообщение для TESTRXM
+              <input id="TESTRXMMSG" type="text" maxlength="2048" placeholder="Lorem ipsum dolor sit amet" />
+              <div id="testRxmMessageHint" class="field-hint">Будет использован встроенный шаблон Lorem ipsum.</div>
+            </label>
+          </div>
+        </section>
         <div class="settings-actions actions">
           <button type="button" id="btnSaveSettings" class="btn">Сохранить</button>
           <button type="button" id="btnApplySettings" class="btn btn-primary">Применить</button>
@@ -319,6 +339,18 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           <button type="button" id="btnClearCache" class="btn danger">Очистить</button>
         </div>
         <button type="button" id="INFO" class="btn" data-cmd="INFO">INFO</button>
+        <section class="settings-section">
+          <h3>Тема</h3>
+          <div class="settings-group">
+            <div class="settings-toggle" id="autoNightControl">
+              <label class="chip switch">
+                <input type="checkbox" id="autoNightMode" />
+                <span>Авто ночной режим</span>
+              </label>
+              <div id="autoNightHint" class="field-hint">Ночная тема включается автоматически с 21:00 до 07:00.</div>
+            </div>
+          </div>
+        </section>
       </form>
     </section>
     <!-- Вкладка безопасности -->
@@ -640,6 +672,7 @@ main {
 .tab[hidden] { display:none; }
 
 /* Chat */
+.chat-area { position: relative; }
 .chat-log {
   height: min(52vh, 560px);
   overflow: auto;
@@ -649,6 +682,26 @@ main {
   background: var(--panel-2);
   border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
 }
+.chat-scroll-down {
+  position: absolute;
+  right: .85rem;
+  bottom: .9rem;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 92%, white 8%), var(--panel-2));
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgba(0,0,0,.35);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.chat-scroll-down span { font-size: 1.3rem; line-height: 1; }
+.chat-scroll-down:hover { transform: translateY(-2px); box-shadow: 0 18px 30px rgba(0,0,0,.38); }
+.chat-scroll-down:active { transform: translateY(0); box-shadow: 0 10px 18px rgba(0,0,0,.32); }
+.chat-scroll-down[hidden] { display: none; }
 .msg {
   display:grid;
   gap:.35rem;
@@ -740,16 +793,41 @@ main {
 .chat-recv-controls { margin-top: .8rem; }
 .cmd-buttons { display:flex; gap:.4rem; flex-wrap:wrap; }
 .send-row { position: relative; display:flex; gap:.5rem; }
-#chatInput {
-  flex:1;
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid transparent;
-  border-radius: .9rem;
-  padding: .7rem .9rem;
-  outline: none;
-}
+#chatInput { flex:1; background: var(--panel-2); color: var(--text); border: 1px solid transparent; border-radius: .9rem; padding: .7rem .9rem; outline: none; }
 #chatInput:focus { border-color: var(--ring); box-shadow: 0 0 0 3px var(--ring); }
+.chat-commands {
+  margin-top: 1rem;
+  padding: .9rem 1rem;
+  border-radius: .95rem;
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  background: color-mix(in oklab, var(--panel-2) 92%, black 8%);
+}
+.chat-commands summary {
+  display:flex;
+  align-items:center;
+  gap:.45rem;
+  font-weight:700;
+  cursor:pointer;
+  list-style:none;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color: color-mix(in oklab, var(--text) 85%, var(--muted) 15%);
+}
+.chat-commands summary::-webkit-details-marker { display:none; }
+.chat-commands summary::after {
+  content:"▾";
+  margin-left:auto;
+  transition: transform .2s ease;
+  font-size:.9rem;
+}
+.chat-commands[open] summary::after { transform: rotate(180deg); }
+.chat-commands .cmd-buttons { margin-top:.75rem; }
+.chat-commands .cmd-inline { margin-top:.6rem; }
+@media (max-width: 640px) {
+  .chat-input { flex-direction: column; align-items: stretch; }
+  .chat-input button { width: 100%; min-width: 0; }
+  .chat-recv-controls { flex-direction: column; align-items: stretch; gap:.5rem; }
+}
 .fab { border-radius: 999px; width: 46px; height: 46px; display:grid; place-items:center; padding: 0; }
 
 /* Buttons */
@@ -912,31 +990,51 @@ main {
 
 /* Pointing tab */
 .pointing-intro { margin-top:.4rem; max-width:640px; }
-.pointing-summary { margin-top:1rem; padding:.9rem 1.1rem; border-radius:1rem; display:flex; flex-wrap:wrap; gap:.75rem 1rem; align-items:center; }
-.pointing-summary-chip { display:inline-flex; align-items:center; gap:.45rem; padding:.55rem .9rem; border-radius:.85rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: color-mix(in oklab, var(--panel-2) 90%, black 10%); font-weight:600; font-size:.9rem; transition:background .2s ease, border-color .2s ease, transform .2s ease; }
-.pointing-summary-chip .pointing-summary-icon { font-size:1.1rem; line-height:1; }
+.pointing-title { margin:0; font-size:clamp(2.6rem, 6vw, 3.4rem); font-weight:800; letter-spacing:.12em; line-height:1.1; }
+.pointing-summary { margin-top:.8rem; padding:.7rem .85rem; border-radius:.95rem; display:flex; flex-wrap:wrap; gap:.55rem .7rem; align-items:center; }
+.pointing-summary-chip { display:inline-flex; align-items:center; gap:.35rem; padding:.45rem .7rem; border-radius:.75rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: color-mix(in oklab, var(--panel-2) 92%, black 8%); font-weight:600; font-size:.82rem; transition:background .2s ease, border-color .2s ease, transform .2s ease; }
+.pointing-summary-chip .pointing-summary-icon { font-size:.6rem; line-height:1; }
 .pointing-summary-chip[data-state="ok"] { border-color: color-mix(in oklab, var(--good) 45%, var(--panel-2) 55%); background: color-mix(in oklab, var(--good) 20%, var(--panel-2) 80%); color: color-mix(in oklab, var(--good) 75%, white 25%); }
 .pointing-summary-chip[data-state="warn"] { border-color: color-mix(in oklab, var(--danger) 50%, var(--panel-2) 50%); background: color-mix(in oklab, var(--danger) 18%, var(--panel-2) 82%); color: color-mix(in oklab, var(--danger) 80%, white 20%); }
 .pointing-summary-chip[data-state="pending"] { border-color: color-mix(in oklab, var(--accent) 55%, var(--panel-2) 45%); background: color-mix(in oklab, var(--accent) 20%, var(--panel-2) 80%); color: color-mix(in oklab, var(--accent) 70%, white 30%); }
 .pointing-summary-chip[data-state="idle"] { opacity:.75; }
 .pointing-summary-chip:hover { transform:translateY(-2px); }
+@media (max-width: 520px) {
+  .pointing-summary { flex-wrap: nowrap; gap:.45rem; }
+  .pointing-summary-chip { flex:1 1 0; justify-content:center; min-width:0; }
+}
 .pointing-grid { display:grid; gap:1rem; margin-top:1rem; }
-.pointing-card { border-radius:.95rem; padding:1rem; display:flex; flex-direction:column; gap:.9rem; }
-.pointing-card h3 { margin:0; font-size:1.1rem; }
-.pointing-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
-.pointing-actions .btn { flex:0 0 auto; }
-.pointing-location-hint { margin:0; font-size:.78rem; color: color-mix(in oklab, var(--accent) 40%, var(--text) 60%); background: color-mix(in oklab, var(--accent) 14%, var(--panel-2) 86%); border:1px solid color-mix(in oklab, var(--accent) 45%, var(--panel-2) 55%); border-radius:.7rem; padding:.55rem .75rem; line-height:1.3; }
-.pointing-info { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:.5rem .75rem; }
-.pointing-info dt { font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color: var(--muted); margin:0 0 .2rem; }
-.pointing-info dd { margin:0; font-weight:600; }
-.pointing-manual { border-top:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); padding-top:.75rem; display:flex; flex-direction:column; gap:.6rem; }
-.pointing-manual-grid { display:grid; gap:.6rem; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); }
-.pointing-manual input { width:100%; background: var(--panel-2); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius:.6rem; padding:.5rem .65rem; color: var(--text); }
-.pointing-manual input:focus { border-color: var(--ring); box-shadow:0 0 0 3px var(--ring); outline:none; }
-.pointing-manual-title { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color: var(--muted); font-weight:700; }
-.pointing-compass { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.6rem; }
-.pointing-compass-dial { position:relative; width:min(280px, 75vw); aspect-ratio:1 / 1; border-radius:50%; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--panel-2) 95%, white 5%), color-mix(in oklab, var(--panel) 88%, black 12%)); display:flex; align-items:center; justify-content:center; overflow:hidden; }
-.pointing-compass-radar { position:absolute; left:12%; top:12%; width:76%; height:76%; border-radius:50%; pointer-events:none; }
+.pointing-card { border-radius:.95rem; padding:1rem; display:flex; flex-direction:column; gap:.8rem; }
+.pointing-card h3 { margin:0; font-size:1.05rem; }
+.pointing-observer { border:none; padding:0; background:transparent; }
+.pointing-observer summary { list-style:none; display:flex; align-items:center; justify-content:space-between; gap:.75rem; cursor:pointer; font-weight:600; font-size:1.05rem; color: var(--text); }
+.pointing-observer summary::-webkit-details-marker { display:none; }
+.pointing-observer summary .value { font-family:'JetBrains Mono','Fira Code','SFMono-Regular',monospace; letter-spacing:.08em; color: color-mix(in oklab, var(--accent) 70%, white 30%); text-transform:uppercase; }
+.pointing-observer[open] summary { border-bottom:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); padding-bottom:.6rem; }
+.pointing-observer-body { display:flex; flex-direction:column; gap:.75rem; padding-top:.75rem; }
+.pointing-observer-grid { display:grid; gap:.6rem; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); }
+.pointing-observer-grid input { width:100%; background: var(--panel-2); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius:.6rem; padding:.5rem .65rem; color: var(--text); font-family:'JetBrains Mono','Fira Code','SFMono-Regular',monospace; letter-spacing:.06em; text-transform:uppercase; }
+.pointing-observer-grid input:focus { border-color: var(--ring); box-shadow:0 0 0 2px var(--ring); outline:none; }
+.pointing-observer-meta { display:flex; flex-wrap:wrap; gap:1rem; font-size:.8rem; color: var(--muted); }
+.pointing-observer-meta div { display:flex; flex-direction:column; gap:.2rem; min-width:120px; }
+.pointing-observer-meta .label { font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color: color-mix(in oklab, var(--muted) 80%, var(--text) 20%); }
+.pointing-observer-meta strong { font-family:'JetBrains Mono','Fira Code','SFMono-Regular',monospace; color: var(--text); letter-spacing:.05em; }
+.pointing-target-grid { display:flex; flex-wrap:wrap; gap:1.25rem; }
+.pointing-target-metric { display:flex; flex-direction:column; gap:.25rem; }
+.pointing-target-metric .label { font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color: var(--muted); }
+.pointing-target-metric strong { font-size:1.45rem; font-weight:700; font-family:'JetBrains Mono','Fira Code','SFMono-Regular',monospace; letter-spacing:.08em; color: color-mix(in oklab, var(--accent) 65%, white 35%); }
+.pointing-compass { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.55rem; }
+.pointing-compass-dial { position:relative; width:min(260px, 70vw); aspect-ratio:1 / 1; border-radius:50%; border:1px solid color-mix(in oklab, var(--panel-2) 68%, black 32%); background: radial-gradient(circle at 50% 50%, color-mix(in oklab, var(--panel-2) 96%, white 4%), color-mix(in oklab, var(--panel) 88%, black 12%)); display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.pointing-compass-dial::before {
+  content:"";
+  position:absolute;
+  inset:12%;
+  border-radius:50%;
+  background: conic-gradient(from 180deg, color-mix(in oklab, var(--accent) 15%, transparent) 0deg 90deg, color-mix(in oklab, var(--good) 16%, transparent) 90deg 180deg, color-mix(in oklab, var(--accent-2) 15%, transparent) 180deg 270deg, color-mix(in oklab, var(--danger) 18%, transparent) 270deg 360deg);
+  opacity:.15;
+  pointer-events:none;
+}
+.pointing-compass-radar { position:absolute; left:14%; top:14%; width:72%; height:72%; border-radius:50%; pointer-events:none; }
 .pointing-compass-sat { position:absolute; left:50%; top:50%; width:10px; height:10px; border-radius:50%; padding:0; display:flex; align-items:center; justify-content:center; transform:translate(-50%, -50%) scale(.55); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 50%, var(--panel) 50%); border:2px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 60%, black 40%); box-shadow:0 3px 8px rgba(0,0,0,.28); pointer-events:auto; cursor:pointer; transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease, filter .2s ease; box-sizing:border-box; line-height:1; aspect-ratio:1 / 1; }
 .pointing-compass-sat:hover { transform:translate(-50%, -50%) scale(.8); box-shadow:0 6px 14px rgba(0,0,0,.32); }
 .pointing-compass-sat:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
@@ -944,26 +1042,42 @@ main {
 .pointing-compass-sat .pointing-compass-label { position:absolute; left:50%; top:-.4rem; transform:translate(-50%, -100%); padding:.25rem .55rem; border-radius:.55rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); font-size:.68rem; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.28); white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .2s ease, transform .2s ease; z-index:5; }
 .pointing-compass-sat .pointing-compass-label::after { content:""; position:absolute; left:50%; top:100%; width:8px; height:8px; transform:translate(-50%, -5px) rotate(45deg); background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); border-left:none; border-top:none; box-shadow:0 3px 6px rgba(0,0,0,.22); }
 .pointing-compass-sat:hover .pointing-compass-label, .pointing-compass-sat:focus-visible .pointing-compass-label, .pointing-compass-sat.active .pointing-compass-label { opacity:1; transform:translate(-50%, -115%); }
-.pointing-compass-north { position:absolute; top:7%; left:50%; transform:translate(-50%, -50%); font-size:.75rem; font-weight:700; letter-spacing:.2em; text-transform:uppercase; color: color-mix(in oklab, var(--accent) 45%, var(--text) 55%); pointer-events:none; text-align:center; }
-.pointing-compass-north::after { content:""; display:block; margin:.3rem auto 0; width:0; height:0; border:6px solid transparent; border-bottom:8px solid color-mix(in oklab, var(--accent) 55%, white 45%); filter:drop-shadow(0 2px 2px rgba(0,0,0,.3)); }
+.pointing-compass-axes {
+  position:absolute;
+  inset:16%;
+  pointer-events:none;
+  background:
+    linear-gradient(color-mix(in oklab, var(--panel-2) 70%, black 30%), color-mix(in oklab, var(--panel-2) 70%, black 30%)) center/2px 100% no-repeat,
+    linear-gradient(color-mix(in oklab, var(--panel-2) 70%, black 30%), color-mix(in oklab, var(--panel-2) 70%, black 30%)) center/100% 2px no-repeat;
+  opacity:.45;
+}
+.pointing-compass-rose {
+  position:absolute;
+  inset:6%;
+  pointer-events:none;
+  font-weight:700;
+  font-size:.7rem;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color: color-mix(in oklab, var(--text) 80%, var(--panel-2) 20%);
+}
+.pointing-compass-rose span {
+  position:absolute;
+  transform:translate(-50%, -50%);
+}
+.pointing-compass-rose span[data-dir="south"] { top:8%; left:50%; }
+.pointing-compass-rose span[data-dir="north"] { bottom:8%; left:50%; }
+.pointing-compass-rose span[data-dir="east"] { top:50%; right:6%; }
+.pointing-compass-rose span[data-dir="west"] { top:50%; left:6%; }
 .pointing-compass-legend { display:flex; flex-wrap:wrap; justify-content:center; gap:.5rem .9rem; margin-top:.6rem; }
 .pointing-compass-legend span { display:flex; align-items:center; gap:.35rem; font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color: color-mix(in oklab, var(--text) 78%, var(--panel-2) 22%); opacity:.85; }
 .pointing-compass-legend span::before { content:""; width:8px; height:8px; border-radius:50%; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 78%, white 22%); box-shadow:0 0 0 2px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, black 55%); }
-.pointing-compass-center { width:18px; height:18px; border-radius:50%; background: color-mix(in oklab, var(--panel-2) 85%, black 15%); border:2px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); }
-.pointing-compass-graduations { position:absolute; inset:12%; border-radius:50%; border:1px dashed color-mix(in oklab, var(--panel-2) 70%, black 30%); opacity:.5; }
-.pointing-angles { display:flex; flex-wrap:wrap; gap:.6rem 1rem; font-size:.9rem; }
-.pointing-angle { display:flex; flex-direction:column; gap:.2rem; }
-.pointing-angle .label { font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color: var(--muted); }
-.pointing-elevation { display:flex; flex-direction:column; gap:.6rem; }
-.pointing-elevation-scale { position:relative; height:18px; border-radius:999px; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: linear-gradient(90deg, color-mix(in oklab, var(--panel) 92%, white 8%), color-mix(in oklab, var(--accent-2) 30%, var(--panel-2) 70%)); overflow:hidden; }
-.pointing-elevation-target, .pointing-elevation-current { position:absolute; top:-6px; left:0; width:2px; height:30px; border-radius:1px; opacity:0; transition:opacity .2s ease, left .2s ease; }
-.pointing-elevation-target { background: var(--accent); }
-.pointing-elevation-current { background: var(--good); }
-.pointing-elevation-target span, .pointing-elevation-current span { position:absolute; top:-1.3rem; left:50%; transform:translateX(-50%); font-size:.65rem; text-transform:uppercase; letter-spacing:.05em; color: inherit; }
-.pointing-elevation-target.active, .pointing-elevation-current.active { opacity:1; }
+.pointing-compass-center { width:14px; height:14px; border-radius:50%; background: color-mix(in oklab, var(--panel-2) 85%, black 15%); border:2px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); }
+.pointing-compass-graduations { position:absolute; inset:16%; border-radius:50%; border:1px dashed color-mix(in oklab, var(--panel-2) 70%, black 30%); opacity:.45; }
 .pointing-min-el { display:flex; align-items:center; gap:.4rem; font-size:.85rem; color: var(--muted); }
 .pointing-min-el input { width:140px; }
 .pointing-min-el-value { font-weight:700; color: var(--text); min-width:2.5rem; text-align:right; }
+.pointing-min-el-footer { margin-top:auto; padding-top:.6rem; border-top:1px solid color-mix(in oklab, var(--panel-2) 55%, black 45%); }
 .pointing-select { display:flex; flex-direction:column; gap:.35rem; font-weight:600; }
 .pointing-select select { background: var(--panel-2); color: var(--text); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius:.6rem; padding:.55rem .7rem; outline:none; }
 .pointing-select select:focus { border-color: var(--ring); box-shadow:0 0 0 3px var(--ring); }
@@ -983,15 +1097,19 @@ main {
 .pointing-empty { padding:.8rem; border-radius:.8rem; background: color-mix(in oklab, var(--panel-2) 90%, black 10%); border:1px dashed color-mix(in oklab, var(--panel-2) 65%, black 35%); text-align:center; }
 .pointing-card-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.5rem; }
 .pointing-card-wide { grid-column:1 / -1; }
-.pointing-horizon { position:relative; border-radius:1rem; padding:1.4rem 1.1rem 1.9rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 72%, var(--accent-2) 6%), color-mix(in oklab, var(--panel) 90%, black 10%)); overflow:hidden; min-height:160px; }
-.pointing-horizon::before { content:""; position:absolute; inset:auto 0 0; height:32%; background: linear-gradient(180deg, color-mix(in oklab, var(--panel) 82%, black 18%), color-mix(in oklab, #020617 88%, black 12%)); opacity:.85; }
+.pointing-horizon { position:relative; border-radius:1rem; padding:1.25rem 1.1rem 1.5rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 72%, var(--accent-2) 6%), color-mix(in oklab, var(--panel) 90%, black 10%)); overflow:hidden; min-height:160px; }
+.pointing-horizon::before { content:""; position:absolute; inset:auto 0 0; height:32%; background: linear-gradient(180deg, color-mix(in oklab, var(--panel) 82%, black 18%), color-mix(in oklab, #020617 88%, black 12%)); opacity:.85; z-index:0; pointer-events:none; }
+.pointing-horizon::after { content:""; position:absolute; inset:42px 18px 22px; background:
+    repeating-linear-gradient(to right, color-mix(in oklab, var(--panel-2) 65%, black 35%) 0, color-mix(in oklab, var(--panel-2) 65%, black 35%) 1px, transparent 1px, transparent calc(100% / 36)),
+    repeating-linear-gradient(to top, color-mix(in oklab, var(--panel-2) 65%, black 35%) 0, color-mix(in oklab, var(--panel-2) 65%, black 35%) 1px, transparent 1px, transparent calc(100% / 9));
+  opacity:.32; pointer-events:none; z-index:0; }
 .pointing-horizon-azimuths { position:absolute; top:14px; left:18px; right:18px; display:flex; justify-content:space-between; font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; color: color-mix(in oklab, var(--muted) 70%, var(--text) 30%); pointer-events:none; z-index:0; opacity:.85; }
 .pointing-horizon-azimuths span { display:flex; align-items:center; gap:.35rem; }
 .pointing-horizon-azimuths span::before { content:""; display:block; width:1px; height:14px; background: color-mix(in oklab, var(--panel-2) 60%, black 40%); }
 .pointing-horizon-track { position:absolute; inset:46px 18px 24px; z-index:1; }
 .pointing-horizon-empty { position:relative; z-index:1; margin:0; text-align:center; padding-top:2.1rem; }
-.pointing-horizon-sat { position:absolute; bottom:0; --pointing-sat-offset:0; transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -1.8rem)) scale(.55); border:none; width:18px; height:18px; border-radius:50%; padding:0; display:flex; align-items:center; justify-content:center; line-height:1; aspect-ratio:1 / 1; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 48%, var(--panel) 52%); border:3px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, black 35%); box-shadow:0 4px 12px rgba(0,0,0,.32); cursor:pointer; transition:transform .2s ease, box-shadow .2s ease, filter .2s ease; z-index:2; box-sizing:border-box; }
-.pointing-horizon-sat:hover { transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -1.8rem - 4px)) scale(.8); box-shadow:0 10px 20px rgba(0,0,0,.4); }
+.pointing-horizon-sat { position:absolute; bottom:0; --pointing-sat-offset:0; transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -1.25rem)) scale(.55); border:none; width:18px; height:18px; border-radius:50%; padding:0; display:flex; align-items:center; justify-content:center; line-height:1; aspect-ratio:1 / 1; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 48%, var(--panel) 52%); border:3px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 65%, black 35%); box-shadow:0 4px 12px rgba(0,0,0,.32); cursor:pointer; transition:transform .2s ease, box-shadow .2s ease, filter .2s ease; z-index:2; box-sizing:border-box; }
+.pointing-horizon-sat:hover { transform:translate(-50%, calc(var(--pointing-sat-offset, 0) * -1.25rem - 4px)) scale(.8); box-shadow:0 10px 20px rgba(0,0,0,.4); }
 .pointing-horizon-sat.active { filter:brightness(1.08); box-shadow:0 0 0 3px color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 45%, white 55%); }
 .pointing-horizon-sat:focus-visible { outline:2px solid var(--ring); outline-offset:4px; }
 .pointing-horizon-sat .pointing-horizon-label { position:absolute; left:50%; bottom:130%; transform:translate(-50%, 6px); padding:.3rem .55rem; border-radius:.65rem; background: color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 22%, var(--panel-2) 78%); border:1px solid color-mix(in oklab, var(--pointing-sat-color, var(--accent)) 55%, black 45%); color: var(--text); font-weight:600; font-size:.72rem; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .2s ease, transform .2s ease; text-shadow:0 1px 2px rgba(0,0,0,.28); }
@@ -1003,7 +1121,7 @@ main {
 /* Tables */
 .table-wrap { overflow:auto; border-radius:.8rem; border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); background: var(--panel-2); }
 .table-wrap.pretty table thead th { position: sticky; top: 0; background: linear-gradient(180deg, var(--panel-2), color-mix(in oklab, var(--panel-2) 80%, white 20%)); }
-table { border-collapse: collapse; width: 100%; min-width: 760px; }
+table { border-collapse: collapse; width: 100%; min-width: 680px; }
 th, td { text-align: left; padding: .6rem .7rem; border-bottom: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); }
 tbody tr:nth-child(odd) { background: color-mix(in oklab, var(--panel-2) 90%, white 10%); }
 /* подсветка статусов каналов */
@@ -1014,7 +1132,12 @@ tbody tr.unknown { opacity:.6; }
 /* подсветка процесса и итогов сканирования */
 /* используем color-mix для согласования с темой */
 tbody tr.scanning { background: var(--scan-bg); color: var(--scan-fg); font-weight:600; }
-tbody tr.signal { background: color-mix(in oklab, var(--good) 15%, white); /* ~#dcfce7, зелёный фон */ }
+tbody tr.signal {
+  background: color-mix(in oklab, var(--good) 18%, var(--panel-2) 82%);
+  box-shadow: inset 4px 0 0 color-mix(in oklab, var(--good) 65%, white 35%);
+  color: color-mix(in oklab, var(--text) 85%, white 15%);
+}
+tbody tr.signal td { font-weight:600; }
 tbody tr.crc-error { background: color-mix(in oklab, #f97316 20%, white); /* ~#fed7aa, оранжевый фон */ }
 tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white); color:#374151; /* ~#e5e7eb, серый фон и тёмный текст */ }
 .channel-layout {
@@ -1058,6 +1181,49 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
 .channel-info-block {
   display: grid;
   gap: .6rem;
+}
+.channel-info-row td {
+  padding: 0;
+  border-bottom: none;
+  background: transparent;
+}
+.channel-info-row .channel-info {
+  margin: .8rem .6rem;
+}
+.channel-info-cell { background: transparent; }
+@media (max-width: 720px) {
+  .channel-layout { gap: .75rem; }
+  .table-wrap.pretty table { min-width: 0; }
+  #channelsTable thead { display: none; }
+  #channelsTable tbody { display: grid; gap: .9rem; }
+  #channelsTable tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .6rem .8rem;
+    padding: .85rem;
+    border-radius: .95rem;
+    border: 1px solid color-mix(in oklab, var(--panel-2) 68%, black 32%);
+    background: color-mix(in oklab, var(--panel-2) 95%, black 5%);
+  }
+  #channelsTable tbody tr td {
+    border-bottom: none;
+    padding: .35rem 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: .5rem;
+    font-size: .85rem;
+  }
+  #channelsTable tbody tr td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  .channel-info-row .channel-info {
+    margin: 0;
+  }
 }
 .channel-info-caption {
   font-weight: 700;
@@ -1150,11 +1316,15 @@ tbody tr.selected-info td { font-weight:600; }
   gap: .9rem;
 }
 .enc-test[data-status="ok"] {
-  border-color: color-mix(in oklab, var(--accent) 35%, var(--panel-2) 65%);
+  border-color: color-mix(in oklab, var(--good) 45%, var(--panel-2) 55%);
+  background: color-mix(in oklab, var(--good) 18%, var(--panel-2) 82%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--good) 30%, var(--panel-2) 70%);
 }
 .enc-test[data-status="error"] {
-  border-color: color-mix(in oklab, var(--danger) 45%, var(--panel-2) 55%);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--danger) 25%, black 10%);
+  border-color: color-mix(in oklab, var(--danger) 55%, var(--panel-2) 45%);
+  background: color-mix(in oklab, var(--danger) 22%, var(--panel-2) 78%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--danger) 35%, black 15%);
+  color: color-mix(in oklab, var(--danger) 75%, white 25%);
 }
 .enc-test-header {
   display:flex;
@@ -1213,7 +1383,7 @@ tbody tr.selected-info td { font-weight:600; }
 .actions { display:flex; flex-wrap:wrap; gap:.5rem; margin:.5rem 0; }
 
 /* Форма настроек радиомодуля */
-.settings-form { display:grid; gap:.75rem; max-width:420px; }
+.settings-form { display:grid; gap:1.25rem; max-width:520px; }
 .settings-form label { display:flex; flex-direction:column; gap:.25rem; font-weight:600; }
 .settings-form label input,
 .settings-form label select {
@@ -1236,7 +1406,31 @@ tbody tr.selected-info td { font-weight:600; }
 .settings-form .settings-toggle { display:flex; flex-direction:column; gap:.25rem; }
 .settings-form .settings-toggle .chip { gap:.6rem; justify-content:flex-start; }
 .settings-form .settings-toggle .field-hint { margin:0; }
-.settings-actions { margin-top:.5rem; }
+.settings-section {
+  border-radius: .95rem;
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  background: color-mix(in oklab, var(--panel-2) 92%, black 8%);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+}
+.settings-section h3 {
+  margin: 0;
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+}
+.settings-group { display:grid; gap:.75rem; }
+.settings-group.two { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:.75rem; }
+.settings-group.inline { display:flex; flex-wrap:wrap; gap:.75rem; }
+.settings-section:last-of-type { margin-bottom: 0; }
+.settings-actions { margin-top:.25rem; }
+@media (max-width: 640px) {
+  .settings-group.two { grid-template-columns: 1fr; }
+  .settings-group.inline { flex-direction: column; }
+}
 
 /* Mobile dock */
 .dock {
@@ -1292,64 +1486,12 @@ tbody tr.selected-info td { font-weight:600; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: .85rem;
 }
-)~~~";;
+.debug-line { opacity:.85; color: var(--text); }
+.debug-line--success { color: color-mix(in oklab, var(--good) 65%, var(--text) 35%); }
+.debug-line--error { color: color-mix(in oklab, var(--danger) 75%, var(--text) 25%); }
+.debug-line--warn { color: color-mix(in oklab, #facc15 70%, var(--text) 30%); }
+.debug-line--action { color: color-mix(in oklab, var(--accent) 70%, var(--text) 30%); }
 
-// libs/sha256.js — библиотека SHA-256 на чистом JavaScript
-const char SHA256_JS[] PROGMEM = R"~~~(/* Простая реализация SHA-256 на чистом JS.
- * Используется, когда WebCrypto недоступен (например, на HTTP).
- */
-(function(global){
-  function rotr(x,n){ return (x>>>n) | (x<<(32-n)); }
-  function sha256Bytes(bytes){
-    const K = new Uint32Array([
-      0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-      0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-      0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-      0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-      0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
-    ]);
-    const H = new Uint32Array([
-      0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-      0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19
-    ]);
-    const l = bytes.length;
-    const bitLen = l * 8;
-    const paddedLen = (((l + 9) >> 6) + 1) << 6; // длина с дополнением кратная 64
-    const buffer = new Uint8Array(paddedLen);
-    buffer.set(bytes);
-    buffer[l] = 0x80; // добавляем бит "1"
-    const dv = new DataView(buffer.buffer);
-    dv.setUint32(paddedLen - 8, Math.floor(bitLen / 4294967296));
-    dv.setUint32(paddedLen - 4, bitLen >>> 0);
-    const w = new Uint32Array(64);
-    for (let i = 0; i < paddedLen; i += 64) {
-      for (let j = 0; j < 16; j++) w[j] = dv.getUint32(i + j*4);
-      for (let j = 16; j < 64; j++) {
-        const s0 = rotr(w[j-15],7) ^ rotr(w[j-15],18) ^ (w[j-15]>>>3);
-        const s1 = rotr(w[j-2],17) ^ rotr(w[j-2],19) ^ (w[j-2]>>>10);
-        w[j] = (w[j-16] + s0 + w[j-7] + s1) >>> 0;
-      }
-      let a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
-      for (let j=0; j<64; j++) {
-        const S1 = rotr(e,6) ^ rotr(e,11) ^ rotr(e,25);
-        const ch = (e & f) ^ (~e & g);
-        const t1 = (h + S1 + ch + K[j] + w[j]) >>> 0;
-        const S0 = rotr(a,2) ^ rotr(a,13) ^ rotr(a,22);
-        const maj = (a & b) ^ (a & c) ^ (b & c);
-        const t2 = (S0 + maj) >>> 0;
-        h=g; g=f; f=e; e=(d + t1)>>>0; d=c; c=b; b=a; a=(t1 + t2)>>>0;
-      }
-      H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
-      H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
-    }
-    return Array.from(H).map(x=>x.toString(16).padStart(8,"0")).join("");
-  }
-  // экспорт в глобальный объект
-  global.sha256Bytes = sha256Bytes;
-})(this);
 )~~~";
 
 // libs/mgrs.js — преобразование квадрата MGRS в широту и долготу (центр 100‑км сектора)
@@ -1577,7 +1719,8 @@ const MU_EARTH = 398600.4418;      // гравитационный параме�
 const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
 const TWO_PI = Math.PI * 2;
-const POINTING_DEFAULT_MIN_ELEVATION = 5; // минимальный угол возвышения по умолчанию
+const POINTING_DEFAULT_MIN_ELEVATION = 10; // минимальный угол возвышения по умолчанию
+const POINTING_COMPASS_OFFSET_DEG = 180; // отображаем юг в верхней части компаса
 
 /* Состояние интерфейса */
 const UI = {
@@ -1608,6 +1751,10 @@ const UI = {
     infoChannelTx: null,
     infoChannelRx: null,
     chatHistory: [],
+    chatHydrating: false,
+    chatScrollPinned: true,
+    chatSoundCtx: null,
+    chatSoundLast: 0,
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
@@ -1862,6 +2009,7 @@ async function init() {
   UI.els.rstsDownloadBtn = $("#btnRstsDownloadJson");
   UI.els.chatLog = $("#chatLog");
   UI.els.chatInput = $("#chatInput");
+  UI.els.chatScrollBtn = $("#chatScrollBottom");
   UI.els.sendBtn = $("#sendBtn");
   UI.els.ackChip = $("#ackStateChip");
   UI.els.ackText = $("#ackStateText");
@@ -1894,6 +2042,8 @@ async function init() {
   UI.els.channelInfoEmpty = $("#channelInfoEmpty");
   UI.els.channelInfoStatus = $("#channelInfoStatus");
   UI.els.channelInfoSetBtn = $("#channelInfoSetCurrent");
+  UI.els.channelInfoRow = null;
+  UI.els.channelInfoCell = null;
   UI.els.channelInfoFields = {
     rxCurrent: $("#channelInfoRxCurrent"),
     txCurrent: $("#channelInfoTxCurrent"),
@@ -2060,6 +2210,23 @@ async function init() {
       if (event.key === "Enter") onSendChat();
     });
   }
+  if (UI.els.chatLog) {
+    UI.els.chatLog.addEventListener("scroll", onChatScroll);
+    updateChatScrollButton();
+  }
+  if (UI.els.chatScrollBtn) {
+    UI.els.chatScrollBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      scrollChatToBottom(true);
+    });
+  }
+  if (typeof document !== "undefined") {
+    const unlockAudio = () => {
+      ensureChatAudioContext();
+    };
+    document.addEventListener("pointerdown", unlockAudio, { once: true, capture: true });
+    document.addEventListener("keydown", unlockAudio, { once: true, capture: true });
+  }
   $all('[data-cmd]').forEach((btn) => {
     const cmd = btn.dataset ? btn.dataset.cmd : null;
     if (!cmd) return;
@@ -2186,6 +2353,7 @@ function setTab(tab) {
   }
   storage.set("activeTab", tab);
   if (tab !== "channels") hideChannelInfo();
+  if (tab === "chat") updateChatScrollButton();
 }
 
 /* Тема */
@@ -2276,6 +2444,88 @@ function toggleAccent() {
 }
 
 /* Работа чата */
+const CHAT_SCROLL_EPSILON = 32;
+
+function chatIsNearBottom(log) {
+  if (!log) return true;
+  const diff = log.scrollHeight - log.scrollTop - log.clientHeight;
+  return diff <= CHAT_SCROLL_EPSILON;
+}
+
+function updateChatScrollButton() {
+  const log = UI.els.chatLog;
+  const btn = UI.els.chatScrollBtn;
+  if (!btn || !log) return;
+  const pinned = chatIsNearBottom(log);
+  btn.hidden = pinned;
+}
+
+function scrollChatToBottom(force) {
+  const log = UI.els.chatLog;
+  if (!log) return;
+  if (force || UI.state.chatScrollPinned || chatIsNearBottom(log)) {
+    log.scrollTop = log.scrollHeight;
+    UI.state.chatScrollPinned = true;
+  }
+  updateChatScrollButton();
+}
+
+function onChatScroll() {
+  const log = UI.els.chatLog;
+  if (!log) return;
+  UI.state.chatScrollPinned = chatIsNearBottom(log);
+  updateChatScrollButton();
+}
+
+function shouldPlayIncomingSound(entry) {
+  if (!entry) return false;
+  const role = entry.role || (entry.a === "you" ? "user" : "system");
+  return role === "rx";
+}
+
+function ensureChatAudioContext() {
+  if (typeof window === "undefined") return null;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!UI.state.chatSoundCtx) {
+    try {
+      UI.state.chatSoundCtx = new Ctx();
+    } catch (err) {
+      UI.state.chatSoundCtx = null;
+      return null;
+    }
+  }
+  const ctx = UI.state.chatSoundCtx;
+  if (ctx && typeof ctx.resume === "function" && ctx.state === "suspended") {
+    ctx.resume().catch(() => {});
+  }
+  return ctx;
+}
+
+function playIncomingChatSound() {
+  const now = Date.now();
+  if (now - UI.state.chatSoundLast < 250) return;
+  const ctx = ensureChatAudioContext();
+  if (!ctx) return;
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const start = ctx.currentTime;
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(660, start);
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(0.09, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.38);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + 0.4);
+    UI.state.chatSoundLast = now;
+  } catch (err) {
+    console.warn("[chat] аудио уведомление недоступно:", err);
+  }
+}
+
 function getChatHistory() {
   if (!Array.isArray(UI.state.chatHistory)) UI.state.chatHistory = [];
   return UI.state.chatHistory;
@@ -2430,9 +2680,12 @@ function loadChatHistory() {
   const normalized = normalizeChatEntries(entries);
   UI.state.chatHistory = normalized;
   if (UI.els.chatLog) UI.els.chatLog.innerHTML = "";
+  UI.state.chatHydrating = true;
   for (let i = 0; i < normalized.length; i++) {
-    addChatMessage(normalized[i], i);
+    addChatMessage(normalized[i], i, { skipSound: true, skipScroll: true });
   }
+  UI.state.chatHydrating = false;
+  scrollChatToBottom(true);
   saveChatHistory();
 }
 function persistChat(message, author, meta) {
@@ -2451,7 +2704,8 @@ function persistChat(message, author, meta) {
   saveChatHistory();
   return { record, index: entries.length - 1 };
 }
-function addChatMessage(entry, index) {
+function addChatMessage(entry, index, options) {
+  const opts = options || {};
   if (!UI.els.chatLog) return null;
   const data = typeof entry === "string" ? { t: Date.now(), a: "dev", m: entry, role: "system" } : entry;
   const wrap = document.createElement("div");
@@ -2474,7 +2728,14 @@ function addChatMessage(entry, index) {
   wrap.appendChild(bubble);
   wrap.appendChild(time);
   UI.els.chatLog.appendChild(wrap);
-  UI.els.chatLog.scrollTop = UI.els.chatLog.scrollHeight;
+  if (!opts.skipSound && !UI.state.chatHydrating && shouldPlayIncomingSound(data)) {
+    playIncomingChatSound();
+  }
+  if (opts.skipScroll) {
+    updateChatScrollButton();
+  } else {
+    scrollChatToBottom(opts.forceScroll === true);
+  }
   return wrap;
 }
 function setBubbleText(node, text) {
@@ -3608,6 +3869,40 @@ let channels = [];
 // Служебное состояние поиска по каналам
 const searchState = { running: false, cancel: false };
 
+function getChannelTableColumnCount() {
+  const table = $("#channelsTable");
+  if (!table) return 0;
+  const head = table.tHead && table.tHead.rows && table.tHead.rows[0];
+  if (head) return head.cells.length;
+  const firstBodyRow = table.tBodies && table.tBodies[0] && table.tBodies[0].rows && table.tBodies[0].rows[0];
+  return firstBodyRow ? firstBodyRow.cells.length : 0;
+}
+
+function ensureChannelInfoRow() {
+  let row = UI.els.channelInfoRow;
+  if (!row) {
+    row = document.createElement("tr");
+    row.className = "channel-info-row";
+    const cell = document.createElement("td");
+    cell.className = "channel-info-cell";
+    row.appendChild(cell);
+    UI.els.channelInfoRow = row;
+    UI.els.channelInfoCell = cell;
+  }
+  const cell = UI.els.channelInfoCell;
+  if (cell) {
+    const cols = getChannelTableColumnCount() || 7;
+    cell.colSpan = cols;
+  }
+  return row;
+}
+
+function removeChannelInfoRow() {
+  if (UI.els.channelInfoRow && UI.els.channelInfoRow.parentNode) {
+    UI.els.channelInfoRow.parentNode.removeChild(UI.els.channelInfoRow);
+  }
+}
+
 // Скрываем панель информации о канале
 function hideChannelInfo() {
   UI.state.infoChannel = null;
@@ -3665,6 +3960,7 @@ function updateChannelInfoPanel() {
       setBtn.disabled = true;
       setBtn.textContent = "Установить текущим каналом";
     }
+    removeChannelInfoRow();
     updateChannelInfoHighlight();
     return;
   }
@@ -3708,9 +4004,13 @@ function updateChannelInfoPanel() {
   if (!channelReference.loading && !channelReference.error && !ref) messages.push("В справочнике нет данных для этого канала.");
   if (!actualEntry) messages.push("Канал отсутствует в текущем списке.");
   if (statusEl) {
-    const text = messages.join(" ");
-    statusEl.textContent = text;
-    statusEl.hidden = !text;
+    if (messages.length) {
+      statusEl.textContent = messages.join(" ");
+      statusEl.hidden = false;
+    } else {
+      statusEl.textContent = "";
+      statusEl.hidden = true;
+    }
   }
 
   const setBtn = UI.els.channelInfoSetBtn || $("#channelInfoSetCurrent");
@@ -3718,6 +4018,26 @@ function updateChannelInfoPanel() {
     const same = UI.state.channel != null && UI.state.channel === UI.state.infoChannel;
     setBtn.disabled = !!same;
     setBtn.textContent = same ? "Канал уже активен" : "Установить текущим каналом";
+  }
+
+  const table = $("#channelsTable");
+  const tbody = table && table.tBodies ? table.tBodies[0] : null;
+  let targetRow = null;
+  if (tbody) {
+    const rows = Array.from(tbody.querySelectorAll("tr[data-ch]"));
+    targetRow = rows.find((tr) => Number(tr.dataset.ch) === UI.state.infoChannel) || null;
+  }
+  if (targetRow && tbody) {
+    const infoRow = ensureChannelInfoRow();
+    const cell = UI.els.channelInfoCell;
+    if (cell) {
+      while (cell.firstChild) cell.removeChild(cell.firstChild);
+      cell.appendChild(panel);
+    }
+    infoRow.hidden = false;
+    tbody.insertBefore(infoRow, targetRow.nextSibling);
+  } else {
+    removeChannelInfoRow();
   }
 
   updateChannelInfoHighlight();
@@ -3959,13 +4279,21 @@ function renderChannels() {
     } else if (scanLower) {
       tr.classList.add("signal");
     }
-    tr.innerHTML = "<td>" + c.ch + "</td>" +
-                   "<td>" + c.tx.toFixed(3) + "</td>" +
-                   "<td>" + c.rx.toFixed(3) + "</td>" +
-                   "<td>" + (isNaN(c.rssi) ? "" : c.rssi) + "</td>" +
-                   "<td>" + (isNaN(c.snr) ? "" : c.snr) + "</td>" +
-                   "<td>" + (c.st || "") + "</td>" +
-                   "<td>" + scanText + "</td>";
+    const cells = [
+      { label: "Канал", value: c.ch != null ? c.ch : "—" },
+      { label: "TX (МГц)", value: Number.isFinite(c.tx) ? c.tx.toFixed(3) : "—" },
+      { label: "RX (МГц)", value: Number.isFinite(c.rx) ? c.rx.toFixed(3) : "—" },
+      { label: "RSSI", value: Number.isFinite(c.rssi) ? String(c.rssi) : "" },
+      { label: "SNR", value: Number.isFinite(c.snr) ? c.snr.toFixed(1) : "" },
+      { label: "Статус", value: c.st || "" },
+      { label: "SCAN", value: scanText },
+    ];
+    cells.forEach((info) => {
+      const td = document.createElement("td");
+      td.dataset.label = info.label;
+      td.textContent = info.value != null ? String(info.value) : "";
+      tr.appendChild(td);
+    });
     tr.dataset.ch = String(c.ch);
     tr.tabIndex = 0;
     tr.setAttribute("role", "button");
@@ -5466,10 +5794,13 @@ function initPointingTab() {
     });
   }
   if (els.manualAlt) {
+    const commitAlt = () => applyPointingAltitude();
+    els.manualAlt.addEventListener("change", commitAlt);
+    els.manualAlt.addEventListener("blur", commitAlt);
     els.manualAlt.addEventListener("keydown", (event) => {
       if (event && event.key === "Enter") {
         event.preventDefault();
-        applyPointingMgrs();
+        commitAlt();
       }
     });
   }
@@ -5658,6 +5989,29 @@ function setPointingObserverFromMgrs(value, altitude, options = {}) {
   return true;
 }
 
+function setPointingObserverAltitude(height, options = {}) {
+  const state = UI.state.pointing;
+  const observer = state && state.observer;
+  if (!observer) {
+    if (!options.silent) note("Сначала укажите квадрат MGRS");
+    return false;
+  }
+  const altNumber = Number(height);
+  const next = Number.isFinite(altNumber) ? altNumber : 0;
+  const prev = Number.isFinite(observer.heightM) ? observer.heightM : 0;
+  if (Math.abs(prev - next) < 0.01) {
+    storage.set("pointingAlt", String(next || 0));
+    updatePointingObserverUi();
+    return true;
+  }
+  observer.heightM = next;
+  storage.set("pointingAlt", String(next || 0));
+  updatePointingObserverUi();
+  updatePointingSatellites();
+  if (!options.silent) note("Высота обновлена");
+  return true;
+}
+
 function updatePointingObserverUi() {
   const els = UI.els.pointing;
   if (!els) return;
@@ -5693,14 +6047,49 @@ function updatePointingObserverUi() {
 function applyPointingMgrs() {
   const els = UI.els.pointing;
   if (!els) return;
+  const state = UI.state.pointing;
   const inputValue = els.mgrsInput ? els.mgrsInput.value : "";
-  const normalized = pointingCanonicalMgrs(inputValue);
+  let normalized = pointingCanonicalMgrs(inputValue);
   if (!normalized) {
-    note("Введите квадрат MGRS вида 43U CR");
-    return;
+    const fallback = state && state.observer ? (state.observer.mgrsRaw || state.observerMgrs) : null;
+    normalized = pointingCanonicalMgrs(fallback);
+    if (!normalized) {
+      note("Введите квадрат MGRS вида 43U CR");
+      return;
+    }
   }
-  const altValue = els.manualAlt ? Number(els.manualAlt.value) : 0;
+  const rawAlt = els.manualAlt ? String(els.manualAlt.value || "").trim() : "";
+  let altValue;
+  if (!rawAlt) {
+    altValue = state && state.observer && Number.isFinite(state.observer.heightM) ? state.observer.heightM : 0;
+  } else {
+    const parsed = Number(rawAlt.replace(",", "."));
+    if (!Number.isFinite(parsed)) {
+      note("Высота должна быть числом");
+      return;
+    }
+    altValue = parsed;
+  }
   setPointingObserverFromMgrs(normalized, altValue, { silent: false });
+}
+
+function applyPointingAltitude() {
+  const els = UI.els.pointing;
+  if (!els) return;
+  const state = UI.state.pointing;
+  const raw = els.manualAlt ? String(els.manualAlt.value || "").trim() : "";
+  let value = 0;
+  if (!raw) {
+    value = state && state.observer && Number.isFinite(state.observer.heightM) ? state.observer.heightM : 0;
+  } else {
+    const parsed = Number(raw.replace(",", "."));
+    if (!Number.isFinite(parsed)) {
+      note("Высота должна быть числом");
+      return;
+    }
+    value = parsed;
+  }
+  setPointingObserverAltitude(value, { silent: !raw });
 }
 
 function updatePointingSatellites() {
@@ -6031,7 +6420,8 @@ function renderPointingCompassRadar(visible) {
     } else {
       delete dot.dataset.quadrant;
     }
-    const angleRad = sat.azimuth * DEG2RAD;
+    const displayAngle = normalizeDegrees((Number.isFinite(sat.azimuth) ? sat.azimuth : 0) + POINTING_COMPASS_OFFSET_DEG);
+    const angleRad = displayAngle * DEG2RAD;
     const elevationClamped = clampNumber(sat.elevation, 0, 90);
     const baseRadius = (1 - elevationClamped / 90) * 45;
     const placed = placeCompassDot(angleRad, baseRadius);
@@ -6360,10 +6750,23 @@ function note(text) {
   toast.classList.add("show");
   setTimeout(() => { toast.hidden = true; }, 2200);
 }
+function classifyDebugMessage(text) {
+  const raw = text != null ? String(text) : "";
+  const trimmed = raw.trim();
+  const low = trimmed.toLowerCase();
+  if (!trimmed) return "info";
+  if (/[✗×]/.test(trimmed) || low.includes("fail") || low.includes("ошиб") || low.startsWith("err")) return "error";
+  if (low.includes("warn") || low.includes("предупр")) return "warn";
+  if (trimmed.includes("✓") || low.includes("успех") || /\bok\b/.test(low)) return "success";
+  if (trimmed.startsWith("→") || low.startsWith("tx") || low.startsWith("cmd") || low.startsWith("send")) return "action";
+  return "info";
+}
 function debugLog(text) {
   const log = UI.els.debugLog;
   if (!log) return;
   const line = document.createElement("div");
+  const type = classifyDebugMessage(text);
+  line.className = "debug-line debug-line--" + type;
   line.textContent = "[" + new Date().toLocaleTimeString() + "] " + text;
   log.appendChild(line);
   log.scrollTop = log.scrollHeight;
@@ -6487,65 +6890,5 @@ async function resyncAfterEndpointChange() {
   }
 }
 
-
-)~~~";;
-
-// libs/sha256.js
-const char SHA_JS[] PROGMEM = R"~~~(
-/* Простая реализация SHA-256 на чистом JS.
- * Используется, когда WebCrypto недоступен (например, на HTTP).
- */
-(function(global){
-  function rotr(x,n){ return (x>>>n) | (x<<(32-n)); }
-  function sha256Bytes(bytes){
-    const K = new Uint32Array([
-      0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-      0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-      0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-      0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-      0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
-    ]);
-    const H = new Uint32Array([
-      0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-      0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19
-    ]);
-    const l = bytes.length;
-    const bitLen = l * 8;
-    const paddedLen = (((l + 9) >> 6) + 1) << 6; // длина с дополнением кратная 64
-    const buffer = new Uint8Array(paddedLen);
-    buffer.set(bytes);
-    buffer[l] = 0x80; // добавляем бит "1"
-    const dv = new DataView(buffer.buffer);
-    dv.setUint32(paddedLen - 8, Math.floor(bitLen / 4294967296));
-    dv.setUint32(paddedLen - 4, bitLen >>> 0);
-    const w = new Uint32Array(64);
-    for (let i = 0; i < paddedLen; i += 64) {
-      for (let j = 0; j < 16; j++) w[j] = dv.getUint32(i + j*4);
-      for (let j = 16; j < 64; j++) {
-        const s0 = rotr(w[j-15],7) ^ rotr(w[j-15],18) ^ (w[j-15]>>>3);
-        const s1 = rotr(w[j-2],17) ^ rotr(w[j-2],19) ^ (w[j-2]>>>10);
-        w[j] = (w[j-16] + s0 + w[j-7] + s1) >>> 0;
-      }
-      let a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
-      for (let j=0; j<64; j++) {
-        const S1 = rotr(e,6) ^ rotr(e,11) ^ rotr(e,25);
-        const ch = (e & f) ^ (~e & g);
-        const t1 = (h + S1 + ch + K[j] + w[j]) >>> 0;
-        const S0 = rotr(a,2) ^ rotr(a,13) ^ rotr(a,22);
-        const maj = (a & b) ^ (a & c) ^ (b & c);
-        const t2 = (S0 + maj) >>> 0;
-        h=g; g=f; f=e; e=(d + t1)>>>0; d=c; c=b; b=a; a=(t1 + t2)>>>0;
-      }
-      H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
-      H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
-    }
-    return Array.from(H).map(x=>x.toString(16).padStart(8,"0")).join("");
-  }
-  // экспорт в глобальный объект
-  global.sha256Bytes = sha256Bytes;
-})(this);
 
 )~~~";
