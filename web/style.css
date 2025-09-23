@@ -396,7 +396,6 @@ main {
 .chat-input { display:flex; gap:.6rem; margin-top:.8rem; }
 .chat-input button { min-width: 7.5rem; }
 .chat-input-row { display:grid; gap:.6rem; grid-template-columns: 1fr; margin-top:.8rem; }
-.chat-recv-controls { margin-top: .8rem; }
 .cmd-buttons { display:flex; gap:.4rem; flex-wrap:wrap; }
 .send-row { position: relative; display:flex; gap:.5rem; }
 #chatInput { flex:1; background: var(--panel-2); color: var(--text); border: 1px solid transparent; border-radius: .9rem; padding: .7rem .9rem; outline: none; }
@@ -432,7 +431,6 @@ main {
 @media (max-width: 640px) {
   .chat-input { flex-direction: column; align-items: stretch; }
   .chat-input button { width: 100%; min-width: 0; }
-  .chat-recv-controls { flex-direction: column; align-items: stretch; gap:.5rem; }
 }
 .fab { border-radius: 999px; width: 46px; height: 46px; display:grid; place-items:center; padding: 0; }
 
@@ -506,82 +504,6 @@ main {
   border-color: color-mix(in oklab, var(--panel-2) 70%, black 30%);
 }
 
-/* Монитор готовых сообщений */
-.received-panel {
-  display:flex;
-  flex-direction:column;
-  gap:.6rem;
-  padding:.75rem .85rem;
-  border-radius:.9rem;
-  border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
-  background: color-mix(in oklab, var(--panel) 88%, transparent);
-  backdrop-filter: blur(8px);
-}
-.received-controls {
-  display:flex;
-  flex-wrap:wrap;
-  align-items:center;
-  gap:.5rem;
-}
-.received-controls .btn { min-width: unset; }
-.received-controls .chip { padding:.35rem .7rem; }
-.received-list {
-  list-style:none;
-  padding:0;
-  margin:0;
-  display:flex;
-  flex-direction:column;
-  gap:.35rem;
-  max-height:240px;
-  overflow-y:auto;
-}
-.received-empty {
-  padding: .75rem .9rem;
-  border-radius: .75rem;
-  border: 1px dashed color-mix(in oklab, var(--panel-2) 70%, black 30%);
-  background: color-mix(in oklab, var(--panel) 80%, transparent);
-  color: var(--muted);
-  font-size: .9rem;
-  text-align: center;
-}
-.received-list li {
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap:.75rem;
-  padding:.55rem .7rem;
-  border-radius:.75rem;
-  background: color-mix(in oklab, var(--panel-2) 88%, black 12%);
-  border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.02);
-  transition: background .25s ease, transform .25s ease;
-}
-.received-list li:hover { background: color-mix(in oklab, var(--panel-2) 82%, var(--accent) 18%); }
-.received-list li.fresh {
-  background: color-mix(in oklab, var(--accent) 26%, var(--panel-2) 74%);
-  transform: translateX(4px);
-}
-.received-body { flex:1; display:flex; flex-direction:column; gap:.45rem; }
-.received-text { font-size:.95rem; line-height:1.45; word-break:break-word; }
-.received-text.empty { color: var(--muted); font-style:italic; }
-.received-meta { display:flex; flex-wrap:wrap; gap:.45rem; font-size:.78rem; color: var(--muted); }
-.received-name { font-family: 'JetBrains Mono','Fira Code','SFMono-Regular',monospace; letter-spacing:.04em; }
-.received-length { opacity:.85; }
-.received-type-ready .received-text { color: color-mix(in oklab, var(--text) 92%, white 8%); }
-.received-type-raw .received-text { color: color-mix(in oklab, var(--accent) 65%, var(--text) 35%); }
-.received-type-split .received-text { color: color-mix(in oklab, var(--accent-2) 55%, var(--text) 45%); }
-.received-actions { display:flex; gap:.35rem; }
-.received-actions .icon-btn {
-  width: 2.2rem;
-  height: 2.2rem;
-  border-radius:999px;
-  display:grid;
-  place-items:center;
-  padding:0;
-}
-.received-actions .icon-btn.ghost {
-  border-color: color-mix(in oklab, var(--accent) 35%, var(--panel-2) 65%);
-}
 .cmd-inline {
   display:flex;
   flex-wrap:wrap;

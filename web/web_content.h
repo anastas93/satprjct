@@ -130,20 +130,6 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           <button id="btnTxlSend" class="btn">Отправить тест</button>
         </div>
       </details>
-      <div class="chat-recv-controls received-controls">
-        <button id="btnRecvRefresh" class="btn ghost">Обновить входящие</button>
-        <button id="btnRecvClear" class="btn ghost">Очистить список</button>
-        <label class="chip switch">
-          <input type="checkbox" id="recvAuto" />
-          <span>Автообновление</span>
-        </label>
-        <label class="chip input-chip">
-          <span>Предел</span>
-          <input id="recvLimit" type="number" min="1" max="200" value="20" />
-        </label>
-      </div>
-      <ul id="recvList" class="received-list"></ul>
-      <div id="recvEmpty" class="received-empty">Входящих сообщений пока нет</div>
     </section>
     <!-- Вкладка каналов и пинга -->
     <section id="tab-channels" class="tab" hidden>
@@ -896,7 +882,6 @@ main {
 .chat-input { display:flex; gap:.6rem; margin-top:.8rem; }
 .chat-input button { min-width: 7.5rem; }
 .chat-input-row { display:grid; gap:.6rem; grid-template-columns: 1fr; margin-top:.8rem; }
-.chat-recv-controls { margin-top: .8rem; }
 .cmd-buttons { display:flex; gap:.4rem; flex-wrap:wrap; }
 .send-row { position: relative; display:flex; gap:.5rem; }
 #chatInput { flex:1; background: var(--panel-2); color: var(--text); border: 1px solid transparent; border-radius: .9rem; padding: .7rem .9rem; outline: none; }
@@ -932,7 +917,6 @@ main {
 @media (max-width: 640px) {
   .chat-input { flex-direction: column; align-items: stretch; }
   .chat-input button { width: 100%; min-width: 0; }
-  .chat-recv-controls { flex-direction: column; align-items: stretch; gap:.5rem; }
 }
 .fab { border-radius: 999px; width: 46px; height: 46px; display:grid; place-items:center; padding: 0; }
 
@@ -1006,82 +990,6 @@ main {
   border-color: color-mix(in oklab, var(--panel-2) 70%, black 30%);
 }
 
-/* Монитор готовых сообщений */
-.received-panel {
-  display:flex;
-  flex-direction:column;
-  gap:.6rem;
-  padding:.75rem .85rem;
-  border-radius:.9rem;
-  border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
-  background: color-mix(in oklab, var(--panel) 88%, transparent);
-  backdrop-filter: blur(8px);
-}
-.received-controls {
-  display:flex;
-  flex-wrap:wrap;
-  align-items:center;
-  gap:.5rem;
-}
-.received-controls .btn { min-width: unset; }
-.received-controls .chip { padding:.35rem .7rem; }
-.received-list {
-  list-style:none;
-  padding:0;
-  margin:0;
-  display:flex;
-  flex-direction:column;
-  gap:.35rem;
-  max-height:240px;
-  overflow-y:auto;
-}
-.received-empty {
-  padding: .75rem .9rem;
-  border-radius: .75rem;
-  border: 1px dashed color-mix(in oklab, var(--panel-2) 70%, black 30%);
-  background: color-mix(in oklab, var(--panel) 80%, transparent);
-  color: var(--muted);
-  font-size: .9rem;
-  text-align: center;
-}
-.received-list li {
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap:.75rem;
-  padding:.55rem .7rem;
-  border-radius:.75rem;
-  background: color-mix(in oklab, var(--panel-2) 88%, black 12%);
-  border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.02);
-  transition: background .25s ease, transform .25s ease;
-}
-.received-list li:hover { background: color-mix(in oklab, var(--panel-2) 82%, var(--accent) 18%); }
-.received-list li.fresh {
-  background: color-mix(in oklab, var(--accent) 26%, var(--panel-2) 74%);
-  transform: translateX(4px);
-}
-.received-body { flex:1; display:flex; flex-direction:column; gap:.45rem; }
-.received-text { font-size:.95rem; line-height:1.45; word-break:break-word; }
-.received-text.empty { color: var(--muted); font-style:italic; }
-.received-meta { display:flex; flex-wrap:wrap; gap:.45rem; font-size:.78rem; color: var(--muted); }
-.received-name { font-family: 'JetBrains Mono','Fira Code','SFMono-Regular',monospace; letter-spacing:.04em; }
-.received-length { opacity:.85; }
-.received-type-ready .received-text { color: color-mix(in oklab, var(--text) 92%, white 8%); }
-.received-type-raw .received-text { color: color-mix(in oklab, var(--accent) 65%, var(--text) 35%); }
-.received-type-split .received-text { color: color-mix(in oklab, var(--accent-2) 55%, var(--text) 45%); }
-.received-actions { display:flex; gap:.35rem; }
-.received-actions .icon-btn {
-  width: 2.2rem;
-  height: 2.2rem;
-  border-radius:999px;
-  display:grid;
-  place-items:center;
-  padding:0;
-}
-.received-actions .icon-btn.ghost {
-  border-color: color-mix(in oklab, var(--accent) 35%, var(--panel-2) 65%);
-}
 .cmd-inline {
   display:flex;
   flex-wrap:wrap;
@@ -2057,9 +1965,6 @@ const UI = {
     ackBusy: false,
     encBusy: false,
     encryption: null,
-    recvAuto: false,
-    recvTimer: null,
-    receivedKnown: new Set(),
     infoChannel: null,
     infoChannelTx: null,
     infoChannelRx: null,
@@ -2072,7 +1977,6 @@ const UI = {
     pauseMs: null,
     ackTimeout: null,
     encTest: null,
-    testRxmTimers: [],
     autoNightTimer: null,
     autoNightActive: false,
     pointing: {
@@ -2336,12 +2240,6 @@ async function init() {
   UI.els.channelSelect = $("#CH");
   UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
-  UI.els.recvList = $("#recvList");
-  UI.els.recvEmpty = $("#recvEmpty");
-  UI.els.recvAuto = $("#recvAuto");
-  UI.els.recvLimit = $("#recvLimit");
-  UI.els.recvRefresh = $("#btnRecvRefresh");
-  UI.els.recvClear = $("#btnRecvClear");
   UI.els.autoNightSwitch = $("#autoNightMode");
   UI.els.autoNightHint = $("#autoNightHint");
   UI.els.channelInfoPanel = $("#channelInfoPanel");
@@ -2558,30 +2456,7 @@ async function init() {
   if (UI.els.rstsJsonBtn) UI.els.rstsJsonBtn.addEventListener("click", requestRstsJsonDebug);
   if (UI.els.rstsDownloadBtn) UI.els.rstsDownloadBtn.addEventListener("click", downloadRstsFullJson);
 
-  // Список принятых сообщений
-  const savedLimitRaw = storage.get("recvLimit");
-  let savedLimit = parseInt(savedLimitRaw || "", 10);
-  if (!Number.isFinite(savedLimit) || savedLimit <= 0) savedLimit = 20;
-  savedLimit = Math.min(Math.max(savedLimit, 1), 200);
-  if (UI.els.recvLimit) {
-    UI.els.recvLimit.value = String(savedLimit);
-    UI.els.recvLimit.addEventListener("change", onRecvLimitChange);
-  }
-  const savedAuto = storage.get("recvAuto") === "1";
-  UI.state.recvAuto = savedAuto;
-  if (UI.els.recvAuto) {
-    UI.els.recvAuto.checked = savedAuto;
-    UI.els.recvAuto.addEventListener("change", () => setRecvAuto(UI.els.recvAuto.checked));
-  }
-  if (UI.els.recvRefresh) {
-    UI.els.recvRefresh.addEventListener("click", () => refreshReceivedList({ manual: true }));
-  }
-  if (UI.els.recvClear) {
-    UI.els.recvClear.addEventListener("click", () => clearReceivedList());
-  }
   loadChatHistory();
-  setRecvAuto(savedAuto, { skipImmediate: true });
-  refreshReceivedList({ silentError: true });
 
   // Управление ACK и тестами
   if (UI.els.ackChip) UI.els.ackChip.addEventListener("click", onAckChipToggle);
@@ -3476,8 +3351,7 @@ function handleCommandSideEffects(cmd, text) {
     const info = parseTestRxmResponse(text);
     if (info) {
       if (info.status === "scheduled") {
-        scheduleTestRxmRefresh(info);
-        refreshReceivedList({ silentError: true });
+        note("TESTRXM запланирован");
       } else if (info.status === "busy") {
         note("TESTRXM уже выполняется");
       }
@@ -3504,57 +3378,6 @@ async function probe() {
     status("Оффлайн · endpoint: " + UI.cfg.endpoint);
   }
 }
-
-/* Монитор принятых сообщений */
-function getRecvLimit() {
-  if (!UI.els.recvLimit) return 20;
-  let limit = parseInt(UI.els.recvLimit.value || "20", 10);
-  if (!Number.isFinite(limit) || limit <= 0) limit = 20;
-  limit = Math.min(Math.max(limit, 1), 200);
-  UI.els.recvLimit.value = String(limit);
-  return limit;
-}
-function onRecvLimitChange() {
-  const limit = getRecvLimit();
-  storage.set("recvLimit", String(limit));
-  if (UI.state.recvAuto) refreshReceivedList({ silentError: true });
-}
-function setRecvAuto(enabled, opts) {
-  const options = opts || {};
-  UI.state.recvAuto = enabled;
-  if (UI.els.recvAuto) UI.els.recvAuto.checked = enabled;
-  storage.set("recvAuto", enabled ? "1" : "0");
-  if (UI.state.recvTimer) {
-    clearInterval(UI.state.recvTimer);
-    UI.state.recvTimer = null;
-  }
-  if (enabled) {
-    if (!options.skipImmediate) {
-      refreshReceivedList({ silentError: true });
-    }
-    const every = options.interval || 5000;
-    UI.state.recvTimer = setInterval(() => refreshReceivedList({ silentError: true }), every);
-  }
-}
-async function refreshReceivedList(opts) {
-  const options = opts || {};
-  const manual = options.manual === true;
-  if (manual) status("→ RSTS");
-  const limit = getRecvLimit();
-  debugLog("→ RSTS FULL (" + (manual ? "ручной" : "авто") + ", n=" + limit + ")");
-  const text = await sendCommand("RSTS", { n: limit, full: "1" }, { silent: true, timeoutMs: 2500, debugLabel: "RSTS FULL" });
-  if (text === null) {
-    if (!options.silentError) {
-      if (manual) status("✗ RSTS");
-      note("Не удалось получить список принятых сообщений");
-    }
-    return;
-  }
-  const entries = parseReceivedResponse(text);
-  renderReceivedList(entries);
-  if (manual) status("✓ RSTS (" + entries.length + ")");
-}
-
 
 // Кэш декодеров для преобразования входящих сообщений
 const receivedTextDecoderCache = {};
@@ -3858,6 +3681,7 @@ function getReceivedLength(entry) {
   return len;
 }
 
+// Нормализуем статус принятого сообщения по имени и исходному типу
 function normalizeReceivedType(name, rawType) {
   const typeText = rawType != null ? String(rawType).trim().toLowerCase() : "";
   if (typeText === "ready" || typeText === "split" || typeText === "raw") {
@@ -3909,75 +3733,6 @@ function parseReceivedResponse(raw) {
                   return { name, type, text: "", hex: "", len: 0 };
                 });
 }
-function renderReceivedList(items) {
-  const hasList = !!UI.els.recvList;
-  if (hasList) UI.els.recvList.innerHTML = "";
-  const prev = UI.state.receivedKnown instanceof Set ? UI.state.receivedKnown : new Set();
-  const next = new Set();
-  const frag = hasList ? document.createDocumentFragment() : null;
-  const list = Array.isArray(items) ? items : [];
-  list.forEach((entry) => {
-    const name = entry && entry.name ? String(entry.name).trim() : "";
-    if (name) next.add(name);
-    const isNew = name && !prev.has(name);
-    if (hasList && frag) {
-      const li = document.createElement("li");
-      const entryType = normalizeReceivedType(name, entry && entry.type);
-      li.classList.add("received-type-" + entryType);
-      const body = document.createElement("div");
-      body.className = "received-body";
-      const textNode = document.createElement("div");
-      const textValue = resolveReceivedText(entry);
-      textNode.className = "received-text" + (textValue ? "" : " empty");
-      textNode.textContent = textValue || "Без текста";
-      body.appendChild(textNode);
-      const meta = document.createElement("div");
-      meta.className = "received-meta";
-      const nameNode = document.createElement("span");
-      nameNode.className = "received-name";
-      nameNode.textContent = name || "—";
-      meta.appendChild(nameNode);
-      const lenValue = getReceivedLength(entry);
-      if (lenValue && lenValue > 0) {
-        const lenNode = document.createElement("span");
-        lenNode.className = "received-length";
-        lenNode.textContent = lenValue + " байт";
-        meta.appendChild(lenNode);
-      }
-      body.appendChild(meta);
-      li.appendChild(body);
-      const actions = document.createElement("div");
-      actions.className = "received-actions";
-      const copyBtn = document.createElement("button");
-      copyBtn.type = "button";
-      copyBtn.className = "icon-btn ghost";
-      copyBtn.textContent = "⧉";
-      copyBtn.title = "Скопировать имя";
-      copyBtn.addEventListener("click", () => copyReceivedName(name));
-      actions.appendChild(copyBtn);
-      li.appendChild(actions);
-      if (isNew) {
-        li.classList.add("fresh");
-        setTimeout(() => li.classList.remove("fresh"), 1600);
-      }
-      frag.appendChild(li);
-    }
-    logReceivedMessage(entry, { isNew });
-  });
-  if (hasList && frag) {
-    UI.els.recvList.appendChild(frag);
-  }
-  UI.state.receivedKnown = next;
-  if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = list.length > 0;
-}
-
-// Полностью очищаем список входящих сообщений без запроса к устройству
-function clearReceivedList() {
-  UI.state.receivedKnown = new Set();
-  if (UI.els.recvList) UI.els.recvList.innerHTML = "";
-  if (UI.els.recvEmpty) UI.els.recvEmpty.hidden = false;
-}
-
 // Оцениваем количество элементов в JSON-ответе RSTS для подсказок пользователю
 function countRstsJsonItems(value) {
   if (!value) return 0;
@@ -4085,138 +3840,6 @@ async function downloadRstsFullJson() {
   URL.revokeObjectURL(url);
   debugLog("RSTS FULL JSON сохранён (" + normalized.length + " элементов)");
   note("RSTS FULL JSON: файл сохранён");
-}
-
-// Добавляем отметку о принятом сообщении в чат
-function logReceivedMessage(entry, opts) {
-  if (!entry) return;
-  const options = opts || {};
-  const name = entry.name != null ? String(entry.name).trim() : "";
-  const entryType = normalizeReceivedType(name, entry.type);
-  const isGoPacket = name.toUpperCase().startsWith("GO-");
-  if (!isGoPacket || entryType !== "ready") {
-    return;
-  }
-  const textValue = resolveReceivedText(entry);
-  const fallbackTextRaw = entry.text != null ? String(entry.text) : "";
-  const fallbackText = fallbackTextRaw.trim();
-  const messageBody = textValue || fallbackText;
-  const message = messageBody || "—";
-  let length = getReceivedLength(entry);
-  if (!Number.isFinite(length) || length < 0) length = null;
-  if (length == null && messageBody) length = messageBody.length;
-  const rxMeta = {
-    name,
-    type: entryType,
-    hex: entry.hex || "",
-    text: messageBody || "",
-  };
-  if (length != null) rxMeta.len = length;
-  const history = getChatHistory();
-  let existingIndex = -1;
-  if (name && Array.isArray(history)) {
-    existingIndex = history.findIndex((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
-    if (existingIndex < 0) {
-      const legacyMessage = "RX: " + name;
-      existingIndex = history.findIndex((item) => item && item.tag === "rx-name" && typeof item.m === "string" && item.m.trim() === legacyMessage);
-    }
-  }
-  if (existingIndex >= 0) {
-    const existing = history[existingIndex];
-    let changed = false;
-    const desiredBody = message;
-    const desiredMessage = desiredBody || "—";
-    if (existing.m !== desiredMessage) {
-      existing.m = desiredMessage;
-      changed = true;
-    }
-    if (existing.tag !== "rx-message") {
-      existing.tag = "rx-message";
-      changed = true;
-    }
-    if (existing.role !== "rx") {
-      existing.role = "rx";
-      changed = true;
-    }
-    if (!existing.rx || typeof existing.rx !== "object") {
-      existing.rx = { ...rxMeta };
-      changed = true;
-    } else {
-      if (existing.rx.name !== name) {
-        existing.rx.name = name;
-        changed = true;
-      }
-      if (rxMeta.type && existing.rx.type !== rxMeta.type) {
-        existing.rx.type = rxMeta.type;
-        changed = true;
-      }
-      if (rxMeta.hex && existing.rx.hex !== rxMeta.hex) {
-        existing.rx.hex = rxMeta.hex;
-        changed = true;
-      }
-      if (rxMeta.len != null && existing.rx.len !== rxMeta.len) {
-        existing.rx.len = rxMeta.len;
-        changed = true;
-      }
-      if (rxMeta.len == null && existing.rx.len != null) {
-        existing.rx.len = rxMeta.len;
-        changed = true;
-      }
-      const nextText = rxMeta.text || "";
-      if (existing.rx.text !== nextText) {
-        existing.rx.text = nextText;
-        changed = true;
-      }
-    }
-    if (!existing.t) {
-      existing.t = Date.now();
-      changed = true;
-    }
-    if (changed) {
-      saveChatHistory();
-      updateChatMessageContent(existingIndex);
-    }
-    return;
-  }
-  if (options.isNew === false && !messageBody) {
-    // Для старых записей без текста не добавляем дубль.
-    return;
-  }
-  const meta = { role: "rx", tag: "rx-message", rx: rxMeta };
-  const saved = persistChat(message, "dev", meta);
-  addChatMessage(saved.record, saved.index);
-}
-async function copyReceivedName(name) {
-  if (!name) return;
-  let copied = false;
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(name);
-      copied = true;
-    }
-  } catch (e) {
-    copied = false;
-  }
-  if (!copied) {
-    const area = document.createElement("textarea");
-    area.value = name;
-    area.setAttribute("readonly", "readonly");
-    area.style.position = "absolute";
-    area.style.left = "-9999px";
-    document.body.appendChild(area);
-    area.select();
-    try {
-      copied = document.execCommand("copy");
-    } catch (err) {
-      copied = false;
-    }
-    document.body.removeChild(area);
-  }
-  if (copied) {
-    note("Имя " + name + " скопировано в буфер обмена");
-  } else {
-    note("Не удалось скопировать имя \"" + name + "\"");
-  }
 }
 
 /* Таблица каналов */
@@ -5555,23 +5178,6 @@ function parseTestRxmResponse(text) {
   if (/busy/i.test(raw)) return { status: "busy", count: 0, intervalMs: 0 };
   return null;
 }
-function clearTestRxmTimers() {
-  if (!Array.isArray(UI.state.testRxmTimers)) UI.state.testRxmTimers = [];
-  for (const id of UI.state.testRxmTimers) {
-    clearTimeout(id);
-  }
-  UI.state.testRxmTimers = [];
-}
-function scheduleTestRxmRefresh(info) {
-  clearTestRxmTimers();
-  const count = Math.max(1, Number(info && info.count ? info.count : 5) || 5);
-  const interval = Math.max(200, Number(info && info.intervalMs ? info.intervalMs : 500) || 500);
-  for (let i = 1; i <= count + 1; ++i) {
-    const timer = setTimeout(() => refreshReceivedList({ silentError: true }), interval * i + 80);
-    UI.state.testRxmTimers.push(timer);
-  }
-}
-
 /* Encryption */
 async function withEncLock(task) {
   if (UI.state.encBusy) return null;
@@ -7469,10 +7075,11 @@ async function resyncAfterEndpointChange() {
     await refreshEncryptionState();
     await refreshKeyState({ silent: true });
     await loadVersion().catch(() => {});
-    refreshReceivedList({ silentError: true });
     probe().catch(() => {});
   } catch (err) {
     console.warn("[endpoint] resync error", err);
   }
 }
+
+
 )~~~";
