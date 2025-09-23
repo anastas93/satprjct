@@ -16,7 +16,12 @@ int main() {
   assert(n3 == "GO-00005");
   auto names = buf.list(10);                      // проверяем формирование списка имён
   assert(names.size() == 3);                      // ожидаем три элемента
-  assert(names[0] == n1 && names[1] == n2 && names[2] == n3);
+  assert(names[0] == n3 && names[1] == n2 && names[2] == n1);
+  auto snap = buf.snapshot(10);                   // проверяем порядок выдачи в снимке
+  assert(snap.size() == 3);
+  assert(snap[0].item.name == n3 && snap[0].kind == ReceivedBuffer::Kind::Ready);
+  assert(snap[1].item.name == n2 && snap[1].kind == ReceivedBuffer::Kind::Split);
+  assert(snap[2].item.name == n1 && snap[2].kind == ReceivedBuffer::Kind::Raw);
   ReceivedBuffer::Item out;
   assert(buf.popRaw(out) && out.id == 1 && out.part == 2 && out.data.size() == 2 && out.name == n1);
   assert(buf.popSplit(out) && out.id == 7 && out.data.size() == 3 && out.name == n2);

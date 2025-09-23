@@ -102,9 +102,9 @@ std::vector<std::string> ReceivedBuffer::list(size_t count) const {
       ++produced;
     }
   };
-  append(raw_);
-  append(split_);
   append(ready_);
+  append(split_);
+  append(raw_);
   return out;                                  // возвращаем список имён
 }
 
@@ -125,9 +125,9 @@ std::vector<ReceivedBuffer::SnapshotEntry> ReceivedBuffer::snapshot(size_t count
       ++produced;
     }
   };
-  append(raw_, Kind::Raw);
-  append(split_, Kind::Split);
   append(ready_, Kind::Ready);
+  append(split_, Kind::Split);
+  append(raw_, Kind::Raw);
   return out;
 }
 
