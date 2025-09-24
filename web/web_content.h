@@ -101,8 +101,19 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         <button type="button" id="chatScrollBottom" class="chat-scroll-down" aria-label="Прокрутить вниз"><span>↓</span></button>
       </div>
       <div class="chat-input">
-        <input id="chatInput" type="text" placeholder="Сообщение" maxlength="2000" />
-        <button id="sendBtn" class="btn">Отправить</button>
+        <div class="send-row">
+          <input id="chatInput" type="text" placeholder="Сообщение" maxlength="2000" />
+          <button id="sendBtn" class="btn">Отправить</button>
+        </div>
+        <div class="chat-upload">
+          <button type="button" id="chatImageBtn" class="icon-btn ghost" aria-label="Отправить изображение" title="Загрузить изображение"><span>📷</span></button>
+          <select id="chatImageProfile" class="chat-image-profile" aria-label="Профиль изображений">
+            <option value="S">S — 320×240, серый</option>
+            <option value="M">M — 320×240, серый+</option>
+            <option value="L">L — 320×240, цвет</option>
+          </select>
+        </div>
+        <input id="chatImageInput" type="file" accept="image/jpeg,image/png,image/heic,image/heif" hidden multiple />
       </div>
       <div class="group-title"><span>Состояние ACK</span><span class="line"></span></div>
       <div class="status-row">
@@ -833,6 +844,22 @@ main {
 
 /* Chat */
 .chat-area { position: relative; }
+.chat-area.drop-active::after {
+  content: "Отпустите, чтобы отправить";
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--accent);
+  border-radius: .8rem;
+  background: color-mix(in oklab, var(--accent) 12%, transparent 88%);
+  color: var(--text);
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  pointer-events: none;
+  padding: 1rem;
+  backdrop-filter: blur(2px);
+}
 .chat-log {
   height: min(52vh, 560px);
   overflow-y: auto;
@@ -962,8 +989,41 @@ main {
 }
 .bubble-tx-detail { font-weight:600; }
 
-.chat-input { display:flex; gap:.6rem; margin-top:.8rem; }
+.chat-input { display:flex; gap:.6rem; margin-top:.8rem; align-items:center; flex-wrap:wrap; }
 .chat-input button { min-width: 7.5rem; }
+.chat-upload { display:flex; align-items:center; gap:.5rem; }
+.chat-upload .icon-btn { min-width: 2.7rem; min-height: 2.7rem; font-size: 1.25rem; }
+.chat-upload .icon-btn span { pointer-events: none; }
+.chat-image-profile {
+  background: var(--panel-2);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  border-radius: .6rem;
+  padding: .35rem .6rem;
+  color: var(--text);
+  font-weight: 600;
+  min-width: 6rem;
+}
+.chat-image-profile:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring);
+}
+.bubble-image { margin-top: .6rem; }
+.bubble-image-frame {
+  border-radius: .75rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  background: #000;
+}
+.bubble-image-frame img { display:block; width:100%; height:auto; }
+.bubble-image-caption {
+  margin-top: .35rem;
+  font-size: .78rem;
+  color: var(--muted);
+  display:flex;
+  gap:.4rem;
+  align-items:center;
+  flex-wrap:wrap;
+}
 .chat-input-row { display:grid; gap:.6rem; grid-template-columns: 1fr; margin-top:.8rem; }
 .cmd-buttons { display:flex; gap:.4rem; flex-wrap:wrap; }
 .send-row { position: relative; display:flex; gap:.5rem; }
@@ -1000,6 +1060,21 @@ main {
 @media (max-width: 640px) {
   .chat-input { flex-direction: column; align-items: stretch; }
   .chat-input button { width: 100%; min-width: 0; }
+  .send-row { flex-direction: column; align-items: stretch; gap: .4rem; }
+  .chat-upload {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(2.75rem, 3rem) 1fr;
+    gap: .5rem;
+    align-items: center;
+  }
+  .chat-upload .icon-btn {
+    width: 100%;
+    min-width: 0;
+  }
+  .chat-image-profile {
+    width: 100%;
+  }
 }
 .fab { border-radius: 999px; width: 46px; height: 46px; display:grid; place-items:center; padding: 0; }
 
@@ -1879,8 +1954,6 @@ tbody tr.selected-info td { font-weight:600; }
 .debug-line--error { color: color-mix(in oklab, var(--danger) 75%, var(--text) 25%); }
 .debug-line--warn { color: color-mix(in oklab, #facc15 70%, var(--text) 30%); }
 .debug-line--action { color: color-mix(in oklab, var(--accent) 70%, var(--text) 30%); }
-
-
 )~~~";
 
 // libs/freq-info.csv — справочник частот каналов
@@ -2288,6 +2361,7 @@ const UI = {
     theme: storage.get("theme") || detectPreferredTheme(),
     accent: (storage.get("accent") === "red") ? "red" : "default",
     autoNight: storage.get("autoNight") !== "0",
+    imageProfile: (storage.get("imageProfile") || "S").toUpperCase(),
   },
   key: {
     state: null,
@@ -2335,6 +2409,7 @@ const UI = {
     chatScrollPinned: true,
     chatSoundCtx: null,
     chatSoundLast: 0,
+    chatImages: null,
     testRxm: {
       polling: false,
       lastName: null,
@@ -2381,6 +2456,17 @@ const CHANNEL_CR_PRESETS = [ // допустимые значения CR для 
   { value: 7, label: "4/7" },
   { value: 8, label: "4/8" },
 ];
+
+// Профили подготовки изображений перед отправкой
+const IMAGE_PROFILES = {
+  S: { id: "S", label: "S — 320×240, серый", maxWidth: 320, maxHeight: 240, quality: 0.3, grayscale: true },
+  M: { id: "M", label: "M — 320×240, серый", maxWidth: 320, maxHeight: 240, quality: 0.4, grayscale: true },
+  L: { id: "L", label: "L — 320×240, цвет", maxWidth: 320, maxHeight: 240, quality: 0.4, grayscale: false },
+};
+const IMAGE_ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/heic", "image/heif"]);
+const IMAGE_MAX_SOURCE_SIZE = 20 * 1024 * 1024; // 20 МБ — верхний предел исходного файла
+const IMAGE_CACHE_LIMIT = 32; // ограничение количества кэшированных изображений в памяти
+let chatDropCounter = 0; // глубина вложенных dragenter для зоны чата
 
 // Справочные данные по каналам из CSV
 const channelReference = {
@@ -2607,6 +2693,9 @@ async function init() {
   UI.els.chatInput = $("#chatInput");
   UI.els.chatScrollBtn = $("#chatScrollBottom");
   UI.els.sendBtn = $("#sendBtn");
+  UI.els.chatImageBtn = $("#chatImageBtn");
+  UI.els.chatImageInput = $("#chatImageInput");
+  UI.els.chatImageProfile = $("#chatImageProfile");
   UI.els.ackChip = $("#ackStateChip");
   UI.els.ackText = $("#ackStateText");
   UI.els.encChip = $("#encStateChip");
@@ -2863,6 +2952,26 @@ async function init() {
       event.preventDefault();
       scrollChatToBottom(true);
     });
+  }
+  if (UI.els.chatImageBtn && UI.els.chatImageInput) {
+    UI.els.chatImageBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      onChatImageButton();
+    });
+    UI.els.chatImageInput.addEventListener("change", onChatImageInputChange);
+  }
+  if (UI.els.chatImageProfile) {
+    const profile = normalizeImageProfile(UI.cfg.imageProfile);
+    UI.els.chatImageProfile.value = profile.id;
+    UI.els.chatImageProfile.addEventListener("change", onChatImageProfileChange);
+  }
+  const chatArea = $(".chat-area");
+  if (chatArea) {
+    UI.els.chatArea = chatArea;
+    chatArea.addEventListener("dragenter", onChatDragEnter, false);
+    chatArea.addEventListener("dragover", onChatDragOver, false);
+    chatArea.addEventListener("dragleave", onChatDragLeave, false);
+    chatArea.addEventListener("drop", onChatDrop, false);
   }
   if (typeof document !== "undefined") {
     const unlockAudio = () => {
@@ -3162,6 +3271,40 @@ function getChatHistory() {
   if (!Array.isArray(UI.state.chatHistory)) UI.state.chatHistory = [];
   return UI.state.chatHistory;
 }
+
+function normalizeImageProfile(value) {
+  const key = typeof value === "string" && value ? value.toUpperCase() : "S";
+  if (Object.prototype.hasOwnProperty.call(IMAGE_PROFILES, key)) {
+    return IMAGE_PROFILES[key];
+  }
+  return IMAGE_PROFILES.S;
+}
+
+function getCurrentImageProfileId() {
+  const profile = normalizeImageProfile(UI.cfg && UI.cfg.imageProfile);
+  return profile.id;
+}
+
+function setCurrentImageProfile(id) {
+  const profile = normalizeImageProfile(id);
+  UI.cfg.imageProfile = profile.id;
+  storage.set("imageProfile", profile.id);
+  return profile;
+}
+
+function makeImageNameFromId(id) {
+  const num = Number(id);
+  if (!Number.isFinite(num) || num < 0) return null;
+  const normalized = Math.abs(Math.trunc(num)) % 100000;
+  return "IMG-" + normalized.toString().padStart(5, "0");
+}
+
+function imageNameFromRawName(rawName) {
+  const text = rawName != null ? String(rawName) : "";
+  const match = text.match(/GO-(\d+)/i);
+  if (match) return makeImageNameFromId(match[1]);
+  return null;
+}
 function saveChatHistory() {
   const entries = getChatHistory();
   try {
@@ -3169,6 +3312,63 @@ function saveChatHistory() {
   } catch (err) {
     console.warn("[chat] не удалось сохранить историю:", err);
   }
+}
+
+function normalizeChatImageMeta(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const profile = normalizeImageProfile(src.profile);
+  const toNumber = (value) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : 0;
+  };
+  const meta = {
+    key: src.key ? String(src.key) : "",
+    name: src.name ? String(src.name) : "",
+    profile: profile.id,
+    frameWidth: toNumber(src.frameWidth),
+    frameHeight: toNumber(src.frameHeight),
+    drawWidth: toNumber(src.drawWidth),
+    drawHeight: toNumber(src.drawHeight),
+    offsetX: toNumber(src.offsetX),
+    offsetY: toNumber(src.offsetY),
+    grayscale: src.grayscale === true || src.grayscale === 1 || src.grayscale === "1",
+    jpegSize: toNumber(src.jpegSize),
+    originalSize: toNumber(src.originalSize),
+    sourceName: src.sourceName ? String(src.sourceName) : "",
+    source: src.source === "rx" ? "rx" : "tx",
+    status: src.status ? String(src.status) : "pending",
+    createdAt: toNumber(src.createdAt) || Date.now(),
+    naturalWidth: src.naturalWidth != null ? toNumber(src.naturalWidth) : null,
+    naturalHeight: src.naturalHeight != null ? toNumber(src.naturalHeight) : null,
+    msgId: src.msgId != null ? toNumber(src.msgId) : null,
+  };
+  if (!meta.key) meta.key = meta.name || ("img:" + meta.createdAt);
+  return meta;
+}
+
+function sanitizeChatImageMeta(meta) {
+  const normalized = normalizeChatImageMeta(meta);
+  return {
+    key: normalized.key,
+    name: normalized.name,
+    profile: normalized.profile,
+    frameWidth: normalized.frameWidth,
+    frameHeight: normalized.frameHeight,
+    drawWidth: normalized.drawWidth,
+    drawHeight: normalized.drawHeight,
+    offsetX: normalized.offsetX,
+    offsetY: normalized.offsetY,
+    grayscale: normalized.grayscale ? 1 : 0,
+    jpegSize: normalized.jpegSize,
+    originalSize: normalized.originalSize,
+    sourceName: normalized.sourceName,
+    source: normalized.source,
+    status: normalized.status,
+    createdAt: normalized.createdAt,
+    naturalWidth: normalized.naturalWidth,
+    naturalHeight: normalized.naturalHeight,
+    msgId: normalized.msgId,
+  };
 }
 function normalizeChatEntries(rawEntries) {
   const out = [];
@@ -3253,6 +3453,9 @@ function normalizeChatEntries(rawEntries) {
       };
       continue;
     }
+    if (obj.image) {
+      obj.image = normalizeChatImageMeta(obj.image);
+    }
     const isLegacyRx = obj.tag === "rx-name" || (obj.role === "rx" && obj.tag !== "rx-message");
     if (isLegacyRx) {
       const rawMeta = (obj.rx && typeof obj.rx === "object") ? obj.rx : {};
@@ -3325,6 +3528,7 @@ function persistChat(message, author, meta) {
     if (meta.txStatus) record.txStatus = meta.txStatus;
     if (meta.rx) record.rx = meta.rx;
     if (meta.detail != null) record.detail = meta.detail;
+    if (meta.image) record.image = sanitizeChatImageMeta(meta.image);
   }
   if (!record.role) record.role = author === "you" ? "user" : "system";
   entries.push(record);
@@ -3374,6 +3578,452 @@ function setBubbleText(node, text) {
     node.appendChild(document.createTextNode(parts[i]));
   }
 }
+
+function getChatImageState() {
+  if (!UI.state.chatImages || typeof UI.state.chatImages !== "object") {
+    UI.state.chatImages = {
+      cache: new Map(),
+      order: [],
+      elements: new Map(),
+      limit: IMAGE_CACHE_LIMIT,
+    };
+  }
+  const state = UI.state.chatImages;
+  if (!(state.cache instanceof Map)) state.cache = new Map();
+  if (!Array.isArray(state.order)) state.order = [];
+  if (!(state.elements instanceof Map)) state.elements = new Map();
+  if (!Number.isFinite(state.limit) || state.limit <= 0) state.limit = IMAGE_CACHE_LIMIT;
+  return state;
+}
+
+function trimChatImageCache(state) {
+  while (state.order.length > state.limit) {
+    const oldest = state.order.shift();
+    if (!oldest) continue;
+    const record = state.cache.get(oldest);
+    if (record && record.url) {
+      URL.revokeObjectURL(record.url);
+    }
+    state.cache.delete(oldest);
+    state.elements.delete(oldest);
+  }
+}
+
+function cacheChatImage(key, blob, meta) {
+  const state = getChatImageState();
+  const normalizedKey = key || (meta && meta.key) || ("img:" + Date.now());
+  if (!blob) return null;
+  const existing = state.cache.get(normalizedKey);
+  if (existing && existing.url) {
+    URL.revokeObjectURL(existing.url);
+  }
+  const record = {
+    key: normalizedKey,
+    blob,
+    url: URL.createObjectURL(blob),
+    size: blob.size,
+    created: Date.now(),
+  };
+  state.cache.set(normalizedKey, record);
+  state.order = state.order.filter((item) => item !== normalizedKey);
+  state.order.push(normalizedKey);
+  trimChatImageCache(state);
+  updateChatImageElements(normalizedKey);
+  return record;
+}
+
+function renameChatImageKey(oldKey, newKey) {
+  if (!oldKey || !newKey || oldKey === newKey) return;
+  const state = getChatImageState();
+  const record = state.cache.get(oldKey);
+  if (record) {
+    state.cache.delete(oldKey);
+    record.key = newKey;
+    state.cache.set(newKey, record);
+  }
+  state.order = state.order.map((item) => (item === oldKey ? newKey : item));
+  const bindings = state.elements.get(oldKey);
+  if (bindings) {
+    state.elements.delete(oldKey);
+    state.elements.set(newKey, bindings);
+    bindings.forEach((binding) => {
+      binding.meta.key = newKey;
+      if (binding.element) binding.element.dataset.imageKey = newKey;
+    });
+  }
+  updateChatImageElements(newKey);
+}
+
+function formatBytesShort(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return "—";
+  if (num < 1024) return num + " Б";
+  const kb = num / 1024;
+  if (kb < 1024) return (kb >= 10 ? Math.round(kb) : Math.round(kb * 10) / 10) + " КиБ";
+  const mb = kb / 1024;
+  return (mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10) + " МиБ";
+}
+
+function resolveImageDimensions(meta) {
+  if (!meta) return "";
+  if (meta.naturalWidth && meta.naturalHeight) {
+    return meta.naturalWidth + "×" + meta.naturalHeight;
+  }
+  if (meta.drawWidth && meta.drawHeight) {
+    return meta.drawWidth + "×" + meta.drawHeight;
+  }
+  if (meta.frameWidth && meta.frameHeight) {
+    return meta.frameWidth + "×" + meta.frameHeight;
+  }
+  return "";
+}
+
+function formatChatImageCaption(meta, record) {
+  const parts = [];
+  if (meta && meta.name) parts.push(meta.name);
+  else if (meta && meta.key) parts.push(meta.key);
+  const size = record ? record.size : (meta && meta.jpegSize ? meta.jpegSize : 0);
+  if (size) parts.push(formatBytesShort(size));
+  const dims = resolveImageDimensions(meta);
+  if (dims) parts.push(dims);
+  if (meta && meta.profile) parts.push("профиль " + meta.profile);
+  if (meta && meta.status === "pending") parts.push("отправка…");
+  else if (meta && meta.status === "error") parts.push("ошибка");
+  return parts.length ? parts.join(" · ") : "Изображение";
+}
+
+function ensureImageDimensions(meta, img, caption) {
+  if (!meta || !img) return;
+  const apply = () => {
+    if (!meta.naturalWidth || !meta.naturalHeight) {
+      if (img.naturalWidth && img.naturalHeight) {
+        meta.naturalWidth = img.naturalWidth;
+        meta.naturalHeight = img.naturalHeight;
+        saveChatHistory();
+        if (caption) caption.textContent = formatChatImageCaption(meta, getChatImageState().cache.get(meta.key) || null);
+      }
+    }
+  };
+  if (img.complete) {
+    apply();
+  } else {
+    const handler = () => {
+      img.removeEventListener("load", handler);
+      apply();
+    };
+    img.addEventListener("load", handler, { once: true });
+  }
+}
+
+function applyChatImageBinding(binding) {
+  if (!binding || !binding.meta) return;
+  const state = getChatImageState();
+  const record = state.cache.get(binding.meta.key);
+  if (record) {
+    binding.element.src = record.url;
+    if (binding.caption) binding.caption.textContent = formatChatImageCaption(binding.meta, record);
+    ensureImageDimensions(binding.meta, binding.element, binding.caption);
+  } else {
+    binding.element.removeAttribute("src");
+    if (binding.caption) binding.caption.textContent = formatChatImageCaption(binding.meta, null);
+  }
+}
+
+function updateChatImageElements(key) {
+  if (!key) return;
+  const state = getChatImageState();
+  const bindings = state.elements.get(key);
+  if (!bindings) return;
+  bindings.forEach((binding) => {
+    applyChatImageBinding(binding);
+  });
+}
+
+function registerChatImageElement(meta, element, caption) {
+  if (!meta || !element) return;
+  const normalized = normalizeChatImageMeta(meta);
+  meta.key = normalized.key;
+  meta.name = normalized.name;
+  meta.profile = normalized.profile;
+  meta.frameWidth = normalized.frameWidth;
+  meta.frameHeight = normalized.frameHeight;
+  meta.drawWidth = normalized.drawWidth;
+  meta.drawHeight = normalized.drawHeight;
+  meta.offsetX = normalized.offsetX;
+  meta.offsetY = normalized.offsetY;
+  meta.grayscale = normalized.grayscale;
+  meta.jpegSize = normalized.jpegSize;
+  meta.originalSize = normalized.originalSize;
+  meta.sourceName = normalized.sourceName;
+  meta.source = normalized.source;
+  meta.status = normalized.status;
+  meta.createdAt = normalized.createdAt;
+  meta.naturalWidth = normalized.naturalWidth;
+  meta.naturalHeight = normalized.naturalHeight;
+  meta.msgId = normalized.msgId;
+  const key = meta.key || meta.name;
+  if (!key) return;
+  element.dataset.imageKey = key;
+  const state = getChatImageState();
+  let bindings = state.elements.get(key);
+  if (!bindings) {
+    bindings = new Set();
+    state.elements.set(key, bindings);
+  }
+  const binding = { element, caption, meta };
+  bindings.add(binding);
+  applyChatImageBinding(binding);
+}
+
+function createChatImageFigure(meta) {
+  const figure = document.createElement("figure");
+  figure.className = "bubble-image";
+  const frame = document.createElement("div");
+  frame.className = "bubble-image-frame";
+  const img = document.createElement("img");
+  img.alt = meta && meta.name ? meta.name : "Изображение";
+  img.loading = "lazy";
+  frame.appendChild(img);
+  figure.appendChild(frame);
+  const caption = document.createElement("figcaption");
+  caption.className = "bubble-image-caption";
+  caption.textContent = formatChatImageCaption(meta, getChatImageState().cache.get(meta && meta.key ? meta.key : "") || null);
+  figure.appendChild(caption);
+  registerChatImageElement(meta, img, caption);
+  return figure;
+}
+
+function setChatDropState(active) {
+  if (!UI.els || !UI.els.chatArea) return;
+  if (active) UI.els.chatArea.classList.add("drop-active");
+  else UI.els.chatArea.classList.remove("drop-active");
+}
+
+function onChatImageButton() {
+  if (UI.els && UI.els.chatImageInput) {
+    UI.els.chatImageInput.click();
+  }
+}
+
+function onChatImageInputChange(event) {
+  const input = event && event.target ? event.target : UI.els.chatImageInput;
+  const files = input && input.files ? Array.from(input.files) : [];
+  if (files.length > 0) {
+    handleSelectedImages(files, { source: "picker" }).catch((err) => {
+      console.error("[chat-image] ошибка обработки выбранных файлов:", err);
+      note("Не удалось подготовить изображение");
+    });
+  }
+  if (input) input.value = "";
+}
+
+function onChatImageProfileChange(event) {
+  const select = event && event.target ? event.target : UI.els.chatImageProfile;
+  const profile = setCurrentImageProfile(select ? select.value : null);
+  note("Профиль изображений: " + profile.id);
+}
+
+function onChatDragEnter(event) {
+  if (!event || !event.dataTransfer) return;
+  const hasFiles = Array.from(event.dataTransfer.types || []).includes("Files");
+  if (!hasFiles) return;
+  chatDropCounter += 1;
+  event.preventDefault();
+  setChatDropState(true);
+}
+
+function onChatDragOver(event) {
+  if (!event || !event.dataTransfer) return;
+  const hasFiles = Array.from(event.dataTransfer.types || []).includes("Files");
+  if (!hasFiles) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  setChatDropState(true);
+}
+
+function onChatDragLeave(event) {
+  if (!event || !event.dataTransfer) return;
+  const hasFiles = Array.from(event.dataTransfer.types || []).includes("Files");
+  if (!hasFiles) return;
+  chatDropCounter = Math.max(0, chatDropCounter - 1);
+  if (chatDropCounter === 0) setChatDropState(false);
+}
+
+function onChatDrop(event) {
+  if (!event || !event.dataTransfer) return;
+  event.preventDefault();
+  const files = Array.from(event.dataTransfer.files || []);
+  chatDropCounter = 0;
+  setChatDropState(false);
+  if (files.length > 0) {
+    handleSelectedImages(files, { source: "drop" }).catch((err) => {
+      console.error("[chat-image] ошибка обработки файлов drop:", err);
+      note("Не удалось подготовить изображение");
+    });
+  }
+}
+
+async function handleSelectedImages(files, options) {
+  const list = Array.from(files || []);
+  if (list.length === 0) return;
+  for (const file of list) {
+    try {
+      await processImageFile(file, options || {});
+    } catch (err) {
+      console.error("[chat-image] ошибка обработки файла:", err);
+      note("Не удалось подготовить изображение");
+    }
+  }
+}
+
+async function processImageFile(file, options) {
+  if (!(file instanceof File)) {
+    note("Неизвестный источник данных");
+    return;
+  }
+  if (file.size > IMAGE_MAX_SOURCE_SIZE) {
+    note("Файл слишком большой для обработки (" + formatBytesShort(file.size) + ")");
+    return;
+  }
+  const type = (file.type || "").toLowerCase();
+  if (type && !IMAGE_ALLOWED_TYPES.has(type)) {
+    note("Формат изображения не поддерживается: " + type);
+    return;
+  }
+  const profile = normalizeImageProfile(UI.cfg && UI.cfg.imageProfile);
+  try {
+    const prepared = await prepareImageForSend(file, profile);
+    if (!prepared || !prepared.blob) {
+      note("Не удалось подготовить изображение");
+      return;
+    }
+    await queuePreparedImage(prepared, file, profile, options || {});
+  } catch (err) {
+    console.error("[chat-image] ошибка подготовки изображения:", err);
+    note("Ошибка обработки изображения");
+  }
+}
+
+async function prepareImageForSend(file, profile) {
+  const preset = normalizeImageProfile(profile && profile.id ? profile.id : profile);
+  const bitmap = await loadImageBitmap(file);
+  if (!bitmap) throw new Error("bitmap");
+  const frameWidth = preset.maxWidth;
+  const frameHeight = preset.maxHeight;
+  const canvasData = drawImageToCanvas(bitmap, frameWidth, frameHeight);
+  if (preset.grayscale) {
+    applyCanvasGrayscale(canvasData.ctx, canvasData.canvas.width, canvasData.canvas.height);
+  }
+  const blob = await canvasToJpegBlob(canvasData.canvas, preset.quality);
+  if (typeof bitmap.close === "function") {
+    try { bitmap.close(); } catch (err) { console.warn("[chat-image] close bitmap", err); }
+  }
+  return {
+    blob,
+    frameWidth: canvasData.canvas.width,
+    frameHeight: canvasData.canvas.height,
+    drawWidth: canvasData.drawWidth,
+    drawHeight: canvasData.drawHeight,
+    offsetX: canvasData.offsetX,
+    offsetY: canvasData.offsetY,
+    grayscale: !!preset.grayscale,
+  };
+}
+
+async function queuePreparedImage(prepared, file, profile, options) {
+  const timestamp = Date.now();
+  const tempKey = "local:" + timestamp + ":" + Math.random().toString(36).slice(2, 8);
+  const meta = normalizeChatImageMeta({
+    key: tempKey,
+    name: tempKey,
+    profile: profile.id,
+    frameWidth: prepared.frameWidth,
+    frameHeight: prepared.frameHeight,
+    drawWidth: prepared.drawWidth,
+    drawHeight: prepared.drawHeight,
+    offsetX: prepared.offsetX,
+    offsetY: prepared.offsetY,
+    grayscale: prepared.grayscale,
+    jpegSize: prepared.blob.size,
+    originalSize: file.size,
+    sourceName: file.name || "",
+    source: "tx",
+    status: "pending",
+    createdAt: timestamp,
+  });
+  cacheChatImage(meta.key, prepared.blob, meta);
+  const label = meta.profile ? "Изображение (" + meta.profile + ")" : "Изображение";
+  const saved = persistChat(label, "you", { role: "user", tag: "img-out", image: meta });
+  addChatMessage(saved.record, saved.index);
+  await sendImageMessage(prepared, {
+    meta,
+    originIndex: saved.index,
+    file,
+    options,
+  });
+}
+
+async function loadImageBitmap(file) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(file);
+    } catch (err) {
+      console.warn("[chat-image] createImageBitmap недоступен:", err);
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error("reader"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("image"));
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function drawImageToCanvas(bitmap, frameWidth, frameHeight) {
+  const canvas = document.createElement("canvas");
+  canvas.width = frameWidth;
+  canvas.height = frameHeight;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, frameWidth, frameHeight);
+  const scale = Math.min(1, Math.min(frameWidth / bitmap.width, frameHeight / bitmap.height));
+  const drawWidth = Math.max(1, Math.round(bitmap.width * scale));
+  const drawHeight = Math.max(1, Math.round(bitmap.height * scale));
+  const offsetX = Math.floor((frameWidth - drawWidth) / 2);
+  const offsetY = Math.floor((frameHeight - drawHeight) / 2);
+  ctx.drawImage(bitmap, offsetX, offsetY, drawWidth, drawHeight);
+  return { canvas, ctx, drawWidth, drawHeight, offsetX, offsetY };
+}
+
+function applyCanvasGrayscale(ctx, width, height) {
+  if (!ctx) return;
+  const image = ctx.getImageData(0, 0, width, height);
+  const data = image.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const y = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+    data[i] = y;
+    data[i + 1] = y;
+    data[i + 2] = y;
+  }
+  ctx.putImageData(image, 0, 0);
+}
+
+function canvasToJpegBlob(canvas, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("toBlob"));
+    }, "image/jpeg", quality);
+  });
+}
 function applyChatBubbleContent(node, entry) {
   const raw = entry && entry.m != null ? String(entry.m) : "";
   const isRx = entry && entry.role === "rx";
@@ -3391,6 +4041,10 @@ function applyChatBubbleContent(node, entry) {
     setBubbleText(textBox, raw);
   }
   node.appendChild(textBox);
+  const imageMeta = entry && entry.image && typeof entry.image === "object" ? entry.image : null;
+  if (imageMeta) {
+    node.appendChild(createChatImageFigure(imageMeta));
+  }
   const detailRaw = entry && entry.detail != null ? String(entry.detail) : "";
   const detail = detailRaw.trim();
   if (detail) {
@@ -3680,6 +4334,60 @@ async function postTx(text, timeoutMs) {
     return { ok: false, error: String(e) };
   }
 }
+
+async function postImage(blob, meta, timeoutMs) {
+  const timeout = timeoutMs || 8000;
+  let base;
+  try {
+    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+  } catch (e) {
+    base = new URL("http://192.168.4.1");
+  }
+  const url = new URL("/api/tx-image", base);
+  const headers = buildImageHeaders(meta);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers,
+      body: blob,
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    const body = await res.text();
+    if (!res.ok) {
+      return { ok: false, error: body || ("HTTP " + res.status) };
+    }
+    if (/<!DOCTYPE|<html/i.test(body)) {
+      return { ok: false, error: "HTML response" };
+    }
+    return { ok: true, text: body };
+  } catch (err) {
+    clearTimeout(timer);
+    return { ok: false, error: String(err) };
+  }
+}
+
+function buildImageHeaders(meta) {
+  const headers = new Headers();
+  headers.set("Content-Type", "image/jpeg");
+  const profile = normalizeImageProfile(meta && meta.profile ? meta.profile : UI.cfg.imageProfile);
+  headers.set("X-Image-Profile", profile.id);
+  const setIfPositive = (key, value) => {
+    const num = Number(value);
+    if (Number.isFinite(num) && num > 0) headers.set(key, String(Math.round(num)));
+  };
+  setIfPositive("X-Image-Frame-Width", meta && meta.frameWidth);
+  setIfPositive("X-Image-Frame-Height", meta && meta.frameHeight);
+  setIfPositive("X-Image-Scaled-Width", meta && meta.drawWidth);
+  setIfPositive("X-Image-Scaled-Height", meta && meta.drawHeight);
+  setIfPositive("X-Image-Offset-X", meta && meta.offsetX);
+  setIfPositive("X-Image-Offset-Y", meta && meta.offsetY);
+  setIfPositive("X-Image-Original-Size", meta && meta.originalSize);
+  headers.set("X-Image-Grayscale", meta && meta.grayscale ? "1" : "0");
+  return headers;
+}
 async function sendTextMessage(text, opts) {
   const options = opts || {};
   const originIndex = typeof options.originIndex === "number" ? options.originIndex : null;
@@ -3714,6 +4422,62 @@ async function sendTextMessage(text, opts) {
   }
   if (!attached) {
     logSystemCommand("TX", errorText, "error");
+  }
+  return null;
+}
+
+async function sendImageMessage(prepared, context) {
+  const ctx = context || {};
+  const meta = ctx.meta ? ctx.meta : null;
+  const originIndex = typeof ctx.originIndex === "number" ? ctx.originIndex : null;
+  if (!prepared || !prepared.blob || !meta) {
+    note("Не удалось отправить изображение");
+    return null;
+  }
+  status("→ IMG");
+  const res = await postImage(prepared.blob, meta, 9000);
+  const entries = getChatHistory();
+  const entry = originIndex != null && entries[originIndex] ? entries[originIndex] : null;
+  if (res.ok) {
+    status("✓ IMG");
+    const value = res.text != null ? String(res.text) : "";
+    note("Изображение: " + summarizeResponse(value, "успешно"));
+    const match = value.match(/id\s*=\s*(\d+)/i);
+    if (match) {
+      meta.msgId = Number(match[1]);
+      const newName = makeImageNameFromId(meta.msgId);
+      if (newName) {
+        const oldKey = meta.key;
+        meta.name = newName;
+        meta.key = newName;
+        renameChatImageKey(oldKey, newName);
+      }
+    }
+    meta.status = "sent";
+    if (entry) {
+      entry.image = sanitizeChatImageMeta(meta);
+      if (entry.image && entry.image.name) {
+        entry.m = "Изображение " + entry.image.name;
+      }
+      saveChatHistory();
+      updateChatMessageContent(originIndex);
+    }
+    if (originIndex != null) {
+      attachTxStatus(originIndex, { ok: true, text: value, raw: res.text });
+    }
+    return value;
+  }
+  status("✗ IMG");
+  const errorText = res.error != null ? String(res.error) : "";
+  note("Изображение: " + summarizeResponse(errorText, "ошибка"));
+  meta.status = "error";
+  if (entry) {
+    entry.image = sanitizeChatImageMeta(meta);
+    saveChatHistory();
+    updateChatMessageContent(originIndex);
+  }
+  if (originIndex != null) {
+    attachTxStatus(originIndex, { ok: false, text: errorText, raw: res.error });
   }
   return null;
 }
@@ -4384,12 +5148,14 @@ function logReceivedMessage(entry, opts) {
     // В чат попадают только финальные GO-пакеты.
     return;
   }
+  const bytes = entry && entry._hexBytes instanceof Uint8Array ? entry._hexBytes : hexToBytes(entry.hex);
+  const isImage = entryType === "ready" && bytes && bytes.length >= 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
   const textValue = resolveReceivedText(entry);
   const fallbackTextRaw = entry.text != null ? String(entry.text) : "";
   const fallbackText = fallbackTextRaw.trim();
   const messageBody = textValue || fallbackText;
-  const message = messageBody || "—";
   let length = getReceivedLength(entry);
+  if (isImage && bytes && bytes.length) length = bytes.length;
   if (!Number.isFinite(length) || length < 0) length = null;
   if (length == null && messageBody) length = messageBody.length;
   const rxMeta = {
@@ -4399,10 +5165,29 @@ function logReceivedMessage(entry, opts) {
     text: messageBody || "",
   };
   if (length != null) rxMeta.len = length;
+  let imageMeta = null;
+  let message = messageBody || "—";
+  if (isImage && bytes && bytes.length) {
+    const blob = new Blob([bytes], { type: "image/jpeg" });
+    const key = imageNameFromRawName(name) || (name ? name : "img:" + Date.now());
+    imageMeta = normalizeChatImageMeta({
+      key,
+      name: imageNameFromRawName(name) || key,
+      profile: getCurrentImageProfileId(),
+      jpegSize: bytes.length,
+      source: "rx",
+      status: "received",
+      createdAt: Date.now(),
+    });
+    cacheChatImage(imageMeta.key, blob, imageMeta);
+    message = imageMeta.name ? "Изображение " + imageMeta.name : "Изображение";
+    rxMeta.text = message;
+    rxMeta.image = { name: imageMeta.name || imageMeta.key, size: bytes.length };
+  }
   const history = getChatHistory();
   let existingIndex = -1;
   if (name && Array.isArray(history)) {
-    existingIndex = history.findIndex((item) => item && item.tag === "rx-message" && item.rx && item.rx.name === name);
+    existingIndex = history.findIndex((item) => item && item.rx && item.rx.name === name);
     if (existingIndex < 0) {
       const legacyMessage = "RX: " + name;
       existingIndex = history.findIndex((item) => item && item.tag === "rx-name" && typeof item.m === "string" && item.m.trim() === legacyMessage);
@@ -4417,8 +5202,9 @@ function logReceivedMessage(entry, opts) {
       existing.m = desiredMessage;
       changed = true;
     }
-    if (existing.tag !== "rx-message") {
-      existing.tag = "rx-message";
+    const desiredTag = imageMeta ? "rx-image" : "rx-message";
+    if (existing.tag !== desiredTag) {
+      existing.tag = desiredTag;
       changed = true;
     }
     if (existing.role !== "rx") {
@@ -4455,6 +5241,22 @@ function logReceivedMessage(entry, opts) {
         changed = true;
       }
     }
+    if (imageMeta) {
+      if (!existing.image || typeof existing.image !== "object") {
+        existing.image = sanitizeChatImageMeta(imageMeta);
+        changed = true;
+      } else {
+        const sanitized = sanitizeChatImageMeta(imageMeta);
+        const keys = Object.keys(sanitized);
+        for (let i = 0; i < keys.length; i += 1) {
+          const key = keys[i];
+          if (existing.image[key] !== sanitized[key]) {
+            existing.image[key] = sanitized[key];
+            changed = true;
+          }
+        }
+      }
+    }
     if (!existing.t) {
       existing.t = Date.now();
       changed = true;
@@ -4465,11 +5267,12 @@ function logReceivedMessage(entry, opts) {
     }
     return;
   }
-  if (options.isNew === false && !messageBody) {
+  if (options.isNew === false && !messageBody && !imageMeta) {
     // Для старых записей без текста не добавляем дубль.
     return;
   }
-  const meta = { role: "rx", tag: "rx-message", rx: rxMeta };
+  const meta = { role: "rx", tag: imageMeta ? "rx-image" : "rx-message", rx: rxMeta };
+  if (imageMeta) meta.image = sanitizeChatImageMeta(imageMeta);
   const saved = persistChat(message, "dev", meta);
   addChatMessage(saved.record, saved.index);
 }
@@ -9330,7 +10133,4 @@ async function resyncAfterEndpointChange() {
     console.warn("[endpoint] resync error", err);
   }
 }
-
-
-
 )~~~";

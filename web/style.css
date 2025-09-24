@@ -270,6 +270,22 @@ main {
 
 /* Chat */
 .chat-area { position: relative; }
+.chat-area.drop-active::after {
+  content: "Отпустите, чтобы отправить";
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--accent);
+  border-radius: .8rem;
+  background: color-mix(in oklab, var(--accent) 12%, transparent 88%);
+  color: var(--text);
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  pointer-events: none;
+  padding: 1rem;
+  backdrop-filter: blur(2px);
+}
 .chat-log {
   height: min(52vh, 560px);
   overflow-y: auto;
@@ -399,8 +415,41 @@ main {
 }
 .bubble-tx-detail { font-weight:600; }
 
-.chat-input { display:flex; gap:.6rem; margin-top:.8rem; }
+.chat-input { display:flex; gap:.6rem; margin-top:.8rem; align-items:center; flex-wrap:wrap; }
 .chat-input button { min-width: 7.5rem; }
+.chat-upload { display:flex; align-items:center; gap:.5rem; }
+.chat-upload .icon-btn { min-width: 2.7rem; min-height: 2.7rem; font-size: 1.25rem; }
+.chat-upload .icon-btn span { pointer-events: none; }
+.chat-image-profile {
+  background: var(--panel-2);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  border-radius: .6rem;
+  padding: .35rem .6rem;
+  color: var(--text);
+  font-weight: 600;
+  min-width: 6rem;
+}
+.chat-image-profile:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring);
+}
+.bubble-image { margin-top: .6rem; }
+.bubble-image-frame {
+  border-radius: .75rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  background: #000;
+}
+.bubble-image-frame img { display:block; width:100%; height:auto; }
+.bubble-image-caption {
+  margin-top: .35rem;
+  font-size: .78rem;
+  color: var(--muted);
+  display:flex;
+  gap:.4rem;
+  align-items:center;
+  flex-wrap:wrap;
+}
 .chat-input-row { display:grid; gap:.6rem; grid-template-columns: 1fr; margin-top:.8rem; }
 .cmd-buttons { display:flex; gap:.4rem; flex-wrap:wrap; }
 .send-row { position: relative; display:flex; gap:.5rem; }
@@ -437,6 +486,21 @@ main {
 @media (max-width: 640px) {
   .chat-input { flex-direction: column; align-items: stretch; }
   .chat-input button { width: 100%; min-width: 0; }
+  .send-row { flex-direction: column; align-items: stretch; gap: .4rem; }
+  .chat-upload {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(2.75rem, 3rem) 1fr;
+    gap: .5rem;
+    align-items: center;
+  }
+  .chat-upload .icon-btn {
+    width: 100%;
+    min-width: 0;
+  }
+  .chat-image-profile {
+    width: 100%;
+  }
 }
 .fab { border-radius: 999px; width: 46px; height: 46px; display:grid; place-items:center; padding: 0; }
 
