@@ -614,6 +614,7 @@ ChannelBank parseBankChar(char b) {
     case 'w': case 'W': return ChannelBank::WEST;
     case 't': case 'T': return ChannelBank::TEST;
     case 'a': case 'A': return ChannelBank::ALL;
+    case 'h': case 'H': return ChannelBank::HOME;
     default: return radio.getBank();
   }
 }
@@ -773,6 +774,7 @@ String bankToLetter(ChannelBank bank) {
     case ChannelBank::WEST: return "w";
     case ChannelBank::TEST: return "t";
     case ChannelBank::ALL:  return "a";
+    case ChannelBank::HOME: return "h";
     default:                return "";
   }
 }
@@ -907,6 +909,7 @@ String cmdInfo() {
     case ChannelBank::WEST: s += "Запад"; break;
     case ChannelBank::TEST: s += "Тест"; break;
     case ChannelBank::ALL: s += "All"; break;
+    case ChannelBank::HOME: s += "Home"; break;
   }
   s += "\nChannel: "; s += String(radio.getChannel());
   s += "\nRX: "; s += String(radio.getRxFrequency(), 3); s += " MHz";
@@ -1234,7 +1237,7 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
 }
 
 void loop() {
@@ -1268,18 +1271,21 @@ void loop() {
         }
       } else if (line.startsWith("BANK ")) {
         char b = line.charAt(5);
-        if (b == 'e') {
+        if (b == 'e' || b == 'E') {
           radio.setBank(ChannelBank::EAST);
           Serial.println("Банк Восток");
-        } else if (b == 'w') {
+        } else if (b == 'w' || b == 'W') {
           radio.setBank(ChannelBank::WEST);
           Serial.println("Банк Запад");
-        } else if (b == 't') {
+        } else if (b == 't' || b == 'T') {
           radio.setBank(ChannelBank::TEST);
           Serial.println("Банк Тест");
-        } else if (b == 'a') {
+        } else if (b == 'a' || b == 'A') {
           radio.setBank(ChannelBank::ALL);
           Serial.println("Банк All");
+        } else if (b == 'h' || b == 'H') {
+          radio.setBank(ChannelBank::HOME);
+          Serial.println("Банк Home");
         }
       } else if (line.startsWith("CH ")) {
         int ch = line.substring(3).toInt();
@@ -1340,6 +1346,7 @@ void loop() {
           case ChannelBank::WEST: Serial.println("Запад"); break;
           case ChannelBank::TEST: Serial.println("Тест"); break;
           case ChannelBank::ALL: Serial.println("All"); break;
+          case ChannelBank::HOME: Serial.println("Home"); break;
         }
         Serial.print("Канал: "); Serial.println(radio.getChannel());
         Serial.print("RX: "); Serial.print(radio.getRxFrequency(), 3); Serial.println(" MHz");
