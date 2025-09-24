@@ -197,14 +197,50 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
               </div>
               <div id="channelInfoTestsStatus" class="channel-info-status small muted" hidden></div>
               <div id="channelInfoStabilitySummary" class="channel-info-test-summary" hidden>
-                <div>Успешных пакетов: <strong id="channelInfoStabilitySuccess">—</strong></div>
+                <div class="channel-info-test-summary-main">
+                  <div><span>Успешных пакетов</span><strong id="channelInfoStabilitySuccess">—</strong></div>
+                  <div><span>Успешность</span><strong id="channelInfoStabilityPercent">—</strong></div>
+                  <div><span>Средняя задержка</span><strong id="channelInfoStabilityLatencyAvg">—</strong></div>
+                  <div><span>Джиттер (σ)</span><strong id="channelInfoStabilityLatencyJitter">—</strong></div>
+                </div>
                 <div class="channel-info-test-legend small">
                   <span data-type="rssi">RSSI</span>
                   <span data-type="snr">SNR</span>
                 </div>
               </div>
+              <div id="channelInfoStabilityIssues" class="channel-info-test-issues small muted" hidden></div>
+              <div id="channelInfoStabilityCards" class="channel-info-test-cards" hidden>
+                <div class="channel-info-test-card">
+                  <div class="label">RSSI</div>
+                  <div class="value" id="channelInfoStabilityRssiRange">—</div>
+                  <div class="meta" id="channelInfoStabilityRssiMeta">—</div>
+                </div>
+                <div class="channel-info-test-card">
+                  <div class="label">SNR</div>
+                  <div class="value" id="channelInfoStabilitySnrRange">—</div>
+                  <div class="meta" id="channelInfoStabilitySnrMeta">—</div>
+                </div>
+                <div class="channel-info-test-card">
+                  <div class="label">Задержка</div>
+                  <div class="value" id="channelInfoStabilityLatencyRange">—</div>
+                  <div class="meta" id="channelInfoStabilityLatencyMeta">—</div>
+                </div>
+              </div>
               <div id="channelInfoStabilityResult" class="channel-info-test-chart" hidden>
                 <canvas id="channelInfoStabilityChart" width="360" height="200"></canvas>
+                <div id="channelInfoStabilityTooltip" class="channel-info-test-tooltip" hidden></div>
+              </div>
+              <div id="channelInfoStabilityHistory" class="channel-info-test-history" hidden>
+                <div class="channel-info-test-history-header">
+                  <div class="channel-info-test-history-title">История Stability</div>
+                  <div class="channel-info-test-history-actions">
+                    <button id="channelInfoStabilityExportCsv" class="btn ghost small">Экспорт CSV</button>
+                    <button id="channelInfoStabilityExportJson" class="btn ghost small">Экспорт JSON</button>
+                    <button id="channelInfoStabilityHistoryClear" class="btn ghost small">Очистить</button>
+                  </div>
+                </div>
+                <div id="channelInfoStabilityHistoryEmpty" class="small muted">История пуста — выполните Stability test.</div>
+                <ul id="channelInfoStabilityHistoryList" class="channel-info-test-history-list"></ul>
               </div>
               <div id="channelInfoCrResult" class="channel-info-cr" hidden>
                 <table class="channel-info-cr-table">
@@ -539,6 +575,8 @@ const char STYLE_CSS[] PROGMEM = R"~~~(
   --good: #22c55e;
   --ring: rgba(34,211,238,.35);
   --ring-2: rgba(56,189,248,.25);
+  --stability-rssi: #f97316;
+  --stability-snr: #38bdf8;
   --scan-bg: color-mix(in oklab, #f97316 25%, white 75%);
   --scan-fg: #1f2937;
   color-scheme: dark;
@@ -556,6 +594,8 @@ const char STYLE_CSS[] PROGMEM = R"~~~(
   --good: #16a34a;
   --ring: rgba(14,165,233,.25);
   --ring-2: rgba(6,182,212,.15);
+  --stability-rssi: #ea580c;
+  --stability-snr: #2563eb;
   --scan-bg: color-mix(in oklab, #f97316 20%, white 80%);
   --scan-fg: #082f49;
   color-scheme: light;
@@ -573,6 +613,8 @@ const char STYLE_CSS[] PROGMEM = R"~~~(
   --good: #facc15;
   --ring: rgba(248,113,113,.35);
   --ring-2: rgba(244,63,94,.25);
+  --stability-rssi: #fb7185;
+  --stability-snr: #facc15;
   --scan-bg: color-mix(in oklab, var(--accent-2) 25%, black 15%);
   --scan-fg: color-mix(in oklab, var(--text) 85%, white 15%);
   color-scheme: dark;
@@ -1268,6 +1310,235 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   display: grid;
   gap: .6rem;
 }
+.channel-info-tests-block { gap: .75rem; }
+.channel-info-tests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+.channel-info-tests .btn {
+  flex: 1 1 45%;
+  min-width: 9rem;
+}
+.channel-info-test-summary {
+  display: grid;
+  gap: .6rem;
+  padding: .45rem .6rem;
+  border-radius: .7rem;
+  background: color-mix(in oklab, var(--panel-2) 82%, black 18%);
+}
+.channel-info-test-summary-main {
+  display: grid;
+  gap: .5rem;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  align-items: start;
+}
+.channel-info-test-summary-main > div {
+  display: grid;
+  gap: .1rem;
+  font-size: .9rem;
+}
+.channel-info-test-summary strong {
+  font-size: 1rem;
+}
+.channel-info-test-summary strong + span,
+.channel-info-test-summary span + strong {
+  font-size: .95rem;
+}
+.channel-info-test-legend {
+  display: flex;
+  gap: .65rem;
+  align-items: center;
+}
+.channel-info-test-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+}
+.channel-info-test-legend span::before {
+  content: "";
+  width: .75rem;
+  height: .75rem;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.2);
+}
+.channel-info-test-legend span[data-type="rssi"]::before { background: var(--stability-rssi); }
+.channel-info-test-legend span[data-type="snr"]::before { background: var(--stability-snr); }
+.channel-info-test-issues {
+  padding: .3rem .1rem;
+}
+.channel-info-test-chart {
+  position: relative;
+  padding: .4rem;
+  border-radius: .8rem;
+  background: color-mix(in oklab, var(--panel-2) 88%, black 12%);
+}
+.channel-info-test-chart canvas {
+  width: 100%;
+  display: block;
+  border-radius: .6rem;
+}
+.channel-info-test-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate3d(0,0,0);
+  pointer-events: none;
+  padding: .55rem .65rem;
+  border-radius: .65rem;
+  background: color-mix(in oklab, var(--panel-2) 92%, black 8%);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  box-shadow: 0 8px 18px rgba(0,0,0,.25);
+  max-width: 220px;
+  font-size: .85rem;
+  display: grid;
+  gap: .4rem;
+  transition: opacity .12s ease;
+}
+.channel-info-test-tooltip-title {
+  font-weight: 600;
+}
+.channel-info-test-tooltip-grid {
+  display: grid;
+  gap: .3rem;
+}
+.channel-info-test-tooltip-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: .8rem;
+}
+.channel-info-test-tooltip-grid span {
+  color: var(--muted);
+  font-size: .8rem;
+}
+.channel-info-test-tooltip-grid strong {
+  font-weight: 600;
+}
+.channel-info-test-tooltip-raw {
+  font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace);
+  font-size: .78rem;
+  background: color-mix(in oklab, var(--panel-2) 85%, black 15%);
+  padding: .35rem .45rem;
+  border-radius: .5rem;
+  color: var(--muted);
+  word-break: break-word;
+}
+.channel-info-test-cards {
+  display: grid;
+  gap: .6rem;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+.channel-info-test-card {
+  border-radius: .75rem;
+  padding: .55rem .65rem;
+  background: color-mix(in oklab, var(--panel-2) 88%, black 12%);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  display: grid;
+  gap: .25rem;
+}
+.channel-info-test-card .label {
+  font-size: .8rem;
+  color: var(--muted);
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.channel-info-test-card .value {
+  font-size: 1rem;
+  font-weight: 600;
+}
+.channel-info-test-card .meta {
+  font-size: .8rem;
+  color: var(--muted);
+}
+.channel-info-test-history {
+  display: grid;
+  gap: .6rem;
+  padding: .4rem 0 .2rem;
+}
+.channel-info-test-history-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: .5rem;
+  align-items: center;
+}
+.channel-info-test-history-title {
+  font-weight: 600;
+}
+.channel-info-test-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+.channel-info-test-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: .5rem;
+}
+.channel-info-test-history-item {
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  border-radius: .7rem;
+  padding: .55rem .65rem;
+  background: color-mix(in oklab, var(--panel-2) 85%, black 15%);
+  display: grid;
+  gap: .35rem;
+}
+.channel-info-test-history-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem .8rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.channel-info-test-history-time {
+  font-weight: 600;
+}
+.channel-info-test-history-success {
+  font-size: .9rem;
+}
+.channel-info-test-history-diff {
+  font-size: .85rem;
+  font-weight: 600;
+}
+.channel-info-test-history-diff.up {
+  color: var(--good);
+}
+.channel-info-test-history-diff.down {
+  color: var(--danger);
+}
+.channel-info-test-history-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem .8rem;
+}
+.channel-info-test-history-issues {
+  color: var(--muted);
+}
+.channel-info-cr {
+  border-radius: .8rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--panel-2) 75%, black 25%);
+}
+.channel-info-cr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .85rem;
+}
+.channel-info-cr-table th,
+.channel-info-cr-table td {
+  padding: .5rem .6rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  text-align: left;
+}
+.channel-info-cr-table thead { background: color-mix(in oklab, var(--panel-2) 90%, black 10%); }
+.channel-info-cr-table tbody tr:last-child td { border-bottom: none; }
+.channel-info-cr-table td.ok { color: var(--good); font-weight: 600; }
+.channel-info-cr-table td.fail { color: var(--danger); font-weight: 600; }
+.channel-info-status[data-state="warn"] { color: var(--danger); }
+.channel-info-status[data-state="success"] { color: var(--good); }
+.channel-info-status[data-state="info"] { color: var(--muted); }
 .channel-info-row td {
   padding: 0;
   border-bottom: none;
@@ -1315,14 +1586,23 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
     border: none;
     box-shadow: none;
   }
+  #channelsTable tbody tr.channel-info-row td {
+    display: block;
+    justify-content: initial;
+    align-items: initial;
+    gap: 0;
+  }
+  #channelsTable tbody tr.channel-info-row td::before {
+    content: none;
+  }
   .channel-info-cell {
     max-width: 100%;
     width: 100%;
   }
   .channel-info-row .channel-info {
-    width: 90vw;
-    max-width: 90vw;
-    margin: 0 auto;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
   }
   #channelsTable tbody tr.selected-info {
     background: color-mix(in oklab, var(--accent-2) 25%, var(--panel-2) 75%);
@@ -1599,6 +1879,8 @@ tbody tr.selected-info td { font-weight:600; }
 .debug-line--error { color: color-mix(in oklab, var(--danger) 75%, var(--text) 25%); }
 .debug-line--warn { color: color-mix(in oklab, #facc15 70%, var(--text) 30%); }
 .debug-line--action { color: color-mix(in oklab, var(--accent) 70%, var(--text) 30%); }
+
+
 )~~~";
 
 // libs/freq-info.csv — справочник частот каналов
@@ -2020,7 +2302,6 @@ const UI = {
     rxBoostedGain: null,
     encBusy: false,
     encryption: null,
-    testMode: null, // состояние тестового режима TX/RX
     infoChannel: null,
     infoChannelTx: null,
     infoChannelRx: null,
@@ -2034,6 +2315,13 @@ const UI = {
         total: 0,
         success: 0,
         points: [],
+        stats: null,
+        startedAt: null,
+        finishedAt: null,
+      },
+      stabilityHistory: {
+        loaded: false,
+        map: new Map(),
       },
       cr: {
         running: false,
@@ -2083,6 +2371,10 @@ const TEST_RXM_MESSAGE_MAX = 2048;
 // Настройки тестов вкладки Channels/Ping
 const CHANNEL_STABILITY_ATTEMPTS = 20; // количество ping для Stability test
 const CHANNEL_STABILITY_INTERVAL_MS = 300; // задержка между ping в миллисекундах
+const CHANNEL_STABILITY_HISTORY_KEY = "channelStabilityHistory"; // ключ localStorage для архива Stability test
+const CHANNEL_STABILITY_HISTORY_VERSION = 1; // версия структуры архива
+const CHANNEL_STABILITY_HISTORY_LIMIT = 20; // максимальное число записей истории на канал
+const CHANNEL_STABILITY_TOOLTIP_RADIUS = 18; // радиус поиска точек на графике для подсказки
 const CHANNEL_CR_PRESETS = [ // допустимые значения CR для перебора
   { value: 5, label: "4/5" },
   { value: 6, label: "4/6" },
@@ -2332,8 +2624,6 @@ async function init() {
   UI.els.rxBoostedGainHint = $("#rxBoostedGainHint");
   UI.els.testRxmMessage = $("#TESTRXMMSG");
   UI.els.testRxmMessageHint = $("#testRxmMessageHint");
-  UI.els.testModeSwitch = $("#TESTMODE");
-  UI.els.testModeHint = $("#testModeHint");
   UI.els.channelSelect = $("#CH");
   UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
@@ -2351,8 +2641,26 @@ async function init() {
   UI.els.channelInfoTestsStatus = $("#channelInfoTestsStatus");
   UI.els.channelInfoStabilitySummary = $("#channelInfoStabilitySummary");
   UI.els.channelInfoStabilitySuccess = $("#channelInfoStabilitySuccess");
+  UI.els.channelInfoStabilityPercent = $("#channelInfoStabilityPercent");
+  UI.els.channelInfoStabilityLatencyAvg = $("#channelInfoStabilityLatencyAvg");
+  UI.els.channelInfoStabilityLatencyJitter = $("#channelInfoStabilityLatencyJitter");
+  UI.els.channelInfoStabilityCards = $("#channelInfoStabilityCards");
+  UI.els.channelInfoStabilityRssiRange = $("#channelInfoStabilityRssiRange");
+  UI.els.channelInfoStabilityRssiMeta = $("#channelInfoStabilityRssiMeta");
+  UI.els.channelInfoStabilitySnrRange = $("#channelInfoStabilitySnrRange");
+  UI.els.channelInfoStabilitySnrMeta = $("#channelInfoStabilitySnrMeta");
+  UI.els.channelInfoStabilityLatencyRange = $("#channelInfoStabilityLatencyRange");
+  UI.els.channelInfoStabilityLatencyMeta = $("#channelInfoStabilityLatencyMeta");
+  UI.els.channelInfoStabilityIssues = $("#channelInfoStabilityIssues");
   UI.els.channelInfoStabilityWrap = $("#channelInfoStabilityResult");
   UI.els.channelInfoStabilityChart = $("#channelInfoStabilityChart");
+  UI.els.channelInfoStabilityTooltip = $("#channelInfoStabilityTooltip");
+  UI.els.channelInfoStabilityHistory = $("#channelInfoStabilityHistory");
+  UI.els.channelInfoStabilityHistoryList = $("#channelInfoStabilityHistoryList");
+  UI.els.channelInfoStabilityHistoryEmpty = $("#channelInfoStabilityHistoryEmpty");
+  UI.els.channelInfoStabilityExportCsv = $("#channelInfoStabilityExportCsv");
+  UI.els.channelInfoStabilityExportJson = $("#channelInfoStabilityExportJson");
+  UI.els.channelInfoStabilityHistoryClear = $("#channelInfoStabilityHistoryClear");
   UI.els.channelInfoCrResult = $("#channelInfoCrResult");
   UI.els.channelInfoCrTableBody = $("#channelInfoCrTableBody");
   UI.els.channelInfoRow = null;
@@ -2433,6 +2741,15 @@ async function init() {
   }
   if (UI.els.channelInfoCrBtn) {
     UI.els.channelInfoCrBtn.addEventListener("click", onChannelCrTest);
+  }
+  if (UI.els.channelInfoStabilityExportCsv) {
+    UI.els.channelInfoStabilityExportCsv.addEventListener("click", onChannelStabilityExportCsv);
+  }
+  if (UI.els.channelInfoStabilityExportJson) {
+    UI.els.channelInfoStabilityExportJson.addEventListener("click", onChannelStabilityExportJson);
+  }
+  if (UI.els.channelInfoStabilityHistoryClear) {
+    UI.els.channelInfoStabilityHistoryClear.addEventListener("click", onChannelStabilityHistoryClear);
   }
   const infoClose = $("#channelInfoClose");
   if (infoClose) infoClose.addEventListener("click", hideChannelInfo);
@@ -2591,16 +2908,6 @@ async function init() {
       updateRxBoostedGainUi();
     });
   }
-  if (UI.els.testModeSwitch) {
-    UI.els.testModeSwitch.addEventListener("change", () => {
-      UI.els.testModeSwitch.indeterminate = false;
-      void setTestMode(UI.els.testModeSwitch.checked);
-    });
-  }
-  const storedTestMode = storage.get("set.TESTMODE");
-  if (storedTestMode === "1") UI.state.testMode = true;
-  else if (storedTestMode === "0") UI.state.testMode = false;
-  updateTestModeUi();
   if (UI.els.testRxmMessage) {
     UI.els.testRxmMessage.addEventListener("input", updateTestRxmMessageHint);
     UI.els.testRxmMessage.addEventListener("change", onTestRxmMessageChange);
@@ -3448,13 +3755,6 @@ function handleCommandSideEffects(cmd, text) {
     if (state !== null) {
       UI.state.encryption = state;
       updateEncryptionUi();
-    }
-  } else if (upper === "TESTMODE") {
-    const state = parseTestModeResponse(text);
-    if (state !== null) {
-      UI.state.testMode = state;
-      storage.set("set.TESTMODE", state ? "1" : "0");
-      updateTestModeUi();
     }
   } else if (upper === "RXBG") {
     const state = parseRxBoostedGainResponse(text);
@@ -4516,24 +4816,52 @@ function updateChannelTestsUi() {
 
   const summary = UI.els.channelInfoStabilitySummary || $("#channelInfoStabilitySummary");
   const successEl = UI.els.channelInfoStabilitySuccess || $("#channelInfoStabilitySuccess");
+  const percentEl = UI.els.channelInfoStabilityPercent || $("#channelInfoStabilityPercent");
+  const latencyAvgEl = UI.els.channelInfoStabilityLatencyAvg || $("#channelInfoStabilityLatencyAvg");
+  const latencyJitterEl = UI.els.channelInfoStabilityLatencyJitter || $("#channelInfoStabilityLatencyJitter");
+  const cardsWrap = UI.els.channelInfoStabilityCards || $("#channelInfoStabilityCards");
   const chartWrap = UI.els.channelInfoStabilityWrap || $("#channelInfoStabilityResult");
+  const issuesWrap = UI.els.channelInfoStabilityIssues || $("#channelInfoStabilityIssues");
+  const historyWrap = UI.els.channelInfoStabilityHistory || $("#channelInfoStabilityHistory");
   const crWrap = UI.els.channelInfoCrResult || $("#channelInfoCrResult");
 
-  if (!tests || !hasChannel || tests.stability.channel !== infoChannel || !tests.stability.points.length) {
+  let stabilityStats = null;
+  const canShowStability = tests && hasChannel && tests.stability.channel === infoChannel && tests.stability.points.length;
+  if (canShowStability) {
+    if (!tests.stability.stats) {
+      tests.stability.stats = computeStabilityStats(tests.stability.points, {
+        planned: tests.stability.total,
+        startedAt: tests.stability.startedAt,
+        finishedAt: tests.stability.finishedAt,
+      });
+    }
+    stabilityStats = tests.stability.stats;
+  }
+  if (!stabilityStats) {
     if (summary) summary.hidden = true;
+    if (cardsWrap) cardsWrap.hidden = true;
+    if (issuesWrap) issuesWrap.hidden = true;
     if (chartWrap) chartWrap.hidden = true;
   } else {
-    const attempts = tests.stability.points.length;
-    const success = tests.stability.success;
-    const percent = attempts ? (success / attempts) * 100 : 0;
-    const rounded = attempts ? Math.round(percent * 10) / 10 : 0;
-    const formattedPercent = attempts ? (Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)) : "0";
-    if (successEl) successEl.textContent = success + "/" + attempts + " (" + formattedPercent + "%)";
+    const attempts = stabilityStats.attempts;
+    const successCount = stabilityStats.success;
+    const percentText = formatPercentValue(stabilityStats.percent);
+    if (successEl) successEl.textContent = successCount + "/" + attempts + " (" + percentText + ")";
+    if (percentEl) percentEl.textContent = percentText;
+    if (latencyAvgEl) latencyAvgEl.textContent = formatLatencyMetric(stabilityStats.metrics.latency, "avg");
+    if (latencyJitterEl) latencyJitterEl.textContent = formatLatencyMetric(stabilityStats.metrics.latency, "std");
     if (summary) summary.hidden = false;
+    renderChannelStabilityCards(stabilityStats);
+    renderChannelStabilityIssues(stabilityStats);
     if (chartWrap) {
       chartWrap.hidden = false;
-      renderChannelStabilityChart(tests.stability.points);
+      renderChannelStabilityChart(tests.stability.points, { stats: stabilityStats });
     }
+  }
+
+  renderChannelStabilityHistory(infoChannel);
+  if (historyWrap) {
+    historyWrap.hidden = infoChannel == null;
   }
 
   if (!tests || !hasChannel || tests.cr.channel !== infoChannel || !tests.cr.results.length) {
@@ -4567,7 +4895,7 @@ function renderChannelCrResults(results) {
     tbody.appendChild(tr);
   }
 }
-function renderChannelStabilityChart(points) {
+function renderChannelStabilityChart(points, opts) {
   const canvas = UI.els.channelInfoStabilityChart || $("#channelInfoStabilityChart");
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
@@ -4585,6 +4913,10 @@ function renderChannelStabilityChart(points) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.scale(dpr, dpr);
+
+  const options = opts || {};
+  const currentHover = options.hover || canvas._stabilityHover || null;
+  const stats = options.stats || null;
 
   const displayWidth = width;
   const displayHeight = height;
@@ -4611,11 +4943,18 @@ function renderChannelStabilityChart(points) {
   ctx.fillRect(0, 0, displayWidth, displayHeight);
 
   const values = [];
+  const datasetValues = { rssi: [], snr: [] };
   if (Array.isArray(points)) {
     for (let i = 0; i < points.length; i++) {
-      const p = points[i];
-      if (Number.isFinite(p.rssi)) values.push(p.rssi);
-      if (Number.isFinite(p.snr)) values.push(p.snr);
+      const entry = points[i];
+      if (Number.isFinite(entry.rssi)) {
+        values.push(entry.rssi);
+        datasetValues.rssi.push(entry.rssi);
+      }
+      if (Number.isFinite(entry.snr)) {
+        values.push(entry.snr);
+        datasetValues.snr.push(entry.snr);
+      }
     }
   }
   if (!values.length) {
@@ -4624,8 +4963,12 @@ function renderChannelStabilityChart(points) {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("Нет данных для построения графика", displayWidth / 2, displayHeight / 2);
+    canvas._stabilityChart = { points: [], coords: [], stats: stats || null };
+    canvas._stabilityHover = null;
+    ensureStabilityChartEvents(canvas);
     return;
   }
+
   let min = Math.min.apply(Math, values);
   let max = Math.max.apply(Math, values);
   if (!Number.isFinite(min) || !Number.isFinite(max)) {
@@ -4641,7 +4984,7 @@ function renderChannelStabilityChart(points) {
   min -= padding;
   max += padding;
   const mapX = (index) => {
-    if (points.length <= 1) return left + chartWidth / 2;
+    if (!points || points.length <= 1) return left + chartWidth / 2;
     return left + (chartWidth * index) / (points.length - 1);
   };
   const mapY = (value) => {
@@ -4661,7 +5004,7 @@ function renderChannelStabilityChart(points) {
     ctx.lineTo(right, y);
     ctx.stroke();
   }
-  const verticalSteps = Math.min(points.length - 1, 5);
+  const verticalSteps = points && points.length > 1 ? Math.min(points.length - 1, 5) : 0;
   for (let i = 0; i <= verticalSteps; i++) {
     const ratio = verticalSteps ? i / verticalSteps : 0;
     const x = left + chartWidth * ratio;
@@ -4679,9 +5022,39 @@ function renderChannelStabilityChart(points) {
     ctx.setLineDash([]);
   }
 
+  const drawBand = (key, color) => {
+    const valuesForKey = datasetValues[key];
+    if (!valuesForKey.length) return;
+    const minVal = Math.min.apply(Math, valuesForKey);
+    const maxVal = Math.max.apply(Math, valuesForKey);
+    const yTop = mapY(maxVal);
+    const yBottom = mapY(minVal);
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.fillStyle = color;
+    ctx.fillRect(left, Math.min(yTop, yBottom), chartWidth, Math.max(1, Math.abs(yBottom - yTop)));
+    ctx.restore();
+    const metric = stats && stats.metrics ? stats.metrics[key] : null;
+    if (metric && Number.isFinite(metric.avg)) {
+      const avgY = mapY(metric.avg);
+      ctx.save();
+      ctx.globalAlpha = 0.7;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(left, avgY);
+      ctx.lineTo(right, avgY);
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+  drawBand("rssi", rssiColor);
+  drawBand("snr", snrColor);
+
   ctx.strokeStyle = axisColor;
   ctx.beginPath();
-  ctx.moveTo(left, bottom);
+  ctx.moveTo(left, top);
+  ctx.lineTo(left, bottom);
   ctx.lineTo(right, bottom);
   ctx.stroke();
 
@@ -4689,13 +5062,14 @@ function renderChannelStabilityChart(points) {
   ctx.font = "11px sans-serif";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
-  ctx.fillText(max.toFixed(1), left - 6, top);
-  ctx.fillText(min.toFixed(1), left - 6, bottom);
+  ctx.fillText(formatNumber(max, 1) || max.toFixed(1), left - 6, top);
+  ctx.fillText(formatNumber(min, 1) || min.toFixed(1), left - 6, bottom);
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.fillText("1", left, bottom + 8);
-  ctx.fillText(String(points.length), right, bottom + 8);
+  ctx.fillText(points && points.length ? String(points.length) : "0", right, bottom + 8);
 
+  const coords = [];
   const drawDataset = (key, color) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = 2.2;
@@ -4708,10 +5082,13 @@ function renderChannelStabilityChart(points) {
       if (!Number.isFinite(value)) continue;
       const x = mapX(i);
       const y = mapY(value);
+      coords.push({ dataset: key, index: i, x, y, point: points[i] });
       if (!started) {
         ctx.moveTo(x, y);
         started = true;
-      } else ctx.lineTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
     }
     if (started) ctx.stroke();
     ctx.fillStyle = color;
@@ -4720,13 +5097,35 @@ function renderChannelStabilityChart(points) {
       if (!Number.isFinite(value)) continue;
       const x = mapX(i);
       const y = mapY(value);
+      const hovered = currentHover && currentHover.dataset === key && currentHover.index === i;
       ctx.beginPath();
-      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.arc(x, y, hovered ? 4.4 : 3, 0, Math.PI * 2);
       ctx.fill();
+      if (hovered) {
+        ctx.save();
+        ctx.strokeStyle = themeLight ? "rgba(15,23,42,0.65)" : "rgba(255,255,255,0.75)";
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.restore();
+      }
     }
   };
-  drawDataset("rssi", rssiColor);
-  drawDataset("snr", snrColor);
+  if (points && points.length) {
+    drawDataset("rssi", rssiColor);
+    drawDataset("snr", snrColor);
+  }
+
+  if (currentHover && points && points.length > currentHover.index) {
+    const hoverX = mapX(currentHover.index);
+    ctx.save();
+    ctx.setLineDash([2, 6]);
+    ctx.strokeStyle = themeLight ? "rgba(30,41,59,0.22)" : "rgba(248,250,252,0.25)";
+    ctx.beginPath();
+    ctx.moveTo(hoverX, top);
+    ctx.lineTo(hoverX, bottom + 18);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   ctx.fillStyle = dangerColor;
   for (let i = 0; i < points.length; i++) {
@@ -4738,6 +5137,848 @@ function renderChannelStabilityChart(points) {
     ctx.fill();
   }
 
+  canvas._stabilityChart = {
+    points: Array.isArray(points) ? points.slice() : [],
+    coords,
+    stats: stats || null,
+  };
+  canvas._stabilityHover = currentHover || null;
+  ensureStabilityChartEvents(canvas);
+}
+
+function ensureStabilityChartEvents(canvas) {
+  if (!canvas || canvas._stabilityEventsBound) return;
+  const handler = onStabilityChartPointer;
+  canvas.addEventListener("pointermove", handler);
+  canvas.addEventListener("pointerleave", handler);
+  canvas.addEventListener("pointercancel", handler);
+  canvas._stabilityEventsBound = true;
+}
+
+function onStabilityChartPointer(event) {
+  const canvas = UI.els.channelInfoStabilityChart || $("#channelInfoStabilityChart");
+  const tooltip = UI.els.channelInfoStabilityTooltip || $("#channelInfoStabilityTooltip");
+  if (!canvas || !tooltip) return;
+  const chart = canvas._stabilityChart;
+  if (!chart || !Array.isArray(chart.coords) || !chart.coords.length) {
+    hideStabilityTooltip(tooltip);
+    updateStabilityChartHover(canvas, null);
+    return;
+  }
+  if (!event || event.type === "pointerleave" || event.type === "pointercancel") {
+    hideStabilityTooltip(tooltip);
+    updateStabilityChartHover(canvas, null);
+    return;
+  }
+  const rect = canvas.getBoundingClientRect();
+  const parent = canvas.parentElement || canvas;
+  const parentRect = parent.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  let nearest = null;
+  for (let i = 0; i < chart.coords.length; i++) {
+    const coord = chart.coords[i];
+    if (!coord) continue;
+    const dx = coord.x - x;
+    const dy = coord.y - y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= CHANNEL_STABILITY_TOOLTIP_RADIUS && (!nearest || dist < nearest.dist)) {
+      nearest = { dist, coord };
+    }
+  }
+  if (!nearest) {
+    hideStabilityTooltip(tooltip);
+    updateStabilityChartHover(canvas, null);
+    return;
+  }
+  updateStabilityChartHover(canvas, { dataset: nearest.coord.dataset, index: nearest.coord.index });
+  const localX = event.clientX - parentRect.left;
+  const localY = event.clientY - parentRect.top;
+  showStabilityTooltip(canvas, tooltip, nearest.coord, localX, localY);
+}
+
+function updateStabilityChartHover(canvas, hover) {
+  if (!canvas) return;
+  const prev = canvas._stabilityHover;
+  if (prev && hover && prev.dataset === hover.dataset && prev.index === hover.index) return;
+  if (!prev && !hover) return;
+  canvas._stabilityHover = hover || null;
+  const chart = canvas._stabilityChart;
+  if (chart && Array.isArray(chart.points)) {
+    renderChannelStabilityChart(chart.points, { stats: chart.stats, hover: canvas._stabilityHover });
+  }
+}
+
+function showStabilityTooltip(canvas, tooltip, coord, localX, localY) {
+  if (!tooltip || !coord || !coord.point) return;
+  const point = coord.point;
+  const packetIndex = typeof point.index === "number" ? point.index : coord.index + 1;
+  const statusText = point.success ? "успех" : "ошибка";
+  const reasonKey = point.state || point.error || (point.success ? "signal" : "unknown");
+  const reasonText = describeFailureReason(reasonKey);
+  const rows = [
+    { label: "RSSI", value: formatMetricValue(point.rssi, "дБм", 1) },
+    { label: "SNR", value: formatMetricValue(point.snr, "дБ", 1) },
+    { label: "Задержка", value: formatMetricValue(point.latency, "мс", point.latency >= 100 ? 0 : 1) },
+    { label: "Состояние", value: reasonText }
+  ];
+  const grid = rows.map((row) => `<div><span>${row.label}</span><strong>${escapeHtml(row.value || "—")}</strong></div>`).join("");
+  const parts = [];
+  parts.push(`<div class="channel-info-test-tooltip-title">Пакет ${packetIndex} • ${statusText}${point.success ? "" : " (" + reasonText + ")"}</div>`);
+  parts.push(`<div class="channel-info-test-tooltip-grid">${grid}</div>`);
+  if (point.raw) {
+    parts.push(`<div class="channel-info-test-tooltip-raw">${escapeHtml(truncateText(point.raw, 160))}</div>`);
+  }
+  tooltip.innerHTML = parts.join("");
+  tooltip.hidden = false;
+  tooltip.style.opacity = "0";
+  const parent = canvas.parentElement || canvas;
+  const offset = { x: localX + 12, y: localY + 12 };
+  tooltip.style.left = offset.x + "px";
+  tooltip.style.top = offset.y + "px";
+  tooltip.style.maxWidth = Math.max(180, parent.clientWidth - 16) + "px";
+  const bounds = tooltip.getBoundingClientRect();
+  let left = offset.x;
+  let top = offset.y;
+  if (left + bounds.width > parent.clientWidth) left = Math.max(0, parent.clientWidth - bounds.width - 8);
+  if (top + bounds.height > parent.clientHeight) top = Math.max(0, parent.clientHeight - bounds.height - 8);
+  tooltip.style.left = left + "px";
+  tooltip.style.top = top + "px";
+  tooltip.style.opacity = "1";
+}
+
+function hideStabilityTooltip(tooltip) {
+  if (!tooltip) return;
+  tooltip.hidden = true;
+  tooltip.textContent = "";
+}
+
+function formatMetricValue(value, unit, digits) {
+  if (!Number.isFinite(value)) return null;
+  const formatted = formatNumber(value, typeof digits === "number" ? digits : 1);
+  if (!formatted) return null;
+  return unit ? formatted + " " + unit : formatted;
+}
+
+function escapeHtml(value) {
+  if (value == null) return "";
+  return String(value).replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case '"': return "&quot;";
+      case "'": return "&#39;";
+      default: return char;
+    }
+  });
+}
+
+function truncateText(text, maxLength) {
+  const value = text == null ? "" : String(text);
+  if (!maxLength || value.length <= maxLength) return value;
+  return value.slice(0, Math.max(0, maxLength - 1)) + "…";
+}
+
+function formatNumber(value, fractionDigits) {
+  if (!Number.isFinite(value)) return null;
+  const digits = typeof fractionDigits === "number" ? Math.max(0, fractionDigits) : 1;
+  return value.toLocaleString("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: digits });
+}
+
+function formatPercentValue(value) {
+  if (!Number.isFinite(value)) return "0%";
+  const digits = Math.abs(Math.round(value) - value) < 0.05 ? 0 : 1;
+  const formatted = formatNumber(value, digits);
+  return formatted ? formatted.replace(/\s+/g, "") + "%" : "0%";
+}
+
+function formatLatencyMetric(metric, key) {
+  if (!metric || !Number.isFinite(metric[key])) return "—";
+  const digits = metric[key] >= 100 ? 0 : 1;
+  const formatted = formatNumber(metric[key], digits);
+  return formatted ? formatted + " мс" : "—";
+}
+
+function formatRange(metric, unit, digits) {
+  if (!metric || !Number.isFinite(metric.min) || !Number.isFinite(metric.max)) return "—";
+  const minText = formatNumber(metric.min, typeof digits === "number" ? digits : 1);
+  const maxText = formatNumber(metric.max, typeof digits === "number" ? digits : 1);
+  if (!minText || !maxText) return "—";
+  return minText + "…" + maxText + (unit ? " " + unit : "");
+}
+
+function formatRssiMeta(metric) {
+  if (!metric) return "—";
+  const parts = [];
+  if (Number.isFinite(metric.avg)) parts.push("среднее " + (formatNumber(metric.avg, 1) || metric.avg));
+  if (Number.isFinite(metric.median)) parts.push("медиана " + (formatNumber(metric.median, 1) || metric.median));
+  if (Number.isFinite(metric.std) && metric.std > 0) parts.push("σ " + (formatNumber(metric.std, 1) || metric.std));
+  return parts.length ? parts.map((part) => part + " дБм").join(", ") : "—";
+}
+
+function formatSnrMeta(metric) {
+  if (!metric) return "—";
+  const parts = [];
+  if (Number.isFinite(metric.avg)) parts.push("среднее " + (formatNumber(metric.avg, 1) || metric.avg));
+  if (Number.isFinite(metric.median)) parts.push("медиана " + (formatNumber(metric.median, 1) || metric.median));
+  if (Number.isFinite(metric.std) && metric.std > 0) parts.push("σ " + (formatNumber(metric.std, 1) || metric.std));
+  return parts.length ? parts.map((part) => part + " дБ").join(", ") : "—";
+}
+
+function formatLatencyMeta(metric) {
+  if (!metric) return "—";
+  const parts = [];
+  if (Number.isFinite(metric.median)) {
+    const digits = metric.median >= 100 ? 0 : 1;
+    parts.push("медиана " + (formatNumber(metric.median, digits) || metric.median) + " мс");
+  }
+  if (Number.isFinite(metric.p95)) {
+    const digits = metric.p95 >= 100 ? 0 : 1;
+    parts.push("95% " + (formatNumber(metric.p95, digits) || metric.p95) + " мс");
+  }
+  if (Number.isFinite(metric.std) && metric.std > 0) {
+    parts.push("σ " + (formatNumber(metric.std, 1) || metric.std) + " мс");
+  }
+  return parts.length ? parts.join(", ") : "—";
+}
+
+function renderChannelStabilityCards(stats) {
+  const wrap = UI.els.channelInfoStabilityCards || $("#channelInfoStabilityCards");
+  if (!wrap) return;
+  const rssiRangeEl = UI.els.channelInfoStabilityRssiRange || $("#channelInfoStabilityRssiRange");
+  const rssiMetaEl = UI.els.channelInfoStabilityRssiMeta || $("#channelInfoStabilityRssiMeta");
+  const snrRangeEl = UI.els.channelInfoStabilitySnrRange || $("#channelInfoStabilitySnrRange");
+  const snrMetaEl = UI.els.channelInfoStabilitySnrMeta || $("#channelInfoStabilitySnrMeta");
+  const latencyRangeEl = UI.els.channelInfoStabilityLatencyRange || $("#channelInfoStabilityLatencyRange");
+  const latencyMetaEl = UI.els.channelInfoStabilityLatencyMeta || $("#channelInfoStabilityLatencyMeta");
+  const metrics = stats ? stats.metrics : null;
+  const hasMetrics = metrics && (metrics.rssi || metrics.snr || metrics.latency);
+  if (!hasMetrics) {
+    wrap.hidden = true;
+    if (rssiRangeEl) rssiRangeEl.textContent = "—";
+    if (rssiMetaEl) rssiMetaEl.textContent = "—";
+    if (snrRangeEl) snrRangeEl.textContent = "—";
+    if (snrMetaEl) snrMetaEl.textContent = "—";
+    if (latencyRangeEl) latencyRangeEl.textContent = "—";
+    if (latencyMetaEl) latencyMetaEl.textContent = "—";
+    return;
+  }
+  wrap.hidden = false;
+  if (rssiRangeEl) rssiRangeEl.textContent = formatRange(metrics.rssi, "дБм");
+  if (rssiMetaEl) rssiMetaEl.textContent = formatRssiMeta(metrics.rssi);
+  if (snrRangeEl) snrRangeEl.textContent = formatRange(metrics.snr, "дБ");
+  if (snrMetaEl) snrMetaEl.textContent = formatSnrMeta(metrics.snr);
+  if (latencyRangeEl) {
+    const digits = metrics.latency && metrics.latency.max >= 100 ? 0 : 1;
+    latencyRangeEl.textContent = formatRange(metrics.latency, "мс", digits);
+  }
+  if (latencyMetaEl) latencyMetaEl.textContent = formatLatencyMeta(metrics.latency);
+}
+
+function renderChannelStabilityIssues(stats) {
+  const issues = UI.els.channelInfoStabilityIssues || $("#channelInfoStabilityIssues");
+  if (!issues) return;
+  const failures = stats && Array.isArray(stats.failureReasons) ? stats.failureReasons : [];
+  if (!failures.length) {
+    issues.hidden = true;
+    issues.textContent = "";
+    return;
+  }
+  const parts = failures.slice(0, 3).map((item) => {
+    const label = item.label || describeFailureReason(item.key);
+    return label + " ×" + item.count;
+  });
+  issues.textContent = "Проблемы: " + parts.join(", ");
+  issues.hidden = false;
+}
+
+function describeFailureReason(key) {
+  if (!key) return "Неопознано";
+  const map = {
+    "signal": "Ответ",
+    "no-response": "Нет ответа",
+    "crc-error": "CRC ошибка",
+    "transport": "Ошибка запроса",
+    "busy": "Канал занят",
+    "timeout": "Тайм-аут",
+    "unknown": "Неопознано"
+  };
+  const normalized = String(key).toLowerCase();
+  if (map[normalized]) return map[normalized];
+  if (normalized.startsWith("err")) return "Ошибка";
+  return normalized.replace(/[-_]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function normalizeFailureKey(point) {
+  if (!point) return "unknown";
+  if (point.error) return String(point.error);
+  if (point.state) return String(point.state);
+  return "unknown";
+}
+
+function summarizeFailureReasons(points) {
+  const counts = new Map();
+  if (Array.isArray(points)) {
+    for (let i = 0; i < points.length; i++) {
+      const point = points[i];
+      if (!point || point.success) continue;
+      const key = normalizeFailureKey(point);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  const list = Array.from(counts.entries()).map(([key, count]) => ({
+    key,
+    count,
+    label: describeFailureReason(key)
+  })).sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return a.label.localeCompare(b.label);
+  });
+  return { list, top: list.length ? list[0].key : null };
+}
+
+function computeStabilityStats(points, opts) {
+  const options = opts || {};
+  const attempts = Array.isArray(points) ? points.length : 0;
+  const success = Array.isArray(points) ? points.reduce((total, item) => total + (item && item.success ? 1 : 0), 0) : 0;
+  const percent = attempts ? (success / attempts) * 100 : 0;
+  const metrics = {
+    rssi: collectStabilityMetric(points, "rssi"),
+    snr: collectStabilityMetric(points, "snr"),
+    latency: collectStabilityMetric(points, "latency")
+  };
+  const failures = summarizeFailureReasons(points);
+  let durationMs = null;
+  if (Number.isFinite(options.startedAt) && Number.isFinite(options.finishedAt)) {
+    durationMs = Math.max(0, options.finishedAt - options.startedAt);
+  }
+  return {
+    attempts,
+    planned: Number.isFinite(options.planned) ? options.planned : attempts,
+    success,
+    percent,
+    metrics,
+    failureReasons: failures.list,
+    dominantFailure: failures.top,
+    durationMs,
+    intervalMs: CHANNEL_STABILITY_INTERVAL_MS,
+  };
+}
+
+function collectStabilityMetric(points, key) {
+  if (!Array.isArray(points) || !points.length) return null;
+  const values = [];
+  const indexes = [];
+  for (let i = 0; i < points.length; i++) {
+    const point = points[i];
+    if (!point) continue;
+    const value = Number(point[key]);
+    if (!Number.isFinite(value)) continue;
+    values.push(value);
+    indexes.push(typeof point.index === "number" ? point.index : i + 1);
+  }
+  if (!values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const count = values.length;
+  const sum = values.reduce((total, value) => total + value, 0);
+  const avg = sum / count;
+  const median = count % 2 ? sorted[(count - 1) / 2] : (sorted[count / 2 - 1] + sorted[count / 2]) / 2;
+  let variance = 0;
+  for (let i = 0; i < values.length; i++) {
+    const diff = values[i] - avg;
+    variance += diff * diff;
+  }
+  variance /= count;
+  const std = Math.sqrt(variance);
+  const minValue = Math.min.apply(Math, values);
+  const maxValue = Math.max.apply(Math, values);
+  const minIndex = indexes[values.indexOf(minValue)];
+  const maxIndex = indexes[values.indexOf(maxValue)];
+  const p95 = calculatePercentile(sorted, 0.95);
+  return {
+    count,
+    min: minValue,
+    max: maxValue,
+    avg,
+    median,
+    std,
+    p95,
+    minIndex,
+    maxIndex,
+  };
+}
+
+function calculatePercentile(values, fraction) {
+  if (!Array.isArray(values) || !values.length) return NaN;
+  if (fraction <= 0) return values[0];
+  if (fraction >= 1) return values[values.length - 1];
+  const pos = (values.length - 1) * fraction;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  if (base + 1 < values.length) {
+    return values[base] + rest * (values[base + 1] - values[base]);
+  }
+  return values[base];
+}
+
+function ensureStabilityHistory() {
+  const tests = UI.state.channelTests;
+  if (!tests) return { loaded: true, map: new Map() };
+  if (!tests.stabilityHistory) {
+    tests.stabilityHistory = { loaded: false, map: new Map() };
+  }
+  if (!tests.stabilityHistory.loaded) {
+    tests.stabilityHistory.map = loadStabilityHistoryFromStorage();
+    tests.stabilityHistory.loaded = true;
+  }
+  return tests.stabilityHistory;
+}
+
+function loadStabilityHistoryFromStorage() {
+  const raw = storage.get(CHANNEL_STABILITY_HISTORY_KEY);
+  const map = new Map();
+  if (!raw) return map;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== CHANNEL_STABILITY_HISTORY_VERSION || typeof parsed.channels !== "object") {
+      return map;
+    }
+    const channels = parsed.channels;
+    Object.keys(channels).forEach((key) => {
+      const list = Array.isArray(channels[key]) ? channels[key] : [];
+      const normalized = list.map(normalizeHistoryRecord).filter(Boolean);
+      if (normalized.length) {
+        normalized.sort((a, b) => b.ts - a.ts);
+        map.set(key, normalized);
+      }
+    });
+  } catch (err) {
+    console.warn("[stability-history] не удалось прочитать историю:", err);
+  }
+  return map;
+}
+
+function normalizeHistoryRecord(record) {
+  if (!record || typeof record !== "object") return null;
+  const ts = Number(record.ts);
+  const channel = Number(record.channel);
+  const attempts = Number(record.attempts);
+  const success = Number(record.success);
+  const percent = Number(record.percent);
+  const durationMs = record.durationMs != null ? Number(record.durationMs) : null;
+  const intervalMs = record.intervalMs != null ? Number(record.intervalMs) : null;
+  const metrics = record.metrics && typeof record.metrics === "object" ? {
+    rssi: normalizeMetric(record.metrics.rssi),
+    snr: normalizeMetric(record.metrics.snr),
+    latency: normalizeMetric(record.metrics.latency),
+  } : {};
+  const failures = Array.isArray(record.failures) ? record.failures.map(normalizeFailureItem).filter(Boolean) : [];
+  const points = Array.isArray(record.points) ? record.points.map(normalizeHistoryPoint).filter(Boolean) : [];
+  return {
+    ts: Number.isFinite(ts) ? ts : Date.now(),
+    channel: Number.isFinite(channel) ? channel : null,
+    attempts: Number.isFinite(attempts) ? attempts : points.length,
+    success: Number.isFinite(success) ? success : 0,
+    percent: Number.isFinite(percent) ? percent : 0,
+    durationMs: Number.isFinite(durationMs) ? durationMs : null,
+    intervalMs: Number.isFinite(intervalMs) ? intervalMs : CHANNEL_STABILITY_INTERVAL_MS,
+    metrics,
+    failures,
+    dominantFailure: typeof record.dominantFailure === "string" ? record.dominantFailure : null,
+    points,
+  };
+}
+
+function normalizeMetric(metric) {
+  if (!metric || typeof metric !== "object") return null;
+  const out = {};
+  if (Number.isFinite(metric.count)) out.count = Number(metric.count);
+  if (Number.isFinite(metric.min)) out.min = Number(metric.min);
+  if (Number.isFinite(metric.max)) out.max = Number(metric.max);
+  if (Number.isFinite(metric.avg)) out.avg = Number(metric.avg);
+  if (Number.isFinite(metric.median)) out.median = Number(metric.median);
+  if (Number.isFinite(metric.std)) out.std = Number(metric.std);
+  if (Number.isFinite(metric.p95)) out.p95 = Number(metric.p95);
+  if (Number.isFinite(metric.minIndex)) out.minIndex = Number(metric.minIndex);
+  if (Number.isFinite(metric.maxIndex)) out.maxIndex = Number(metric.maxIndex);
+  return out;
+}
+
+function normalizeFailureItem(item) {
+  if (!item || typeof item !== "object") return null;
+  const key = item.key != null ? String(item.key) : null;
+  const count = Number(item.count);
+  if (!key || !Number.isFinite(count)) return null;
+  return { key, count, label: item.label ? String(item.label) : describeFailureReason(key) };
+}
+
+function normalizeHistoryPoint(point) {
+  if (!point || typeof point !== "object") return null;
+  return {
+    index: Number.isFinite(point.index) ? Number(point.index) : null,
+    success: !!point.success,
+    rssi: Number.isFinite(point.rssi) ? Number(point.rssi) : null,
+    snr: Number.isFinite(point.snr) ? Number(point.snr) : null,
+    latency: Number.isFinite(point.latency) ? Number(point.latency) : null,
+    state: point.state != null ? String(point.state) : null,
+    error: point.error != null ? String(point.error) : null,
+    raw: point.raw != null ? String(point.raw) : null,
+  };
+}
+
+function saveStabilityHistory(map) {
+  const payload = { version: CHANNEL_STABILITY_HISTORY_VERSION, channels: {} };
+  if (map && typeof map.forEach === "function") {
+    map.forEach((records, key) => {
+      if (Array.isArray(records) && records.length) {
+        payload.channels[key] = records;
+      }
+    });
+  }
+  try {
+    storage.set(CHANNEL_STABILITY_HISTORY_KEY, JSON.stringify(payload));
+  } catch (err) {
+    console.warn("[stability-history] не удалось сохранить историю:", err);
+  }
+}
+
+function getChannelStabilityHistory(channel) {
+  if (channel == null) return [];
+  const history = ensureStabilityHistory();
+  const key = String(channel);
+  const list = history.map.get(key);
+  return Array.isArray(list) ? list : [];
+}
+
+function persistChannelStabilityHistory(channel, stability) {
+  if (channel == null || !stability) return;
+  const history = ensureStabilityHistory();
+  const record = prepareStabilityHistoryRecord(channel, stability);
+  if (!record) return;
+  const key = String(channel);
+  const list = history.map.get(key) || [];
+  list.unshift(record);
+  while (list.length > CHANNEL_STABILITY_HISTORY_LIMIT) list.pop();
+  history.map.set(key, list);
+  saveStabilityHistory(history.map);
+  renderChannelStabilityHistory(channel);
+}
+
+function serializeMetric(metric) {
+  if (!metric) return null;
+  const out = {};
+  if (Number.isFinite(metric.count)) out.count = Number(metric.count);
+  if (Number.isFinite(metric.min)) out.min = Math.round(metric.min * 100) / 100;
+  if (Number.isFinite(metric.max)) out.max = Math.round(metric.max * 100) / 100;
+  if (Number.isFinite(metric.avg)) out.avg = Math.round(metric.avg * 100) / 100;
+  if (Number.isFinite(metric.median)) out.median = Math.round(metric.median * 100) / 100;
+  if (Number.isFinite(metric.std)) out.std = Math.round(metric.std * 100) / 100;
+  if (Number.isFinite(metric.p95)) out.p95 = Math.round(metric.p95 * 100) / 100;
+  if (Number.isFinite(metric.minIndex)) out.minIndex = Number(metric.minIndex);
+  if (Number.isFinite(metric.maxIndex)) out.maxIndex = Number(metric.maxIndex);
+  return out;
+}
+
+function prepareStabilityHistoryRecord(channel, stability) {
+  if (!stability || !Array.isArray(stability.points) || !stability.points.length) return null;
+  const stats = stability.stats || computeStabilityStats(stability.points, {
+    planned: stability.total,
+    startedAt: stability.startedAt,
+    finishedAt: stability.finishedAt,
+  });
+  if (!stats) return null;
+  const ts = Number.isFinite(stability.finishedAt) ? stability.finishedAt : Date.now();
+  const points = stability.points.map((point) => ({
+    index: point.index != null ? point.index : null,
+    success: !!point.success,
+    rssi: Number.isFinite(point.rssi) ? Number(point.rssi) : null,
+    snr: Number.isFinite(point.snr) ? Number(point.snr) : null,
+    latency: Number.isFinite(point.latency) ? Number(point.latency) : null,
+    state: point.state || null,
+    error: point.error || null,
+    raw: point.raw ? truncateText(String(point.raw), 200) : null,
+  }));
+  return {
+    ts,
+    channel: Number(channel),
+    attempts: stats.attempts,
+    success: stats.success,
+    percent: Math.round(stats.percent * 10) / 10,
+    durationMs: stats.durationMs != null ? Math.round(stats.durationMs) : null,
+    intervalMs: CHANNEL_STABILITY_INTERVAL_MS,
+    metrics: {
+      rssi: stats.metrics.rssi ? serializeMetric(stats.metrics.rssi) : null,
+      snr: stats.metrics.snr ? serializeMetric(stats.metrics.snr) : null,
+      latency: stats.metrics.latency ? serializeMetric(stats.metrics.latency) : null,
+    },
+    failures: stats.failureReasons ? stats.failureReasons.map((item) => ({ key: item.key, count: item.count, label: item.label })) : [],
+    dominantFailure: stats.dominantFailure || null,
+    points,
+  };
+}
+
+function renderChannelStabilityHistory(channel) {
+  const wrap = UI.els.channelInfoStabilityHistory || $("#channelInfoStabilityHistory");
+  const list = UI.els.channelInfoStabilityHistoryList || $("#channelInfoStabilityHistoryList");
+  const empty = UI.els.channelInfoStabilityHistoryEmpty || $("#channelInfoStabilityHistoryEmpty");
+  if (!wrap || !list) return;
+  list.innerHTML = "";
+  if (channel == null) {
+    if (empty) empty.hidden = false;
+    return;
+  }
+  const history = getChannelStabilityHistory(channel);
+  if (!history.length) {
+    if (empty) empty.hidden = false;
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  const limit = Math.min(history.length, 10);
+  for (let i = 0; i < limit; i++) {
+    const record = history[i];
+    const previous = history[i + 1] || null;
+    fragment.appendChild(createStabilityHistoryItem(record, previous));
+  }
+  list.appendChild(fragment);
+  if (empty) empty.hidden = true;
+}
+
+function createStabilityHistoryItem(record, previous) {
+  const li = document.createElement("li");
+  li.className = "channel-info-test-history-item";
+  const header = document.createElement("div");
+  header.className = "channel-info-test-history-line";
+  const time = document.createElement("span");
+  time.className = "channel-info-test-history-time";
+  time.textContent = formatHistoryTimestamp(record.ts);
+  header.appendChild(time);
+  const success = document.createElement("span");
+  success.className = "channel-info-test-history-success";
+  const percentText = formatPercentValue(record.percent);
+  success.textContent = `${record.success}/${record.attempts} (${percentText})`;
+  header.appendChild(success);
+  if (previous && Number.isFinite(previous.percent) && Number.isFinite(record.percent)) {
+    const diffValue = record.percent - previous.percent;
+    if (Math.abs(diffValue) > 0.05) {
+      const diff = document.createElement("span");
+      diff.className = "channel-info-test-history-diff" + (diffValue > 0 ? " up" : " down");
+      const diffText = formatNumber(Math.abs(diffValue), 1) || Math.abs(diffValue).toFixed(1);
+      diff.textContent = (diffValue > 0 ? "↑ " : "↓ ") + diffText + "%";
+      header.appendChild(diff);
+    }
+  }
+  li.appendChild(header);
+
+  const metricsParts = [];
+  if (record.metrics && record.metrics.latency && Number.isFinite(record.metrics.latency.avg)) {
+    const digits = record.metrics.latency.avg >= 100 ? 0 : 1;
+    const avgLatency = formatNumber(record.metrics.latency.avg, digits) || record.metrics.latency.avg;
+    metricsParts.push(`Задержка ${avgLatency} мс`);
+  }
+  if (record.metrics && record.metrics.latency && Number.isFinite(record.metrics.latency.std) && record.metrics.latency.std > 0) {
+    const stdLatency = formatNumber(record.metrics.latency.std, 1) || record.metrics.latency.std;
+    metricsParts.push(`σ ${stdLatency} мс`);
+  }
+  if (record.metrics && record.metrics.rssi && Number.isFinite(record.metrics.rssi.min) && Number.isFinite(record.metrics.rssi.max)) {
+    metricsParts.push(`RSSI ${formatNumber(record.metrics.rssi.min, 1)}…${formatNumber(record.metrics.rssi.max, 1)} дБм`);
+  }
+  if (record.metrics && record.metrics.snr && Number.isFinite(record.metrics.snr.min) && Number.isFinite(record.metrics.snr.max)) {
+    metricsParts.push(`SNR ${formatNumber(record.metrics.snr.min, 1)}…${formatNumber(record.metrics.snr.max, 1)} дБ`);
+  }
+  if (Number.isFinite(record.durationMs)) {
+    const duration = formatDurationMs(record.durationMs);
+    if (duration) metricsParts.push(`Время ${duration}`);
+  }
+  if (metricsParts.length) {
+    const metricsLine = document.createElement("div");
+    metricsLine.className = "channel-info-test-history-metrics small muted";
+    metricsLine.textContent = metricsParts.join(" · ");
+    li.appendChild(metricsLine);
+  }
+  if (record.failures && record.failures.length) {
+    const issues = document.createElement("div");
+    issues.className = "channel-info-test-history-issues small";
+    const parts = record.failures.slice(0, 3).map((item) => `${item.label || describeFailureReason(item.key)} ×${item.count}`);
+    issues.textContent = "Ошибки: " + parts.join(", ");
+    li.appendChild(issues);
+  }
+  return li;
+}
+
+function formatHistoryTimestamp(ts) {
+  const date = ts ? new Date(ts) : new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatDurationMs(ms) {
+  if (!Number.isFinite(ms)) return null;
+  if (ms >= 1000) {
+    const seconds = ms / 1000;
+    const digits = seconds >= 10 ? 1 : 2;
+    return (formatNumber(seconds, digits) || seconds.toFixed(digits)) + " с";
+  }
+  return (formatNumber(ms, 0) || Math.round(ms).toString()) + " мс";
+}
+
+function buildStabilityHistoryCsv(channel, records) {
+  const header = [
+    "type","timestamp","channel","attempts","success","percent","duration_ms","interval_ms",
+    "rssi_min","rssi_max","rssi_avg","snr_min","snr_max","snr_avg",
+    "latency_min_ms","latency_max_ms","latency_avg_ms","latency_median_ms","latency_std_ms","latency_p95_ms",
+    "dominant_failure","failures","point_index","point_success","point_rssi","point_snr","point_latency_ms","point_state","point_error","point_raw"
+  ];
+  const rows = [header];
+  records.forEach((record) => {
+    const timestamp = new Date(record.ts).toISOString();
+    const failures = record.failures && record.failures.length ? record.failures.map((item) => `${item.key}:${item.count}`).join("|") : "";
+    rows.push([
+      "summary",
+      timestamp,
+      record.channel != null ? record.channel : "",
+      record.attempts,
+      record.success,
+      record.percent,
+      record.durationMs != null ? record.durationMs : "",
+      record.intervalMs != null ? record.intervalMs : "",
+      metricField(record.metrics.rssi, "min"),
+      metricField(record.metrics.rssi, "max"),
+      metricField(record.metrics.rssi, "avg"),
+      metricField(record.metrics.snr, "min"),
+      metricField(record.metrics.snr, "max"),
+      metricField(record.metrics.snr, "avg"),
+      metricField(record.metrics.latency, "min"),
+      metricField(record.metrics.latency, "max"),
+      metricField(record.metrics.latency, "avg"),
+      metricField(record.metrics.latency, "median"),
+      metricField(record.metrics.latency, "std"),
+      metricField(record.metrics.latency, "p95"),
+      record.dominantFailure || "",
+      failures,
+      "","","","","","","",""
+    ]);
+    if (Array.isArray(record.points)) {
+      record.points.forEach((point) => {
+        rows.push([
+          "point",
+          timestamp,
+          record.channel != null ? record.channel : "",
+          record.attempts,
+          record.success,
+          record.percent,
+          record.durationMs != null ? record.durationMs : "",
+          record.intervalMs != null ? record.intervalMs : "",
+          "","","","","","","","","","","","",
+          record.dominantFailure || "",
+          failures,
+          point.index != null ? point.index : "",
+          point.success ? "1" : "0",
+          Number.isFinite(point.rssi) ? point.rssi : "",
+          Number.isFinite(point.snr) ? point.snr : "",
+          Number.isFinite(point.latency) ? point.latency : "",
+          point.state || "",
+          point.error || "",
+          point.raw ? point.raw.replace(/\r?\n/g, " ") : "",
+        ]);
+      });
+    }
+  });
+  return rows.map((row) => row.map(csvEscape).join(",")).join("\n");
+}
+
+function metricField(metric, key) {
+  if (!metric || !Number.isFinite(metric[key])) return "";
+  return String(metric[key]);
+}
+
+function buildStabilityHistoryJson(channel, records) {
+  const payload = {
+    channel,
+    exportedAt: new Date().toISOString(),
+    records,
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+function buildStabilityExportName(channel, ext) {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return `stability_ch${channel}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.${ext}`;
+}
+
+function csvEscape(value) {
+  if (value == null) return "";
+  const str = String(value);
+  if (/[",\n]/.test(str)) return '"' + str.replace(/"/g, '""') + '"';
+  return str;
+}
+
+function downloadTextFile(filename, content, mime) {
+  const blob = new Blob([content], { type: mime || "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function onChannelStabilityExportCsv(event) {
+  if (event) event.preventDefault();
+  const channel = UI.state.infoChannel;
+  if (channel == null) {
+    note("Выберите канал для экспорта истории.");
+    return;
+  }
+  const history = getChannelStabilityHistory(channel);
+  if (!history.length) {
+    note("История Stability пуста.");
+    return;
+  }
+  const csv = buildStabilityHistoryCsv(channel, history);
+  downloadTextFile(buildStabilityExportName(channel, "csv"), csv, "text/csv");
+  note("История Stability экспортирована в CSV.");
+}
+
+function onChannelStabilityExportJson(event) {
+  if (event) event.preventDefault();
+  const channel = UI.state.infoChannel;
+  if (channel == null) {
+    note("Выберите канал для экспорта истории.");
+    return;
+  }
+  const history = getChannelStabilityHistory(channel);
+  if (!history.length) {
+    note("История Stability пуста.");
+    return;
+  }
+  const json = buildStabilityHistoryJson(channel, history);
+  downloadTextFile(buildStabilityExportName(channel, "json"), json, "application/json");
+  note("История Stability экспортирована в JSON.");
+}
+
+function onChannelStabilityHistoryClear(event) {
+  if (event) event.preventDefault();
+  const channel = UI.state.infoChannel;
+  if (channel == null) {
+    note("Нет выбранного канала.");
+    return;
+  }
+  const cleared = clearChannelStabilityHistory(channel);
+  renderChannelStabilityHistory(channel);
+  note(cleared ? "История Stability очищена." : "История уже пуста.");
+}
+
+function clearChannelStabilityHistory(channel) {
+  const history = ensureStabilityHistory();
+  const key = String(channel);
+  if (!history.map.has(key)) return false;
+  history.map.delete(key);
+  saveStabilityHistory(history.map);
+  return true;
 }
 async function onChannelStabilityTest(event) {
   if (event) event.preventDefault();
@@ -4760,6 +6001,9 @@ async function onChannelStabilityTest(event) {
   tests.stability.total = CHANNEL_STABILITY_ATTEMPTS;
   tests.stability.success = 0;
   tests.stability.points = [];
+  tests.stability.stats = null;
+  tests.stability.startedAt = Date.now();
+  tests.stability.finishedAt = null;
   setChannelTestsStatus("Stability test: запуск…", "info", channel);
   updateChannelTestsUi();
   let cancelled = false;
@@ -4771,20 +6015,37 @@ async function onChannelStabilityTest(event) {
       }
       setChannelTestsStatus(`Stability test: пакет ${i + 1} из ${CHANNEL_STABILITY_ATTEMPTS}`, "info", channel);
       applyChannelTestsStatus();
+      const startedTick = typeof performance !== "undefined" && performance && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
       const res = await sendCommand("PI", undefined, { silent: true, timeoutMs: 5000, debugLabel: `PI stability #${i + 1}` });
+      const finishedTick = typeof performance !== "undefined" && performance && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+      const latency = Math.max(0, Math.round(finishedTick - startedTick));
       let success = false;
       let rssi = null;
       let snr = null;
+      let state = null;
+      let raw = null;
+      let error = null;
       if (res != null) {
-        const metrics = extractPingMetrics(res);
+        raw = String(res).trim();
+        const metrics = extractPingMetrics(raw);
         rssi = metrics.rssi;
         snr = metrics.snr;
-        const state = detectScanState(res);
-        const trimmed = String(res).trim();
-        success = state === "signal" || (!state && trimmed.length > 0);
+        state = detectScanState(raw);
+        success = state === "signal" || (!state && raw.length > 0);
+      } else {
+        error = "transport";
       }
       if (success) tests.stability.success += 1;
-      tests.stability.points.push({ index: i + 1, success, rssi, snr });
+      tests.stability.points.push({ index: i + 1, success, rssi, snr, latency, state: state || null, raw, error });
+      tests.stability.stats = computeStabilityStats(tests.stability.points, {
+        planned: tests.stability.total,
+        startedAt: tests.stability.startedAt,
+        finishedAt: null,
+      });
       updateChannelTestsUi();
       await uiYield();
       if (i < CHANNEL_STABILITY_ATTEMPTS - 1) {
@@ -4796,6 +6057,12 @@ async function onChannelStabilityTest(event) {
     if (btn) btn.removeAttribute("aria-busy");
     updateChannelTestsUi();
   }
+  tests.stability.finishedAt = Date.now();
+  tests.stability.stats = computeStabilityStats(tests.stability.points, {
+    planned: tests.stability.total,
+    startedAt: tests.stability.startedAt,
+    finishedAt: tests.stability.finishedAt,
+  });
   if (cancelled) {
     setChannelTestsStatus("Stability test остановлен: выбран другой канал.", "warn", channel);
     return;
@@ -4806,6 +6073,7 @@ async function onChannelStabilityTest(event) {
   const rounded = attempts ? Math.round(percent * 10) / 10 : 0;
   const formattedPercent = attempts ? (Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)) : "0";
   setChannelTestsStatus(`Stability test завершён: ${success}/${attempts} (${formattedPercent}% успешных пакетов)`, attempts ? "success" : "warn", channel);
+  persistChannelStabilityHistory(channel, tests.stability);
   updateChannelTestsUi();
 }
 async function onChannelCrTest(event) {
@@ -5811,78 +7079,6 @@ function updateRxBoostedGainUi() {
     }
   }
 }
-
-function parseTestModeResponse(text) {
-  if (text == null) return null;
-  const normalized = String(text).trim().toLowerCase();
-  if (!normalized) return null;
-  if (normalized.indexOf("err") >= 0) return null;
-  if (/(^|[^0-9])1($|[^0-9])/.test(normalized) || normalized.indexOf("on") >= 0 || normalized.indexOf("включ") >= 0) {
-    return true;
-  }
-  if (/(^|[^0-9])0($|[^0-9])/.test(normalized) || normalized.indexOf("off") >= 0 || normalized.indexOf("выключ") >= 0) {
-    return false;
-  }
-  return null;
-}
-
-function updateTestModeUi() {
-  const state = UI.state.testMode;
-  const input = UI.els.testModeSwitch;
-  if (input) {
-    if (state === null) {
-      input.indeterminate = true;
-    } else {
-      input.indeterminate = false;
-      input.checked = state;
-    }
-  }
-  const hint = UI.els.testModeHint;
-  if (hint) {
-    if (state === true) {
-      hint.textContent = "Тестовый режим включён: сообщения эмулируются и показываются в чате.";
-    } else if (state === false) {
-      hint.textContent = "Тестовый режим выключен, используется реальная очередь TX.";
-    } else {
-      hint.textContent = "Состояние не загружено.";
-    }
-  }
-}
-
-async function setTestMode(enabled) {
-  const response = await sendCommand("TESTMODE", { v: enabled ? "1" : "0" });
-  if (typeof response === "string") {
-    const parsed = parseTestModeResponse(response);
-    if (parsed !== null) {
-      UI.state.testMode = parsed;
-      storage.set("set.TESTMODE", parsed ? "1" : "0");
-      updateTestModeUi();
-      return parsed;
-    }
-  }
-  return await refreshTestModeState();
-}
-
-async function refreshTestModeState() {
-  try {
-    const res = await deviceFetch("TESTMODE", {}, 2000);
-    if (res.ok && typeof res.text === "string") {
-      const parsed = parseTestModeResponse(res.text);
-      if (parsed !== null) {
-        UI.state.testMode = parsed;
-        storage.set("set.TESTMODE", parsed ? "1" : "0");
-        updateTestModeUi();
-        return parsed;
-      }
-    }
-  } catch (err) {
-    console.warn("[settings] TESTMODE", err);
-  }
-  UI.state.testMode = null;
-  updateTestModeUi();
-  return null;
-}
-
 function updateAckRetryUi() {
   const input = UI.els.ackRetry;
   const state = UI.state.ackRetry;
@@ -6340,10 +7536,10 @@ function loadSettings() {
       el.value = v;
       if (key === "BANK") {
         UI.state.bank = v;
+      }
     }
-  updateRxBoostedGainUi();
-}
   }
+  updateRxBoostedGainUi();
 }
 function saveSettingsLocal() {
   for (let i = 0; i < SETTINGS_KEYS.length; i++) {
@@ -6661,7 +7857,6 @@ async function syncSettingsFromDevice() {
   } catch (err) {
     console.warn("[settings] RXBG", err);
   }
-  await refreshTestModeState();
   try {
     const pauseRes = await deviceFetch("PAUSE", {}, 2000);
     if (pauseRes.ok) {
@@ -8135,4 +9330,7 @@ async function resyncAfterEndpointChange() {
     console.warn("[endpoint] resync error", err);
   }
 }
+
+
+
 )~~~";
