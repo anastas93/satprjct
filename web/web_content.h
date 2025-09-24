@@ -420,6 +420,13 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
               <div id="testRxmMessageHint" class="field-hint">Будет использован встроенный шаблон Lorem ipsum.</div>
             </label>
           </div>
+          <div class="settings-toggle" id="testModeControl">
+            <label class="chip switch">
+              <input type="checkbox" id="TESTMODE" />
+              <span>Тестовый режим TX/RX (SendMsg_BR/received_msg)</span>
+            </label>
+            <div id="testModeHint" class="field-hint">Состояние не загружено.</div>
+          </div>
         </section>
         <div class="settings-actions actions">
           <button type="button" id="btnSaveSettings" class="btn">Сохранить</button>
@@ -2013,6 +2020,7 @@ const UI = {
     rxBoostedGain: null,
     encBusy: false,
     encryption: null,
+    testMode: null, // состояние тестового режима TX/RX
     infoChannel: null,
     infoChannelTx: null,
     infoChannelRx: null,
@@ -2324,6 +2332,8 @@ async function init() {
   UI.els.rxBoostedGainHint = $("#rxBoostedGainHint");
   UI.els.testRxmMessage = $("#TESTRXMMSG");
   UI.els.testRxmMessageHint = $("#testRxmMessageHint");
+  UI.els.testModeSwitch = $("#TESTMODE");
+  UI.els.testModeHint = $("#testModeHint");
   UI.els.channelSelect = $("#CH");
   UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
@@ -2581,6 +2591,16 @@ async function init() {
       updateRxBoostedGainUi();
     });
   }
+  if (UI.els.testModeSwitch) {
+    UI.els.testModeSwitch.addEventListener("change", () => {
+      UI.els.testModeSwitch.indeterminate = false;
+      void setTestMode(UI.els.testModeSwitch.checked);
+    });
+  }
+  const storedTestMode = storage.get("set.TESTMODE");
+  if (storedTestMode === "1") UI.state.testMode = true;
+  else if (storedTestMode === "0") UI.state.testMode = false;
+  updateTestModeUi();
   if (UI.els.testRxmMessage) {
     UI.els.testRxmMessage.addEventListener("input", updateTestRxmMessageHint);
     UI.els.testRxmMessage.addEventListener("change", onTestRxmMessageChange);
@@ -3428,6 +3448,13 @@ function handleCommandSideEffects(cmd, text) {
     if (state !== null) {
       UI.state.encryption = state;
       updateEncryptionUi();
+    }
+  } else if (upper === "TESTMODE") {
+    const state = parseTestModeResponse(text);
+    if (state !== null) {
+      UI.state.testMode = state;
+      storage.set("set.TESTMODE", state ? "1" : "0");
+      updateTestModeUi();
     }
   } else if (upper === "RXBG") {
     const state = parseRxBoostedGainResponse(text);
@@ -5784,6 +5811,78 @@ function updateRxBoostedGainUi() {
     }
   }
 }
+
+function parseTestModeResponse(text) {
+  if (text == null) return null;
+  const normalized = String(text).trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.indexOf("err") >= 0) return null;
+  if (/(^|[^0-9])1($|[^0-9])/.test(normalized) || normalized.indexOf("on") >= 0 || normalized.indexOf("включ") >= 0) {
+    return true;
+  }
+  if (/(^|[^0-9])0($|[^0-9])/.test(normalized) || normalized.indexOf("off") >= 0 || normalized.indexOf("выключ") >= 0) {
+    return false;
+  }
+  return null;
+}
+
+function updateTestModeUi() {
+  const state = UI.state.testMode;
+  const input = UI.els.testModeSwitch;
+  if (input) {
+    if (state === null) {
+      input.indeterminate = true;
+    } else {
+      input.indeterminate = false;
+      input.checked = state;
+    }
+  }
+  const hint = UI.els.testModeHint;
+  if (hint) {
+    if (state === true) {
+      hint.textContent = "Тестовый режим включён: сообщения эмулируются и показываются в чате.";
+    } else if (state === false) {
+      hint.textContent = "Тестовый режим выключен, используется реальная очередь TX.";
+    } else {
+      hint.textContent = "Состояние не загружено.";
+    }
+  }
+}
+
+async function setTestMode(enabled) {
+  const response = await sendCommand("TESTMODE", { v: enabled ? "1" : "0" });
+  if (typeof response === "string") {
+    const parsed = parseTestModeResponse(response);
+    if (parsed !== null) {
+      UI.state.testMode = parsed;
+      storage.set("set.TESTMODE", parsed ? "1" : "0");
+      updateTestModeUi();
+      return parsed;
+    }
+  }
+  return await refreshTestModeState();
+}
+
+async function refreshTestModeState() {
+  try {
+    const res = await deviceFetch("TESTMODE", {}, 2000);
+    if (res.ok && typeof res.text === "string") {
+      const parsed = parseTestModeResponse(res.text);
+      if (parsed !== null) {
+        UI.state.testMode = parsed;
+        storage.set("set.TESTMODE", parsed ? "1" : "0");
+        updateTestModeUi();
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] TESTMODE", err);
+  }
+  UI.state.testMode = null;
+  updateTestModeUi();
+  return null;
+}
+
 function updateAckRetryUi() {
   const input = UI.els.ackRetry;
   const state = UI.state.ackRetry;
@@ -6562,6 +6661,7 @@ async function syncSettingsFromDevice() {
   } catch (err) {
     console.warn("[settings] RXBG", err);
   }
+  await refreshTestModeState();
   try {
     const pauseRes = await deviceFetch("PAUSE", {}, 2000);
     if (pauseRes.ok) {

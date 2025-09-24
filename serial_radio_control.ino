@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <array>
 #include <vector>
+#include <string>
 #include <cstring> // для strlen
 #include <algorithm> // для std::equal
 #include <cstdio>    // для snprintf при подготовке JSON
@@ -57,6 +58,8 @@ ReceivedBuffer recvBuf;     // буфер полученных сообщени�
 bool ackEnabled = DefaultSettings::USE_ACK; // флаг автоматической отправки ACK
 bool encryptionEnabled = DefaultSettings::USE_ENCRYPTION; // режим шифрования
 uint8_t ackRetryLimit = DefaultSettings::ACK_RETRY_LIMIT; // число повторов при ожидании ACK
+bool testModeEnabled = false;           // флаг тестового режима SendMsg_BR/received_msg
+uint8_t testModeLocalCounter = 0;       // локальный счётчик пакетов для тестового режима
 
 WebServer server(80);       // HTTP-сервер для веб-интерфейса
 
@@ -238,6 +241,143 @@ uint32_t nextTestRxmId() {
   counter = (counter + 1) % 100000;
   if (counter == 0) counter = 1;
   return counter;
+}
+
+// Генерация идентификатора для сообщений тестового режима SendMsg_BR/received_msg
+uint32_t nextTestModeMessageId() {
+  static uint32_t counter = 90000;
+  counter = (counter + 1) % 100000;
+  if (counter == 0) counter = 1;
+  return counter;
+}
+
+// Разбор текстовых значений 0/1/on/off для команды TESTMODE
+bool parseOnOffToken(const String& value, bool& out) {
+  String token = value;
+  token.trim();
+  if (token.length() == 0) return false;
+  String lower = token;
+  lower.toLowerCase();
+  if (lower == "1" || lower == "on" || lower == "true" || lower == "вкл" || lower == "включ" || lower == "да") {
+    out = true;
+    return true;
+  }
+  if (lower == "0" || lower == "off" || lower == "false" || lower == "выкл" || lower == "выключ" || lower == "нет") {
+    out = false;
+    return true;
+  }
+  if (lower == "toggle" || lower == "swap" || lower == "перекл" || lower == "сменить") {
+    out = !testModeEnabled;
+    return true;
+  }
+  return false;
+}
+
+// Параметры «унаследованного» формата пакета из SendMsg_BR
+static constexpr size_t kLegacyPacketSize = 112;
+static constexpr size_t kLegacyHeaderSize = 9;
+static constexpr size_t kLegacyPayloadMax = 96;
+static constexpr uint8_t kLegacySourceAddress = 1;
+static constexpr uint8_t kLegacyBroadcastAddress = 0;
+
+// Представление тестового пакета в формате исторического проекта
+struct LegacyTestPacket {
+  std::array<uint8_t, kLegacyPacketSize> data{}; // полный буфер пакета
+  size_t length = kLegacyHeaderSize;             // фактическая длина
+  uint8_t source = kLegacySourceAddress;         // адрес источника
+  uint8_t destination = kLegacyBroadcastAddress; // адрес назначения (широковещание)
+  bool encrypted = false;                        // признак шифрования
+  uint8_t keyIndex = 0;                          // индекс ключа (для шифрования)
+};
+
+// Формирование пакета по правилам SendMsg_BR
+LegacyTestPacket buildLegacyTestPacket(const std::vector<uint8_t>& payload) {
+  LegacyTestPacket packet;
+  packet.data.fill(0);
+  static uint8_t seqA = 0x2A; // псевдослучайные байты идентификатора пакета
+  static uint8_t seqB = 0x7C;
+  seqA = static_cast<uint8_t>(seqA + 1);
+  seqB = static_cast<uint8_t>(seqB + 3);
+  packet.data[1] = seqA;
+  packet.data[2] = seqB;
+  packet.data[0] = packet.data[1] ^ packet.data[2];
+  packet.data[3] = packet.source;
+  packet.data[4] = packet.destination;
+  packet.data[5] = 0; // флаг подтверждения не используется
+  packet.data[6] = packet.encrypted ? 1 : 0;
+  packet.data[7] = packet.keyIndex;
+  packet.data[8] = testModeLocalCounter;
+  testModeLocalCounter = static_cast<uint8_t>(testModeLocalCounter + 1);
+  const size_t limit = std::min(payload.size(), static_cast<size_t>(kLegacyPayloadMax));
+  if (limit > 0) {
+    std::copy(payload.begin(), payload.begin() + limit, packet.data.begin() + kLegacyHeaderSize);
+  }
+  packet.length = kLegacyHeaderSize + limit;
+  return packet;
+}
+
+// Формирование строки для чата в стиле received_msg
+String formatLegacyDisplayString(const LegacyTestPacket& packet, const String& decoded) {
+  String text = decoded;
+  if (text.length() == 0) text = String("—");
+  String out = String("    ");
+  out += text;
+  out += "*";
+  out += String(static_cast<unsigned int>(packet.source));
+  if (packet.encrypted) {
+    out += " ~ucr~";
+  }
+  out += "*  #";
+  out += text;
+  return out;
+}
+
+// Эмуляция полного цикла SendMsg_BR → received_msg с сохранением в буфер
+bool testModeProcessMessage(const String& payload, uint32_t& outId, String& err) {
+  String trimmed = payload;
+  trimmed.trim();
+  if (trimmed.length() == 0) {
+    err = "пустое сообщение";
+    return false;
+  }
+  std::vector<uint8_t> cp = utf8ToCp1251(trimmed.c_str());
+  if (cp.empty()) {
+    err = "пустое сообщение";
+    return false;
+  }
+  if (cp.size() > kLegacyPayloadMax) {
+    cp.resize(kLegacyPayloadMax);
+  }
+  LegacyTestPacket packet = buildLegacyTestPacket(cp);
+  size_t payloadLen = packet.length > kLegacyHeaderSize ? packet.length - kLegacyHeaderSize : 0;
+  std::vector<uint8_t> decodedSource;
+  if (payloadLen > 0) {
+    decodedSource.assign(packet.data.begin() + kLegacyHeaderSize,
+                        packet.data.begin() + kLegacyHeaderSize + payloadLen);
+  }
+  String decoded = decodeCp1251ToString(decodedSource);
+  if (decoded.length() == 0) decoded = trimmed;
+  String display = formatLegacyDisplayString(packet, decoded);
+  std::vector<uint8_t> readyBytes = utf8ToCp1251(display.c_str());
+  if (readyBytes.empty()) {
+    const char* raw = display.c_str();
+    size_t rawLen = static_cast<size_t>(display.length());
+    readyBytes.resize(rawLen);
+    if (rawLen > 0) {
+      std::memcpy(readyBytes.data(), raw, rawLen);
+    }
+  }
+  outId = nextTestModeMessageId();
+  recvBuf.pushRaw(outId, 0, packet.data.data(), packet.length);
+  recvBuf.pushReady(outId, readyBytes.data(), readyBytes.size());
+  String log = String("TESTMODE id=");
+  log += String(outId);
+  log += " len=";
+  log += String(static_cast<unsigned int>(packet.length));
+  SimpleLogger::logStatus(std::string(log.c_str()));
+  Serial.print("TESTMODE RX: ");
+  Serial.println(display);
+  return true;
 }
 
 // Формирование тестового текста с указанным шаблоном
@@ -598,6 +738,16 @@ void handleApiTx() {
   String body = server.arg("plain");                       // получаем сырой текст
   uint32_t id = 0;
   String err;
+  if (testModeEnabled) {                                    // эмуляция SendMsg_BR/received_msg
+    if (testModeProcessMessage(body, id, err)) {
+      String resp = "ok:";
+      resp += String(id);
+      server.send(200, "text/plain", resp);
+    } else {
+      server.send(400, "text/plain", err);
+    }
+    return;
+  }
   if (enqueueTextMessage(body, id, err)) {                  // повторно используем логику Serial-команды
     String resp = "ok:";
     resp += String(id);
@@ -811,7 +961,13 @@ bool enqueueTextMessage(const String& payload, uint32_t& outId, String& err) {
 String cmdTx(const String& payload) {
   uint32_t id = 0;
   String err;
-  if (enqueueTextMessage(payload, id, err)) {
+  if (testModeEnabled) {
+    if (testModeProcessMessage(payload, id, err)) {
+      String ok = "TX:OK id=";
+      ok += String(id);
+      return ok;
+    }
+  } else if (enqueueTextMessage(payload, id, err)) {
     String ok = "TX:OK id=";
     ok += String(id);
     return ok;
@@ -842,6 +998,32 @@ String cmdTxl(size_t sz) {
   out += " size=";
   out += String(sz);
   return out;
+}
+
+// Управление тестовым режимом эмуляции SendMsg_BR/received_msg
+String cmdTestMode(const String& arg) {
+  String token = arg;
+  token.trim();
+  if (token.length() == 0) {
+    String resp = "TESTMODE:";
+    resp += testModeEnabled ? "1" : "0";
+    return resp;
+  }
+  bool desired = testModeEnabled;
+  if (!parseOnOffToken(token, desired)) {
+    return String("TESTMODE:ERR");
+  }
+  bool changed = desired != testModeEnabled;
+  testModeEnabled = desired;
+  if (changed) {
+    testModeLocalCounter = 0;                                  // сбрасываем локальный счётчик
+    SimpleLogger::logStatus(testModeEnabled ? "TESTMODE ON" : "TESTMODE OFF");
+    Serial.print("TESTMODE: ");
+    Serial.println(testModeEnabled ? "включён" : "выключен");
+  }
+  String resp = "TESTMODE:";
+  resp += testModeEnabled ? "1" : "0";
+  return resp;
 }
 
 // Команда BCN отправляет служебный маяк
@@ -1114,6 +1296,14 @@ void handleCmdHttp() {
     tx.setEncryptionEnabled(encryptionEnabled);
     rx.setEncryptionEnabled(encryptionEnabled);
     resp = encryptionEnabled ? String("ENC:1") : String("ENC:0");
+  } else if (cmd == "TESTMODE") {
+    String value;
+    if (server.hasArg("v")) {
+      value = server.arg("v");
+    } else {
+      value = cmdArg;
+    }
+    resp = cmdTestMode(value);
   } else if (cmd == "BCN") {
     resp = cmdBcn();
   } else if (cmd == "TXL") {
@@ -1399,17 +1589,24 @@ void loop() {
         }
       } else if (line.startsWith("TX ")) {
         String msg = line.substring(3);                     // исходный текст
-        // конвертация UTF-8 в CP1251 для корректной передачи русских символов
-        std::vector<uint8_t> data = utf8ToCp1251(std::string(msg.c_str()));
-        // помещаем сообщение в очередь и проверяем успех
-        DEBUG_LOG("RC: команда TX");
-        uint32_t id = tx.queue(data.data(), data.size());
-        if (id != 0) {
-          DEBUG_LOG_VAL("RC: сообщение поставлено id=", id);
-          tx.loop();                           // отправляем первый пакет
-          Serial.println("Пакет отправлен");
+        uint32_t id = 0;
+        String err;
+        if (testModeEnabled) {
+          DEBUG_LOG("RC: тестовый режим TX");
+          if (testModeProcessMessage(msg, id, err)) {
+            Serial.print("TESTMODE: сообщение сохранено id=");
+            Serial.println(id);
+          } else {
+            Serial.print("TESTMODE: ошибка — ");
+            Serial.println(err);
+          }
+        } else if (enqueueTextMessage(msg, id, err)) {
+          DEBUG_LOG_VAL("RC: сообщение поставлено id=", static_cast<int>(id));
+          Serial.print("Пакет отправлен, id=");
+          Serial.println(id);
         } else {
-          Serial.println("Ошибка постановки пакета в очередь");
+          Serial.print("Ошибка постановки пакета: ");
+          Serial.println(err);
         }
       } else if (line.startsWith("TXL ")) {
         int sz = line.substring(4).toInt();                // размер требуемого пакета
@@ -1431,6 +1628,11 @@ void loop() {
         } else {
           Serial.println("Неверный размер");
         }
+      } else if (line.startsWith("TESTMODE")) {
+        String arg = line.length() > 8 ? line.substring(8) : String();
+        arg.trim();
+        String response = cmdTestMode(arg);
+        Serial.println(response);
       } else if (line.equalsIgnoreCase("ENCT")) {
         // тест шифрования: создаём сообщение, шифруем и расшифровываем
         const uint8_t key[16]   = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
