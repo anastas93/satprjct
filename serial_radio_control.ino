@@ -740,23 +740,35 @@ void handleApiTx() {
     return;
   }
   String body = server.arg("plain");                       // получаем сырой текст
-  uint32_t id = 0;
-  String err;
-  if (testModeEnabled) {                                    // эмуляция SendMsg_BR/received_msg
-    if (testModeProcessMessage(body, id, err)) {
-      String resp = "ok:";
-      resp += String(id);
-      server.send(200, "text/plain", resp);
-    } else {
-      server.send(400, "text/plain", err);
+  uint32_t testId = 0;                                      // идентификатор сообщения эмуляции
+  String testErr;                                           // текст ошибки эмуляции
+  bool simulated = false;                                   // выполнена ли эмуляция
+  if (testModeEnabled) {
+    simulated = testModeProcessMessage(body, testId, testErr);
+    if (!simulated && testErr.length() > 0) {               // записываем сбой в журнал
+      std::string log = "TESTMODE: ошибка эмуляции — ";
+      log += testErr.c_str();
+      SimpleLogger::logStatus(log);
     }
-    return;
   }
+  uint32_t id = 0;                                          // идентификатор реальной очереди
+  String err;                                               // текст ошибки постановки
   if (enqueueTextMessage(body, id, err)) {                  // повторно используем логику Serial-команды
     String resp = "ok:";
     resp += String(id);
     server.send(200, "text/plain", resp);
   } else {
+    if (testModeEnabled) {                                  // добавляем информацию о тестовом режиме
+      if (simulated) {
+        err += " (test id=";
+        err += String(testId);
+        err += ")";
+      } else if (testErr.length() > 0) {
+        err += " (testmode: ";
+        err += testErr;
+        err += ")";
+      }
+    }
     server.send(400, "text/plain", err);                   // читаемая причина ошибки
   }
 }
@@ -963,21 +975,39 @@ bool enqueueTextMessage(const String& payload, uint32_t& outId, String& err) {
 
 // Команда TX с возвратом результата для HTTP-интерфейса
 String cmdTx(const String& payload) {
-  uint32_t id = 0;
-  String err;
+  uint32_t testId = 0;                               // идентификатор эмуляции тестового режима
+  String testErr;                                    // текст ошибки тестового режима
+  bool simulated = false;                            // удалось ли выполнить эмуляцию
   if (testModeEnabled) {
-    if (testModeProcessMessage(payload, id, err)) {
-      String ok = "TX:OK id=";
-      ok += String(id);
-      return ok;
+    simulated = testModeProcessMessage(payload, testId, testErr);
+    if (!simulated && testErr.length() > 0) {        // логируем сбой эмуляции
+      std::string log = "TESTMODE: ошибка эмуляции — ";
+      log += testErr.c_str();
+      SimpleLogger::logStatus(log);
     }
-  } else if (enqueueTextMessage(payload, id, err)) {
-    String ok = "TX:OK id=";
+  }
+
+  uint32_t id = 0;                                   // идентификатор реальной отправки
+  String err;                                        // причина ошибки очереди
+  if (enqueueTextMessage(payload, id, err)) {
+    String ok = "TX:OK id=";                         // сохраняем исходный формат ответа
     ok += String(id);
     return ok;
   }
+
   String out = "TX:ERR ";
-  out += err;
+  out += err;                                        // сообщаем о реальной ошибке отправки
+  if (testModeEnabled) {
+    if (simulated) {                                 // добавляем информацию об эмуляции
+      out += " (test id=";
+      out += String(testId);
+      out += ")";
+    } else if (testErr.length() > 0) {
+      out += " (testmode: ";
+      out += testErr;
+      out += ")";
+    }
+  }
   return out;
 }
 
@@ -1593,24 +1623,33 @@ void loop() {
         }
       } else if (line.startsWith("TX ")) {
         String msg = line.substring(3);                     // исходный текст
-        uint32_t id = 0;
-        String err;
+        uint32_t testId = 0;                                // идентификатор тестового сообщения
+        String testErr;                                     // ошибка тестовой эмуляции
+        bool simulated = false;                             // отметка об успешной эмуляции
         if (testModeEnabled) {
           DEBUG_LOG("RC: тестовый режим TX");
-          if (testModeProcessMessage(msg, id, err)) {
-            Serial.print("TESTMODE: сообщение сохранено id=");
-            Serial.println(id);
-          } else {
-            Serial.print("TESTMODE: ошибка — ");
-            Serial.println(err);
-          }
-        } else if (enqueueTextMessage(msg, id, err)) {
+          simulated = testModeProcessMessage(msg, testId, testErr);
+        }
+
+        uint32_t id = 0;                                    // идентификатор реальной очереди
+        String err;                                         // ошибка постановки в очередь
+        if (enqueueTextMessage(msg, id, err)) {
           DEBUG_LOG_VAL("RC: сообщение поставлено id=", static_cast<int>(id));
           Serial.print("Пакет отправлен, id=");
           Serial.println(id);
         } else {
           Serial.print("Ошибка постановки пакета: ");
           Serial.println(err);
+        }
+
+        if (testModeEnabled) {                              // выводим статус тестового режима
+          if (simulated) {
+            Serial.print("TESTMODE: сообщение сохранено id=");
+            Serial.println(testId);
+          } else {
+            Serial.print("TESTMODE: ошибка — ");
+            Serial.println(testErr);
+          }
         }
       } else if (line.startsWith("TXL ")) {
         int sz = line.substring(4).toInt();                // размер требуемого пакета
