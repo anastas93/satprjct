@@ -70,9 +70,17 @@ static const float fTX_all_[167] = {
     310.450, 310.475, 309.025, 310.550, 310.600, 309.150, 296.050, 309.250, 309.300, 309.350,
     295.900, 309.450, 309.925, 310.750, 310.025, 310.850, 310.950};
 
-const float* RadioSX1262::fRX_bank_[4] = {fRX_east_, fRX_west_, fRX_test_, fRX_all_};
-const float* RadioSX1262::fTX_bank_[4] = {fTX_east_, fTX_west_, fTX_test_, fTX_all_};
-const uint16_t RadioSX1262::BANK_CHANNELS_[4] = {10, 10, 10, 167};
+// Домашний банк: короткий набор частот из полного списка ALL
+static const float fRX_home_[7] = {
+    262.425, 257.500, 257.150, 255.775, 267.200, 249.930, 245.950};
+static const float fTX_home_[7] = {
+    296.025, 311.350, 298.150, 309.300, 308.200, 308.750, 299.400};
+
+const float* RadioSX1262::fRX_bank_[5] = {
+    fRX_east_, fRX_west_, fRX_test_, fRX_all_, fRX_home_};
+const float* RadioSX1262::fTX_bank_[5] = {
+    fTX_east_, fTX_west_, fTX_test_, fTX_all_, fTX_home_};
+const uint16_t RadioSX1262::BANK_CHANNELS_[5] = {10, 10, 10, 167, 7};
 
 uint16_t RadioSX1262::bankSize(ChannelBank bank) {
   // Возвращаем количество каналов для указанного банка

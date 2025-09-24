@@ -339,6 +339,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
                 <option value="w">WEST</option>
                 <option value="t">TEST</option>
                 <option value="a">ALL</option>
+                <option value="h">HOME</option>
               </select>
             </label>
             <label>Channel

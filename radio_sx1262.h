@@ -91,9 +91,9 @@ private:
   float lastRssi_ = 0.0f;    // RSSI последнего пакета
 
     // Таблицы частот для всех банков
-    static const float* fRX_bank_[4];
-    static const float* fTX_bank_[4];
-    static const uint16_t BANK_CHANNELS_[4];
+    static const float* fRX_bank_[5];
+    static const float* fTX_bank_[5];
+    static const uint16_t BANK_CHANNELS_[5];
   static const int8_t Pwr_[10];
   static const float BW_[5];
   static const int8_t SF_[8];
