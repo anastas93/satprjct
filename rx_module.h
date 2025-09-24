@@ -5,6 +5,7 @@
 #include <array>
 #include <vector>
 #include <unordered_map>
+#include <chrono>
 #include "libs/packetizer/packet_gatherer.h" // сборщик пакетов
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
 #include "default_settings.h"
@@ -38,9 +39,16 @@ private:
   std::vector<uint8_t> plain_buf_;   // буфер расшифрованных данных
   uint32_t raw_counter_ = 0;         // счётчик сырых пакетов без заголовка
   bool encryption_forced_ = DefaultSettings::USE_ENCRYPTION; // ожидание шифрования по умолчанию
+  bool assembling_ = false;          // активна ли текущая сборка сообщения
+  uint32_t active_msg_id_ = 0;       // идентификатор собираемого сообщения
+  uint16_t expected_frag_cnt_ = 0;   // сколько фрагментов ожидается
+  uint16_t next_frag_idx_ = 0;       // какой индекс должен прийти следующим
+  std::chrono::steady_clock::time_point last_conv_cleanup_{}; // момент последней очистки кэша свёртки
   struct PendingConvBlock {
     size_t expected_len = 0;           // ожидаемая длина свёрнутого блока
     std::vector<uint8_t> data;         // накопленные байты для последующего декодирования
+    std::chrono::steady_clock::time_point last_update{}; // отметка последнего поступления данных
   };
   std::unordered_map<uint64_t, PendingConvBlock> pending_conv_; // буферизация неполных свёрточных блоков
+  void cleanupPendingConv(std::chrono::steady_clock::time_point now);
 };

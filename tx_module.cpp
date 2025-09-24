@@ -352,10 +352,8 @@ bool TxModule::transmit(const PendingMessage& message) {
     if (message.expect_ack) hdr.flags |= FrameHeader::FLAG_ACK_REQUIRED;
     if (frag.conv_encoded) {
       hdr.flags |= FrameHeader::FLAG_CONV_ENCODED;
-      hdr.ack_mask = (static_cast<uint32_t>(frag.cipher_len) << 16) | frag.chunk_idx; // старшие биты — длина, младшие — индекс блока
-    } else {
-      hdr.ack_mask = 0;
     }
+    hdr.ack_mask = 0;                               // поле свободно для реальных масок подтверждений
 
     uint8_t hdr_buf[FrameHeader::SIZE];
     if (!hdr.encode(hdr_buf, sizeof(hdr_buf), frag.payload.data(), frag.payload.size())) {

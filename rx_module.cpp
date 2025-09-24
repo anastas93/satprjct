@@ -11,6 +11,7 @@
 #include <vector>
 #include <algorithm>
 #include <array>
+#include <chrono>
 
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
 static constexpr size_t TAG_LEN = 8;              // длина тега аутентичности
@@ -18,6 +19,7 @@ static constexpr size_t RS_ENC_LEN = 255;      // длина закодиров�
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
 static constexpr bool USE_RS = DefaultSettings::USE_RS; // использовать RS(255,223)
 static constexpr size_t CONV_TAIL_BYTES = 1;      // «хвост» для сброса регистра свёрточного кодера
+static constexpr std::chrono::seconds PENDING_CONV_TTL(10); // максимальное время жизни незавершённого блока
 
 // Удаление пилотов из полезной нагрузки
 static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
@@ -40,11 +42,16 @@ static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& 
 // Конструктор модуля приёма
 RxModule::RxModule()
     : gatherer_(PayloadMode::SMALL, DefaultSettings::GATHER_BLOCK_SIZE),
-      key_(KeyLoader::loadKey()) {} // ключ для последующего дешифрования
+      key_(KeyLoader::loadKey()) { // ключ для последующего дешифрования
+  last_conv_cleanup_ = std::chrono::steady_clock::now(); // отметка для фоновой очистки кэша свёртки
+}
 
 // Передаём данные колбэку, если заголовок валиден
 void RxModule::onReceive(const uint8_t* data, size_t len) {
   if (!data || len == 0) return;                     // защита от пустого указателя
+
+  auto now = std::chrono::steady_clock::now();       // фиксируем момент для очистки временных структур
+  cleanupPendingConv(now);
 
   auto forward_raw = [&](const uint8_t* raw, size_t raw_len) {
     if (!raw || raw_len == 0) return;               // пропускаем пустые вызовы
@@ -82,19 +89,53 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   if (payload_buf_.size() != hdr.payload_len) return;      // несоответствие длины
   if (!hdr.checkFrameCrc(payload_buf_.data(), payload_buf_.size())) return; // неверный CRC
 
+  if (!assembling_ || hdr.msg_id != active_msg_id_) {      // обнаружили новое сообщение
+    gatherer_.reset();
+    assembling_ = true;
+    active_msg_id_ = hdr.msg_id;
+    expected_frag_cnt_ = hdr.frag_cnt;
+    next_frag_idx_ = 0;
+  }
+  if (hdr.frag_idx == 0) {                                // явный старт новой последовательности
+    if (next_frag_idx_ != 0) {
+      gatherer_.reset();
+    }
+    expected_frag_cnt_ = hdr.frag_cnt;
+    next_frag_idx_ = 0;
+  }
+  if (hdr.frag_idx != next_frag_idx_) {                   // пришёл неожиданный индекс
+    if (hdr.frag_idx != 0) {
+      gatherer_.reset();
+      assembling_ = false;
+      expected_frag_cnt_ = 0;
+      next_frag_idx_ = 0;
+      return;                                             // дожидаемся корректной последовательности
+    }
+    next_frag_idx_ = 0;
+  }
+
   // Деинтерливинг и декодирование
   result_buf_.clear();
   work_buf_.clear();
   size_t result_len = 0;
   const bool conv_flag = (hdr.flags & FrameHeader::FLAG_CONV_ENCODED) != 0;
-  const uint16_t cipher_len_hint = static_cast<uint16_t>(hdr.ack_mask >> 16);
-  const uint16_t chunk_idx_hint = static_cast<uint16_t>(hdr.ack_mask & 0xFFFF);
+  size_t cipher_len_hint = 0;
+  if (conv_flag) {
+    if (hdr.payload_len < CONV_TAIL_BYTES * 2 || (hdr.payload_len % 2) != 0) {
+      return;                                             // некорректная длина для свёрточного блока
+    }
+    cipher_len_hint = static_cast<size_t>(hdr.payload_len / 2);
+    if (cipher_len_hint < CONV_TAIL_BYTES) {
+      return;                                             // невозможная длина
+    }
+    cipher_len_hint -= CONV_TAIL_BYTES;
+  }
   std::vector<uint8_t> assembled_payload;
   std::vector<uint8_t>* payload_ptr = &payload_buf_;
 
   if (conv_flag) {
     size_t expected_conv_len = cipher_len_hint ? static_cast<size_t>(cipher_len_hint + CONV_TAIL_BYTES) * 2 : 0;
-    const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | chunk_idx_hint;
+    const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | hdr.frag_idx;
     if (expected_conv_len && payload_buf_.size() < expected_conv_len) {
       auto& slot = pending_conv_[conv_key];
       if (slot.expected_len != expected_conv_len) {
@@ -102,6 +143,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
         slot.data.clear();                            // обнуляем накопленный буфер
       }
       slot.data.insert(slot.data.end(), payload_buf_.begin(), payload_buf_.end());
+      slot.last_update = now;
       if (slot.data.size() < expected_conv_len) {
         return;                                      // ждём остальные части до полного блока
       }
@@ -116,6 +158,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
       auto it = pending_conv_.find(conv_key);
       if (it != pending_conv_.end()) {
         it->second.data.insert(it->second.data.end(), payload_buf_.begin(), payload_buf_.end());
+        it->second.last_update = now;
         if (!it->second.expected_len && expected_conv_len) {
           it->second.expected_len = expected_conv_len; // инициализация ожидания если не было
         }
@@ -134,8 +177,8 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
         return;                                      // пришло больше, чем ожидалось
       }
     }
-  } else if (chunk_idx_hint || cipher_len_hint) {
-    const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | chunk_idx_hint;
+  } else {
+    const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | hdr.frag_idx;
     pending_conv_.erase(conv_key);                   // очищаем возможные остатки при смене режима
   }
 
@@ -187,19 +230,24 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   size_t cipher_len = result_len - TAG_LEN;
   const uint8_t* tag = result_buf_.data() + cipher_len;
   bool encrypted = (hdr.flags & FrameHeader::FLAG_ENCRYPTED) != 0;
-  if (!encrypted && encryption_forced_) encrypted = true; // совместимость со старыми кадрами
-
-  if (encrypted) {
-    uint16_t nonce_idx = conv_flag ? chunk_idx_hint : hdr.frag_idx; // используем исходный индекс блока для нонса
+  bool should_decrypt = encrypted || encryption_forced_;
+  bool decrypt_ok = false;
+  if (should_decrypt) {
+    uint16_t nonce_idx = hdr.frag_idx;               // индекс части задаёт уникальный нонс
     nonce_ = KeyLoader::makeNonce(hdr.msg_id, nonce_idx);
-    if (!decrypt_ccm(key_.data(), key_.size(), nonce_.data(), nonce_.size(),
-                     nullptr, 0, cipher, cipher_len,
-                     tag, TAG_LEN, plain_buf_)) {
-      LOG_ERROR("RxModule: ошибка дешифрования");
-      return;                                         // прекращаем обработку
+    decrypt_ok = decrypt_ccm(key_.data(), key_.size(), nonce_.data(), nonce_.size(),
+                             nullptr, 0, cipher, cipher_len,
+                             tag, TAG_LEN, plain_buf_);
+    if (!decrypt_ok) {
+      if (encrypted) {
+        LOG_ERROR("RxModule: ошибка дешифрования");
+        return;                                       // завершаем обработку повреждённого кадра
+      }
+      LOG_WARN("RxModule: получен незашифрованный фрагмент при принудительном режиме");
     }
-  } else {
-    plain_buf_.assign(result_buf_.begin(), result_buf_.begin() + cipher_len);
+  }
+  if (!should_decrypt || (!decrypt_ok && !encrypted)) {
+    plain_buf_.assign(result_buf_.begin(), result_buf_.begin() + cipher_len); // принимаем открытый текст
   }
 
   if (!plain_buf_.empty() && plain_buf_[0] == '[') {  // удаляем префикс [ID|n]
@@ -210,6 +258,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   }
   gatherer_.add(plain_buf_.data(), plain_buf_.size());
   plain_buf_.clear();                                  // очищаем буфер, сохраняя вместимость
+  ++next_frag_idx_;                                    // ожидаем следующий индекс фрагмента
   if (hdr.frag_idx + 1 == hdr.frag_cnt) {             // последний фрагмент
     const auto& full = gatherer_.get();
     if (buf_) {                                       // при наличии внешнего буфера сохраняем данные
@@ -219,6 +268,22 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
       cb_(full.data(), full.size());
     }
     gatherer_.reset();
+    assembling_ = false;
+    expected_frag_cnt_ = 0;
+    next_frag_idx_ = 0;
+  }
+}
+
+void RxModule::cleanupPendingConv(std::chrono::steady_clock::time_point now) {
+  if (pending_conv_.empty()) return;                      // нечего очищать
+  if (!assembling_ && now - last_conv_cleanup_ < std::chrono::seconds(1)) return; // не запускаем очистку слишком часто
+  last_conv_cleanup_ = now;
+  for (auto it = pending_conv_.begin(); it != pending_conv_.end();) {
+    if (now - it->second.last_update > PENDING_CONV_TTL) {
+      it = pending_conv_.erase(it);                       // удаляем устаревший хвост
+    } else {
+      ++it;
+    }
   }
 }
 
