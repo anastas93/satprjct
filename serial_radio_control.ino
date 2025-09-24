@@ -19,6 +19,7 @@
 #include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
 #include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
 #include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
+#include "test_mode.h"                             // тестовый режим SendMsg_BR/received_msg
 
 // --- Сеть и веб-интерфейс ---
 #include <WiFi.h>        // работа с Wi-Fi
@@ -57,6 +58,7 @@ ReceivedBuffer recvBuf;     // буфер полученных сообщени�
 bool ackEnabled = DefaultSettings::USE_ACK; // флаг автоматической отправки ACK
 bool encryptionEnabled = DefaultSettings::USE_ENCRYPTION; // режим шифрования
 uint8_t ackRetryLimit = DefaultSettings::ACK_RETRY_LIMIT; // число повторов при ожидании ACK
+TestMode testMode;          // контроллер тестового режима отправки/приёма
 
 WebServer server(80);       // HTTP-сервер для веб-интерфейса
 
@@ -790,6 +792,15 @@ bool enqueueTextMessage(const String& payload, uint32_t& outId, String& err) {
     err = "пустое сообщение";
     return false;
   }
+  if (testMode.isEnabled()) {
+    String tmErr;
+    if (testMode.sendMessage(trimmed, outId, tmErr)) {
+      err = String();
+      return true;
+    }
+    err = tmErr;
+    return false;
+  }
   std::vector<uint8_t> data = utf8ToCp1251(trimmed.c_str());
   if (data.empty()) {
     err = "пустое сообщение";
@@ -1102,6 +1113,12 @@ void handleCmdHttp() {
       tx.setAckTimeout(static_cast<uint32_t>(raw));
     }
     resp = String(tx.getAckTimeout());
+  } else if (cmd == "TESTMODE") {
+    if (server.hasArg("v")) {
+      bool enable = server.arg("v").toInt() != 0;
+      testMode.setEnabled(enable);
+    }
+    resp = testMode.isEnabled() ? String("1") : String("0");
   } else if (cmd == "ENC") {
     if (server.hasArg("toggle")) {
       encryptionEnabled = !encryptionEnabled;
@@ -1214,6 +1231,7 @@ void setup() {
   tx.setEncryptionEnabled(encryptionEnabled);
   rx.setEncryptionEnabled(encryptionEnabled);
   rx.setBuffer(&recvBuf);                                   // сохраняем принятые пакеты
+  testMode.attachBuffer(&recvBuf);                          // пробрасываем буфер в тестовый режим
   // обработка входящих данных с учётом ACK
   rx.setCallback([&](const uint8_t* d, size_t l){
     if (l == 3 && d[0]=='A' && d[1]=='C' && d[2]=='K') { // пришёл ACK
@@ -1234,7 +1252,7 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, TESTMODE <0|1>, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
 }
 
 void loop() {
@@ -1454,6 +1472,12 @@ void loop() {
         Serial.println(cmdTestRxm(&overrideText));
       } else if (line.equalsIgnoreCase("TESTRXM")) {
         Serial.println(cmdTestRxm());
+      } else if (line.startsWith("TESTMODE ")) {
+        int val = line.substring(9).toInt();
+        testMode.setEnabled(val != 0);
+      } else if (line.equalsIgnoreCase("TESTMODE")) {
+        Serial.print("TESTMODE:");
+        Serial.println(testMode.isEnabled() ? "1" : "0");
       } else if (line.equalsIgnoreCase("KEYTRANSFER SEND")) {
         Serial.println(cmdKeyTransferSendLora());
       } else if (line.equalsIgnoreCase("KEYTRANSFER RECEIVE")) {

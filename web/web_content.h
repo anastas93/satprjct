@@ -420,6 +420,18 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
             </label>
           </div>
         </section>
+        <section class="settings-section">
+          <h3>Тестовый режим</h3>
+          <div class="settings-group">
+            <div class="settings-toggle" id="testModeControl">
+              <label class="chip switch">
+                <input type="checkbox" id="TESTMODE" />
+                <span>Test mode (SendMsg_BR)</span>
+              </label>
+              <div id="testModeHint" class="field-hint">Состояние не загружено.</div>
+            </div>
+          </div>
+        </section>
         <div class="settings-actions actions">
           <button type="button" id="btnSaveSettings" class="btn">Сохранить</button>
           <button type="button" id="btnApplySettings" class="btn btn-primary">Применить</button>

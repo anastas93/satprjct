@@ -95,6 +95,7 @@ const UI = {
     ackRetry: null,
     ackBusy: false,
     rxBoostedGain: null,
+    testMode: null,
     encBusy: false,
     encryption: null,
     infoChannel: null,
@@ -408,6 +409,8 @@ async function init() {
   UI.els.rxBoostedGainHint = $("#rxBoostedGainHint");
   UI.els.testRxmMessage = $("#TESTRXMMSG");
   UI.els.testRxmMessageHint = $("#testRxmMessageHint");
+  UI.els.testMode = $("#TESTMODE");
+  UI.els.testModeHint = $("#testModeHint");
   UI.els.channelSelect = $("#CH");
   UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
@@ -663,6 +666,15 @@ async function init() {
       UI.els.rxBoostedGain.indeterminate = false;
       UI.state.rxBoostedGain = UI.els.rxBoostedGain.checked;
       updateRxBoostedGainUi();
+    });
+  }
+  if (UI.els.testMode) {
+    UI.els.testMode.addEventListener("change", () => {
+      if (typeof UI.els.testMode.indeterminate === "boolean") {
+        UI.els.testMode.indeterminate = false;
+      }
+      UI.state.testMode = UI.els.testMode.checked;
+      updateTestModeUi();
     });
   }
   if (UI.els.testRxmMessage) {
@@ -3848,6 +3860,19 @@ function parseRxBoostedGainResponse(text) {
   if (normalized.indexOf("off") >= 0 || normalized.indexOf("выключ") >= 0) return false;
   return null;
 }
+function parseTestModeResponse(text) {
+  if (!text) return null;
+  const trimmed = String(text).trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.toLowerCase();
+  if (trimmed === "1") return true;
+  if (trimmed === "0") return false;
+  if (normalized.indexOf("on") >= 0 || normalized.indexOf("включ") >= 0) return true;
+  if (normalized.indexOf("off") >= 0 || normalized.indexOf("выключ") >= 0) return false;
+  const match = normalized.match(/(?:^|[^0-9])([01])(?:[^0-9]|$)/);
+  if (match) return match[1] === "1";
+  return null;
+}
 function updateRxBoostedGainUi() {
   const state = UI.state.rxBoostedGain;
   const input = UI.els.rxBoostedGain;
@@ -3865,6 +3890,28 @@ function updateRxBoostedGainUi() {
       hint.textContent = "Состояние не загружено.";
     } else {
       hint.textContent = state ? "Повышенное усиление включено." : "Повышенное усиление выключено.";
+    }
+  }
+}
+function updateTestModeUi() {
+  const state = UI.state.testMode;
+  const input = UI.els.testMode;
+  if (input) {
+    if (state === null) {
+      input.indeterminate = true;
+    } else {
+      input.indeterminate = false;
+      input.checked = state;
+    }
+  }
+  const hint = UI.els.testModeHint;
+  if (hint) {
+    if (state === null) {
+      hint.textContent = "Состояние не загружено.";
+    } else if (state) {
+      hint.textContent = "Тестовый режим включён: SendMsg_BR/received_msg работают локально.";
+    } else {
+      hint.textContent = "Тестовый режим выключен: используется штатная передача.";
     }
   }
 }
@@ -4259,7 +4306,7 @@ async function refreshEncryptionState() {
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","TESTRXMMSG"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","TESTMODE","TESTRXMMSG"];
 function normalizePowerPreset(raw) {
   if (raw == null) return null;
   const str = String(raw).trim();
@@ -4288,6 +4335,9 @@ function loadSettings() {
       if (key === "RXBG") {
         UI.state.rxBoostedGain = el.checked;
         updateRxBoostedGainUi();
+      } else if (key === "TESTMODE") {
+        UI.state.testMode = el.checked;
+        updateTestModeUi();
       }
     } else if (key === "PW") {
       const resolved = normalizePowerPreset(v);
@@ -4329,6 +4379,7 @@ function loadSettings() {
     }
   }
   updateRxBoostedGainUi();
+  updateTestModeUi();
 }
 function saveSettingsLocal() {
   for (let i = 0; i < SETTINGS_KEYS.length; i++) {
@@ -4355,6 +4406,9 @@ function saveSettingsLocal() {
     if (key === "RXBG") {
       UI.state.rxBoostedGain = (v === "1");
       updateRxBoostedGainUi();
+    } else if (key === "TESTMODE") {
+      UI.state.testMode = (v === "1");
+      updateTestModeUi();
     }
   }
   note("Сохранено локально.");
@@ -4422,6 +4476,20 @@ async function applySettingsToDevice() {
         updateAckTimeoutUi();
         updateAckRetryUi();
         storage.set("set.ACKT", String(effective));
+      }
+    } else if (key === "TESTMODE") {
+      const resp = await sendCommand("TESTMODE", { v: value });
+      if (resp !== null) {
+        const state = parseTestModeResponse(resp);
+        if (state !== null) {
+          UI.state.testMode = state;
+          if (UI.els.testMode) {
+            UI.els.testMode.checked = state;
+            UI.els.testMode.indeterminate = false;
+          }
+          updateTestModeUi();
+          storage.set("set.TESTMODE", state ? "1" : "0");
+        }
       }
     } else {
       const resp = await sendCommand(key, { v: value });
@@ -4527,6 +4595,13 @@ function importSettings() {
       if (el.type === "checkbox") {
         el.checked = obj[key] === "1";
         if (typeof el.indeterminate === "boolean") el.indeterminate = false;
+        if (key === "RXBG") {
+          UI.state.rxBoostedGain = el.checked;
+          updateRxBoostedGainUi();
+        } else if (key === "TESTMODE") {
+          UI.state.testMode = el.checked;
+          updateTestModeUi();
+        }
       } else el.value = obj[key];
       storage.set("set." + key, String(obj[key]));
     }
@@ -4645,6 +4720,23 @@ async function syncSettingsFromDevice() {
     }
   } catch (err) {
     console.warn("[settings] RXBG", err);
+  }
+  try {
+    const tmRes = await deviceFetch("TESTMODE", {}, 2000);
+    if (tmRes.ok) {
+      const state = parseTestModeResponse(tmRes.text);
+      if (state !== null) {
+        UI.state.testMode = state;
+        if (UI.els.testMode) {
+          UI.els.testMode.checked = state;
+          UI.els.testMode.indeterminate = false;
+        }
+        storage.set("set.TESTMODE", state ? "1" : "0");
+        updateTestModeUi();
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] TESTMODE", err);
   }
   try {
     const pauseRes = await deviceFetch("PAUSE", {}, 2000);
