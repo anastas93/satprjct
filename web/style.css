@@ -758,17 +758,29 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   min-width: 9rem;
 }
 .channel-info-test-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
   gap: .6rem;
-  padding: .35rem .5rem;
+  padding: .45rem .6rem;
   border-radius: .7rem;
   background: color-mix(in oklab, var(--panel-2) 82%, black 18%);
 }
+.channel-info-test-summary-main {
+  display: grid;
+  gap: .5rem;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  align-items: start;
+}
+.channel-info-test-summary-main > div {
+  display: grid;
+  gap: .1rem;
+  font-size: .9rem;
+}
 .channel-info-test-summary strong {
   font-size: 1rem;
+}
+.channel-info-test-summary strong + span,
+.channel-info-test-summary span + strong {
+  font-size: .95rem;
 }
 .channel-info-test-legend {
   display: flex;
@@ -789,7 +801,11 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
 }
 .channel-info-test-legend span[data-type="rssi"]::before { background: var(--stability-rssi); }
 .channel-info-test-legend span[data-type="snr"]::before { background: var(--stability-snr); }
+.channel-info-test-issues {
+  padding: .3rem .1rem;
+}
 .channel-info-test-chart {
+  position: relative;
   padding: .4rem;
   border-radius: .8rem;
   background: color-mix(in oklab, var(--panel-2) 88%, black 12%);
@@ -798,6 +814,144 @@ tbody tr.no-response { background: color-mix(in oklab, var(--muted) 15%, white);
   width: 100%;
   display: block;
   border-radius: .6rem;
+}
+.channel-info-test-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate3d(0,0,0);
+  pointer-events: none;
+  padding: .55rem .65rem;
+  border-radius: .65rem;
+  background: color-mix(in oklab, var(--panel-2) 92%, black 8%);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  box-shadow: 0 8px 18px rgba(0,0,0,.25);
+  max-width: 220px;
+  font-size: .85rem;
+  display: grid;
+  gap: .4rem;
+  transition: opacity .12s ease;
+}
+.channel-info-test-tooltip-title {
+  font-weight: 600;
+}
+.channel-info-test-tooltip-grid {
+  display: grid;
+  gap: .3rem;
+}
+.channel-info-test-tooltip-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: .8rem;
+}
+.channel-info-test-tooltip-grid span {
+  color: var(--muted);
+  font-size: .8rem;
+}
+.channel-info-test-tooltip-grid strong {
+  font-weight: 600;
+}
+.channel-info-test-tooltip-raw {
+  font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace);
+  font-size: .78rem;
+  background: color-mix(in oklab, var(--panel-2) 85%, black 15%);
+  padding: .35rem .45rem;
+  border-radius: .5rem;
+  color: var(--muted);
+  word-break: break-word;
+}
+.channel-info-test-cards {
+  display: grid;
+  gap: .6rem;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+.channel-info-test-card {
+  border-radius: .75rem;
+  padding: .55rem .65rem;
+  background: color-mix(in oklab, var(--panel-2) 88%, black 12%);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  display: grid;
+  gap: .25rem;
+}
+.channel-info-test-card .label {
+  font-size: .8rem;
+  color: var(--muted);
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.channel-info-test-card .value {
+  font-size: 1rem;
+  font-weight: 600;
+}
+.channel-info-test-card .meta {
+  font-size: .8rem;
+  color: var(--muted);
+}
+.channel-info-test-history {
+  display: grid;
+  gap: .6rem;
+  padding: .4rem 0 .2rem;
+}
+.channel-info-test-history-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: .5rem;
+  align-items: center;
+}
+.channel-info-test-history-title {
+  font-weight: 600;
+}
+.channel-info-test-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+.channel-info-test-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: .5rem;
+}
+.channel-info-test-history-item {
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  border-radius: .7rem;
+  padding: .55rem .65rem;
+  background: color-mix(in oklab, var(--panel-2) 85%, black 15%);
+  display: grid;
+  gap: .35rem;
+}
+.channel-info-test-history-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem .8rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.channel-info-test-history-time {
+  font-weight: 600;
+}
+.channel-info-test-history-success {
+  font-size: .9rem;
+}
+.channel-info-test-history-diff {
+  font-size: .85rem;
+  font-weight: 600;
+}
+.channel-info-test-history-diff.up {
+  color: var(--good);
+}
+.channel-info-test-history-diff.down {
+  color: var(--danger);
+}
+.channel-info-test-history-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem .8rem;
+}
+.channel-info-test-history-issues {
+  color: var(--muted);
 }
 .channel-info-cr {
   border-radius: .8rem;
