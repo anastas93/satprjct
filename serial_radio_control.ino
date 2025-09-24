@@ -187,6 +187,14 @@ String vectorToString(const std::vector<uint8_t>& data) {
   return out;
 }
 
+// Проверяем, похож ли буфер на JPEG по сигнатуре FF D8 FF
+bool isLikelyJpeg(const uint8_t* data, size_t len) {
+  if (!data || len < 3) {
+    return false;
+  }
+  return data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF;
+}
+
 // Декодирование CP1251 в UTF-8 для отправки в веб-интерфейс
 String decodeCp1251ToString(const std::vector<uint8_t>& data) {
   if (data.empty()) return String();
@@ -773,6 +781,69 @@ void handleApiTx() {
   }
 }
 
+// Приём JPEG-изображения и постановка его в очередь передачи
+void handleApiTxImage() {
+  if (server.method() != HTTP_POST) {                       // поддерживаем только POST
+    server.send(405, "text/plain", "Method Not Allowed");
+    return;
+  }
+  String body = server.arg("plain");
+  if (body.length() == 0) {                                 // защита от пустого тела
+    server.send(400, "text/plain", "empty");
+    return;
+  }
+  const size_t len = static_cast<size_t>(body.length());
+  static constexpr size_t kImageMaxPayload = 128 * 1024;    // ограничиваем полезную нагрузку ~128 КиБ
+  if (len > kImageMaxPayload) {
+    server.send(413, "text/plain", "too large");
+    return;
+  }
+  std::vector<uint8_t> payload(len);
+  std::memcpy(payload.data(), body.c_str(), len);           // копируем данные в вектор
+  if (!isLikelyJpeg(payload.data(), payload.size())) {
+    server.send(415, "text/plain", "not jpeg");
+    return;
+  }
+  // Читаем метаданные изображения из заголовков (необязательные поля)
+  String profile = server.hasHeader("X-Image-Profile") ? server.header("X-Image-Profile") : String();
+  profile.trim();
+  profile.toUpperCase();
+  String frameW = server.hasHeader("X-Image-Frame-Width") ? server.header("X-Image-Frame-Width") : String();
+  String frameH = server.hasHeader("X-Image-Frame-Height") ? server.header("X-Image-Frame-Height") : String();
+  String origSize = server.hasHeader("X-Image-Original-Size") ? server.header("X-Image-Original-Size") : String();
+  uint32_t id = 0;
+  String err;
+  if (enqueueBinaryMessage(payload.data(), payload.size(), id, err)) {
+    String resp = "IMG:OK id=";
+    resp += String(id);
+    resp += " bytes=";
+    resp += String(static_cast<unsigned long>(payload.size()));
+    if (profile.length() > 0) {
+      resp += " profile=";
+      resp += profile;
+    }
+    server.send(200, "text/plain", resp);
+    std::string log = "IMG TX id=" + std::to_string(id) + " bytes=" + std::to_string(payload.size());
+    if (profile.length() > 0) {
+      log += " profile=";
+      log += profile.c_str();
+    }
+    if (origSize.length() > 0) {
+      log += " orig=";
+      log += origSize.c_str();
+    }
+    if (frameW.length() > 0 && frameH.length() > 0) {
+      log += " frame=";
+      log += frameW.c_str();
+      log += "x";
+      log += frameH.c_str();
+    }
+    SimpleLogger::logStatus(log);                            // фиксируем отправку в журнале
+  } else {
+    server.send(400, "text/plain", err);
+  }
+}
+
 // Преобразование символа в значение перечисления банка каналов
 ChannelBank parseBankChar(char b) {
   switch (b) {
@@ -964,6 +1035,24 @@ bool enqueueTextMessage(const String& payload, uint32_t& outId, String& err) {
     return false;
   }
   uint32_t id = tx.queue(data.data(), data.size());
+  if (id == 0) {
+    err = "очередь заполнена";
+    return false;
+  }
+  tx.loop();
+  outId = id;
+  return true;
+}
+
+// Постановка бинарного буфера (например, JPEG) в очередь передачи
+bool enqueueBinaryMessage(const uint8_t* data, size_t len, uint32_t& outId, String& err) {
+  if (!data || len == 0) {
+    err = "пустой буфер";
+    return false;
+  }
+  tx.setPayloadMode(PayloadMode::LARGE);                    // даём больше места под кадр
+  uint32_t id = tx.queue(data, len);
+  tx.setPayloadMode(PayloadMode::SMALL);                    // возвращаем стандартный режим
   if (id == 0) {
     err = "очередь заполнена";
     return false;
@@ -1412,6 +1501,18 @@ void setupWifi() {
   IPAddress subnet(255, 255, 255, 0);
   WiFi.softAPConfig(local_ip, gateway, subnet);
   WiFi.softAP(DefaultSettings::WIFI_SSID, DefaultSettings::WIFI_PASS); // создаём AP
+  static const char* kImageHeaders[] = {
+    "X-Image-Profile",
+    "X-Image-Frame-Width",
+    "X-Image-Frame-Height",
+    "X-Image-Scaled-Width",
+    "X-Image-Scaled-Height",
+    "X-Image-Offset-X",
+    "X-Image-Offset-Y",
+    "X-Image-Original-Size",
+    "X-Image-Grayscale"
+  };
+  server.collectHeaders(kImageHeaders, sizeof(kImageHeaders) / sizeof(kImageHeaders[0]));
   server.on("/", handleRoot);                                         // обработчик страницы
   server.on("/style.css", handleStyleCss);                           // CSS веб-интерфейса
   server.on("/script.js", handleScriptJs);                           // JS логика
@@ -1421,6 +1522,7 @@ void setupWifi() {
   server.on("/libs/geostat_tle.js", handleGeostatTleJs);             // статический список спутников
   server.on("/ver", handleVer);                                      // версия приложения
   server.on("/api/tx", handleApiTx);                                 // отправка текста по радио
+  server.on("/api/tx-image", handleApiTxImage);                      // отправка изображения по радио
   server.on("/cmd", handleCmdHttp);                                  // обработка команд
   server.on("/api/cmd", handleCmdHttp);                              // совместимый эндпоинт
   server.begin();                                                      // старт сервера
