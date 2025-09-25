@@ -578,7 +578,26 @@ bool generateLocalKey(KeyRecord* out, fs_utils::SpiffsMountResult* mount_status)
   rec.origin = KeyOrigin::LOCAL;
   rec.peer_public.fill(0);
   rec.valid = true;
-  if (!writeRecord(rec)) return false;
+  if (!writeRecord(rec)) {
+#if defined(ARDUINO) && KEY_LOADER_HAS_NVS
+    StorageBackend prev_preferred = getPreferredBackend();
+    StorageBackend prev_active = getBackend();
+    if (prev_active != StorageBackend::NVS) {
+      Serial.println(F("KeyLoader: запись SPIFFS не удалась, переключаемся на NVS"));
+      if (setPreferredBackend(StorageBackend::NVS)) {
+        if (writeRecord(rec)) {
+          if (out) *out = rec;
+          return true;  // успешная запись в NVS
+        }
+        if (prev_preferred != StorageBackend::NVS) {
+          setPreferredBackend(prev_preferred);  // возвращаем выбор пользователя
+        }
+        ensureActiveBackend();
+      }
+    }
+#endif
+    return false;
+  }
   if (out) *out = rec;
   return true;
 }

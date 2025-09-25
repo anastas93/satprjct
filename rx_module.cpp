@@ -7,6 +7,7 @@
 #include "libs/scrambler/scrambler.h" // скремблер
 #include "libs/key_loader/key_loader.h" // загрузка ключа
 #include "libs/crypto/aes_ccm.h" // AES-CCM шифрование
+#include "libs/protocol/ack_utils.h" // проверка ACK для фильтрации буфера
 #include "default_settings.h"         // параметры по умолчанию
 #include <vector>
 #include <algorithm>
@@ -261,7 +262,8 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   ++next_frag_idx_;                                    // ожидаем следующий индекс фрагмента
   if (hdr.frag_idx + 1 == hdr.frag_cnt) {             // последний фрагмент
     const auto& full = gatherer_.get();
-    if (buf_) {                                       // при наличии внешнего буфера сохраняем данные
+    bool is_ack_payload = protocol::ack::isAckPayload(full.data(), full.size());
+    if (buf_ && !is_ack_payload) {                    // пропускаем ACK при сохранении
       buf_->pushReady(hdr.msg_id, full.data(), full.size());
     }
     if (cb_) {                                        // передаём сообщение пользователю

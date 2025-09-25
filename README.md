@@ -357,8 +357,9 @@ ENCT: успех
   `GO-00000`.
 - `Item::name` хранит заранее подготовленную подпись, повторные обращения не требуют форматирования.
 - `bool popRaw(Item& out)`, `bool popSplit(Item& out)`, `bool popReady(Item& out)` — извлечь данные.
-- `std::vector<std::string> list(size_t count)` — имена первых элементов (не более `count`).
-- `std::vector<SnapshotEntry> snapshot(size_t count)` — копия первых элементов с типом очереди для
+- `std::vector<std::string> list(size_t count)` — имена последних элементов (не более `count`), начиная
+  с самых свежих.
+- `std::vector<SnapshotEntry> snapshot(size_t count)` — копия последних элементов с типом очереди для
   формирования JSON-ответа `RSTS`.
 - При активном `RxModule::setBuffer()` короткие и повреждённые кадры без заголовка сохраняются как
   RAW-пакеты с идентификатором `0` и увеличивающимся `part`, чтобы не терять последовательность
@@ -399,6 +400,8 @@ ENCT: успех
 - `void setSendPause(uint32_t pause_ms)` и `uint32_t getSendPause() const` — пауза между отправками.
 - `void setAckTimeout(uint32_t timeout_ms)` и `uint32_t getAckTimeout() const` — управление тайм-аутом
   ожидания ACK.
+- Подтверждение (`ACK`) отправляется минимальным полезным грузом из одного байта `0x06`; модуль
+  распознаёт и устаревший текстовый вариант `"ACK"` для совместимости со старыми клиентами.
 - `void prepareExternalSend()` / `void completeExternalSend()` — учёт глобальной паузы при внешней
   отправке через `RadioSX1262`.
 - При ожидании подтверждения радиоинтерфейс переводится в режим приёма; пауза применяется между
@@ -485,8 +488,8 @@ ENCT: успех
 - `bool saveKey(const std::array<uint8_t,16>& key, KeyOrigin origin, const std::array<uint8_t,32>* peer,
   uint32_t salt)` — сохранить ключ с указанием происхождения и публичного ключа собеседника.
 - `bool generateLocalKey(KeyRecord* out = nullptr, fs_utils::SpiffsMountResult* status = nullptr)` —
-  создать новую пару Curve25519, обновить симметричный ключ и резервную копию, дополнительно
-  возвращая состояние монтирования SPIFFS (для сообщений пользователю).
+  создать новую пару Curve25519, обновить симметричный ключ и резервную копию; при ошибке записи в
+  SPIFFS модуль автоматически пробует переключиться на NVS (если доступен) и завершить операцию.
 - `bool restorePreviousKey(KeyRecord* out = nullptr)` — восстановить `key.stkey` из резервной копии.
 - `bool applyRemotePublic(const std::array<uint8_t,32>& remote)` — вычислить общий секрет и сохранить
   внешний симметричный ключ.

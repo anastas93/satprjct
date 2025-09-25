@@ -7,6 +7,7 @@
 #include "libs/scrambler/scrambler.h" // скремблер
 #include "libs/key_loader/key_loader.h" // загрузка ключа
 #include "libs/crypto/aes_ccm.h" // AES-CCM шифрование
+#include "libs/protocol/ack_utils.h" // проверка ACK-пакетов
 #include "default_settings.h"
 #include <vector>
 #include <chrono>
@@ -76,12 +77,12 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos) {
     return 0;
   }
   if (qos > 3) qos = 3;                           // ограничение диапазона QoS
-  bool is_plain_ack = (len == 3 && data[0] == 'A' && data[1] == 'C' && data[2] == 'K');
+  bool is_plain_ack = protocol::ack::isAckPayload(data, len);
   if (is_plain_ack) {
     PendingMessage ack_msg;                       // формируем отдельную запись для ACK
     ack_msg.id = next_ack_id_++;                  // выделяем идентификатор вне общей очереди
     if (next_ack_id_ < 0x80000000u) next_ack_id_ = 0x80000000u; // не даём переполнению уйти в «обычный» диапазон
-    ack_msg.data.assign(data, data + len);        // сохраняем полезную нагрузку
+    ack_msg.data.assign(1, protocol::ack::MARKER); // всегда отправляем минимальный ACK
     ack_msg.qos = qos;                            // запоминаем исходный класс
     ack_msg.attempts_left = 0;                    // повторы не нужны
     ack_msg.expect_ack = false;                   // ACK никогда не ждёт подтверждения
@@ -402,13 +403,7 @@ bool TxModule::transmit(const PendingMessage& message) {
 }
 
 bool TxModule::isAckPayload(const std::vector<uint8_t>& data) {
-  size_t offset = 0;
-  if (!data.empty() && data[0] == '[') {
-    auto it = std::find(data.begin(), data.end(), ']');
-    if (it != data.end()) offset = static_cast<size_t>(std::distance(data.begin(), it) + 1);
-  }
-  if (data.size() < offset + 3) return false;
-  return data[offset] == 'A' && data[offset + 1] == 'C' && data[offset + 2] == 'K';
+  return protocol::ack::isAckPayload(data);
 }
 
 std::string TxModule::extractPacketTag(const std::vector<uint8_t>& data) {
