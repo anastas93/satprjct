@@ -61,6 +61,7 @@ private:
   void scheduleFromArchive();
   void onSendSuccess();
   void waitForPauseWindow();
+  bool processImmediateAck();
 
   IRadio& radio_;
   std::array<MessageBuffer,4> buffers_;             // очереди сообщений по классам QoS
@@ -76,6 +77,8 @@ private:
   std::optional<PendingMessage> inflight_;          // текущий пакет в работе
   std::optional<PendingMessage> delayed_;           // пакет из архива, готовый к отправке
   std::deque<PendingMessage> archive_;              // архив сообщений без ACK
+  std::deque<PendingMessage> ack_queue_;            // очередь мгновенных ACK-сообщений
+  uint32_t next_ack_id_ = 0x80000000u;              // идентификаторы ACK вне общей очереди
   bool encryption_enabled_ = DefaultSettings::USE_ENCRYPTION; // текущий режим шифрования
 };
 
