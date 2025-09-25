@@ -33,6 +33,13 @@
 #include <SPIFFS.h>
 #endif
 
+#if defined(ESP32) && __has_include("esp_core_dump.h")
+#include "esp_core_dump.h" // управление core dump на ESP32
+#define SR_HAS_ESP_COREDUMP 1
+#else
+#define SR_HAS_ESP_COREDUMP 0
+#endif
+
 #ifdef ARDUINO
 // Резервная версия прошивки, чтобы /ver отвечал даже без SPIFFS
 static const char kEmbeddedVersion[] PROGMEM =
@@ -176,6 +183,21 @@ String jsonEscape(const String& value) {
   }
   return out;
 }
+
+#if SR_HAS_ESP_COREDUMP
+// Пытаемся очистить повреждённую конфигурацию core dump, чтобы убрать перезагрузки с ошибкой CRC
+void clearCorruptedCoreDumpConfig() {
+  esp_err_t err = esp_core_dump_image_erase();
+  if (err == ESP_OK) {
+    Serial.println("Core dump: конфигурация очищена");
+  } else if (err == ESP_ERR_NOT_FOUND) {
+    Serial.println("Core dump: активных записей не найдено");
+  } else {
+    Serial.print("Core dump: ошибка очистки, код=");
+    Serial.println(static_cast<int>(err));
+  }
+}
+#endif
 
 // Преобразование буфера байтов в строку ASCII
 String vectorToString(const std::vector<uint8_t>& data) {
@@ -1533,6 +1555,9 @@ void setupWifi() {
 void setup() {
   Serial.begin(115200);
   while (!Serial) {}
+#if SR_HAS_ESP_COREDUMP
+  clearCorruptedCoreDumpConfig();
+#endif
   KeyLoader::ensureStorage();
   setupWifi();                                       // запускаем точку доступа
   radio.begin();
