@@ -9,9 +9,9 @@
 #include <Arduino.h>
 #include <FS.h>
 #include <SPIFFS.h>
-#if defined(ESP32) && __has_include("esp_ipc.h")
-#include <esp_err.h>
-#include <esp_ipc.h>
+#if defined(ESP32) && __has_include("freertos/FreeRTOS.h") && __has_include("freertos/task.h")
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #define FS_UTILS_HAS_ESP_IPC 1
 #else
 #define FS_UTILS_HAS_ESP_IPC 0
@@ -86,27 +86,49 @@ inline SpiffsMountResult ensureSpiffsMounted(bool allowFormat = true) {
     formatAttempted = true;
     Serial.println(F("SPIFFS: требуется форматирование, пробуем очистить раздел"));
     bool formatted = false;
+    bool formatPerformed = false;
 #if FS_UTILS_HAS_ESP_IPC
-    // Форматируем раздел на основном ядре через IPC, чтобы избежать assert внутри FreeRTOS.
-    struct FormatContext {
-      bool formatted = false;
-    } ctx;
-    constexpr int kFormatCpu = 0;  // основной (PRO) процессор ESP32
-    esp_err_t ipcResult = esp_ipc_call_blocking(kFormatCpu, [](void* arg) {
-      auto* context = static_cast<FormatContext*>(arg);
-      context->formatted = SPIFFS.format();
-    }, &ctx);
-    if (ipcResult != ESP_OK) {
-      Serial.print(F("SPIFFS: ошибка IPC при форматировании, код="));
-      Serial.println(static_cast<int>(ipcResult));
-      result.status = SpiffsMountStatus::kFormatIpcError;
-      result.error_code = static_cast<int32_t>(ipcResult);
-      formatAttempted = false;  // позволяем повторить попытку позже
-      return result;
+    // Форматируем раздел в отдельной задаче на ядре PRO с увеличенным стеком, чтобы избежать переполнения стека ipc0.
+    auto formatOnCpu0 = [&]() -> bool {
+      struct FormatTaskContext {
+        TaskHandle_t waiter = nullptr;
+        bool formatted = false;
+      } ctx;
+      ctx.waiter = xTaskGetCurrentTaskHandle();
+      constexpr uint32_t kStackSizeWords = 4096;  // 16 КБ стека для задачи форматирования
+      constexpr UBaseType_t kPriority = tskIDLE_PRIORITY + 1;
+      TaskHandle_t formatTaskHandle = nullptr;
+      BaseType_t createResult = xTaskCreatePinnedToCore(
+          [](void* arg) {
+            auto* context = static_cast<FormatTaskContext*>(arg);
+            context->formatted = SPIFFS.format();
+            xTaskNotifyGive(context->waiter);
+            vTaskDelete(nullptr);
+          },
+          "spiffs_fmt", kStackSizeWords, &ctx, kPriority, &formatTaskHandle, 0);
+      if (createResult != pdPASS) {
+        Serial.println(F("SPIFFS: не удалось создать задачу форматирования, пробуем прямой вызов"));
+        return false;
+      }
+      uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
+      if (notified == 0) {
+        Serial.println(F("SPIFFS: форматирование не завершилось за отведённое время"));
+        vTaskDelete(formatTaskHandle);
+        return false;
+      }
+      formatted = ctx.formatted;
+      return true;
+    };
+
+    formatPerformed = formatOnCpu0();
+    if (!formatPerformed) {
+      Serial.println(F("SPIFFS: выполняем форматирование напрямую (без IPC)"));
+      formatted = SPIFFS.format();
+      formatPerformed = true;
     }
-    formatted = ctx.formatted;
 #else
     formatted = SPIFFS.format();
+    formatPerformed = true;
 #endif
 
     if (formatted) {
