@@ -23,9 +23,9 @@ public:
   // Разделить данные и занести части в буфер, возвращает ID первого пакета
   // with_id=true добавляет префикс и журналирование
   uint32_t splitAndEnqueue(MessageBuffer& buf, const uint8_t* data, size_t len, bool with_id = true) const;
-private:
   // Возвращает размер полезной нагрузки для текущего режима
   size_t payloadSize() const;
+private:
   PayloadMode mode_;
   size_t custom_ = 0; // произвольный размер, если задан
 };
