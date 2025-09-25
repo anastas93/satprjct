@@ -15,6 +15,16 @@
 #else
 #include <SPIFFS.h>
 #include <FS.h>
+#if defined(ESP32)
+#include <Preferences.h>
+#define KEY_LOADER_HAS_NVS 1
+#else
+#define KEY_LOADER_HAS_NVS 0
+#endif
+#endif
+
+#ifndef KEY_LOADER_HAS_NVS
+#define KEY_LOADER_HAS_NVS 0
 #endif
 
 namespace KeyLoader {
@@ -38,6 +48,169 @@ const char* KEY_FILE_OLD = "/keys/key.stkey.old";
 
 KeyRecord g_cache;
 bool g_cache_valid = false;
+
+#if defined(ARDUINO)
+StorageBackend g_active_backend = StorageBackend::UNKNOWN;
+StorageBackend g_preferred_backend = StorageBackend::UNKNOWN;
+bool g_backend_cached = false;
+StorageBackend g_last_announced_backend = StorageBackend::UNKNOWN;
+bool g_reported_fallback = false;
+
+void announceBackend(StorageBackend backend) {
+  if (backend == StorageBackend::UNKNOWN) return;
+  if (g_last_announced_backend == backend) return;
+  g_last_announced_backend = backend;
+  Serial.print(F("KeyLoader: используется хранилище "));
+  Serial.println(backendName(backend));
+}
+
+#if KEY_LOADER_HAS_NVS
+Preferences& prefsInstance() {
+  static Preferences prefs;
+  return prefs;
+}
+
+bool ensurePrefs() {
+  static bool opened = false;
+  if (!opened) {
+    Preferences& prefs = prefsInstance();
+    if (!prefs.begin("key_store", false)) {
+      Serial.println(F("KeyLoader: не удалось открыть раздел NVS (Preferences)"));
+      return false;
+    }
+    opened = true;
+  }
+  return true;
+}
+
+bool readFromNvs(std::vector<uint8_t>& out) {
+  if (!ensurePrefs()) return false;
+  Preferences& prefs = prefsInstance();
+  size_t len = prefs.getBytesLength("current");
+  if (len == 0) return false;
+  out.resize(len);
+  size_t read = prefs.getBytes("current", out.data(), len);
+  return read == len;
+}
+
+bool writeToNvs(const std::vector<uint8_t>& data) {
+  if (!ensurePrefs()) return false;
+  Preferences& prefs = prefsInstance();
+  if (prefs.isKey("backup")) {
+    prefs.remove("backup");
+  }
+  size_t current_len = prefs.getBytesLength("current");
+  if (current_len > 0) {
+    std::vector<uint8_t> current(current_len);
+    size_t read = prefs.getBytes("current", current.data(), current_len);
+    if (read == current_len) {
+      prefs.putBytes("backup", current.data(), current.size());
+    } else {
+      prefs.remove("backup");
+    }
+  }
+  size_t written = prefs.putBytes("current", data.data(), data.size());
+  return written == data.size();
+}
+
+bool hasBackupNvs() {
+  if (!ensurePrefs()) return false;
+  Preferences& prefs = prefsInstance();
+  return prefs.getBytesLength("backup") > 0;
+}
+
+bool restoreBackupNvs() {
+  if (!ensurePrefs()) return false;
+  Preferences& prefs = prefsInstance();
+  size_t len = prefs.getBytesLength("backup");
+  if (len == 0) return false;
+  std::vector<uint8_t> buf(len);
+  size_t read = prefs.getBytes("backup", buf.data(), len);
+  if (read != len) return false;
+  size_t written = prefs.putBytes("current", buf.data(), buf.size());
+  if (written != buf.size()) return false;
+  prefs.remove("backup");
+  return true;
+}
+#else
+bool ensurePrefs() { return false; }
+bool readFromNvs(std::vector<uint8_t>&) { return false; }
+bool writeToNvs(const std::vector<uint8_t>&) { return false; }
+bool hasBackupNvs() { return false; }
+bool restoreBackupNvs() { return false; }
+#endif
+
+bool ensureSpiffsDir(fs_utils::SpiffsMountResult* mount_status = nullptr) {
+  auto mount = fs_utils::ensureSpiffsMounted();
+  if (mount_status) *mount_status = mount;
+  if (!mount.ok()) {
+    if (mount_status) {
+      // уже записали результат
+    }
+    if (mount.error_code != 0) {
+      Serial.print(F("KeyLoader: код ошибки SPIFFS="));
+      Serial.println(mount.error_code);
+    }
+    return false;
+  }
+  if (!SPIFFS.exists(KEY_DIR)) {
+    if (!SPIFFS.mkdir(KEY_DIR)) {
+      Serial.println(F("KeyLoader: не удалось создать каталог /keys"));
+      return false;
+    }
+  }
+  return true;
+}
+
+StorageBackend ensureActiveBackend(fs_utils::SpiffsMountResult* mount_status = nullptr) {
+  if (g_backend_cached) {
+    return g_active_backend;
+  }
+
+  StorageBackend previous = g_active_backend;
+  StorageBackend preferred = g_preferred_backend;
+
+  if (preferred == StorageBackend::UNKNOWN || preferred == StorageBackend::SPIFFS) {
+    if (ensureSpiffsDir(mount_status)) {
+      g_active_backend = StorageBackend::SPIFFS;
+      g_backend_cached = true;
+      if (previous != g_active_backend) {
+        g_cache_valid = false;
+      }
+      g_reported_fallback = false;
+      announceBackend(g_active_backend);
+      return g_active_backend;
+    }
+    if (preferred == StorageBackend::SPIFFS) {
+      return StorageBackend::UNKNOWN;
+    }
+  }
+
+#if KEY_LOADER_HAS_NVS
+  if (preferred == StorageBackend::UNKNOWN || preferred == StorageBackend::NVS) {
+    if (ensurePrefs()) {
+      if (!g_reported_fallback && preferred == StorageBackend::UNKNOWN) {
+        Serial.println(F("KeyLoader: SPIFFS недоступен, переключаемся на NVS"));
+        g_reported_fallback = true;
+      }
+      g_active_backend = StorageBackend::NVS;
+      g_backend_cached = true;
+      if (previous != g_active_backend) {
+        g_cache_valid = false;
+      }
+      announceBackend(g_active_backend);
+      return g_active_backend;
+    }
+  }
+#else
+  (void)preferred;
+#endif
+
+  return StorageBackend::UNKNOWN;
+}
+#else
+StorageBackend g_active_backend = StorageBackend::FILESYSTEM;
+#endif
 
 std::array<uint8_t,16> truncateDigest(const std::array<uint8_t, crypto::sha256::DIGEST_SIZE>& digest) {
   std::array<uint8_t,16> out{};
@@ -140,59 +313,74 @@ bool readLegacy(std::array<uint8_t,16>& key) {
 }
 #else
 bool ensureDir(fs_utils::SpiffsMountResult* mount_status = nullptr) {
-  auto mount = fs_utils::ensureSpiffsMounted();
-  if (mount_status) *mount_status = mount;
-  if (!mount.ok()) {
-    Serial.print(F("KeyLoader: SPIFFS не смонтирован: "));
-    Serial.println(fs_utils::describeStatus(mount.status));
-    if (mount.error_code != 0) {
-      Serial.print(F("KeyLoader: код ошибки SPIFFS="));
-      Serial.println(mount.error_code);
-    }
-    return false;
-  }
-  if (!SPIFFS.exists(KEY_DIR)) {
-    if (!SPIFFS.mkdir(KEY_DIR)) {
-      Serial.println(F("KeyLoader: не удалось создать каталог /keys"));
-      return false;
-    }
-  }
-  return true;
+  return ensureActiveBackend(mount_status) != StorageBackend::UNKNOWN;
 }
 
 bool readFile(std::vector<uint8_t>& out) {
-  if (!fs_utils::ensureSpiffsMounted().ok()) return false;
-  File f = SPIFFS.open(KEY_FILE, "r");
-  if (!f) return false;
-  size_t sz = f.size();
-  if (sz == 0) { f.close(); return false; }
-  out.resize(sz);
-  size_t read = f.read(out.data(), sz);
-  f.close();
-  return read == sz;
+  StorageBackend backend = ensureActiveBackend();
+  if (backend == StorageBackend::SPIFFS) {
+    File f = SPIFFS.open(KEY_FILE, "r");
+    if (!f) return false;
+    size_t sz = f.size();
+    if (sz == 0) { f.close(); return false; }
+    out.resize(sz);
+    size_t read = f.read(out.data(), sz);
+    f.close();
+    return read == sz;
+  }
+#if KEY_LOADER_HAS_NVS
+  if (backend == StorageBackend::NVS) {
+    return readFromNvs(out);
+  }
+#endif
+  return false;
 }
 
 bool writeFile(const std::vector<uint8_t>& data) {
-  if (!fs_utils::ensureSpiffsMounted().ok()) return false;
-  if (SPIFFS.exists(KEY_FILE_OLD)) SPIFFS.remove(KEY_FILE_OLD);
-  if (SPIFFS.exists(KEY_FILE)) SPIFFS.rename(KEY_FILE, KEY_FILE_OLD);
-  File f = SPIFFS.open(KEY_FILE, "w");
-  if (!f) return false;
-  size_t written = f.write(data.data(), data.size());
-  f.close();
-  return written == data.size();
+  StorageBackend backend = ensureActiveBackend();
+  if (backend == StorageBackend::SPIFFS) {
+    if (SPIFFS.exists(KEY_FILE_OLD)) SPIFFS.remove(KEY_FILE_OLD);
+    if (SPIFFS.exists(KEY_FILE)) SPIFFS.rename(KEY_FILE, KEY_FILE_OLD);
+    File f = SPIFFS.open(KEY_FILE, "w");
+    if (!f) return false;
+    size_t written = f.write(data.data(), data.size());
+    f.close();
+    return written == data.size();
+  }
+#if KEY_LOADER_HAS_NVS
+  if (backend == StorageBackend::NVS) {
+    return writeToNvs(data);
+  }
+#endif
+  return false;
 }
 
 bool hasBackup() {
-  if (!fs_utils::ensureSpiffsMounted(false).ok()) return false;
-  return SPIFFS.exists(KEY_FILE_OLD);
+  StorageBackend backend = ensureActiveBackend();
+  if (backend == StorageBackend::SPIFFS) {
+    return SPIFFS.exists(KEY_FILE_OLD);
+  }
+#if KEY_LOADER_HAS_NVS
+  if (backend == StorageBackend::NVS) {
+    return hasBackupNvs();
+  }
+#endif
+  return false;
 }
 
 bool restoreBackup() {
-  if (!fs_utils::ensureSpiffsMounted().ok()) return false;
-  if (!SPIFFS.exists(KEY_FILE_OLD)) return false;
-  if (SPIFFS.exists(KEY_FILE)) SPIFFS.remove(KEY_FILE);
-  return SPIFFS.rename(KEY_FILE_OLD, KEY_FILE);
+  StorageBackend backend = ensureActiveBackend();
+  if (backend == StorageBackend::SPIFFS) {
+    if (!SPIFFS.exists(KEY_FILE_OLD)) return false;
+    if (SPIFFS.exists(KEY_FILE)) SPIFFS.remove(KEY_FILE);
+    return SPIFFS.rename(KEY_FILE_OLD, KEY_FILE);
+  }
+#if KEY_LOADER_HAS_NVS
+  if (backend == StorageBackend::NVS) {
+    return restoreBackupNvs();
+  }
+#endif
+  return false;
 }
 
 bool readLegacy(std::array<uint8_t,16>&) { return false; }
@@ -411,6 +599,7 @@ KeyState getState() {
   st.root_public = rec.root_public;
   st.peer_public = rec.peer_public;
   st.has_backup = hasBackup();
+  st.backend = getBackend();
   return st;
 }
 
@@ -443,6 +632,80 @@ std::array<uint8_t,4> keyId(const std::array<uint8_t,16>& key) {
   std::array<uint8_t,4> id{};
   std::copy_n(digest.begin(), id.size(), id.begin());
   return id;
+}
+
+#ifdef ARDUINO
+StorageBackend getBackend() {
+  if (!g_backend_cached) {
+    ensureActiveBackend();
+  }
+  return g_backend_cached ? g_active_backend : StorageBackend::UNKNOWN;
+}
+
+StorageBackend getPreferredBackend() { return g_preferred_backend; }
+
+bool setPreferredBackend(StorageBackend backend) {
+  if (backend != StorageBackend::UNKNOWN &&
+      backend != StorageBackend::SPIFFS &&
+      backend != StorageBackend::NVS) {
+    return false;
+  }
+#if !KEY_LOADER_HAS_NVS
+  if (backend == StorageBackend::NVS) {
+    Serial.println(F("KeyLoader: бэкенд NVS недоступен на данной платформе"));
+    return false;
+  }
+#endif
+#if KEY_LOADER_HAS_NVS
+  if (backend == StorageBackend::NVS) {
+    std::vector<uint8_t> snapshot;
+    if (g_cache_valid && g_cache.valid) {
+      snapshot = serialize(g_cache);
+    } else {
+      auto mount = fs_utils::ensureSpiffsMounted(false);
+      if (mount.ok() && SPIFFS.exists(KEY_FILE)) {
+        File f = SPIFFS.open(KEY_FILE, "r");
+        if (f) {
+          size_t sz = f.size();
+          if (sz > 0) {
+            snapshot.resize(sz);
+            size_t read = f.read(snapshot.data(), sz);
+            if (read != sz) snapshot.clear();
+          }
+          f.close();
+        }
+      }
+    }
+    if (!snapshot.empty()) {
+      if (writeToNvs(snapshot)) {
+        Serial.println(F("KeyLoader: ключи скопированы в NVS"));
+      }
+    }
+  }
+#endif
+  g_preferred_backend = backend;
+  g_backend_cached = false;
+  g_last_announced_backend = StorageBackend::UNKNOWN;
+  g_reported_fallback = false;
+  g_cache_valid = false;
+  return true;
+}
+#else
+StorageBackend getBackend() { return StorageBackend::FILESYSTEM; }
+StorageBackend getPreferredBackend() { return StorageBackend::FILESYSTEM; }
+bool setPreferredBackend(StorageBackend backend) {
+  return backend == StorageBackend::FILESYSTEM || backend == StorageBackend::UNKNOWN;
+}
+#endif
+
+const char* backendName(StorageBackend backend) {
+  switch (backend) {
+    case StorageBackend::SPIFFS: return "spiffs";
+    case StorageBackend::NVS: return "nvs";
+    case StorageBackend::FILESYSTEM: return "filesystem";
+    case StorageBackend::UNKNOWN:
+    default: return "unknown";
+  }
 }
 
 } // namespace KeyLoader
