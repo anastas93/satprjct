@@ -35,6 +35,7 @@
 
 #if defined(ESP32) && __has_include("esp_core_dump.h")
 #include "esp_core_dump.h" // управление core dump на ESP32
+#include "esp_partition.h" // прямой доступ к разделам флеша
 #define SR_HAS_ESP_COREDUMP 1
 #else
 #define SR_HAS_ESP_COREDUMP 0
@@ -187,13 +188,20 @@ String jsonEscape(const String& value) {
 #if SR_HAS_ESP_COREDUMP
 // Пытаемся очистить повреждённую конфигурацию core dump, чтобы убрать перезагрузки с ошибкой CRC
 void clearCorruptedCoreDumpConfig() {
-  esp_err_t err = esp_core_dump_image_erase();
+  // На некоторых сборках Arduino+ESP32 вызов esp_core_dump_image_erase()
+  // приводит к assert внутри FreeRTOS (нет Idle-задачи на втором ядре).
+  // Поэтому стираем раздел core dump напрямую через API разделов флеша.
+  const esp_partition_t* part = esp_partition_find_first(
+      ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
+  if (!part) {
+    Serial.println("Core dump: раздел не найден");
+    return;
+  }
+  esp_err_t err = esp_partition_erase_range(part, 0, part->size);
   if (err == ESP_OK) {
-    Serial.println("Core dump: конфигурация очищена");
-  } else if (err == ESP_ERR_NOT_FOUND) {
-    Serial.println("Core dump: активных записей не найдено");
+    Serial.println("Core dump: раздел очищен");
   } else {
-    Serial.print("Core dump: ошибка очистки, код=");
+    Serial.print("Core dump: ошибка стирания, код=");
     Serial.println(static_cast<int>(err));
   }
 }
