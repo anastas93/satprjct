@@ -25,6 +25,9 @@
 // --- Сеть и веб-интерфейс ---
 #include <WiFi.h>        // работа с Wi-Fi
 #include <WebServer.h>   // встроенный HTTP-сервер
+#if defined(ARDUINO) && defined(ESP32)
+#include <esp_system.h>  // доступ к уникальному идентификатору ESP32
+#endif
 #include "web/web_content.h"      // встроенные файлы веб-интерфейса
 #include "web/geostat_tle_js.h"   // статический набор TLE
 #ifndef ARDUINO
@@ -531,6 +534,9 @@ String makeKeyStateJson() {
     json += toHex(st.peer_public);
     json += "\"";
   }
+  json += ",\"baseKey\":\"";
+  json += toHex(DefaultSettings::DEFAULT_KEY);
+  json += "\"";
   json += "}";
   return json;
 }
@@ -1530,6 +1536,27 @@ void handleVer() {
   server.send(200, "text/plain", readVersionFile());
 }
 
+// Формирование SSID точки доступа с коротким уникальным идентификатором устройства
+String makeAccessPointSsid() {
+  String base = String(DefaultSettings::WIFI_SSID);
+#if defined(ARDUINO)
+  uint32_t suffix = 0;
+#if defined(ESP32)
+  uint64_t mac = ESP.getEfuseMac();
+  suffix = static_cast<uint32_t>(mac & 0xFFFFFFULL);
+#elif defined(ESP8266)
+  suffix = ESP.getChipId() & 0xFFFFFFU;
+#endif
+  char buf[8];
+  std::snprintf(buf, sizeof(buf), "%06X", static_cast<unsigned>(suffix));
+  base += "-";
+  base += buf;
+#else
+  base += "-000000"; // фиксированный идентификатор для хостовых сборок
+#endif
+  return base;
+}
+
 // Настройка Wi-Fi точки доступа и запуск сервера
 void setupWifi() {
   // Задаём статический IP 192.168.4.1 для точки доступа
@@ -1537,7 +1564,8 @@ void setupWifi() {
   IPAddress gateway(192, 168, 4, 1);
   IPAddress subnet(255, 255, 255, 0);
   WiFi.softAPConfig(local_ip, gateway, subnet);
-  WiFi.softAP(DefaultSettings::WIFI_SSID, DefaultSettings::WIFI_PASS); // создаём AP
+  String ssid = makeAccessPointSsid();                   // формируем SSID с суффиксом устройства
+  WiFi.softAP(ssid.c_str(), DefaultSettings::WIFI_PASS); // создаём AP
   static const char* kImageHeaders[] = {
     "X-Image-Profile",
     "X-Image-Frame-Width",
