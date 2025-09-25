@@ -21,7 +21,9 @@
 #include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
 #include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
 #include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
 #include "libs/fs_utils/spiffs_guard.h"           // единый контроль монтажа SPIFFS
+#endif
 
 // --- Сеть и веб-интерфейс ---
 #include <WiFi.h>        // работа с Wi-Fi
@@ -35,7 +37,9 @@
 #include <fstream>
 #else
 #include <FS.h>
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
 #include <SPIFFS.h>
+#endif
 #endif
 
 #if defined(ESP32) && __has_include("esp_core_dump.h")
@@ -620,6 +624,7 @@ String readVersionFile() {
   if (fallback.length()) return fallback;
   return String("unknown");
 #else
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
   static bool spiffsMounted = false;
   if (!spiffsMounted) {
     auto mountResult = fs_utils::ensureSpiffsMounted();
@@ -645,6 +650,7 @@ String readVersionFile() {
       if (text.length()) return text;
     }
   }
+#endif
   String fallback(FPSTR(kEmbeddedVersion));
   fallback.trim();
   if (fallback.length() >= 2) {
@@ -705,8 +711,10 @@ String cmdKeyStorage(const String& mode) {
   KeyLoader::StorageBackend backend = KeyLoader::StorageBackend::UNKNOWN;
   if (trimmed.equalsIgnoreCase("AUTO")) {
     backend = KeyLoader::StorageBackend::UNKNOWN;
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
   } else if (trimmed.equalsIgnoreCase("SPIFFS")) {
     backend = KeyLoader::StorageBackend::SPIFFS;
+#endif
   } else if (trimmed.equalsIgnoreCase("NVS")) {
     backend = KeyLoader::StorageBackend::NVS;
   } else if (trimmed.equalsIgnoreCase("FS") || trimmed.equalsIgnoreCase("FILESYSTEM")) {
@@ -726,6 +734,7 @@ String cmdKeyStorage(const String& mode) {
 
 String cmdKeyGenSecure() {
   DEBUG_LOG("Key: генерация нового ключа");
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
   fs_utils::SpiffsMountResult mountStatus{};
   if (KeyLoader::generateLocalKey(nullptr, &mountStatus)) {
     reloadCryptoModules();
@@ -742,6 +751,12 @@ String cmdKeyGenSecure() {
     json += "}";
     return json;
   }
+#else
+  if (KeyLoader::generateLocalKey()) {
+    reloadCryptoModules();
+    return makeKeyStateJson();
+  }
+#endif
   return String("{\"error\":\"keygen\"}");
 }
 
@@ -1729,7 +1744,11 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
   Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|spiffs|nvs]");
+#else
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
+#endif
 }
 
 void loop() {

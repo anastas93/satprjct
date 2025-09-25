@@ -16,6 +16,11 @@
 #  include <Arduino.h>
 #endif
 
+// Разрешаем управлять поддержкой SPIFFS через макрос конфигурации.
+#ifndef DEFAULT_SETTINGS_ENABLE_SPIFFS
+#define DEFAULT_SETTINGS_ENABLE_SPIFFS 0
+#endif
+
 // Значения параметров радиомодуля по умолчанию
 namespace DefaultSettings {
   constexpr ChannelBank BANK = ChannelBank::EAST; // Банк каналов
@@ -39,6 +44,7 @@ namespace DefaultSettings {
   constexpr const char* WIFI_SSID = "sat_ap";      // SSID точки доступа
   constexpr const char* WIFI_PASS = "12345678";    // пароль точки доступа
   constexpr bool DEBUG = true;                    // Флаг отладочного вывода
+  constexpr bool ENABLE_SPIFFS = DEFAULT_SETTINGS_ENABLE_SPIFFS != 0; // использовать ли SPIFFS
   // Уровни журналирования для фильтрации сообщений
   enum class LogLevel : uint8_t { ERROR = 0, WARN = 1, INFO = 2, DEBUG = 3 };
   constexpr LogLevel LOG_LEVEL = LogLevel::DEBUG;   // Текущий уровень вывода
