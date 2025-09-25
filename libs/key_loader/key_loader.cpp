@@ -13,8 +13,10 @@
 #include <filesystem>
 #include <fstream>
 #else
-#include <SPIFFS.h>
 #include <FS.h>
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
+#include <SPIFFS.h>
+#endif
 #if defined(ESP32)
 #include <Preferences.h>
 #define KEY_LOADER_HAS_NVS 1
@@ -51,7 +53,13 @@ bool g_cache_valid = false;
 
 #if defined(ARDUINO)
 StorageBackend g_active_backend = StorageBackend::UNKNOWN;
-StorageBackend g_preferred_backend = StorageBackend::UNKNOWN;
+StorageBackend g_preferred_backend =
+#if KEY_LOADER_HAS_NVS
+    (DefaultSettings::ENABLE_SPIFFS ? StorageBackend::UNKNOWN : StorageBackend::NVS);
+#else
+    StorageBackend::UNKNOWN;
+#endif
+;
 bool g_backend_cached = false;
 StorageBackend g_last_announced_backend = StorageBackend::UNKNOWN;
 bool g_reported_fallback = false;
@@ -141,6 +149,7 @@ bool restoreBackupNvs() { return false; }
 #endif
 
 bool ensureSpiffsDir(fs_utils::SpiffsMountResult* mount_status = nullptr) {
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
   auto mount = fs_utils::ensureSpiffsMounted();
   if (mount_status) *mount_status = mount;
   if (!mount.ok()) {
@@ -160,6 +169,14 @@ bool ensureSpiffsDir(fs_utils::SpiffsMountResult* mount_status = nullptr) {
     }
   }
   return true;
+#else
+  if (mount_status) {
+    mount_status->mounted = false;
+    mount_status->status = fs_utils::SpiffsMountStatus::kMountFailed;
+    mount_status->error_code = 0;
+  }
+  return false;
+#endif
 }
 
 StorageBackend ensureActiveBackend(fs_utils::SpiffsMountResult* mount_status = nullptr) {
@@ -170,6 +187,7 @@ StorageBackend ensureActiveBackend(fs_utils::SpiffsMountResult* mount_status = n
   StorageBackend previous = g_active_backend;
   StorageBackend preferred = g_preferred_backend;
 
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
   if (preferred == StorageBackend::UNKNOWN || preferred == StorageBackend::SPIFFS) {
     if (ensureSpiffsDir(mount_status)) {
       g_active_backend = StorageBackend::SPIFFS;
@@ -185,6 +203,7 @@ StorageBackend ensureActiveBackend(fs_utils::SpiffsMountResult* mount_status = n
       return StorageBackend::UNKNOWN;
     }
   }
+#endif
 
 #if KEY_LOADER_HAS_NVS
   if (preferred == StorageBackend::UNKNOWN || preferred == StorageBackend::NVS) {
@@ -318,6 +337,7 @@ bool ensureDir(fs_utils::SpiffsMountResult* mount_status = nullptr) {
 
 bool readFile(std::vector<uint8_t>& out) {
   StorageBackend backend = ensureActiveBackend();
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
   if (backend == StorageBackend::SPIFFS) {
     File f = SPIFFS.open(KEY_FILE, "r");
     if (!f) return false;
@@ -328,6 +348,7 @@ bool readFile(std::vector<uint8_t>& out) {
     f.close();
     return read == sz;
   }
+#endif
 #if KEY_LOADER_HAS_NVS
   if (backend == StorageBackend::NVS) {
     return readFromNvs(out);
@@ -338,6 +359,7 @@ bool readFile(std::vector<uint8_t>& out) {
 
 bool writeFile(const std::vector<uint8_t>& data) {
   StorageBackend backend = ensureActiveBackend();
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
   if (backend == StorageBackend::SPIFFS) {
     if (SPIFFS.exists(KEY_FILE_OLD)) SPIFFS.remove(KEY_FILE_OLD);
     if (SPIFFS.exists(KEY_FILE)) SPIFFS.rename(KEY_FILE, KEY_FILE_OLD);
@@ -347,6 +369,7 @@ bool writeFile(const std::vector<uint8_t>& data) {
     f.close();
     return written == data.size();
   }
+#endif
 #if KEY_LOADER_HAS_NVS
   if (backend == StorageBackend::NVS) {
     return writeToNvs(data);
@@ -357,9 +380,11 @@ bool writeFile(const std::vector<uint8_t>& data) {
 
 bool hasBackup() {
   StorageBackend backend = ensureActiveBackend();
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
   if (backend == StorageBackend::SPIFFS) {
     return SPIFFS.exists(KEY_FILE_OLD);
   }
+#endif
 #if KEY_LOADER_HAS_NVS
   if (backend == StorageBackend::NVS) {
     return hasBackupNvs();
@@ -370,11 +395,13 @@ bool hasBackup() {
 
 bool restoreBackup() {
   StorageBackend backend = ensureActiveBackend();
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
   if (backend == StorageBackend::SPIFFS) {
     if (!SPIFFS.exists(KEY_FILE_OLD)) return false;
     if (SPIFFS.exists(KEY_FILE)) SPIFFS.remove(KEY_FILE);
     return SPIFFS.rename(KEY_FILE_OLD, KEY_FILE);
   }
+#endif
 #if KEY_LOADER_HAS_NVS
   if (backend == StorageBackend::NVS) {
     return restoreBackupNvs();
@@ -650,6 +677,12 @@ bool setPreferredBackend(StorageBackend backend) {
       backend != StorageBackend::NVS) {
     return false;
   }
+#if !DEFAULT_SETTINGS_ENABLE_SPIFFS
+  if (backend == StorageBackend::SPIFFS) {
+    Serial.println(F("KeyLoader: SPIFFS отключён в настройках"));
+    return false;
+  }
+#endif
 #if !KEY_LOADER_HAS_NVS
   if (backend == StorageBackend::NVS) {
     Serial.println(F("KeyLoader: бэкенд NVS недоступен на данной платформе"));
@@ -662,6 +695,7 @@ bool setPreferredBackend(StorageBackend backend) {
     if (g_cache_valid && g_cache.valid) {
       snapshot = serialize(g_cache);
     } else {
+#if DEFAULT_SETTINGS_ENABLE_SPIFFS
       auto mount = fs_utils::ensureSpiffsMounted(false);
       if (mount.ok() && SPIFFS.exists(KEY_FILE)) {
         File f = SPIFFS.open(KEY_FILE, "r");
@@ -675,6 +709,7 @@ bool setPreferredBackend(StorageBackend backend) {
           f.close();
         }
       }
+#endif
     }
     if (!snapshot.empty()) {
       if (writeToNvs(snapshot)) {
