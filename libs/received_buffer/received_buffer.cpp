@@ -96,9 +96,9 @@ std::vector<std::string> ReceivedBuffer::list(size_t count) const {
   out.reserve(total);                          // резервируем место под итоговый объём
   size_t produced = 0;                         // сколько имён добавлено
   auto append = [&](const std::deque<Item>& queue) {
-    for (const auto& it : queue) {             // перебор элементов очереди
-      if (produced >= count) break;            // достигнут лимит выдачи
-      out.push_back(it.name);                  // используем готовое имя без форматирования
+    for (auto it = queue.rbegin(); it != queue.rend(); ++it) { // идём от новых к старым
+      if (produced >= count) break;                            // достигнут лимит выдачи
+      out.push_back(it->name);                                 // используем готовое имя без форматирования
       ++produced;
     }
   };
@@ -116,10 +116,10 @@ std::vector<ReceivedBuffer::SnapshotEntry> ReceivedBuffer::snapshot(size_t count
   out.reserve(total);
   size_t produced = 0;
   auto append = [&](const std::deque<Item>& queue, Kind kind) {
-    for (const auto& it : queue) {
+    for (auto it = queue.rbegin(); it != queue.rend(); ++it) {
       if (produced >= count) break;                             // достигнут лимит
       SnapshotEntry entry;
-      entry.item = it;                                          // копируем данные
+      entry.item = *it;                                         // копируем данные
       entry.kind = kind;
       out.push_back(std::move(entry));
       ++produced;

@@ -21,6 +21,7 @@
 #include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
 #include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
 #include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
+#include "libs/protocol/ack_utils.h"              // обработка ACK-пакетов
 #if DEFAULT_SETTINGS_ENABLE_SPIFFS
 #include "libs/fs_utils/spiffs_guard.h"           // единый контроль монтажа SPIFFS
 #endif
@@ -1726,7 +1727,7 @@ void setup() {
   rx.setBuffer(&recvBuf);                                   // сохраняем принятые пакеты
   // обработка входящих данных с учётом ACK
   rx.setCallback([&](const uint8_t* d, size_t l){
-    if (l == 3 && d[0]=='A' && d[1]=='C' && d[2]=='K') { // пришёл ACK
+    if (protocol::ack::isAckPayload(d, l)) {              // пришёл ACK любого формата
       Serial.println("ACK: получен");
       tx.onAckReceived();
       return;
@@ -1735,7 +1736,7 @@ void setup() {
     for (size_t i = 0; i < l; ++i) Serial.write(d[i]);
     Serial.println();
     if (ackEnabled) {                                     // отправляем подтверждение
-      const uint8_t ack_msg[3] = {'A','C','K'};
+      const uint8_t ack_msg[1] = {protocol::ack::MARKER};
       tx.queue(ack_msg, sizeof(ack_msg));
       tx.loop();
     }

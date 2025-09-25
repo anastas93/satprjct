@@ -17,11 +17,17 @@ int main() {
   auto names = buf.list(10);                      // проверяем формирование списка имён
   assert(names.size() == 3);                      // ожидаем три элемента
   assert(names[0] == n3 && names[1] == n2 && names[2] == n1);
+  auto latest = buf.list(2);                      // проверяем, что берутся самые свежие элементы
+  assert(latest.size() == 2);
+  assert(latest[0] == n3 && latest[1] == n2);
   auto snap = buf.snapshot(10);                   // проверяем порядок выдачи в снимке
   assert(snap.size() == 3);
   assert(snap[0].item.name == n3 && snap[0].kind == ReceivedBuffer::Kind::Ready);
   assert(snap[1].item.name == n2 && snap[1].kind == ReceivedBuffer::Kind::Split);
   assert(snap[2].item.name == n1 && snap[2].kind == ReceivedBuffer::Kind::Raw);
+  auto snapLatest = buf.snapshot(1);              // проверяем ограничение по количеству
+  assert(snapLatest.size() == 1);
+  assert(snapLatest[0].item.name == n3);
   ReceivedBuffer::Item out;
   assert(buf.popRaw(out) && out.id == 1 && out.part == 2 && out.data.size() == 2 && out.name == n1);
   assert(buf.popSplit(out) && out.id == 7 && out.data.size() == 3 && out.name == n2);
