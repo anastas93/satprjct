@@ -17,6 +17,7 @@
 #include "libs/simple_logger/simple_logger.h"     // журнал статусов
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
 #include "libs/packetizer/packet_gatherer.h"      // собиратель пакетов для теста
+#include "libs/packetizer/packet_splitter.h"      // параметры делителя пакетов
 #include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
 #include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
 #include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
@@ -836,9 +837,18 @@ void handleApiTxImage() {
     return;
   }
   const size_t len = static_cast<size_t>(body.length());
-  static constexpr size_t kImageMaxPayload = 128 * 1024;    // ограничиваем полезную нагрузку ~128 КиБ
+  static const size_t kImageMaxPayload = []() {
+    PacketSplitter splitter(PayloadMode::LARGE);
+    return DefaultSettings::TX_QUEUE_CAPACITY * splitter.payloadSize();
+  }();                                                     // реальный потолок для очереди
   if (len > kImageMaxPayload) {
-    server.send(413, "text/plain", "too large");
+    String reason = "image exceeds queue capacity (max ";
+    reason += String(static_cast<unsigned long>(kImageMaxPayload));
+    reason += " bytes)";
+    server.send(413, "text/plain", reason);
+    std::string log = "IMG TX reject bytes=" + std::to_string(len) +
+                      " limit=" + std::to_string(kImageMaxPayload);
+    SimpleLogger::logStatus(log);
     return;
   }
   std::vector<uint8_t> payload(len);
