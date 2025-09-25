@@ -528,8 +528,18 @@ String makeKeyStateJson() {
   json += toHex(idBytes);
   json += "\",\"public\":\"";
   json += toHex(st.root_public);
-  json += "\",\"hasBackup\":";
+  json += ",\"hasBackup\":";
   json += st.has_backup ? "true" : "false";
+  json += ",\"storage\":\"";
+  json += KeyLoader::backendName(st.backend);
+  json += "\",\"preferred\":\"";
+  auto preferredBackend = KeyLoader::getPreferredBackend();
+  if (preferredBackend == KeyLoader::StorageBackend::UNKNOWN) {
+    json += "auto";
+  } else {
+    json += KeyLoader::backendName(preferredBackend);
+  }
+  json += "\"";
   if (st.origin == KeyLoader::KeyOrigin::REMOTE) {
     json += ",\"peer\":\"";
     json += toHex(st.peer_public);
@@ -537,6 +547,24 @@ String makeKeyStateJson() {
   }
   json += ",\"baseKey\":\"";
   json += toHex(DefaultSettings::DEFAULT_KEY);
+  json += "\"";
+  json += "}";
+  return json;
+}
+
+// Короткий ответ о бэкенде хранения ключей для UI/CLI
+String makeKeyStorageStatusJson() {
+  auto active = KeyLoader::getBackend();
+  auto preferred = KeyLoader::getPreferredBackend();
+  String json = "{";
+  json += "\"storage\":\"";
+  json += KeyLoader::backendName(active);
+  json += "\",\"preferred\":\"";
+  if (preferred == KeyLoader::StorageBackend::UNKNOWN) {
+    json += "auto";
+  } else {
+    json += KeyLoader::backendName(preferred);
+  }
   json += "\"";
   json += "}";
   return json;
@@ -665,6 +693,35 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
 String cmdKeyState() {
   DEBUG_LOG("Key: запрос состояния");
   return makeKeyStateJson();
+}
+
+// Управление бэкендом хранилища ключей (SPIFFS/NVS/auto)
+String cmdKeyStorage(const String& mode) {
+  String trimmed = mode;
+  trimmed.trim();
+  if (trimmed.length() == 0) {
+    return makeKeyStorageStatusJson();
+  }
+  KeyLoader::StorageBackend backend = KeyLoader::StorageBackend::UNKNOWN;
+  if (trimmed.equalsIgnoreCase("AUTO")) {
+    backend = KeyLoader::StorageBackend::UNKNOWN;
+  } else if (trimmed.equalsIgnoreCase("SPIFFS")) {
+    backend = KeyLoader::StorageBackend::SPIFFS;
+  } else if (trimmed.equalsIgnoreCase("NVS")) {
+    backend = KeyLoader::StorageBackend::NVS;
+  } else if (trimmed.equalsIgnoreCase("FS") || trimmed.equalsIgnoreCase("FILESYSTEM")) {
+    backend = KeyLoader::StorageBackend::FILESYSTEM;
+  } else {
+    return String("{\"error\":\"mode\"}");
+  }
+  if (!KeyLoader::setPreferredBackend(backend)) {
+    return String("{\"error\":\"unsupported\"}");
+  }
+  auto active = KeyLoader::getBackend();
+  if (active == KeyLoader::StorageBackend::UNKNOWN) {
+    return String("{\"error\":\"unavailable\"}");
+  }
+  return makeKeyStorageStatusJson();
 }
 
 String cmdKeyGenSecure() {
@@ -1537,6 +1594,16 @@ void handleCmdHttp() {
     }
   } else if (cmd == "KEYSTATE") {
     resp = cmdKeyState();
+  } else if (cmd == "KEYSTORE") {
+    String arg;
+    if (server.hasArg("mode")) {
+      arg = server.arg("mode");
+    } else if (server.hasArg("v")) {
+      arg = server.arg("v");
+    } else {
+      arg = cmdArg;
+    }
+    resp = cmdKeyStorage(arg);
   } else if (cmd == "KEYGEN") {
     resp = cmdKeyGenSecure();
   } else if (cmd == "KEYRESTORE") {
@@ -1631,6 +1698,8 @@ void setup() {
   gCoreDumpClearAfterMs = millis() + 500;  // ждём старта фоновых задач
 #endif
   KeyLoader::ensureStorage();
+  Serial.print("Хранилище ключей: ");
+  Serial.println(KeyLoader::backendName(KeyLoader::getBackend()));
   setupWifi();                                       // запускаем точку доступа
   radio.begin();
   tx.setAckEnabled(ackEnabled);
@@ -1660,7 +1729,7 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|spiffs|nvs]");
 }
 
 void loop() {
@@ -1915,6 +1984,10 @@ void loop() {
         Serial.println(cmdKeyTransferSendLora());
       } else if (line.equalsIgnoreCase("KEYTRANSFER RECEIVE")) {
         Serial.println(cmdKeyTransferReceiveLora());
+      } else if (line.startsWith("KEYSTORE")) {
+        String arg = line.length() > 8 ? line.substring(8) : String();
+        arg.trim();
+        Serial.println(cmdKeyStorage(arg));
       } else if (line.startsWith("ENC ")) {
         encryptionEnabled = line.substring(4).toInt() != 0;
         tx.setEncryptionEnabled(encryptionEnabled);
