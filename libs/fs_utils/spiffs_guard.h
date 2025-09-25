@@ -5,6 +5,23 @@
 
 #include <cstdint>
 
+#ifdef ARDUINO
+#include <Arduino.h>
+#include <FS.h>
+#include <SPIFFS.h>
+#if defined(ESP32) && __has_include("esp_ipc.h")
+#include <esp_err.h>
+#include <esp_ipc.h>
+#define FS_UTILS_HAS_ESP_IPC 1
+#else
+#define FS_UTILS_HAS_ESP_IPC 0
+#endif
+#endif
+
+#ifndef FS_UTILS_HAS_ESP_IPC
+#define FS_UTILS_HAS_ESP_IPC 0
+#endif
+
 namespace fs_utils {
 
 // Детальное состояние операции монтирования SPIFFS.
@@ -40,17 +57,6 @@ inline const char* describeStatus(SpiffsMountStatus status) {
 }
 
 #ifdef ARDUINO
-#include <Arduino.h>
-#include <FS.h>
-#include <SPIFFS.h>
-#if defined(ESP32) && __has_include("esp_ipc.h")
-#include <esp_err.h>
-#include <esp_ipc.h>
-#define FS_UTILS_HAS_ESP_IPC 1
-#else
-#define FS_UTILS_HAS_ESP_IPC 0
-#endif
-
 // Обёртка над SPIFFS.begin() с повторными попытками форматирования и монтирования.
 inline SpiffsMountResult ensureSpiffsMounted(bool allowFormat = true) {
   static bool mounted = false;
