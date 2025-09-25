@@ -2,6 +2,7 @@
 #include "../crypto/sha256.h"
 #include "../crypto/x25519.h"
 #include "default_settings.h"
+#include "../fs_utils/spiffs_guard.h"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -14,7 +15,6 @@
 #else
 #include <SPIFFS.h>
 #include <FS.h>
-#include "../fs_utils/spiffs_guard.h"
 #endif
 
 namespace KeyLoader {
@@ -139,16 +139,29 @@ bool readLegacy(std::array<uint8_t,16>& key) {
   return f.good();
 }
 #else
-bool ensureDir() {
-  if (!fs_utils::ensureSpiffsMounted()) return false;
+bool ensureDir(fs_utils::SpiffsMountResult* mount_status = nullptr) {
+  auto mount = fs_utils::ensureSpiffsMounted();
+  if (mount_status) *mount_status = mount;
+  if (!mount.ok()) {
+    Serial.print(F("KeyLoader: SPIFFS не смонтирован: "));
+    Serial.println(fs_utils::describeStatus(mount.status));
+    if (mount.error_code != 0) {
+      Serial.print(F("KeyLoader: код ошибки SPIFFS="));
+      Serial.println(mount.error_code);
+    }
+    return false;
+  }
   if (!SPIFFS.exists(KEY_DIR)) {
-    return SPIFFS.mkdir(KEY_DIR);
+    if (!SPIFFS.mkdir(KEY_DIR)) {
+      Serial.println(F("KeyLoader: не удалось создать каталог /keys"));
+      return false;
+    }
   }
   return true;
 }
 
 bool readFile(std::vector<uint8_t>& out) {
-  if (!fs_utils::ensureSpiffsMounted()) return false;
+  if (!fs_utils::ensureSpiffsMounted().ok()) return false;
   File f = SPIFFS.open(KEY_FILE, "r");
   if (!f) return false;
   size_t sz = f.size();
@@ -160,7 +173,7 @@ bool readFile(std::vector<uint8_t>& out) {
 }
 
 bool writeFile(const std::vector<uint8_t>& data) {
-  if (!fs_utils::ensureSpiffsMounted()) return false;
+  if (!fs_utils::ensureSpiffsMounted().ok()) return false;
   if (SPIFFS.exists(KEY_FILE_OLD)) SPIFFS.remove(KEY_FILE_OLD);
   if (SPIFFS.exists(KEY_FILE)) SPIFFS.rename(KEY_FILE, KEY_FILE_OLD);
   File f = SPIFFS.open(KEY_FILE, "w");
@@ -171,12 +184,12 @@ bool writeFile(const std::vector<uint8_t>& data) {
 }
 
 bool hasBackup() {
-  if (!fs_utils::ensureSpiffsMounted(false)) return false;
+  if (!fs_utils::ensureSpiffsMounted(false).ok()) return false;
   return SPIFFS.exists(KEY_FILE_OLD);
 }
 
 bool restoreBackup() {
-  if (!fs_utils::ensureSpiffsMounted()) return false;
+  if (!fs_utils::ensureSpiffsMounted().ok()) return false;
   if (!SPIFFS.exists(KEY_FILE_OLD)) return false;
   if (SPIFFS.exists(KEY_FILE)) SPIFFS.remove(KEY_FILE);
   return SPIFFS.rename(KEY_FILE_OLD, KEY_FILE);
@@ -331,8 +344,17 @@ bool saveKey(const std::array<uint8_t,16>& key,
   return writeRecord(rec);
 }
 
-bool generateLocalKey(KeyRecord* out) {
+bool generateLocalKey(KeyRecord* out, fs_utils::SpiffsMountResult* mount_status) {
+#ifdef ARDUINO
+  if (!ensureDir(mount_status)) return false;
+#else
+  if (mount_status) {
+    mount_status->mounted = true;
+    mount_status->status = fs_utils::SpiffsMountStatus::kSuccess;
+    mount_status->error_code = 0;
+  }
   if (!ensureDir()) return false;
+#endif
   KeyRecord rec;
   crypto::x25519::random_bytes(rec.root_private.data(), rec.root_private.size());
   crypto::x25519::derive_public(rec.root_public, rec.root_private);

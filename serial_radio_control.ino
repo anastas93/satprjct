@@ -593,7 +593,13 @@ String readVersionFile() {
   return String("unknown");
 #else
   static bool spiffsMounted = false;
-  if (!spiffsMounted) spiffsMounted = fs_utils::ensureSpiffsMounted();
+  if (!spiffsMounted) {
+    auto mountResult = fs_utils::ensureSpiffsMounted();
+    spiffsMounted = mountResult.ok();
+    if (!spiffsMounted) {
+      DEBUG_LOG("SPIFFS: %s", fs_utils::describeStatus(mountResult.status));
+    }
+  }
   if (spiffsMounted) {
     File f = SPIFFS.open("/ver", "r");
     if (f) {
@@ -663,9 +669,21 @@ String cmdKeyState() {
 
 String cmdKeyGenSecure() {
   DEBUG_LOG("Key: генерация нового ключа");
-  if (KeyLoader::generateLocalKey()) {
+  fs_utils::SpiffsMountResult mountStatus{};
+  if (KeyLoader::generateLocalKey(nullptr, &mountStatus)) {
     reloadCryptoModules();
     return makeKeyStateJson();
+  }
+  if (!mountStatus.ok()) {
+    String json = "{\"error\":\"spiffs\",\"reason\":\"";
+    json += fs_utils::describeStatus(mountStatus.status);
+    json += "\"";
+    if (mountStatus.error_code != 0) {
+      json += ",\"code\":";
+      json += String(mountStatus.error_code);
+    }
+    json += "}";
+    return json;
   }
   return String("{\"error\":\"keygen\"}");
 }
