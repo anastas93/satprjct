@@ -123,7 +123,7 @@
 | `frame` | Структуры заголовков кадров (`FrameHeader`). |
 | `key_loader`, `crypto/aes_ccm`, `key_transfer` | Работа с ключами, AES-CCM и обмен корневым ключом. |
 | `simple_logger`, `serial_program_collector`, `text_converter` | Логирование, сборка команд, преобразование текста. |
-| `fs_utils` | Хелпер `ensureSpiffsMounted()` монтирует SPIFFS и при необходимости форматирует раздел один раз. |
+| `fs_utils` | Хелпер `ensureSpiffsMounted()` возвращает `SpiffsMountResult` с причиной и повторно пытается форматировать/монтировать SPIFFS. |
 
 Файл `libs_includes.cpp` подключает реализации библиотек для Arduino-проекта и избавляет от
 неявных зависимостей.
@@ -464,8 +464,9 @@ ENCT: успех
   создаётся запись по умолчанию).
 - `bool saveKey(const std::array<uint8_t,16>& key, KeyOrigin origin, const std::array<uint8_t,32>* peer,
   uint32_t salt)` — сохранить ключ с указанием происхождения и публичного ключа собеседника.
-- `bool generateLocalKey(KeyRecord* out = nullptr)` — создать новую пару Curve25519, обновить
-  симметричный ключ и резервную копию.
+- `bool generateLocalKey(KeyRecord* out = nullptr, fs_utils::SpiffsMountResult* status = nullptr)` —
+  создать новую пару Curve25519, обновить симметричный ключ и резервную копию, дополнительно
+  возвращая состояние монтирования SPIFFS (для сообщений пользователю).
 - `bool restorePreviousKey(KeyRecord* out = nullptr)` — восстановить `key.stkey` из резервной копии.
 - `bool applyRemotePublic(const std::array<uint8_t,32>& remote)` — вычислить общий секрет и сохранить
   внешний симметричный ключ.

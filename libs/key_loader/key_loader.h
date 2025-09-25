@@ -3,6 +3,10 @@
 #include <cstdint>
 #include <optional>
 
+namespace fs_utils {
+struct SpiffsMountResult;
+}
+
 namespace KeyLoader {
 
 // Происхождение активного ключа
@@ -48,7 +52,8 @@ bool saveKey(const std::array<uint8_t,16>& key,
 
 // Запись нового локального ключа (генерация пары Curve25519 и симметричного ключа из неё).
 // При сохранении предыдущая версия переименовывается в key.stkey.old (если была).
-bool generateLocalKey(KeyRecord* out = nullptr);
+bool generateLocalKey(KeyRecord* out = nullptr,
+                      fs_utils::SpiffsMountResult* mount_status = nullptr);
 
 // Восстановление предыдущего ключа (если существует key.stkey.old).
 bool restorePreviousKey(KeyRecord* out = nullptr);
