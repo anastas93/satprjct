@@ -14,6 +14,7 @@
 #else
 #include <SPIFFS.h>
 #include <FS.h>
+#include "../fs_utils/spiffs_guard.h"
 #endif
 
 namespace KeyLoader {
@@ -139,7 +140,7 @@ bool readLegacy(std::array<uint8_t,16>& key) {
 }
 #else
 bool ensureDir() {
-  if (!SPIFFS.begin(true)) return false;
+  if (!fs_utils::ensureSpiffsMounted()) return false;
   if (!SPIFFS.exists(KEY_DIR)) {
     return SPIFFS.mkdir(KEY_DIR);
   }
@@ -147,7 +148,7 @@ bool ensureDir() {
 }
 
 bool readFile(std::vector<uint8_t>& out) {
-  if (!SPIFFS.begin(true)) return false;
+  if (!fs_utils::ensureSpiffsMounted()) return false;
   File f = SPIFFS.open(KEY_FILE, "r");
   if (!f) return false;
   size_t sz = f.size();
@@ -159,7 +160,7 @@ bool readFile(std::vector<uint8_t>& out) {
 }
 
 bool writeFile(const std::vector<uint8_t>& data) {
-  if (!SPIFFS.begin(true)) return false;
+  if (!fs_utils::ensureSpiffsMounted()) return false;
   if (SPIFFS.exists(KEY_FILE_OLD)) SPIFFS.remove(KEY_FILE_OLD);
   if (SPIFFS.exists(KEY_FILE)) SPIFFS.rename(KEY_FILE, KEY_FILE_OLD);
   File f = SPIFFS.open(KEY_FILE, "w");
@@ -170,12 +171,12 @@ bool writeFile(const std::vector<uint8_t>& data) {
 }
 
 bool hasBackup() {
-  if (!SPIFFS.begin(true)) return false;
+  if (!fs_utils::ensureSpiffsMounted(false)) return false;
   return SPIFFS.exists(KEY_FILE_OLD);
 }
 
 bool restoreBackup() {
-  if (!SPIFFS.begin(true)) return false;
+  if (!fs_utils::ensureSpiffsMounted()) return false;
   if (!SPIFFS.exists(KEY_FILE_OLD)) return false;
   if (SPIFFS.exists(KEY_FILE)) SPIFFS.remove(KEY_FILE);
   return SPIFFS.rename(KEY_FILE_OLD, KEY_FILE);

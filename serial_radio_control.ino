@@ -20,6 +20,7 @@
 #include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
 #include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
 #include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
+#include "libs/fs_utils/spiffs_guard.h"           // единый контроль монтажа SPIFFS
 
 // --- Сеть и веб-интерфейс ---
 #include <WiFi.h>        // работа с Wi-Fi
@@ -205,6 +206,12 @@ void clearCorruptedCoreDumpConfig() {
     Serial.println(static_cast<int>(err));
   }
 }
+#endif
+
+#if SR_HAS_ESP_COREDUMP
+// Флаги, управляющие отложенной очисткой core dump после старта FreeRTOS.
+bool gCoreDumpClearPending = true;
+uint32_t gCoreDumpClearAfterMs = 0;
 #endif
 
 // Преобразование буфера байтов в строку ASCII
@@ -579,7 +586,7 @@ String readVersionFile() {
   return String("unknown");
 #else
   static bool spiffsMounted = false;
-  if (!spiffsMounted) spiffsMounted = SPIFFS.begin(true);
+  if (!spiffsMounted) spiffsMounted = fs_utils::ensureSpiffsMounted();
   if (spiffsMounted) {
     File f = SPIFFS.open("/ver", "r");
     if (f) {
@@ -1564,7 +1571,8 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) {}
 #if SR_HAS_ESP_COREDUMP
-  clearCorruptedCoreDumpConfig();
+  gCoreDumpClearPending = true;
+  gCoreDumpClearAfterMs = millis() + 500;  // ждём старта фоновых задач
 #endif
   KeyLoader::ensureStorage();
   setupWifi();                                       // запускаем точку доступа
@@ -1600,6 +1608,12 @@ void setup() {
 }
 
 void loop() {
+#if SR_HAS_ESP_COREDUMP
+    if (gCoreDumpClearPending && millis() >= gCoreDumpClearAfterMs) {
+      clearCorruptedCoreDumpConfig();
+      gCoreDumpClearPending = false;
+    }
+#endif
     server.handleClient();                  // обработка HTTP-запросов
     radio.loop();                           // обработка входящих пакетов
     tx.loop();                              // обработка очередей передачи
