@@ -6,6 +6,9 @@
 #include <array>
 #include "channel_bank.h" // Банк каналов
 #include <string>
+#include <cstdarg>  // для работы с переменным числом аргументов
+#include <cstdio>   // для vsnprintf
+#include <memory>   // для управления буферами форматирования
 #ifndef ARDUINO
 #  include <sstream>
 #  include <iostream>
@@ -75,6 +78,24 @@ namespace LogDetail {
     Serial.print(prefix); Serial.println(val);
     Serial.flush();
   }
+
+  // Форматированный вывод в стиле printf с фильтрацией дублей
+  inline void logMsgFmt(DefaultSettings::LogLevel level, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    va_list copy;
+    va_copy(copy, args);
+    int required = vsnprintf(nullptr, 0, fmt, copy);
+    va_end(copy);
+    if (required < 0) {
+      va_end(args);
+      return;
+    }
+    std::unique_ptr<char[]> buffer(new char[static_cast<size_t>(required) + 1]);
+    vsnprintf(buffer.get(), static_cast<size_t>(required) + 1, fmt, args);
+    va_end(args);
+    logMsg(level, buffer.get());
+  }
 #else
   // Проверка необходимости вывода сообщения (стандартный вывод)
   inline bool shouldPrint(DefaultSettings::LogLevel level, const std::string& msg) {
@@ -101,16 +122,35 @@ namespace LogDetail {
     if (!shouldPrint(level, s)) return;
     std::cout << s << std::endl;
   }
+
+  // Форматированный вывод в стиле printf с фильтрацией дублей
+  inline void logMsgFmt(DefaultSettings::LogLevel level, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    va_list copy;
+    va_copy(copy, args);
+    int required = std::vsnprintf(nullptr, 0, fmt, copy);
+    va_end(copy);
+    if (required < 0) {
+      va_end(args);
+      return;
+    }
+    std::unique_ptr<char[]> buffer(new char[static_cast<size_t>(required) + 1]);
+    std::vsnprintf(buffer.get(), static_cast<size_t>(required) + 1, fmt, args);
+    va_end(args);
+    logMsg(level, buffer.get());
+  }
 #endif
 } // namespace LogDetail
 
 // Макросы верхнего уровня для логирования
 #  define LOG_MSG(level, msg) LogDetail::logMsg(level, msg)
 #  define LOG_MSG_VAL(level, prefix, val) LogDetail::logMsgVal(level, prefix, val)
-#  define LOG_ERROR(msg) LOG_MSG(DefaultSettings::LogLevel::ERROR, msg)
-#  define LOG_WARN(msg)  LOG_MSG(DefaultSettings::LogLevel::WARN,  msg)
-#  define LOG_INFO(msg)  LOG_MSG(DefaultSettings::LogLevel::INFO,  msg)
-#  define DEBUG_LOG(msg) LOG_MSG(DefaultSettings::LogLevel::DEBUG, msg)
+#  define LOG_MSG_FMT(level, ...) LogDetail::logMsgFmt(level, __VA_ARGS__)
+#  define LOG_ERROR(...) LOG_MSG_FMT(DefaultSettings::LogLevel::ERROR, __VA_ARGS__)
+#  define LOG_WARN(...)  LOG_MSG_FMT(DefaultSettings::LogLevel::WARN,  __VA_ARGS__)
+#  define LOG_INFO(...)  LOG_MSG_FMT(DefaultSettings::LogLevel::INFO,  __VA_ARGS__)
+#  define DEBUG_LOG(...) LOG_MSG_FMT(DefaultSettings::LogLevel::DEBUG, __VA_ARGS__)
 #  define LOG_ERROR_VAL(prefix, val) LOG_MSG_VAL(DefaultSettings::LogLevel::ERROR, prefix, val)
 #  define LOG_WARN_VAL(prefix, val)  LOG_MSG_VAL(DefaultSettings::LogLevel::WARN,  prefix, val)
 #  define LOG_INFO_VAL(prefix, val)  LOG_MSG_VAL(DefaultSettings::LogLevel::INFO,  prefix, val)
