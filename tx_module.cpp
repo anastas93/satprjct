@@ -87,7 +87,9 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos) {
     ack_msg.attempts_left = 0;                    // повторы не нужны
     ack_msg.expect_ack = false;                   // ACK никогда не ждёт подтверждения
     ack_queue_.push_back(std::move(ack_msg));
-    DEBUG_LOG("TxModule: ACK добавлен в быстрый буфер");
+    DEBUG_LOG("TxModule: ACK добавлен в быстрый буфер id=%u qos=%u",
+              static_cast<unsigned int>(ack_msg.id),
+              static_cast<unsigned int>(ack_msg.qos));
     return ack_queue_.back().id;
   }
   DEBUG_LOG_VAL("TxModule: постановка длины=", len);
@@ -481,13 +483,17 @@ bool TxModule::processImmediateAck() {
   if (ack_queue_.empty()) return false;            // нечего отправлять
   PendingMessage ack = std::move(ack_queue_.front());
   ack_queue_.pop_front();
+  const uint32_t ack_id = ack.id;
+  const uint8_t ack_qos = ack.qos;
   bool sent = transmit(ack);                      // пытаемся отправить ACK обычным пайплайном
   if (!sent) {                                    // не удалось — возвращаем в начало очереди
     ack_queue_.push_front(std::move(ack));
     return false;
   }
   onSendSuccess();                                // позволяем архиву продолжить отдачу
-  DEBUG_LOG("TxModule: ACK отправлен вне очереди");
+  DEBUG_LOG("TxModule: ACK отправлен вне очереди id=%u qos=%u",
+            static_cast<unsigned int>(ack_id),
+            static_cast<unsigned int>(ack_qos));
   return true;
 }
 
@@ -537,7 +543,11 @@ void TxModule::onAckReceived() {
   }
   if (!waiting_ack_) return;
   waiting_ack_ = false;
-  DEBUG_LOG("TxModule: ACK получен");
+  uint32_t inflight_id = inflight_ ? inflight_->id : 0;
+  uint8_t inflight_qos = inflight_ ? inflight_->qos : 0;
+  DEBUG_LOG("TxModule: ACK получен для id=%u qos=%u",
+            static_cast<unsigned int>(inflight_id),
+            static_cast<unsigned int>(inflight_qos));
   if (inflight_) {
     if (!inflight_->status_prefix.empty()) {
       SimpleLogger::logStatus(inflight_->status_prefix + " GO");
