@@ -31,6 +31,8 @@ int main() {
 
   // Применяем внешний ключ и сверяем результат
   assert(applyRemotePublic(remote_pub));
+  auto state_after_remote = getState();
+  assert(state_after_remote.has_backup);
   KeyRecord rec2;
   assert(loadKeyRecord(rec2));
   assert(rec2.origin == KeyOrigin::REMOTE);
@@ -64,10 +66,14 @@ int main() {
 
   // Проверяем резервную копию и восстановление
   assert(generateLocalKey());
+  auto state_after_regen = getState();
+  assert(state_after_regen.has_backup);
   KeyRecord rec3;
   assert(loadKeyRecord(rec3));
   assert(rec3.origin == KeyOrigin::LOCAL);
   assert(restorePreviousKey());
+  auto state_after_restore = getState();
+  assert(!state_after_restore.has_backup);
   KeyRecord rec4;
   assert(loadKeyRecord(rec4));
   assert(rec4.origin == KeyOrigin::REMOTE);

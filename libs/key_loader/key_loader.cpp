@@ -2,7 +2,6 @@
 #include "../crypto/sha256.h"
 #include "../crypto/x25519.h"
 #include "default_settings.h"
-#include "../fs_utils/spiffs_guard.h"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -13,10 +12,6 @@
 #include <filesystem>
 #include <fstream>
 #else
-#include <FS.h>
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-#include <SPIFFS.h>
-#endif
 #if defined(ESP32)
 #include <Preferences.h>
 #define KEY_LOADER_HAS_NVS 1
@@ -32,203 +27,45 @@
 namespace KeyLoader {
 namespace {
 
-constexpr uint8_t MAGIC[4] = {'S', 'T', 'K', '1'};
-constexpr uint8_t VERSION = 1;
-constexpr size_t PACKED_SIZE = 4 + 1 + 1 + 2 + 4 + 4 + 16 + 32 + 32 + 32;
+constexpr uint8_t RECORD_MAGIC[4] = {'S', 'T', 'K', '1'};
+constexpr uint8_t RECORD_VERSION = 1;
+constexpr size_t RECORD_PACKED_SIZE = 4 + 1 + 1 + 2 + 4 + 4 + 16 + 32 + 32 + 32;
 constexpr size_t DIGEST_SIZE = crypto::sha256::DIGEST_SIZE;
+
+constexpr uint8_t STORAGE_MAGIC[4] = {'S', 'T', 'B', '1'};
+constexpr uint8_t STORAGE_VERSION = 1;
+constexpr size_t STORAGE_HEADER_SIZE = 4 + 1 + 1 + 2 + 4 + 4;
 
 #ifndef ARDUINO
 const char* KEY_DIR = "key_storage";
 const char* KEY_FILE = "key_storage/key.stkey";
-const char* KEY_FILE_OLD = "key_storage/key.stkey.old";
+const char* LEGACY_BACKUP_FILE = "key_storage/key.stkey.old";
 const char* LEGACY_FILE = "key_storage/key.bin";
 #else
-const char* KEY_DIR = "/keys";
-const char* KEY_FILE = "/keys/key.stkey";
-const char* KEY_FILE_OLD = "/keys/key.stkey.old";
+const char* LEGACY_FILE = nullptr;
 #endif
 
-KeyRecord g_cache;
-bool g_cache_valid = false;
+struct StorageSnapshot {
+  KeyRecord current;
+  KeyRecord previous;
+  bool current_valid = false;
+  bool previous_valid = false;
+};
 
-#if defined(ARDUINO)
-StorageBackend g_active_backend = StorageBackend::UNKNOWN;
-StorageBackend g_preferred_backend =
+StorageSnapshot g_snapshot;
+bool g_snapshot_loaded = false;
+StorageBackend g_preferred_backend = StorageBackend::UNKNOWN;
+
+#ifdef ARDUINO
+StorageBackend activeBackend() {
 #if KEY_LOADER_HAS_NVS
-    (DefaultSettings::ENABLE_SPIFFS ? StorageBackend::UNKNOWN : StorageBackend::NVS);
+  return StorageBackend::NVS;
 #else
-    StorageBackend::UNKNOWN;
-#endif
-;
-bool g_backend_cached = false;
-StorageBackend g_last_announced_backend = StorageBackend::UNKNOWN;
-bool g_reported_fallback = false;
-
-void announceBackend(StorageBackend backend) {
-  if (backend == StorageBackend::UNKNOWN) return;
-  if (g_last_announced_backend == backend) return;
-  g_last_announced_backend = backend;
-  Serial.print(F("KeyLoader: используется хранилище "));
-  Serial.println(backendName(backend));
-}
-
-#if KEY_LOADER_HAS_NVS
-Preferences& prefsInstance() {
-  static Preferences prefs;
-  return prefs;
-}
-
-bool ensurePrefs() {
-  static bool opened = false;
-  if (!opened) {
-    Preferences& prefs = prefsInstance();
-    if (!prefs.begin("key_store", false)) {
-      Serial.println(F("KeyLoader: не удалось открыть раздел NVS (Preferences)"));
-      return false;
-    }
-    opened = true;
-  }
-  return true;
-}
-
-bool readFromNvs(std::vector<uint8_t>& out) {
-  if (!ensurePrefs()) return false;
-  Preferences& prefs = prefsInstance();
-  size_t len = prefs.getBytesLength("current");
-  if (len == 0) return false;
-  out.resize(len);
-  size_t read = prefs.getBytes("current", out.data(), len);
-  return read == len;
-}
-
-bool writeToNvs(const std::vector<uint8_t>& data) {
-  if (!ensurePrefs()) return false;
-  Preferences& prefs = prefsInstance();
-  if (prefs.isKey("backup")) {
-    prefs.remove("backup");
-  }
-  size_t current_len = prefs.getBytesLength("current");
-  if (current_len > 0) {
-    std::vector<uint8_t> current(current_len);
-    size_t read = prefs.getBytes("current", current.data(), current_len);
-    if (read == current_len) {
-      prefs.putBytes("backup", current.data(), current.size());
-    } else {
-      prefs.remove("backup");
-    }
-  }
-  size_t written = prefs.putBytes("current", data.data(), data.size());
-  return written == data.size();
-}
-
-bool hasBackupNvs() {
-  if (!ensurePrefs()) return false;
-  Preferences& prefs = prefsInstance();
-  return prefs.getBytesLength("backup") > 0;
-}
-
-bool restoreBackupNvs() {
-  if (!ensurePrefs()) return false;
-  Preferences& prefs = prefsInstance();
-  size_t len = prefs.getBytesLength("backup");
-  if (len == 0) return false;
-  std::vector<uint8_t> buf(len);
-  size_t read = prefs.getBytes("backup", buf.data(), len);
-  if (read != len) return false;
-  size_t written = prefs.putBytes("current", buf.data(), buf.size());
-  if (written != buf.size()) return false;
-  prefs.remove("backup");
-  return true;
-}
-#else
-bool ensurePrefs() { return false; }
-bool readFromNvs(std::vector<uint8_t>&) { return false; }
-bool writeToNvs(const std::vector<uint8_t>&) { return false; }
-bool hasBackupNvs() { return false; }
-bool restoreBackupNvs() { return false; }
-#endif
-
-bool ensureSpiffsDir(fs_utils::SpiffsMountResult* mount_status = nullptr) {
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-  auto mount = fs_utils::ensureSpiffsMounted();
-  if (mount_status) *mount_status = mount;
-  if (!mount.ok()) {
-    if (mount_status) {
-      // уже записали результат
-    }
-    if (mount.error_code != 0) {
-      Serial.print(F("KeyLoader: код ошибки SPIFFS="));
-      Serial.println(mount.error_code);
-    }
-    return false;
-  }
-  if (!SPIFFS.exists(KEY_DIR)) {
-    if (!SPIFFS.mkdir(KEY_DIR)) {
-      Serial.println(F("KeyLoader: не удалось создать каталог /keys"));
-      return false;
-    }
-  }
-  return true;
-#else
-  if (mount_status) {
-    mount_status->mounted = false;
-    mount_status->status = fs_utils::SpiffsMountStatus::kMountFailed;
-    mount_status->error_code = 0;
-  }
-  return false;
-#endif
-}
-
-StorageBackend ensureActiveBackend(fs_utils::SpiffsMountResult* mount_status = nullptr) {
-  if (g_backend_cached) {
-    return g_active_backend;
-  }
-
-  StorageBackend previous = g_active_backend;
-  StorageBackend preferred = g_preferred_backend;
-
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-  if (preferred == StorageBackend::UNKNOWN || preferred == StorageBackend::SPIFFS) {
-    if (ensureSpiffsDir(mount_status)) {
-      g_active_backend = StorageBackend::SPIFFS;
-      g_backend_cached = true;
-      if (previous != g_active_backend) {
-        g_cache_valid = false;
-      }
-      g_reported_fallback = false;
-      announceBackend(g_active_backend);
-      return g_active_backend;
-    }
-    if (preferred == StorageBackend::SPIFFS) {
-      return StorageBackend::UNKNOWN;
-    }
-  }
-#endif
-
-#if KEY_LOADER_HAS_NVS
-  if (preferred == StorageBackend::UNKNOWN || preferred == StorageBackend::NVS) {
-    if (ensurePrefs()) {
-      if (!g_reported_fallback && preferred == StorageBackend::UNKNOWN) {
-        Serial.println(F("KeyLoader: SPIFFS недоступен, переключаемся на NVS"));
-        g_reported_fallback = true;
-      }
-      g_active_backend = StorageBackend::NVS;
-      g_backend_cached = true;
-      if (previous != g_active_backend) {
-        g_cache_valid = false;
-      }
-      announceBackend(g_active_backend);
-      return g_active_backend;
-    }
-  }
-#else
-  (void)preferred;
-#endif
-
   return StorageBackend::UNKNOWN;
+#endif
 }
 #else
-StorageBackend g_active_backend = StorageBackend::FILESYSTEM;
+StorageBackend activeBackend() { return StorageBackend::FILESYSTEM; }
 #endif
 
 std::array<uint8_t,16> truncateDigest(const std::array<uint8_t, crypto::sha256::DIGEST_SIZE>& digest) {
@@ -265,159 +102,11 @@ std::array<uint8_t,16> deriveSessionFromShared(const std::array<uint8_t,32>& sha
   return truncateDigest(digest);
 }
 
-#ifndef ARDUINO
-bool ensureDir() {
-  try {
-    std::filesystem::create_directories(KEY_DIR);
-    return true;
-  } catch (...) {
-    return false;
-  }
-}
-
-bool readFile(std::vector<uint8_t>& out) {
-  std::ifstream f(KEY_FILE, std::ios::binary);
-  if (!f.good()) return false;
-  f.seekg(0, std::ios::end);
-  auto sz = static_cast<size_t>(f.tellg());
-  f.seekg(0, std::ios::beg);
-  out.resize(sz);
-  if (sz == 0) return false;
-  f.read(reinterpret_cast<char*>(out.data()), sz);
-  return f.good();
-}
-
-bool writeFile(const std::vector<uint8_t>& data) {
-  if (!ensureDir()) return false;
-  try {
-    std::filesystem::path current(KEY_FILE);
-    std::filesystem::path backup(KEY_FILE_OLD);
-    if (std::filesystem::exists(backup)) {
-      std::filesystem::remove(backup);
-    }
-    if (std::filesystem::exists(current)) {
-      std::filesystem::rename(current, backup);
-    }
-    std::ofstream f(KEY_FILE, std::ios::binary | std::ios::trunc);
-    if (!f.good()) return false;
-    f.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
-    return f.good();
-  } catch (...) {
-    return false;
-  }
-}
-
-bool hasBackup() {
-  return std::filesystem::exists(KEY_FILE_OLD);
-}
-
-bool restoreBackup() {
-  try {
-    if (!std::filesystem::exists(KEY_FILE_OLD)) return false;
-    if (std::filesystem::exists(KEY_FILE)) {
-      std::filesystem::remove(KEY_FILE);
-    }
-    std::filesystem::rename(KEY_FILE_OLD, KEY_FILE);
-    return true;
-  } catch (...) {
-    return false;
-  }
-}
-
-bool readLegacy(std::array<uint8_t,16>& key) {
-  std::ifstream f(LEGACY_FILE, std::ios::binary);
-  if (!f.good()) return false;
-  f.read(reinterpret_cast<char*>(key.data()), key.size());
-  return f.good();
-}
-#else
-bool ensureDir(fs_utils::SpiffsMountResult* mount_status = nullptr) {
-  return ensureActiveBackend(mount_status) != StorageBackend::UNKNOWN;
-}
-
-bool readFile(std::vector<uint8_t>& out) {
-  StorageBackend backend = ensureActiveBackend();
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-  if (backend == StorageBackend::SPIFFS) {
-    File f = SPIFFS.open(KEY_FILE, "r");
-    if (!f) return false;
-    size_t sz = f.size();
-    if (sz == 0) { f.close(); return false; }
-    out.resize(sz);
-    size_t read = f.read(out.data(), sz);
-    f.close();
-    return read == sz;
-  }
-#endif
-#if KEY_LOADER_HAS_NVS
-  if (backend == StorageBackend::NVS) {
-    return readFromNvs(out);
-  }
-#endif
-  return false;
-}
-
-bool writeFile(const std::vector<uint8_t>& data) {
-  StorageBackend backend = ensureActiveBackend();
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-  if (backend == StorageBackend::SPIFFS) {
-    if (SPIFFS.exists(KEY_FILE_OLD)) SPIFFS.remove(KEY_FILE_OLD);
-    if (SPIFFS.exists(KEY_FILE)) SPIFFS.rename(KEY_FILE, KEY_FILE_OLD);
-    File f = SPIFFS.open(KEY_FILE, "w");
-    if (!f) return false;
-    size_t written = f.write(data.data(), data.size());
-    f.close();
-    return written == data.size();
-  }
-#endif
-#if KEY_LOADER_HAS_NVS
-  if (backend == StorageBackend::NVS) {
-    return writeToNvs(data);
-  }
-#endif
-  return false;
-}
-
-bool hasBackup() {
-  StorageBackend backend = ensureActiveBackend();
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-  if (backend == StorageBackend::SPIFFS) {
-    return SPIFFS.exists(KEY_FILE_OLD);
-  }
-#endif
-#if KEY_LOADER_HAS_NVS
-  if (backend == StorageBackend::NVS) {
-    return hasBackupNvs();
-  }
-#endif
-  return false;
-}
-
-bool restoreBackup() {
-  StorageBackend backend = ensureActiveBackend();
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-  if (backend == StorageBackend::SPIFFS) {
-    if (!SPIFFS.exists(KEY_FILE_OLD)) return false;
-    if (SPIFFS.exists(KEY_FILE)) SPIFFS.remove(KEY_FILE);
-    return SPIFFS.rename(KEY_FILE_OLD, KEY_FILE);
-  }
-#endif
-#if KEY_LOADER_HAS_NVS
-  if (backend == StorageBackend::NVS) {
-    return restoreBackupNvs();
-  }
-#endif
-  return false;
-}
-
-bool readLegacy(std::array<uint8_t,16>&) { return false; }
-#endif
-
-std::vector<uint8_t> serialize(const KeyRecord& rec) {
-  std::vector<uint8_t> data(PACKED_SIZE, 0);
+std::vector<uint8_t> serializeRecord(const KeyRecord& rec) {
+  std::vector<uint8_t> data(RECORD_PACKED_SIZE + DIGEST_SIZE, 0);
   size_t offset = 0;
-  std::memcpy(data.data() + offset, MAGIC, sizeof(MAGIC)); offset += sizeof(MAGIC);
-  data[offset++] = VERSION;
+  std::memcpy(data.data() + offset, RECORD_MAGIC, sizeof(RECORD_MAGIC)); offset += sizeof(RECORD_MAGIC);
+  data[offset++] = RECORD_VERSION;
   data[offset++] = static_cast<uint8_t>(rec.origin);
   data[offset++] = 0; data[offset++] = 0; // reserved
   uint32_t salt = rec.nonce_salt;
@@ -430,22 +119,22 @@ std::vector<uint8_t> serialize(const KeyRecord& rec) {
   std::memcpy(data.data() + offset, rec.root_public.data(), rec.root_public.size()); offset += rec.root_public.size();
   std::memcpy(data.data() + offset, rec.root_private.data(), rec.root_private.size()); offset += rec.root_private.size();
   std::memcpy(data.data() + offset, rec.peer_public.data(), rec.peer_public.size()); offset += rec.peer_public.size();
-  auto digest = crypto::sha256::hash(data.data(), data.size());
-  data.insert(data.end(), digest.begin(), digest.end());
+  auto digest = crypto::sha256::hash(data.data(), RECORD_PACKED_SIZE);
+  std::memcpy(data.data() + offset, digest.data(), digest.size());
   return data;
 }
 
-bool deserialize(const std::vector<uint8_t>& raw, KeyRecord& out) {
-  if (raw.size() < PACKED_SIZE + DIGEST_SIZE) return false;
-  auto digest = crypto::sha256::hash(raw.data(), PACKED_SIZE);
-  if (!std::equal(digest.begin(), digest.end(), raw.data() + PACKED_SIZE)) {
+bool deserializeRecord(const std::vector<uint8_t>& raw, KeyRecord& out) {
+  if (raw.size() != RECORD_PACKED_SIZE + DIGEST_SIZE) return false;
+  auto digest = crypto::sha256::hash(raw.data(), RECORD_PACKED_SIZE);
+  if (!std::equal(digest.begin(), digest.end(), raw.data() + RECORD_PACKED_SIZE)) {
     return false;
   }
   size_t offset = 0;
-  if (std::memcmp(raw.data(), MAGIC, sizeof(MAGIC)) != 0) return false;
-  offset += sizeof(MAGIC);
+  if (std::memcmp(raw.data(), RECORD_MAGIC, sizeof(RECORD_MAGIC)) != 0) return false;
+  offset += sizeof(RECORD_MAGIC);
   uint8_t version = raw[offset++];
-  if (version != VERSION) return false;
+  if (version != RECORD_VERSION) return false;
   uint8_t origin = raw[offset++];
   if (origin > static_cast<uint8_t>(KeyOrigin::REMOTE)) return false;
   offset += 2; // reserved
@@ -467,7 +156,103 @@ bool deserialize(const std::vector<uint8_t>& raw, KeyRecord& out) {
   return true;
 }
 
-KeyRecord makeDefaultRecord() {
+std::vector<uint8_t> serializeSnapshot(const StorageSnapshot& snapshot) {
+  std::vector<uint8_t> current_blob =
+      (snapshot.current_valid && snapshot.current.valid) ? serializeRecord(snapshot.current) : std::vector<uint8_t>();
+  std::vector<uint8_t> previous_blob =
+      (snapshot.previous_valid && snapshot.previous.valid) ? serializeRecord(snapshot.previous) : std::vector<uint8_t>();
+  size_t payload_size = STORAGE_HEADER_SIZE + current_blob.size() + previous_blob.size();
+  std::vector<uint8_t> data(payload_size + DIGEST_SIZE, 0);
+  size_t offset = 0;
+  std::memcpy(data.data() + offset, STORAGE_MAGIC, sizeof(STORAGE_MAGIC)); offset += sizeof(STORAGE_MAGIC);
+  data[offset++] = STORAGE_VERSION;
+  uint8_t flags = 0;
+  if (!current_blob.empty()) flags |= 0x01;
+  if (!previous_blob.empty()) flags |= 0x02;
+  data[offset++] = flags;
+  data[offset++] = 0;
+  data[offset++] = 0;
+  auto write_u32 = [&](uint32_t value) {
+    data[offset++] = static_cast<uint8_t>(value & 0xFF);
+    data[offset++] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    data[offset++] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    data[offset++] = static_cast<uint8_t>((value >> 24) & 0xFF);
+  };
+  write_u32(static_cast<uint32_t>(current_blob.size()));
+  write_u32(static_cast<uint32_t>(previous_blob.size()));
+  if (!current_blob.empty()) {
+    std::memcpy(data.data() + offset, current_blob.data(), current_blob.size());
+    offset += current_blob.size();
+  }
+  if (!previous_blob.empty()) {
+    std::memcpy(data.data() + offset, previous_blob.data(), previous_blob.size());
+    offset += previous_blob.size();
+  }
+  auto digest = crypto::sha256::hash(data.data(), offset);
+  std::memcpy(data.data() + offset, digest.data(), digest.size());
+  return data;
+}
+
+bool deserializeSnapshot(const std::vector<uint8_t>& raw, StorageSnapshot& snapshot) {
+  if (raw.size() < STORAGE_HEADER_SIZE + DIGEST_SIZE) return false;
+  size_t payload = raw.size() - DIGEST_SIZE;
+  auto digest = crypto::sha256::hash(raw.data(), payload);
+  if (!std::equal(digest.begin(), digest.end(), raw.data() + payload)) {
+    return false;
+  }
+  size_t offset = 0;
+  if (std::memcmp(raw.data(), STORAGE_MAGIC, sizeof(STORAGE_MAGIC)) != 0) return false;
+  offset += sizeof(STORAGE_MAGIC);
+  uint8_t version = raw[offset++];
+  if (version != STORAGE_VERSION) return false;
+  uint8_t flags = raw[offset++];
+  offset += 2; // reserved
+  auto read_u32 = [&](uint32_t& value) {
+    value = static_cast<uint32_t>(raw[offset]) |
+            (static_cast<uint32_t>(raw[offset + 1]) << 8) |
+            (static_cast<uint32_t>(raw[offset + 2]) << 16) |
+            (static_cast<uint32_t>(raw[offset + 3]) << 24);
+    offset += 4;
+  };
+  uint32_t current_len = 0;
+  uint32_t previous_len = 0;
+  read_u32(current_len);
+  read_u32(previous_len);
+  if (payload != STORAGE_HEADER_SIZE + current_len + previous_len) return false;
+  StorageSnapshot result;
+  if ((flags & 0x01) != 0) {
+    if (current_len == 0) return false;
+    std::vector<uint8_t> buf(current_len);
+    std::copy_n(raw.data() + offset, current_len, buf.begin());
+    if (!deserializeRecord(buf, result.current)) return false;
+    result.current_valid = true;
+    offset += current_len;
+  } else {
+    if (current_len != 0) return false;
+  }
+  if ((flags & 0x02) != 0) {
+    if (previous_len == 0) return false;
+    std::vector<uint8_t> buf(previous_len);
+    std::copy_n(raw.data() + offset, previous_len, buf.begin());
+    if (!deserializeRecord(buf, result.previous)) return false;
+    result.previous_valid = true;
+    offset += previous_len;
+  } else {
+    if (previous_len != 0) return false;
+  }
+  snapshot = result;
+  return true;
+}
+
+void finalizeRecord(KeyRecord& rec) {
+  if (rec.nonce_salt == 0) {
+    rec.nonce_salt = nonceSaltFromKey(rec.session_key);
+  }
+  rec.valid = true;
+}
+
+StorageSnapshot makeDefaultSnapshot() {
+  StorageSnapshot snapshot;
   KeyRecord rec;
   rec.origin = KeyOrigin::LOCAL;
   rec.session_key = DefaultSettings::DEFAULT_KEY;
@@ -477,99 +262,325 @@ KeyRecord makeDefaultRecord() {
   rec.root_private[31] &= 127;
   rec.root_private[31] |= 64;
   crypto::x25519::derive_public(rec.root_public, rec.root_private);
+  rec.peer_public.fill(0);
   rec.nonce_salt = nonceSaltFromKey(rec.session_key);
   rec.valid = true;
-  rec.peer_public.fill(0);
-  return rec;
+  snapshot.current = rec;
+  snapshot.current_valid = true;
+  snapshot.previous_valid = false;
+  return snapshot;
 }
 
-bool writeRecord(const KeyRecord& rec) {
-  KeyRecord tmp = rec;
-  if (tmp.nonce_salt == 0) {
-    tmp.nonce_salt = nonceSaltFromKey(tmp.session_key);
+#ifndef ARDUINO
+bool ensureDir() {
+  try {
+    std::filesystem::create_directories(KEY_DIR);
+    return true;
+  } catch (...) {
+    return false;
   }
-  auto data = serialize(tmp);
-  if (!writeFile(data)) return false;
-  g_cache = tmp;
-  g_cache_valid = true;
+}
+
+bool readPrimary(std::vector<uint8_t>& out) {
+  std::ifstream f(KEY_FILE, std::ios::binary);
+  if (!f.good()) return false;
+  f.seekg(0, std::ios::end);
+  auto sz = static_cast<size_t>(f.tellg());
+  f.seekg(0, std::ios::beg);
+  if (sz == 0) return false;
+  out.resize(sz);
+  f.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(sz));
+  return f.good();
+}
+
+bool writePrimary(const std::vector<uint8_t>& data) {
+  if (!ensureDir()) return false;
+  try {
+    std::ofstream f(KEY_FILE, std::ios::binary | std::ios::trunc);
+    if (!f.good()) return false;
+    f.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+    if (!f.good()) return false;
+  } catch (...) {
+    return false;
+  }
+  std::error_code ec;
+  std::filesystem::remove(LEGACY_BACKUP_FILE, ec);
   return true;
 }
 
-bool loadRecordFromDisk(KeyRecord& out) {
+bool readLegacyBackup(KeyRecord& out) {
+  std::ifstream f(LEGACY_BACKUP_FILE, std::ios::binary);
+  if (!f.good()) return false;
+  f.seekg(0, std::ios::end);
+  auto sz = static_cast<size_t>(f.tellg());
+  f.seekg(0, std::ios::beg);
+  if (sz == 0) return false;
+  std::vector<uint8_t> raw(sz);
+  f.read(reinterpret_cast<char*>(raw.data()), static_cast<std::streamsize>(sz));
+  if (!f.good()) return false;
+  return deserializeRecord(raw, out);
+}
+
+bool readLegacyBinary(KeyRecord& key) {
+  if (!LEGACY_FILE) return false;
+  std::ifstream f(LEGACY_FILE, std::ios::binary);
+  if (!f.good()) return false;
+  f.read(reinterpret_cast<char*>(key.session_key.data()), key.session_key.size());
+  if (!f.good()) return false;
+  key.origin = KeyOrigin::LOCAL;
+  key.peer_public.fill(0);
+  key.nonce_salt = nonceSaltFromKey(key.session_key);
+  auto digest = crypto::sha256::hash(key.session_key.data(), key.session_key.size());
+  std::copy_n(digest.begin(), key.root_private.size(), key.root_private.begin());
+  key.root_private[0] &= 248;
+  key.root_private[31] &= 127;
+  key.root_private[31] |= 64;
+  crypto::x25519::derive_public(key.root_public, key.root_private);
+  key.valid = true;
+  return true;
+}
+#else
+#if KEY_LOADER_HAS_NVS
+enum class BlobType : uint8_t {
+  kNone = 0,
+  kNewFormat,
+  kLegacyCurrent
+};
+
+Preferences& prefsInstance() {
+  static Preferences prefs;
+  return prefs;
+}
+
+bool ensurePrefs() {
+  static bool opened = false;
+  if (!opened) {
+    Preferences& prefs = prefsInstance();
+    if (!prefs.begin("key_store", false)) {
+      Serial.println(F("KeyLoader: не удалось открыть раздел NVS"));
+      return false;
+    }
+    opened = true;
+  }
+  return true;
+}
+
+BlobType readBlob(std::vector<uint8_t>& out) {
+  if (!ensurePrefs()) return BlobType::kNone;
+  Preferences& prefs = prefsInstance();
+  size_t len = prefs.getBytesLength("records");
+  if (len > 0) {
+    out.resize(len);
+    size_t read = prefs.getBytes("records", out.data(), len);
+    if (read == len) return BlobType::kNewFormat;
+    out.clear();
+  }
+  len = prefs.getBytesLength("current");
+  if (len == 0) return BlobType::kNone;
+  out.resize(len);
+  size_t read = prefs.getBytes("current", out.data(), len);
+  if (read != len) {
+    out.clear();
+    return BlobType::kNone;
+  }
+  return BlobType::kLegacyCurrent;
+}
+
+bool readLegacyBackup(KeyRecord& out) {
+  if (!ensurePrefs()) return false;
+  Preferences& prefs = prefsInstance();
+  size_t len = prefs.getBytesLength("backup");
+  if (len == 0) return false;
+  std::vector<uint8_t> raw(len);
+  size_t read = prefs.getBytes("backup", raw.data(), len);
+  if (read != len) return false;
+  return deserializeRecord(raw, out);
+}
+
+void clearLegacyBlobs() {
+  if (!ensurePrefs()) return;
+  Preferences& prefs = prefsInstance();
+  if (prefs.isKey("current")) prefs.remove("current");
+  if (prefs.isKey("backup")) prefs.remove("backup");
+}
+
+bool writePrimary(const std::vector<uint8_t>& data) {
+  if (!ensurePrefs()) return false;
+  Preferences& prefs = prefsInstance();
+  size_t written = prefs.putBytes("records", data.data(), data.size());
+  if (written != data.size()) return false;
+  clearLegacyBlobs();
+  return true;
+}
+#else
+enum class BlobType : uint8_t { kNone = 0, kNewFormat, kLegacyCurrent };
+bool ensurePrefs() { return false; }
+BlobType readBlob(std::vector<uint8_t>&, BlobType = BlobType::kNone) { return BlobType::kNone; }
+bool readLegacyBackup(KeyRecord&) { return false; }
+void clearLegacyBlobs() {}
+bool writePrimary(const std::vector<uint8_t>&) { return false; }
+#endif
+#endif
+
+struct LoadOutcome {
+  bool loaded = false;
+  bool from_legacy = false;
+};
+
+LoadOutcome loadFromBackend(StorageSnapshot& snapshot) {
+  LoadOutcome outcome;
+#ifdef ARDUINO
+#if KEY_LOADER_HAS_NVS
   std::vector<uint8_t> raw;
-  if (!readFile(raw)) return false;
-  if (!deserialize(raw, out)) return false;
-  g_cache = out;
-  g_cache_valid = true;
-  return true;
+  BlobType type = readBlob(raw);
+  if (type == BlobType::kNewFormat) {
+    if (deserializeSnapshot(raw, snapshot)) {
+      outcome.loaded = snapshot.current_valid && snapshot.current.valid;
+    }
+    return outcome;
+  }
+  if (type == BlobType::kLegacyCurrent) {
+    KeyRecord current;
+    if (deserializeRecord(raw, current)) {
+      snapshot.current = current;
+      snapshot.current_valid = current.valid;
+      KeyRecord backup;
+      if (readLegacyBackup(backup)) {
+        snapshot.previous = backup;
+        snapshot.previous_valid = backup.valid;
+      }
+      outcome.loaded = snapshot.current_valid;
+      outcome.from_legacy = true;
+    }
+    return outcome;
+  }
+#else
+  (void)snapshot;
+#endif
+#else
+  std::vector<uint8_t> raw;
+  if (readPrimary(raw)) {
+    if (deserializeSnapshot(raw, snapshot)) {
+      outcome.loaded = snapshot.current_valid && snapshot.current.valid;
+      return outcome;
+    }
+    KeyRecord current;
+    if (deserializeRecord(raw, current)) {
+      snapshot.current = current;
+      snapshot.current_valid = current.valid;
+      KeyRecord backup;
+      if (readLegacyBackup(backup)) {
+        snapshot.previous = backup;
+        snapshot.previous_valid = backup.valid;
+      }
+      outcome.loaded = snapshot.current_valid;
+      outcome.from_legacy = true;
+      return outcome;
+    }
+  }
+  KeyRecord legacy{};
+  if (readLegacyBinary(legacy)) {
+    snapshot.current = legacy;
+    snapshot.current_valid = legacy.valid;
+    snapshot.previous_valid = false;
+    outcome.loaded = snapshot.current_valid;
+    outcome.from_legacy = true;
+  }
+#endif
+  return outcome;
 }
 
-bool tryLoad(KeyRecord& out) {
-  if (g_cache_valid) {
-    out = g_cache;
-    return true;
-  }
-  if (loadRecordFromDisk(out)) return true;
-  // fallback: legacy key
-  std::array<uint8_t,16> legacy{};
-  if (readLegacy(legacy)) {
-    KeyRecord rec = makeDefaultRecord();
-    rec.session_key = legacy;
-    rec.nonce_salt = nonceSaltFromKey(rec.session_key);
-    writeRecord(rec);
-    out = rec;
-    return true;
-  }
+bool writeSnapshot(const StorageSnapshot& snapshot) {
+  std::vector<uint8_t> blob = serializeSnapshot(snapshot);
+#ifdef ARDUINO
+#if KEY_LOADER_HAS_NVS
+  return writePrimary(blob);
+#else
+  (void)snapshot;
   return false;
+#endif
+#else
+  return writePrimary(blob);
+#endif
 }
 
-KeyRecord ensureRecord() {
-  KeyRecord rec;
-  if (tryLoad(rec)) return rec;
-  KeyRecord def = makeDefaultRecord();
-  if (!writeRecord(def)) {
-    g_cache = def;
-    g_cache_valid = false;
+bool ensureBackendReady() {
+#ifdef ARDUINO
+#if KEY_LOADER_HAS_NVS
+  return ensurePrefs();
+#else
+  return false;
+#endif
+#else
+  return ensureDir();
+#endif
+}
+
+StorageSnapshot& ensureSnapshot() {
+  if (g_snapshot_loaded) return g_snapshot;
+  StorageSnapshot snapshot;
+  bool backend_ok = ensureBackendReady();
+  LoadOutcome outcome;
+  if (backend_ok) {
+    outcome = loadFromBackend(snapshot);
   }
-  return def;
+  if (!outcome.loaded || !snapshot.current_valid) {
+    snapshot = makeDefaultSnapshot();
+    if (backend_ok) {
+      writeSnapshot(snapshot);
+    }
+  } else if (outcome.from_legacy && backend_ok) {
+    writeSnapshot(snapshot);
+  }
+  g_snapshot = snapshot;
+  g_snapshot_loaded = true;
+  return g_snapshot;
+}
+
+bool hasBackup(const StorageSnapshot& snapshot) {
+  return snapshot.previous_valid && snapshot.previous.valid;
 }
 
 } // namespace
 
-bool ensureStorage() { return ensureDir(); }
+bool ensureStorage() { return ensureBackendReady(); }
 
 std::array<uint8_t,16> loadKey() {
-  KeyRecord rec = ensureRecord();
-  return rec.session_key;
+  StorageSnapshot& snapshot = ensureSnapshot();
+  return snapshot.current.session_key;
 }
 
 bool saveKey(const std::array<uint8_t,16>& key,
              KeyOrigin origin,
              const std::array<uint8_t,32>* peer_public,
              uint32_t nonce_salt) {
-  KeyRecord rec = ensureRecord();
-  rec.session_key = key;
-  rec.origin = origin;
-  if (peer_public) rec.peer_public = *peer_public;
-  if (nonce_salt != 0) {
-    rec.nonce_salt = nonce_salt;
-  } else {
-    rec.nonce_salt = nonceSaltFromKey(rec.session_key);
+  StorageSnapshot snapshot = ensureSnapshot();
+  if (snapshot.current_valid && snapshot.current.valid) {
+    snapshot.previous = snapshot.current;
+    snapshot.previous_valid = true;
   }
-  return writeRecord(rec);
+  KeyRecord next = snapshot.current;
+  next.session_key = key;
+  next.origin = origin;
+  if (peer_public) next.peer_public = *peer_public;
+  else next.peer_public.fill(0);
+  if (nonce_salt != 0) {
+    next.nonce_salt = nonce_salt;
+  } else {
+    next.nonce_salt = nonceSaltFromKey(next.session_key);
+  }
+  finalizeRecord(next);
+  snapshot.current = next;
+  snapshot.current_valid = true;
+  if (!ensureBackendReady()) return false;
+  if (!writeSnapshot(snapshot)) return false;
+  g_snapshot = snapshot;
+  g_snapshot_loaded = true;
+  return true;
 }
 
-bool generateLocalKey(KeyRecord* out, fs_utils::SpiffsMountResult* mount_status) {
-#ifdef ARDUINO
-  if (!ensureDir(mount_status)) return false;
-#else
-  if (mount_status) {
-    mount_status->mounted = true;
-    mount_status->status = fs_utils::SpiffsMountStatus::kSuccess;
-    mount_status->error_code = 0;
-  }
-  if (!ensureDir()) return false;
-#endif
+bool generateLocalKey(KeyRecord* out) {
+  StorageSnapshot snapshot = ensureSnapshot();
   KeyRecord rec;
   crypto::x25519::random_bytes(rec.root_private.data(), rec.root_private.size());
   crypto::x25519::derive_public(rec.root_public, rec.root_private);
@@ -578,84 +589,90 @@ bool generateLocalKey(KeyRecord* out, fs_utils::SpiffsMountResult* mount_status)
   rec.origin = KeyOrigin::LOCAL;
   rec.peer_public.fill(0);
   rec.valid = true;
-  if (!writeRecord(rec)) {
-#if defined(ARDUINO) && KEY_LOADER_HAS_NVS
-    StorageBackend prev_preferred = getPreferredBackend();
-    StorageBackend prev_active = getBackend();
-    if (prev_active != StorageBackend::NVS) {
-      Serial.println(F("KeyLoader: запись SPIFFS не удалась, переключаемся на NVS"));
-      if (setPreferredBackend(StorageBackend::NVS)) {
-        if (writeRecord(rec)) {
-          if (out) *out = rec;
-          return true;  // успешная запись в NVS
-        }
-        if (prev_preferred != StorageBackend::NVS) {
-          setPreferredBackend(prev_preferred);  // возвращаем выбор пользователя
-        }
-        ensureActiveBackend();
-      }
-    }
-#endif
-    return false;
+  if (snapshot.current_valid && snapshot.current.valid) {
+    snapshot.previous = snapshot.current;
+    snapshot.previous_valid = true;
   }
+  snapshot.current = rec;
+  snapshot.current_valid = true;
+  if (!ensureBackendReady()) return false;
+  if (!writeSnapshot(snapshot)) return false;
+  g_snapshot = snapshot;
+  g_snapshot_loaded = true;
   if (out) *out = rec;
   return true;
 }
 
 bool restorePreviousKey(KeyRecord* out) {
-  if (!restoreBackup()) return false;
-  g_cache_valid = false;
-  KeyRecord rec;
-  if (!loadRecordFromDisk(rec)) return false;
-  if (out) *out = rec;
+  StorageSnapshot snapshot = ensureSnapshot();
+  if (!hasBackup(snapshot)) return false;
+  snapshot.current = snapshot.previous;
+  snapshot.current_valid = true;
+  snapshot.previous_valid = false;
+  if (!ensureBackendReady()) return false;
+  if (!writeSnapshot(snapshot)) return false;
+  g_snapshot = snapshot;
+  g_snapshot_loaded = true;
+  if (out) *out = snapshot.current;
   return true;
 }
 
 bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
                        KeyRecord* out) {
-  KeyRecord rec = ensureRecord();
+  StorageSnapshot snapshot = ensureSnapshot();
+  if (!snapshot.current_valid || !snapshot.current.valid) return false;
   std::array<uint8_t,32> shared{};
-  if (!crypto::x25519::compute_shared(rec.root_private, remote_public, shared)) {
+  if (!crypto::x25519::compute_shared(snapshot.current.root_private, remote_public, shared)) {
     return false;
   }
-  rec.session_key = deriveSessionFromShared(shared, rec.root_public, remote_public);
+  KeyRecord rec = snapshot.current;
+  rec.session_key = deriveSessionFromShared(shared, snapshot.current.root_public, remote_public);
   rec.nonce_salt = nonceSaltFromKey(rec.session_key);
   rec.origin = KeyOrigin::REMOTE;
   rec.peer_public = remote_public;
   rec.valid = true;
-  if (!writeRecord(rec)) return false;
+  if (snapshot.current_valid && snapshot.current.valid) {
+    snapshot.previous = snapshot.current;
+    snapshot.previous_valid = true;
+  }
+  snapshot.current = rec;
+  snapshot.current_valid = true;
+  if (!ensureBackendReady()) return false;
+  if (!writeSnapshot(snapshot)) return false;
+  g_snapshot = snapshot;
+  g_snapshot_loaded = true;
   if (out) *out = rec;
   return true;
 }
 
 bool loadKeyRecord(KeyRecord& out) {
-  if (tryLoad(out)) return true;
-  out = makeDefaultRecord();
-  out.valid = false;
-  return false;
+  StorageSnapshot& snapshot = ensureSnapshot();
+  if (!snapshot.current_valid) return false;
+  out = snapshot.current;
+  return true;
 }
 
 KeyState getState() {
-  KeyRecord rec = ensureRecord();
+  StorageSnapshot& snapshot = ensureSnapshot();
   KeyState st;
-  st.valid = rec.valid;
-  st.origin = rec.origin;
-  st.nonce_salt = rec.nonce_salt;
-  st.session_key = rec.session_key;
-  st.root_public = rec.root_public;
-  st.peer_public = rec.peer_public;
-  st.has_backup = hasBackup();
+  st.valid = snapshot.current_valid && snapshot.current.valid;
+  st.origin = snapshot.current.origin;
+  st.nonce_salt = snapshot.current.nonce_salt;
+  st.session_key = snapshot.current.session_key;
+  st.root_public = snapshot.current.root_public;
+  st.peer_public = snapshot.current.peer_public;
+  st.has_backup = hasBackup(snapshot);
   st.backend = getBackend();
   return st;
 }
 
 std::array<uint8_t,32> getPublicKey() {
-  KeyRecord rec = ensureRecord();
-  return rec.root_public;
+  StorageSnapshot& snapshot = ensureSnapshot();
+  return snapshot.current.root_public;
 }
 
 std::array<uint8_t,12> makeNonce(uint32_t msg_id, uint16_t frag_idx) {
-  KeyRecord rec = ensureRecord();
+  StorageSnapshot& snapshot = ensureSnapshot();
   std::array<uint8_t,12> nonce{};
   nonce[0] = static_cast<uint8_t>(msg_id & 0xFF);
   nonce[1] = static_cast<uint8_t>((msg_id >> 8) & 0xFF);
@@ -663,7 +680,7 @@ std::array<uint8_t,12> makeNonce(uint32_t msg_id, uint16_t frag_idx) {
   nonce[3] = static_cast<uint8_t>((msg_id >> 24) & 0xFF);
   nonce[4] = static_cast<uint8_t>(frag_idx & 0xFF);
   nonce[5] = static_cast<uint8_t>((frag_idx >> 8) & 0xFF);
-  uint32_t salt = rec.nonce_salt;
+  uint32_t salt = snapshot.current.nonce_salt;
   nonce[6] = static_cast<uint8_t>(salt & 0xFF);
   nonce[7] = static_cast<uint8_t>((salt >> 8) & 0xFF);
   nonce[8] = static_cast<uint8_t>((salt >> 16) & 0xFF);
@@ -680,81 +697,35 @@ std::array<uint8_t,4> keyId(const std::array<uint8_t,16>& key) {
   return id;
 }
 
-#ifdef ARDUINO
-StorageBackend getBackend() {
-  if (!g_backend_cached) {
-    ensureActiveBackend();
-  }
-  return g_backend_cached ? g_active_backend : StorageBackend::UNKNOWN;
-}
+StorageBackend getBackend() { return activeBackend(); }
 
 StorageBackend getPreferredBackend() { return g_preferred_backend; }
 
 bool setPreferredBackend(StorageBackend backend) {
-  if (backend != StorageBackend::UNKNOWN &&
-      backend != StorageBackend::SPIFFS &&
-      backend != StorageBackend::NVS) {
-    return false;
-  }
-#if !DEFAULT_SETTINGS_ENABLE_SPIFFS
-  if (backend == StorageBackend::SPIFFS) {
-    Serial.println(F("KeyLoader: SPIFFS отключён в настройках"));
-    return false;
-  }
-#endif
-#if !KEY_LOADER_HAS_NVS
-  if (backend == StorageBackend::NVS) {
-    Serial.println(F("KeyLoader: бэкенд NVS недоступен на данной платформе"));
-    return false;
-  }
-#endif
+#ifdef ARDUINO
 #if KEY_LOADER_HAS_NVS
-  if (backend == StorageBackend::NVS) {
-    std::vector<uint8_t> snapshot;
-    if (g_cache_valid && g_cache.valid) {
-      snapshot = serialize(g_cache);
-    } else {
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-      auto mount = fs_utils::ensureSpiffsMounted(false);
-      if (mount.ok() && SPIFFS.exists(KEY_FILE)) {
-        File f = SPIFFS.open(KEY_FILE, "r");
-        if (f) {
-          size_t sz = f.size();
-          if (sz > 0) {
-            snapshot.resize(sz);
-            size_t read = f.read(snapshot.data(), sz);
-            if (read != sz) snapshot.clear();
-          }
-          f.close();
-        }
-      }
-#endif
-    }
-    if (!snapshot.empty()) {
-      if (writeToNvs(snapshot)) {
-        Serial.println(F("KeyLoader: ключи скопированы в NVS"));
-      }
-    }
+  if (backend == StorageBackend::UNKNOWN || backend == StorageBackend::NVS) {
+    g_preferred_backend = backend;
+    return true;
   }
-#endif
-  g_preferred_backend = backend;
-  g_backend_cached = false;
-  g_last_announced_backend = StorageBackend::UNKNOWN;
-  g_reported_fallback = false;
-  g_cache_valid = false;
-  return true;
-}
+  Serial.println(F("KeyLoader: доступен только бэкенд NVS"));
+  return false;
 #else
-StorageBackend getBackend() { return StorageBackend::FILESYSTEM; }
-StorageBackend getPreferredBackend() { return StorageBackend::FILESYSTEM; }
-bool setPreferredBackend(StorageBackend backend) {
-  return backend == StorageBackend::FILESYSTEM || backend == StorageBackend::UNKNOWN;
-}
+  (void)backend;
+  Serial.println(F("KeyLoader: на этой платформе нет доступного хранилища"));
+  return false;
 #endif
+#else
+  if (backend == StorageBackend::UNKNOWN || backend == StorageBackend::FILESYSTEM) {
+    g_preferred_backend = backend;
+    return true;
+  }
+  return false;
+#endif
+}
 
 const char* backendName(StorageBackend backend) {
   switch (backend) {
-    case StorageBackend::SPIFFS: return "spiffs";
     case StorageBackend::NVS: return "nvs";
     case StorageBackend::FILESYSTEM: return "filesystem";
     case StorageBackend::UNKNOWN:
