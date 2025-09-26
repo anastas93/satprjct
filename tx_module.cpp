@@ -512,6 +512,18 @@ void TxModule::setAckRetryLimit(uint8_t retries) {
     delayed_->attempts_left = ack_retry_limit_;
     delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(delayed_->data);
   }
+  if (ack_retry_limit_ == 0 && waiting_ack_) {
+    // При обнулении лимита считаем пакет доставленным и не ждём ACK
+    waiting_ack_ = false;
+    if (inflight_) {
+      if (!inflight_->status_prefix.empty()) {
+        SimpleLogger::logStatus(inflight_->status_prefix + " GO");
+      }
+      inflight_->attempts_left = ack_retry_limit_;
+      inflight_.reset();
+    }
+    onSendSuccess();
+  }
 }
 
 void TxModule::onAckReceived() {

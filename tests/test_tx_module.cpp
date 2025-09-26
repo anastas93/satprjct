@@ -65,5 +65,40 @@ int main() {
   size_t sent_before = radioAck.history.size();
   txAck.loop();                       // новых фрагментов не должно появиться
   assert(radioAck.history.size() == sent_before);
+
+  // Проверяем завершение пакета при обнулении лимита ретраев до прихода ACK
+  MockRadio radioNoAck;
+  TxModule txNoAck(radioNoAck, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txNoAck.setAckEnabled(true);
+  txNoAck.setAckRetryLimit(2);
+  txNoAck.setAckTimeout(1000);
+  txNoAck.setSendPause(0);
+  const char first_msg[] = "DATA1";
+  txNoAck.queue(reinterpret_cast<const uint8_t*>(first_msg), sizeof(first_msg));
+  txNoAck.loop();                     // первая отправка требует ACK
+  assert(radioNoAck.history.size() == 1);
+  txNoAck.setAckRetryLimit(0);        // отменяем ожидание подтверждения
+  const char second_msg[] = "DATA2";
+  txNoAck.queue(reinterpret_cast<const uint8_t*>(second_msg), sizeof(second_msg));
+  txNoAck.loop();                     // второе сообщение должно уйти без ожидания тайм-аута
+  assert(radioNoAck.history.size() == 2);
+
+  // Проверяем, что при ack_timeout=0 пакет не попадает в архив после обнуления лимита
+  MockRadio radioZero;
+  TxModule txZero(radioZero, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txZero.setAckEnabled(true);
+  txZero.setAckRetryLimit(2);
+  txZero.setAckTimeout(0);
+  txZero.setSendPause(0);
+  const char zero_msg[] = "ZERO";
+  txZero.queue(reinterpret_cast<const uint8_t*>(zero_msg), sizeof(zero_msg));
+  txZero.loop();                      // сообщение отправлено и ждёт ACK
+  assert(radioZero.history.size() == 1);
+  txZero.setAckRetryLimit(0);         // сбрасываем лимит — сообщение считается доставленным
+  txZero.loop();                      // не должно появиться повторных отправок
+  assert(radioZero.history.size() == 1);
+  txZero.setAckEnabled(false);        // если бы сообщение ушло в архив, оно бы восстановилось и отправилось
+  txZero.loop();
+  assert(radioZero.history.size() == 1);
   return 0;
 }
