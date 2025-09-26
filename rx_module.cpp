@@ -50,6 +50,60 @@ static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& 
   }
 }
 
+struct RxModule::RxProfilingScope {
+  RxModule& owner;                                        // ссылка на модуль для доступа к состоянию
+  ProfilingSnapshot snapshot;                             // формируемый снимок
+  bool enabled = false;                                   // активна ли диагностика
+  std::chrono::steady_clock::time_point start{};          // начало обработки
+  std::chrono::steady_clock::time_point stage_start{};    // отметка последнего этапа
+
+  explicit RxProfilingScope(RxModule& module, size_t raw_len)
+      : owner(module), enabled(module.profiling_enabled_) {
+    if (enabled) {
+      snapshot.valid = true;
+      snapshot.raw_len = raw_len;
+      start = stage_start = std::chrono::steady_clock::now();
+    }
+  }
+
+  void mark(std::chrono::microseconds ProfilingSnapshot::*field) {
+    if (!enabled) return;
+    auto now = std::chrono::steady_clock::now();
+    snapshot.*field = std::chrono::duration_cast<std::chrono::microseconds>(now - stage_start);
+    stage_start = now;
+  }
+
+  void noteDecodedLen(size_t len) {
+    if (!enabled) return;
+    snapshot.decoded_len = len;
+  }
+
+  void noteConv(bool used) {
+    if (!enabled) return;
+    snapshot.conv = used;
+  }
+
+  void noteDecrypt(bool performed) {
+    if (!enabled) return;
+    snapshot.decrypted = performed;
+  }
+
+  void markDrop(const char* stage) {
+    if (!enabled) return;
+    if (!snapshot.dropped) {
+      snapshot.dropped = true;
+      snapshot.drop_stage = stage ? stage : "";
+    }
+  }
+
+  ~RxProfilingScope() {
+    if (!enabled) return;
+    auto finish = std::chrono::steady_clock::now();
+    snapshot.total = std::chrono::duration_cast<std::chrono::microseconds>(finish - start);
+    owner.last_profile_ = snapshot;
+  }
+};
+
 // Конструктор модуля приёма
 RxModule::RxModule()
     : gatherer_(PayloadMode::SMALL, DefaultSettings::GATHER_BLOCK_SIZE),
@@ -59,49 +113,68 @@ RxModule::RxModule()
 
 // Передаём данные колбэку, если заголовок валиден
 void RxModule::onReceive(const uint8_t* data, size_t len) {
-  if (!data || len == 0) return;                     // защита от пустого указателя
+  RxProfilingScope profile_scope(*this, len);           // начинаем измерение пути кадра
+  if (!data || len == 0) {                              // защита от пустого указателя
+    profile_scope.markDrop("пустой кадр");
+    return;
+  }
 
-  auto now = std::chrono::steady_clock::now();       // фиксируем момент для очистки временных структур
+  auto now = std::chrono::steady_clock::now();          // фиксируем момент для очистки временных структур
   cleanupPendingConv(now);
   cleanupPendingSplits(now);
 
   auto forward_raw = [&](const uint8_t* raw, size_t raw_len) {
-    if (!raw || raw_len == 0) return;               // пропускаем пустые вызовы
-    if (buf_) {                                     // сохраняем сырые пакеты по отдельному счётчику
+    if (!raw || raw_len == 0) return;                  // пропускаем пустые вызовы
+    if (buf_) {                                        // сохраняем сырые пакеты по отдельному счётчику
       buf_->pushRaw(0, raw_counter_++, raw, raw_len);
     }
-    if (cb_) {                                      // передаём оригинальные данные напрямую
+    if (cb_) {                                         // передаём оригинальные данные напрямую
       cb_(raw, raw_len);
     }
+    profile_scope.mark(&ProfilingSnapshot::deliver);   // фиксируем передачу наружу
   };
 
-  if (len < FrameHeader::SIZE * 2) {                // недостаточно данных для заголовков
+  if (len < FrameHeader::SIZE * 2) {                   // недостаточно данных для заголовков
     forward_raw(data, len);
+    profile_scope.markDrop("короткий кадр без заголовка");
     return;
   }
 
-  if (!cb_ && !buf_) return;                        // некому отдавать результат
+  if (!cb_ && !buf_) {                                 // некому отдавать результат
+    profile_scope.markDrop("нет приёмника данных");
+    return;
+  }
 
-  frame_buf_.assign(data, data + len);                     // переиспользуемый буфер кадра
+  frame_buf_.assign(data, data + len);                        // переиспользуемый буфер кадра
   scrambler::descramble(frame_buf_.data(), frame_buf_.size()); // дескремблируем весь кадр
+  profile_scope.mark(&ProfilingSnapshot::descramble);
 
   FrameHeader hdr;
   bool ok = FrameHeader::decode(frame_buf_.data(), frame_buf_.size(), hdr);
   if (!ok)
     ok = FrameHeader::decode(frame_buf_.data() + FrameHeader::SIZE,
                              frame_buf_.size() - FrameHeader::SIZE, hdr);
-  if (!ok) {                                         // оба заголовка повреждены
+  profile_scope.mark(&ProfilingSnapshot::header);
+  if (!ok) {                                            // оба заголовка повреждены
     forward_raw(data, len);
+    profile_scope.markDrop("заголовок повреждён");
     return;
   }
 
   const uint8_t* payload_p = frame_buf_.data() + FrameHeader::SIZE * 2;
   size_t payload_len = frame_buf_.size() - FrameHeader::SIZE * 2;
-  removePilots(payload_p, payload_len, payload_buf_);      // убираем пилоты без выделений
-  if (payload_buf_.size() != hdr.payload_len) return;      // несоответствие длины
-  if (!hdr.checkFrameCrc(payload_buf_.data(), payload_buf_.size())) return; // неверный CRC
+  removePilots(payload_p, payload_len, payload_buf_);       // убираем пилоты без выделений
+  profile_scope.mark(&ProfilingSnapshot::payload_extract);
+  if (payload_buf_.size() != hdr.payload_len) {
+    profile_scope.markDrop("несовпадение длины payload");
+    return;
+  }
+  if (!hdr.checkFrameCrc(payload_buf_.data(), payload_buf_.size())) {
+    profile_scope.markDrop("CRC payload");
+    return;
+  }
 
-  if (!assembling_ || hdr.msg_id != active_msg_id_) {      // обнаружили новое сообщение
+  if (!assembling_ || hdr.msg_id != active_msg_id_) {       // обнаружили новое сообщение
     if (assembling_) {
       inflight_prefix_.erase(active_msg_id_);
     }
@@ -111,7 +184,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     expected_frag_cnt_ = hdr.frag_cnt;
     next_frag_idx_ = 0;
   }
-  if (hdr.frag_idx == 0) {                                // явный старт новой последовательности
+  if (hdr.frag_idx == 0) {                                 // явный старт новой последовательности
     if (next_frag_idx_ != 0) {
       inflight_prefix_.erase(active_msg_id_);
       gatherer_.reset();
@@ -119,14 +192,15 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     expected_frag_cnt_ = hdr.frag_cnt;
     next_frag_idx_ = 0;
   }
-  if (hdr.frag_idx != next_frag_idx_) {                   // пришёл неожиданный индекс
+  if (hdr.frag_idx != next_frag_idx_) {                    // пришёл неожиданный индекс
     if (hdr.frag_idx != 0) {
       inflight_prefix_.erase(active_msg_id_);
       gatherer_.reset();
       assembling_ = false;
       expected_frag_cnt_ = 0;
       next_frag_idx_ = 0;
-      return;                                             // дожидаемся корректной последовательности
+      profile_scope.markDrop("нарушена последовательность фрагментов");
+      return;                                              // дожидаемся корректной последовательности
     }
     next_frag_idx_ = 0;
   }
@@ -136,14 +210,17 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   work_buf_.clear();
   size_t result_len = 0;
   const bool conv_flag = (hdr.flags & FrameHeader::FLAG_CONV_ENCODED) != 0;
+  profile_scope.noteConv(conv_flag);
   size_t cipher_len_hint = 0;
   if (conv_flag) {
     if (hdr.payload_len < CONV_TAIL_BYTES * 2 || (hdr.payload_len % 2) != 0) {
-      return;                                             // некорректная длина для свёрточного блока
+      profile_scope.markDrop("некорректная длина свёрточного блока");
+      return;
     }
     cipher_len_hint = static_cast<size_t>(hdr.payload_len / 2);
     if (cipher_len_hint < CONV_TAIL_BYTES) {
-      return;                                             // невозможная длина
+      profile_scope.markDrop("слишком короткий свёрточный блок");
+      return;
     }
     cipher_len_hint -= CONV_TAIL_BYTES;
   }
@@ -156,93 +233,116 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     if (expected_conv_len && payload_buf_.size() < expected_conv_len) {
       auto& slot = pending_conv_[conv_key];
       if (slot.expected_len != expected_conv_len) {
-        slot.expected_len = expected_conv_len;        // запоминаем ожидаемую длину
-        slot.data.clear();                            // обнуляем накопленный буфер
+        slot.expected_len = expected_conv_len;         // запоминаем ожидаемую длину
+        slot.data.clear();                             // обнуляем накопленный буфер
       }
       slot.data.insert(slot.data.end(), payload_buf_.begin(), payload_buf_.end());
       slot.last_update = now;
-      if (slot.data.size() < expected_conv_len) {
-        return;                                      // ждём остальные части до полного блока
-      }
-      if (slot.data.size() > expected_conv_len) {
-        pending_conv_.erase(conv_key);               // превышение означает ошибку, сбрасываем
-        return;
-      }
-      assembled_payload.swap(slot.data);
+      profile_scope.markDrop("ожидание продолжения свёрточного блока");
+      return;                                          // ждём остальные части до полного блока
+    }
+    if (expected_conv_len && payload_buf_.size() > expected_conv_len) {
       pending_conv_.erase(conv_key);
-      payload_ptr = &assembled_payload;
-    } else {
-      auto it = pending_conv_.find(conv_key);
-      if (it != pending_conv_.end()) {
-        it->second.data.insert(it->second.data.end(), payload_buf_.begin(), payload_buf_.end());
-        it->second.last_update = now;
-        if (!it->second.expected_len && expected_conv_len) {
-          it->second.expected_len = expected_conv_len; // инициализация ожидания если не было
+      profile_scope.markDrop("переполнение свёрточного блока");
+      return;
+    }
+    auto it = pending_conv_.find(conv_key);
+    if (it != pending_conv_.end()) {
+      it->second.data.insert(it->second.data.end(), payload_buf_.begin(), payload_buf_.end());
+      it->second.last_update = now;
+      if (!it->second.expected_len && expected_conv_len) {
+        it->second.expected_len = expected_conv_len;  // инициализация ожидания если не было
+      }
+      if (it->second.expected_len && it->second.data.size() == it->second.expected_len) {
+        assembled_payload.swap(it->second.data);
+        pending_conv_.erase(it);
+        payload_ptr = &assembled_payload;
+      } else {
+        if (!it->second.expected_len || it->second.data.size() < it->second.expected_len) {
+          profile_scope.markDrop("ожидание хвоста свёрточного блока");
+          return;                                      // ждём продолжение
         }
-        if (it->second.expected_len && it->second.data.size() == it->second.expected_len) {
-          assembled_payload.swap(it->second.data);
-          pending_conv_.erase(it);
-          payload_ptr = &assembled_payload;
-        } else {
-          if (!it->second.expected_len || it->second.data.size() < it->second.expected_len) {
-            return;                                  // ждём продолжение
-          }
-          pending_conv_.erase(it);                   // превышение длины — ошибка
-          return;
-        }
-      } else if (expected_conv_len && payload_buf_.size() > expected_conv_len) {
-        return;                                      // пришло больше, чем ожидалось
+        pending_conv_.erase(it);                       // превышение длины — ошибка
+        profile_scope.markDrop("сбой длины свёрточного блока");
+        return;
       }
     }
   } else {
     const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | hdr.frag_idx;
-    pending_conv_.erase(conv_key);                   // очищаем возможные остатки при смене режима
+    pending_conv_.erase(conv_key);                    // очищаем возможные остатки при смене режима
   }
 
+  bool decode_ok = true;
   if (conv_flag) {
     if (!payload_ptr->empty() && USE_BIT_INTERLEAVER) {
       bit_interleaver::deinterleave(payload_ptr->data(), payload_ptr->size());
     }
-    if (!conv_codec::viterbiDecode(payload_ptr->data(), payload_ptr->size(), result_buf_)) return;
-    if (cipher_len_hint) {
-      size_t required = static_cast<size_t>(cipher_len_hint) + CONV_TAIL_BYTES;
-      if (result_buf_.size() < required) {
-        return;                                      // получили меньше, чем ожидалось
+    if (!conv_codec::viterbiDecode(payload_ptr->data(), payload_ptr->size(), result_buf_)) {
+      decode_ok = false;
+    } else {
+      if (cipher_len_hint) {
+        size_t required = static_cast<size_t>(cipher_len_hint) + CONV_TAIL_BYTES;
+        if (result_buf_.size() < required) {
+          decode_ok = false;                           // получили меньше, чем ожидалось
+        } else {
+          if (result_buf_.size() > required) {
+            result_buf_.resize(required);             // отбрасываем лишние байты декодера
+          }
+          if (result_buf_.size() >= CONV_TAIL_BYTES) {
+            result_buf_.erase(result_buf_.end() - CONV_TAIL_BYTES, result_buf_.end());
+          }
+        }
       }
-      if (result_buf_.size() > required) {
-        result_buf_.resize(required);                // отбрасываем лишние байты декодера
-      }
-      if (result_buf_.size() >= CONV_TAIL_BYTES) {
-        result_buf_.erase(result_buf_.end() - CONV_TAIL_BYTES, result_buf_.end());
-      }
+      result_len = result_buf_.size();
     }
-    result_len = result_buf_.size();
   } else if (USE_RS && payload_buf_.size() == RS_ENC_LEN * 2) {
     if (USE_BIT_INTERLEAVER)
       bit_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // деинтерливинг бит
-    if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), work_buf_)) return;
-    if (!work_buf_.empty())
-      byte_interleaver::deinterleave(work_buf_.data(), work_buf_.size()); // байтовый деинтерливинг
-    result_buf_.resize(RS_DATA_LEN);
-    if (!rs255223::decode(work_buf_.data(), result_buf_.data())) return;
-    result_len = RS_DATA_LEN;
+    if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), work_buf_)) {
+      decode_ok = false;
+    } else {
+      if (!work_buf_.empty())
+        byte_interleaver::deinterleave(work_buf_.data(), work_buf_.size()); // байтовый деинтерливинг
+      result_buf_.resize(RS_DATA_LEN);
+      if (!rs255223::decode(work_buf_.data(), result_buf_.data())) {
+        decode_ok = false;
+      } else {
+        result_len = RS_DATA_LEN;
+      }
+    }
   } else if (USE_RS && payload_buf_.size() == RS_ENC_LEN) {
     byte_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // байтовый деинтерливинг
     result_buf_.resize(RS_DATA_LEN);
-    if (!rs255223::decode(payload_buf_.data(), result_buf_.data())) return;
-    result_len = RS_DATA_LEN;
+    if (!rs255223::decode(payload_buf_.data(), result_buf_.data())) {
+      decode_ok = false;
+    } else {
+      result_len = RS_DATA_LEN;
+    }
   } else if (!USE_RS && payload_buf_.size() == RS_DATA_LEN * 2) {
     if (USE_BIT_INTERLEAVER)
       bit_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // деинтерливинг бит
-    if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), result_buf_)) return;
-    result_len = result_buf_.size();
+    if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), result_buf_)) {
+      decode_ok = false;
+    } else {
+      result_len = result_buf_.size();
+    }
   } else {
-    result_buf_.assign(payload_buf_.begin(), payload_buf_.end()); // кадр без кодирования
+    result_buf_.assign(payload_buf_.begin(), payload_buf_.end());  // кадр без кодирования
     result_len = result_buf_.size();
   }
 
+  profile_scope.noteDecodedLen(result_len);
+  profile_scope.mark(&ProfilingSnapshot::decode);
+  if (!decode_ok) {
+    profile_scope.markDrop("сбой декодирования");
+    return;
+  }
+
   // Дешифрование и сборка сообщения
-  if (result_len < TAG_LEN) return;                  // недостаточно данных
+  if (result_len < TAG_LEN) {
+    profile_scope.markDrop("payload короче тега");
+    return;                                          // недостаточно данных
+  }
   const uint8_t* cipher = result_buf_.data();
   size_t cipher_len = result_len - TAG_LEN;
   const uint8_t* tag = result_buf_.data() + cipher_len;
@@ -250,7 +350,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   bool should_decrypt = encrypted || encryption_forced_;
   bool decrypt_ok = false;
   if (should_decrypt) {
-    uint16_t nonce_idx = hdr.frag_idx;               // индекс части задаёт уникальный нонс
+    uint16_t nonce_idx = hdr.frag_idx;                // индекс части задаёт уникальный нонс
     nonce_ = KeyLoader::makeNonce(hdr.msg_id, nonce_idx);
     decrypt_ok = decrypt_ccm(key_.data(), key_.size(), nonce_.data(), nonce_.size(),
                              nullptr, 0, cipher, cipher_len,
@@ -258,14 +358,18 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     if (!decrypt_ok) {
       if (encrypted) {
         LOG_ERROR("RxModule: ошибка дешифрования");
-        return;                                       // завершаем обработку повреждённого кадра
+        profile_scope.mark(&ProfilingSnapshot::decrypt);
+        profile_scope.markDrop("ошибка AES-CCM");
+        return;                                      // завершаем обработку повреждённого кадра
       }
       LOG_WARN("RxModule: получен незашифрованный фрагмент при принудительном режиме");
     }
   }
+  profile_scope.noteDecrypt(should_decrypt);
   if (!should_decrypt || (!decrypt_ok && !encrypted)) {
     plain_buf_.assign(result_buf_.begin(), result_buf_.begin() + cipher_len); // принимаем открытый текст
   }
+  profile_scope.mark(&ProfilingSnapshot::decrypt);
 
   size_t prefix_len = 0;
   SplitPrefixInfo split_info = parseSplitPrefix(plain_buf_, prefix_len);
@@ -281,34 +385,35 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     plain_buf_.erase(plain_buf_.begin(), plain_buf_.begin() + static_cast<std::ptrdiff_t>(prefix_len));
   }
   gatherer_.add(plain_buf_.data(), plain_buf_.size());
-  plain_buf_.clear();                                  // очищаем буфер, сохраняя вместимость
-  ++next_frag_idx_;                                    // ожидаем следующий индекс фрагмента
-  if (hdr.frag_idx + 1 == hdr.frag_cnt) {             // последний фрагмент
+  plain_buf_.clear();                                   // очищаем буфер, сохраняя вместимость
+  profile_scope.mark(&ProfilingSnapshot::assemble);
+
+  ++next_frag_idx_;                                     // ожидаем следующий индекс фрагмента
+  if (hdr.frag_idx + 1 == hdr.frag_cnt) {              // последний фрагмент
     const auto& full = gatherer_.get();
     auto split_result = handleSplitPart(split_info, full, hdr.msg_id);
-  if (split_result.deliver) {
+    if (!split_result.deliver) {
+      assembling_ = false;
+      expected_frag_cnt_ = 0;
+      next_frag_idx_ = 0;
+      profile_scope.markDrop("ожидание остальных частей split");
+      return;                                         // результат ещё не готов
+    }
     const uint8_t* deliver_ptr = full.data();
     size_t deliver_len = full.size();
     if (!split_result.use_original) {
       deliver_ptr = split_result.data.data();
-        deliver_len = split_result.data.size();
-      }
-      bool is_ack_payload = protocol::ack::isAckPayload(deliver_ptr, deliver_len);
-      if (buf_ && !is_ack_payload) {
-        buf_->pushReady(hdr.msg_id, deliver_ptr, deliver_len);
-      }
-      if (cb_) {
-        cb_(deliver_ptr, deliver_len);
-      }
+      deliver_len = split_result.data.size();
     }
-    // если результат ещё не готов, просто ждём остальные части
-    if (!split_result.deliver) {
-      gatherer_.reset();
-      assembling_ = false;
-      expected_frag_cnt_ = 0;
-      next_frag_idx_ = 0;
-      return;
+    bool is_ack_payload = protocol::ack::isAckPayload(deliver_ptr, deliver_len);
+    if (buf_ && !is_ack_payload) {
+      buf_->pushReady(hdr.msg_id, deliver_ptr, deliver_len);
     }
+    if (cb_) {
+      cb_(deliver_ptr, deliver_len);
+    }
+    profile_scope.mark(&ProfilingSnapshot::deliver);
+
     inflight_prefix_.erase(hdr.msg_id);
     gatherer_.reset();
     assembling_ = false;
@@ -408,6 +513,13 @@ RxModule::SplitProcessResult RxModule::handleSplitPart(const SplitPrefixInfo& in
   res.data = std::move(slot.data);
   pending_split_.erase(info.tag);
   return res;
+}
+
+void RxModule::enableProfiling(bool enable) {
+  profiling_enabled_ = enable;                       // фиксируем текущее состояние профилирования
+  if (!enable) {
+    last_profile_ = ProfilingSnapshot{};             // сбрасываем предыдущий снимок
+  }
 }
 
 // Установка колбэка для обработки сообщений
