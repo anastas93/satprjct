@@ -6634,7 +6634,12 @@ async function refreshKeyState(options) {
       } catch (err) {
         // Всегда оставляем комментарии на русском
         console.warn("[key] не удалось разобрать JSON KEYSTATE:", err);
-        parseFailed = true;
+        data = parseKeyStateFallback(rawText);
+        if (!data) parseFailed = true;
+        else {
+          // Резервный разбор сработал, предупреждаем в консоли
+          console.warn("[key] использован резервный парсер KEYSTATE");
+        }
       }
     }
     if (data && data.error) {
@@ -6669,6 +6674,51 @@ async function refreshKeyState(options) {
     note("Ошибка KEYSTATE: " + res.error);
   }
   if (!res.ok) debugLog("KEYSTATE ✗ " + res.error);
+}
+
+// Пытаемся восстановить объект состояния ключа из нестрогого JSON или пары ключ=значение
+function parseKeyStateFallback(rawText) {
+  const raw = rawText != null ? String(rawText).trim() : "";
+  if (!raw) return null;
+  // Убираем фигурные скобки, если они есть, чтобы облегчить дальнейший разбор
+  const inner = raw.replace(/^[{\[]|[}\]]$/g, "");
+  const result = {};
+  let hasData = false;
+  inner
+    .split(/[,;\n]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .forEach((part) => {
+      const match = part.match(/^"?([A-Za-z0-9_]+)"?\s*[:=]\s*(.+)$/);
+      if (!match) return;
+      const key = match[1];
+      let value = match[2].trim();
+      if (!value) return;
+      // Удаляем кавычки вокруг значения, если они присутствуют
+      value = value.replace(/^"(.+)"$/, "$1").replace(/^'(.+)'$/, "$1");
+      if (!value) return;
+      // Приводим булевы значения к типу boolean
+      if (/^(true|false)$/i.test(value)) {
+        result[key] = /^true$/i.test(value);
+      } else if (/^\d+$/.test(value)) {
+        // Числовые значения оставляем строками, чтобы не менять текущую логику
+        result[key] = value;
+      } else {
+        result[key] = value;
+      }
+      hasData = true;
+    });
+  if (!hasData) return null;
+  // Нормализуем известные поля
+  if (result.type) result.type = String(result.type).toLowerCase();
+  if (result.id) result.id = String(result.id).toUpperCase();
+  if (result.public) result.public = String(result.public).toUpperCase();
+  if (result.peer) result.peer = String(result.peer).toUpperCase();
+  if (typeof result.hasBackup === "string") {
+    const backupStr = result.hasBackup.toLowerCase();
+    result.hasBackup = /^(1|true|yes|да|on)$/i.test(backupStr);
+  }
+  return result;
 }
 
 // Пытаемся извлечь полезную информацию из текстового ответа KEYGEN без JSON
