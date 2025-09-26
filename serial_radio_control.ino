@@ -1497,7 +1497,12 @@ void handleCmdHttp() {
       if (raw > 60000) raw = 60000;
       tx.setAckTimeout(static_cast<uint32_t>(raw));
     }
-    resp = String(tx.getAckTimeout());
+    uint32_t effective = tx.getAckTimeout();
+    if (effective == 0) {
+      resp = String("0 (ожидание без тайм-аута)");   // фиксируем особое значение 0
+    } else {
+      resp = String(effective);
+    }
   } else if (cmd == "ENC") {
     if (server.hasArg("toggle")) {
       encryptionEnabled = !encryptionEnabled;
@@ -1984,9 +1989,14 @@ void loop() {
         if (value < 0) value = 0;
         if (value > 60000) value = 60000;
         tx.setAckTimeout(static_cast<uint32_t>(value));
+        uint32_t applied = tx.getAckTimeout();
         Serial.print("ACKT: ");
-        Serial.print(value);
-        Serial.println(" ms");
+        Serial.print(applied);
+        if (applied == 0) {
+          Serial.println(" ms (ожидание без тайм-аута)");  // подчёркиваем особый режим ожидания
+        } else {
+          Serial.println(" ms");
+        }
       } else if (line.startsWith("ACK")) {
         if (line.length() > 3) {                          // установка явного значения
           ackEnabled = line.substring(4).toInt() != 0;
