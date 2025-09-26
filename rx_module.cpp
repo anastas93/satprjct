@@ -13,6 +13,9 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cctype>
+#include <cstddef>
+#include <utility>
 
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
 static constexpr size_t TAG_LEN = 8;              // длина тега аутентичности
@@ -21,6 +24,13 @@ static constexpr bool USE_BIT_INTERLEAVER = true; // включение бито
 static constexpr bool USE_RS = DefaultSettings::USE_RS; // использовать RS(255,223)
 static constexpr size_t CONV_TAIL_BYTES = 1;      // «хвост» для сброса регистра свёрточного кодера
 static constexpr std::chrono::seconds PENDING_CONV_TTL(10); // максимальное время жизни незавершённого блока
+static bool isDecimal(const std::string& s) {
+  if (s.empty()) return false;
+  for (char c : s) {
+    if (!std::isdigit(static_cast<unsigned char>(c))) return false;
+  }
+  return true;
+}
 
 // Удаление пилотов из полезной нагрузки
 static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
@@ -53,6 +63,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
 
   auto now = std::chrono::steady_clock::now();       // фиксируем момент для очистки временных структур
   cleanupPendingConv(now);
+  cleanupPendingSplits(now);
 
   auto forward_raw = [&](const uint8_t* raw, size_t raw_len) {
     if (!raw || raw_len == 0) return;               // пропускаем пустые вызовы
@@ -91,6 +102,9 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   if (!hdr.checkFrameCrc(payload_buf_.data(), payload_buf_.size())) return; // неверный CRC
 
   if (!assembling_ || hdr.msg_id != active_msg_id_) {      // обнаружили новое сообщение
+    if (assembling_) {
+      inflight_prefix_.erase(active_msg_id_);
+    }
     gatherer_.reset();
     assembling_ = true;
     active_msg_id_ = hdr.msg_id;
@@ -99,6 +113,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   }
   if (hdr.frag_idx == 0) {                                // явный старт новой последовательности
     if (next_frag_idx_ != 0) {
+      inflight_prefix_.erase(active_msg_id_);
       gatherer_.reset();
     }
     expected_frag_cnt_ = hdr.frag_cnt;
@@ -106,6 +121,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   }
   if (hdr.frag_idx != next_frag_idx_) {                   // пришёл неожиданный индекс
     if (hdr.frag_idx != 0) {
+      inflight_prefix_.erase(active_msg_id_);
       gatherer_.reset();
       assembling_ = false;
       expected_frag_cnt_ = 0;
@@ -251,24 +267,49 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     plain_buf_.assign(result_buf_.begin(), result_buf_.begin() + cipher_len); // принимаем открытый текст
   }
 
-  if (!plain_buf_.empty() && plain_buf_[0] == '[') {  // удаляем префикс [ID|n]
-    auto it = std::find(plain_buf_.begin(), plain_buf_.end(), ']');
-    if (it != plain_buf_.end()) {
-      plain_buf_.erase(plain_buf_.begin(), it + 1);
+  size_t prefix_len = 0;
+  SplitPrefixInfo split_info = parseSplitPrefix(plain_buf_, prefix_len);
+  if (split_info.valid) {
+    inflight_prefix_[hdr.msg_id] = split_info;
+  } else {
+    auto it_pref = inflight_prefix_.find(hdr.msg_id);
+    if (it_pref != inflight_prefix_.end()) {
+      split_info = it_pref->second;
     }
+  }
+  if (prefix_len > 0 && prefix_len <= plain_buf_.size()) {
+    plain_buf_.erase(plain_buf_.begin(), plain_buf_.begin() + static_cast<std::ptrdiff_t>(prefix_len));
   }
   gatherer_.add(plain_buf_.data(), plain_buf_.size());
   plain_buf_.clear();                                  // очищаем буфер, сохраняя вместимость
   ++next_frag_idx_;                                    // ожидаем следующий индекс фрагмента
   if (hdr.frag_idx + 1 == hdr.frag_cnt) {             // последний фрагмент
     const auto& full = gatherer_.get();
-    bool is_ack_payload = protocol::ack::isAckPayload(full.data(), full.size());
-    if (buf_ && !is_ack_payload) {                    // пропускаем ACK при сохранении
-      buf_->pushReady(hdr.msg_id, full.data(), full.size());
+    auto split_result = handleSplitPart(split_info, full, hdr.msg_id);
+  if (split_result.deliver) {
+    const uint8_t* deliver_ptr = full.data();
+    size_t deliver_len = full.size();
+    if (!split_result.use_original) {
+      deliver_ptr = split_result.data.data();
+        deliver_len = split_result.data.size();
+      }
+      bool is_ack_payload = protocol::ack::isAckPayload(deliver_ptr, deliver_len);
+      if (buf_ && !is_ack_payload) {
+        buf_->pushReady(hdr.msg_id, deliver_ptr, deliver_len);
+      }
+      if (cb_) {
+        cb_(deliver_ptr, deliver_len);
+      }
     }
-    if (cb_) {                                        // передаём сообщение пользователю
-      cb_(full.data(), full.size());
+    // если результат ещё не готов, просто ждём остальные части
+    if (!split_result.deliver) {
+      gatherer_.reset();
+      assembling_ = false;
+      expected_frag_cnt_ = 0;
+      next_frag_idx_ = 0;
+      return;
     }
+    inflight_prefix_.erase(hdr.msg_id);
     gatherer_.reset();
     assembling_ = false;
     expected_frag_cnt_ = 0;
@@ -287,6 +328,86 @@ void RxModule::cleanupPendingConv(std::chrono::steady_clock::time_point now) {
       ++it;
     }
   }
+}
+
+void RxModule::cleanupPendingSplits(std::chrono::steady_clock::time_point now) {
+  if (pending_split_.empty()) return;
+  for (auto it = pending_split_.begin(); it != pending_split_.end();) {
+    if (now - it->second.last_update > PENDING_SPLIT_TTL) {
+      it = pending_split_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+RxModule::SplitPrefixInfo RxModule::parseSplitPrefix(const std::vector<uint8_t>& data, size_t& prefix_len) const {
+  SplitPrefixInfo info;
+  prefix_len = 0;
+  if (data.empty() || data.front() != '[') return info;
+  auto end = std::find(data.begin(), data.end(), ']');
+  if (end == data.end()) return info;
+  std::string content(data.begin() + 1, end);
+  auto pipe = content.find('|');
+  if (pipe == std::string::npos || pipe == 0) return info;
+  info.tag = content.substr(0, pipe);
+  std::string rest = content.substr(pipe + 1);
+  size_t slash = rest.find('/');
+  std::string part_str = rest.substr(0, slash);
+  if (!isDecimal(part_str)) return info;
+  info.part = static_cast<size_t>(std::stoul(part_str));
+  if (slash != std::string::npos) {
+    std::string total_str = rest.substr(slash + 1);
+    if (!isDecimal(total_str)) return info;
+    info.total = static_cast<size_t>(std::stoul(total_str));
+  }
+  if (info.total == 0 || info.part == 0 || info.part > info.total) {
+    info.valid = false;
+  } else {
+    info.valid = true;
+  }
+  prefix_len = static_cast<size_t>(std::distance(data.begin(), end + 1));
+  return info;
+}
+
+RxModule::SplitProcessResult RxModule::handleSplitPart(const SplitPrefixInfo& info,
+                                                       const std::vector<uint8_t>& chunk,
+                                                       uint32_t msg_id) {
+  SplitProcessResult res;
+  if (!info.valid) {
+    res.deliver = true;
+    res.use_original = true;
+    return res;
+  }
+  auto& slot = pending_split_[info.tag];
+  if (info.part == 1 || slot.expected_total != info.total) {
+    slot.data.clear();
+    slot.next_part = 1;
+    slot.expected_total = info.total;
+  }
+  if (info.part != slot.next_part) {
+    slot.data.clear();
+    slot.next_part = 1;
+    slot.expected_total = info.total;
+    if (info.part != 1) {
+      slot.last_update = std::chrono::steady_clock::now();
+      return res;
+    }
+  }
+  slot.data.insert(slot.data.end(), chunk.begin(), chunk.end());
+  slot.last_update = std::chrono::steady_clock::now();
+  slot.next_part = info.part + 1;
+  if (info.part < info.total) {
+    if (buf_) {
+      buf_->pushSplit(msg_id, slot.data.data(), slot.data.size());
+    }
+    return res;
+  }
+  res.deliver = true;
+  res.use_original = false;
+  res.data = std::move(slot.data);
+  pending_split_.erase(info.tag);
+  return res;
 }
 
 // Установка колбэка для обработки сообщений
