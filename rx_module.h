@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_map>
 #include <chrono>
+#include <string>
 #include "libs/packetizer/packet_gatherer.h" // сборщик пакетов
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
 #include "default_settings.h"
@@ -18,6 +19,27 @@ public:
   RxModule();
   // Обработка входящего пакета
   void onReceive(const uint8_t* data, size_t len);
+  // Включение профилирования и диагностики задержек
+  void enableProfiling(bool enable);
+  // Получение последнего снимка профилирования
+  struct ProfilingSnapshot {
+    bool valid = false;                                    // есть ли актуальные данные
+    bool dropped = false;                                  // был ли кадр отклонён
+    bool conv = false;                                     // применялось ли свёрточное кодирование
+    bool decrypted = false;                                // выполнялось ли дешифрование
+    size_t raw_len = 0;                                    // исходная длина кадра
+    size_t decoded_len = 0;                                // длина после декодирования
+    std::string drop_stage;                                // стадия, на которой кадр отвергнут
+    std::chrono::microseconds total{};                     // полное время обработки
+    std::chrono::microseconds descramble{};                // дескремблирование
+    std::chrono::microseconds header{};                    // парсинг заголовка
+    std::chrono::microseconds payload_extract{};           // удаление пилотов/подготовка payload
+    std::chrono::microseconds decode{};                    // декодирование/деинтерливинг
+    std::chrono::microseconds decrypt{};                   // дешифрование AES-CCM
+    std::chrono::microseconds assemble{};                  // сборка и работа со Split-префиксами
+    std::chrono::microseconds deliver{};                   // передача в буфер/колбэк
+  };
+  ProfilingSnapshot lastProfiling() const { return last_profile_; }
   // Установка пользовательского колбэка
   void setCallback(Callback cb);
   // Привязка внешнего буфера для хранения готовых сообщений
@@ -39,6 +61,7 @@ private:
   std::vector<uint8_t> plain_buf_;   // буфер расшифрованных данных
   uint32_t raw_counter_ = 0;         // счётчик сырых пакетов без заголовка
   bool encryption_forced_ = DefaultSettings::USE_ENCRYPTION; // ожидание шифрования по умолчанию
+  bool profiling_enabled_ = false;   // включено ли профилирование
   bool assembling_ = false;          // активна ли текущая сборка сообщения
   uint32_t active_msg_id_ = 0;       // идентификатор собираемого сообщения
   uint16_t expected_frag_cnt_ = 0;   // сколько фрагментов ожидается
@@ -70,6 +93,9 @@ private:
     std::vector<uint8_t> data;         // собранные данные, если требуется копия
   };
   std::unordered_map<uint32_t, SplitPrefixInfo> inflight_prefix_; // префиксы, ожидающие завершения
+  ProfilingSnapshot last_profile_;   // последний снимок профилирования
+  struct RxProfilingScope;           // внутренняя структура для RAII-профилирования
+  friend struct RxProfilingScope;
   void cleanupPendingConv(std::chrono::steady_clock::time_point now);
   void cleanupPendingSplits(std::chrono::steady_clock::time_point now);
   SplitPrefixInfo parseSplitPrefix(const std::vector<uint8_t>& data, size_t& prefix_len) const;
