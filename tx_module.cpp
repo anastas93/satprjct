@@ -113,6 +113,10 @@ bool TxModule::loop() {
   }
 
   if (ack_enabled_ && waiting_ack_) {
+    if (ack_timeout_ms_ == 0) {
+      radio_.ensureReceiveMode();                 // нулевой тайм-аут трактуем как бесконечное ожидание
+      return false;
+    }
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_attempt_);
     if (elapsed.count() < static_cast<long>(ack_timeout_ms_)) {
       radio_.ensureReceiveMode();

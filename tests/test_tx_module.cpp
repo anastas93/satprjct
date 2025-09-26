@@ -2,6 +2,8 @@
 #include <iostream>
 #include <vector>
 #include <array>
+#include <thread>
+#include <chrono>
 #include "tx_module.h"
 #include "rx_module.h"
 #include "../libs/frame/frame_header.h" // заголовок кадра
@@ -54,13 +56,15 @@ int main() {
   TxModule txAck(radioAck, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
   txAck.setAckEnabled(true);
   txAck.setAckRetryLimit(1);          // одна повторная отправка
-  txAck.setAckTimeout(0);             // мгновенный тайм-аут для теста
+  txAck.setAckTimeout(1);             // минимальный положительный тайм-аут для ускоренных повторов
   txAck.setSendPause(0);              // убираем ожидание между циклами
   std::vector<uint8_t> big(80, 'A');  // гарантированно несколько частей
   txAck.queue(big.data(), big.size());
   txAck.loop();                       // первая попытка
+  std::this_thread::sleep_for(std::chrono::milliseconds(2));
   txAck.loop();                       // срабатывает тайм-аут, попытка №2 станет доступна
   txAck.loop();                       // повторная отправка
+  std::this_thread::sleep_for(std::chrono::milliseconds(2));
   txAck.loop();                       // тайм-аут, пакет уходит в архив вместе с остатком
   size_t sent_before = radioAck.history.size();
   txAck.loop();                       // новых фрагментов не должно появиться
@@ -124,5 +128,25 @@ int main() {
   assert(!ackPlain.empty() && ackPlain.back() == protocol::ack::MARKER);
   txPriority.loop();
   assert(radioPriority.history.size() == 2);
+
+  // Проверяем, что при ack_timeout=0 модуль ожидает подтверждение до его получения
+  MockRadio radioWait;
+  TxModule txWait(radioWait, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txWait.setAckEnabled(true);
+  txWait.setAckRetryLimit(3);
+  txWait.setAckTimeout(0);            // бесконечное ожидание ACK
+  txWait.setSendPause(0);
+  const char wait_msg[] = "WAIT";
+  txWait.queue(reinterpret_cast<const uint8_t*>(wait_msg), sizeof(wait_msg));
+  bool firstSend = txWait.loop();
+  assert(firstSend);
+  assert(radioWait.history.size() == 1);
+  bool secondSend = txWait.loop();
+  assert(!secondSend);                // повтор не должен стартовать без подтверждения
+  assert(radioWait.history.size() == 1);
+  txWait.onAckReceived();             // имитируем приход подтверждения
+  bool afterAck = txWait.loop();
+  assert(!afterAck);
+  assert(radioWait.history.size() == 1);
   return 0;
 }
