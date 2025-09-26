@@ -2022,10 +2022,12 @@ function logSystemCommand(cmd, payload, state) {
   const saved = persistChat(messageText, "dev", meta);
   addChatMessage(saved.record, saved.index);
 }
+const DEVICE_COMMAND_TIMEOUT_MS = 4000; // Базовый тайм-аут для команд и фонового опроса
+
 async function sendCommand(cmd, params, opts) {
   const options = opts || {};
   const silent = options.silent === true;
-  const timeout = options.timeoutMs || 4000;
+  const timeout = options.timeoutMs || DEVICE_COMMAND_TIMEOUT_MS;
   const debugLabel = options.debugLabel != null ? String(options.debugLabel) : cmd;
   const payload = params || {};
   if (!silent) status("→ " + cmd);
@@ -3199,6 +3201,8 @@ function handleReceivedSnapshot(items) {
   updateChatReceivingIndicatorFromRsts(list);
 }
 
+// Фоновый запрос RSTS использует тот же базовый тайм-аут, что и sendCommand,
+// чтобы избежать преждевременного прерывания при нагруженных каналах.
 async function pollReceivedMessages(opts) {
   const state = getReceivedMonitorState();
   if (state.running) return null;
@@ -3206,7 +3210,7 @@ async function pollReceivedMessages(opts) {
   const options = opts || {};
   const params = { full: "1", json: "1", n: String(state.limit) };
   try {
-    const res = await deviceFetch("RSTS", params, options.timeoutMs || 3000);
+    const res = await deviceFetch("RSTS", params, options.timeoutMs || DEVICE_COMMAND_TIMEOUT_MS);
     if (!res.ok) {
       if (res.error) console.warn("[recv] RSTS недоступен:", res.error);
       return null;
