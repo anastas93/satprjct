@@ -2484,6 +2484,8 @@ const UI = {
       running: false,
       known: new Set(),
       limit: null,
+      awaiting: false,
+      progress: new Map(),
     },
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
@@ -2774,6 +2776,10 @@ async function init() {
   UI.els.chatLog = $("#chatLog");
   UI.els.chatInput = $("#chatInput");
   UI.els.chatScrollBtn = $("#chatScrollBottom");
+  UI.els.chatRxIndicator = $("#chatRxIndicator");
+  if (UI.els.chatRxIndicator) {
+    setChatReceivingIndicatorState(getReceivedMonitorState().awaiting);
+  }
   UI.els.sendBtn = $("#sendBtn");
   UI.els.chatImageBtn = $("#chatImageBtn");
   UI.els.chatImageInput = $("#chatImageInput");
@@ -3628,6 +3634,9 @@ function addChatMessage(entry, index, options) {
   const role = data.role || (author === "you" ? "user" : "system");
   if (role === "rx") wrap.classList.add("rx");
   else if (role !== "user") wrap.classList.add("system");
+  const tag = data && data.tag ? String(data.tag) : "";
+  if (tag === "rx-progress") wrap.classList.add("progress");
+  else if (tag === "rx-image") wrap.classList.add("image");
   if (typeof index === "number" && index >= 0) {
     wrap.dataset.index = String(index);
   }
@@ -4109,6 +4118,8 @@ function canvasToJpegBlob(canvas, quality) {
 function applyChatBubbleContent(node, entry) {
   const raw = entry && entry.m != null ? String(entry.m) : "";
   const isRx = entry && entry.role === "rx";
+  const tag = entry && entry.tag ? String(entry.tag) : "";
+  const isProgress = tag === "rx-progress";
   node.innerHTML = "";
   const textBox = document.createElement("div");
   textBox.className = "bubble-text";
@@ -4121,6 +4132,12 @@ function applyChatBubbleContent(node, entry) {
     setBubbleText(textBox, displayText || "—");
   } else {
     setBubbleText(textBox, raw);
+  }
+  if (isProgress) {
+    textBox.classList.add("with-spinner");
+    const spinner = document.createElement("span");
+    spinner.className = "bubble-spinner";
+    textBox.insertBefore(spinner, textBox.firstChild);
   }
   node.appendChild(textBox);
   const imageMeta = entry && entry.image && typeof entry.image === "object" ? entry.image : null;
@@ -4194,7 +4211,15 @@ function updateChatMessageContent(index) {
   if (!wrap) return;
   const bubble = wrap.querySelector('.bubble');
   if (!bubble) return;
-  applyChatBubbleContent(bubble, entries[index]);
+  const entry = entries[index];
+  const tag = entry && entry.tag ? String(entry.tag) : "";
+  wrap.classList.toggle("progress", tag === "rx-progress");
+  wrap.classList.toggle("image", tag === "rx-image");
+  if (entry && entry.role === "rx") wrap.classList.add("rx");
+  else wrap.classList.remove("rx");
+  if (entry && entry.role === "user") wrap.classList.remove("system");
+  else if (!wrap.classList.contains("you")) wrap.classList.add("system");
+  applyChatBubbleContent(bubble, entry);
 }
 function attachTxStatus(index, info) {
   const entries = getChatHistory();
@@ -4357,7 +4382,8 @@ function logSystemCommand(cmd, payload, state) {
   const saved = persistChat(messageText, "dev", meta);
   addChatMessage(saved.record, saved.index);
 }
-const DEVICE_COMMAND_TIMEOUT_MS = 4000;
+const DEVICE_COMMAND_TIMEOUT_MS = 4000; // Базовый тайм-аут для команд и фонового опроса
+
 async function sendCommand(cmd, params, opts) {
   const options = opts || {};
   const silent = options.silent === true;
@@ -5220,12 +5246,107 @@ async function downloadRstsFullJson() {
   note("RSTS FULL JSON: файл сохранён");
 }
 
+function parseReceivedNumericId(name) {
+  const raw = name != null ? String(name).trim() : "";
+  if (!raw) return null;
+  const match = raw.match(/(?:GO|SP|R)[^0-9]*(\d{1,6})/i);
+  if (!match) return null;
+  const digits = match[1];
+  if (!digits) return null;
+  return digits.padStart(5, "0");
+}
+
+function makeReadyNameFromId(id) {
+  const digits = id != null ? String(id).replace(/\D+/g, "") : "";
+  if (!digits) return null;
+  return "GO-" + digits.padStart(5, "0");
+}
+
+function clearSplitProgressTracking(name) {
+  if (!name) return;
+  const state = getReceivedMonitorState();
+  if (!(state.progress instanceof Map)) return;
+  if (state.progress.delete(name)) {
+    if (state.progress.size === 0) setChatReceivingIndicatorState(false);
+    return;
+  }
+  for (const [key, info] of state.progress.entries()) {
+    if (info && info.name === name) {
+      state.progress.delete(key);
+      if (state.progress.size === 0) setChatReceivingIndicatorState(false);
+      break;
+    }
+  }
+}
+
+function upsertSplitProgress(entry) {
+  if (!entry) return;
+  const nameRaw = entry.name != null ? String(entry.name).trim() : "";
+  if (!nameRaw) return;
+  const state = getReceivedMonitorState();
+  setChatReceivingIndicatorState(true);
+  const history = getChatHistory();
+  const id = parseReceivedNumericId(nameRaw);
+  const readyName = makeReadyNameFromId(id);
+  const key = readyName || nameRaw;
+  const length = getReceivedLength(entry);
+  const lengthText = Number.isFinite(length) && length > 0 ? `${length} байт` : "ожидание данных";
+  const caption = readyName ? `Приём пакета ${readyName}` : `Приём пакета ${nameRaw}`;
+  const detail = readyName ? `${readyName}: получено ${lengthText}` : `Получено ${lengthText}`;
+  const rxText = `${caption} · ${lengthText}`;
+  let index = -1;
+  const known = state.progress instanceof Map ? state.progress.get(key) : null;
+  if (known && typeof known.index === "number") {
+    index = known.index;
+  } else if (readyName) {
+    index = history.findIndex((item) => item && item.rx && item.rx.name === readyName && item.tag === "rx-progress");
+  }
+  if (index >= 0 && history[index]) {
+    const record = history[index];
+    let changed = false;
+    if (record.m !== caption) { record.m = caption; changed = true; }
+    if (record.role !== "rx") { record.role = "rx"; changed = true; }
+    if (record.tag !== "rx-progress") { record.tag = "rx-progress"; changed = true; }
+    if (!record.rx || typeof record.rx !== "object") {
+      record.rx = {};
+      changed = true;
+    }
+    if (record.rx.name !== (readyName || nameRaw)) { record.rx.name = readyName || nameRaw; changed = true; }
+    if (record.rx.type !== "split") { record.rx.type = "split"; changed = true; }
+    if (Number.isFinite(length) && record.rx.len !== length) { record.rx.len = length; changed = true; }
+    if (record.rx.text !== rxText) { record.rx.text = rxText; changed = true; }
+    if (record.detail !== detail) { record.detail = detail; changed = true; }
+    if (changed) saveChatHistory();
+    updateChatMessageContent(index);
+    state.progress.set(key, { index, name: readyName || nameRaw });
+    return;
+  }
+  const meta = {
+    role: "rx",
+    tag: "rx-progress",
+    rx: {
+      name: readyName || nameRaw,
+      type: "split",
+      len: Number.isFinite(length) && length >= 0 ? length : 0,
+      text: rxText,
+    },
+    detail,
+  };
+  const saved = persistChat(caption, "dev", meta);
+  addChatMessage(saved.record, saved.index);
+  state.progress.set(key, { index: saved.index, name: readyName || nameRaw });
+}
+
 /* Фоновый монитор входящих сообщений */
 function logReceivedMessage(entry, opts) {
   if (!entry) return;
   const options = opts || {};
   const name = entry.name != null ? String(entry.name).trim() : "";
   const entryType = normalizeReceivedType(name, entry.type);
+  if (entryType === "split") {
+    upsertSplitProgress(entry);
+    return;
+  }
   if (!name || entryType !== "ready") {
     // В чат попадают только элементы со статусом ready; без имени их сложно отслеживать.
     return;
@@ -5244,11 +5365,10 @@ function logReceivedMessage(entry, opts) {
     name,
     type: entryType,
     hex: entry.hex || "",
-    text: messageBody || "",
   };
   if (length != null) rxMeta.len = length;
   let imageMeta = null;
-  let message = messageBody || "—";
+  let message = "";
   if (isImage && bytes && bytes.length) {
     const blob = new Blob([bytes], { type: "image/jpeg" });
     const key = imageNameFromRawName(name) || (name ? name : "img:" + Date.now());
@@ -5265,6 +5385,14 @@ function logReceivedMessage(entry, opts) {
     message = imageMeta.name ? "Изображение " + imageMeta.name : "Изображение";
     rxMeta.text = message;
     rxMeta.image = { name: imageMeta.name || imageMeta.key, size: bytes.length };
+  } else if (messageBody) {
+    message = messageBody;
+    rxMeta.text = message;
+  } else {
+    const base = name || "RX сообщение";
+    const lengthText = Number.isFinite(length) && length >= 0 ? `${length} байт` : "";
+    message = lengthText ? `${base} · ${lengthText}` : base;
+    rxMeta.text = message;
   }
   const history = getChatHistory();
   let existingIndex = -1;
@@ -5323,6 +5451,10 @@ function logReceivedMessage(entry, opts) {
         changed = true;
       }
     }
+    if (existing.tag === "rx-progress" && existing.detail) {
+      existing.detail = "";
+      changed = true;
+    }
     if (imageMeta) {
       if (!existing.image || typeof existing.image !== "object") {
         existing.image = sanitizeChatImageMeta(imageMeta);
@@ -5343,20 +5475,26 @@ function logReceivedMessage(entry, opts) {
       existing.t = Date.now();
       changed = true;
     }
-    if (changed) {
-      saveChatHistory();
-      updateChatMessageContent(existingIndex);
-    }
+    if (changed) saveChatHistory();
+    updateChatMessageContent(existingIndex);
+    clearSplitProgressTracking(name);
     return;
   }
   if (options.isNew === false && !messageBody && !imageMeta) {
     // Для старых записей без текста не добавляем дубль.
     return;
   }
+  if (!imageMeta && !messageBody && name && message === name) {
+    // Для пакетов без payload добавляем подпись с длиной, чтобы было видно объём данных
+    const lengthText = Number.isFinite(length) && length >= 0 ? `${length} байт` : "нет данных";
+    rxMeta.text = `${name} · ${lengthText}`;
+    message = rxMeta.text;
+  }
   const meta = { role: "rx", tag: imageMeta ? "rx-image" : "rx-message", rx: rxMeta };
   if (imageMeta) meta.image = sanitizeChatImageMeta(imageMeta);
   const saved = persistChat(message, "dev", meta);
   addChatMessage(saved.record, saved.index);
+  clearSplitProgressTracking(name);
 }
 
 function getReceivedMonitorState() {
@@ -5370,9 +5508,11 @@ function getReceivedMonitorState() {
     state.known = new Set(state.known ? Array.from(state.known) : []);
   }
   if (!(state.progress instanceof Map)) {
+    // Карта отслеживания промежуточных сообщений (SP-xxxxx → индекс в истории чата)
     state.progress = new Map();
   }
   if (!state.metrics || typeof state.metrics !== "object") {
+    // Метрики фонового опроса RSTS для вкладки Debug
     state.metrics = {
       configuredIntervalMs: null,
       lastStartedAt: null,
@@ -5406,6 +5546,7 @@ function getReceivedMonitorState() {
   return state;
 }
 
+// Форматирование продолжительности запроса в человеко-понятный вид
 function formatDurationMs(ms) {
   if (!Number.isFinite(ms)) return "—";
   if (ms < 1) return ms.toFixed(2) + " мс";
@@ -5420,6 +5561,7 @@ function formatDurationMs(ms) {
   return `${hours} ч ${restMin} мин`;
 }
 
+// Форматирование относительного времени (например, «5 с назад»)
 function formatRelativeTime(ts) {
   if (!Number.isFinite(ts)) return "—";
   const now = Date.now();
@@ -5434,6 +5576,7 @@ function formatRelativeTime(ts) {
   return `${hours} ч назад`;
 }
 
+// Обновление панели диагностики опроса RSTS во вкладке Debug
 function updateReceivedMonitorDiagnostics() {
   const els = UI.els && UI.els.receivedDiag ? UI.els.receivedDiag : null;
   if (!els || !els.root) return;
@@ -5530,6 +5673,29 @@ function updateReceivedMonitorDiagnostics() {
   }
 }
 
+// Обновляем визуальный индикатор, показывающий ожидание оставшихся пакетов SP-...
+function setChatReceivingIndicatorState(active) {
+  const indicator = UI.els && UI.els.chatRxIndicator ? UI.els.chatRxIndicator : null;
+  const state = getReceivedMonitorState();
+  state.awaiting = !!active;
+  if (!indicator) return;
+  const flag = !!active;
+  indicator.classList.toggle("active", flag);
+  indicator.hidden = !flag;
+}
+
+// Проверяем список RSTS и решаем, нужно ли показывать анимацию приёма
+function updateChatReceivingIndicatorFromRsts(items) {
+  const list = Array.isArray(items) ? items : [];
+  const awaiting = list.some((entry) => {
+    if (!entry) return false;
+    const name = entry.name != null ? String(entry.name).trim() : "";
+    const entryType = normalizeReceivedType(name, entry.type);
+    return entryType === "split";
+  });
+  setChatReceivingIndicatorState(awaiting);
+}
+
 function handleReceivedSnapshot(items) {
   const state = getReceivedMonitorState();
   const prev = state.known;
@@ -5546,6 +5712,8 @@ function handleReceivedSnapshot(items) {
   updateChatReceivingIndicatorFromRsts(list);
 }
 
+// Фоновый запрос RSTS использует тот же базовый тайм-аут, что и sendCommand,
+// чтобы избежать преждевременного прерывания при нагруженных каналах.
 async function pollReceivedMessages(opts) {
   const state = getReceivedMonitorState();
   const metrics = state.metrics;
@@ -9027,26 +9195,154 @@ async function refreshKeyState(options) {
   debugLog("KEYSTATE → запрос состояния");
   const res = await deviceFetch("KEYSTATE", {}, 4000);
   if (res.ok) {
-    debugLog("KEYSTATE ← " + res.text);
-    try {
-      const data = JSON.parse(res.text);
-      if (data && data.error) {
-        if (!opts.silent) note("KEYSTATE: " + data.error);
-        return;
+    const rawText = res.text != null ? String(res.text) : "";
+    debugLog("KEYSTATE ← " + rawText);
+    let data = null;
+    let parseFailed = false;
+    if (rawText.trim()) {
+      try {
+        data = JSON.parse(rawText);
+      } catch (err) {
+        // Всегда оставляем комментарии на русском
+        console.warn("[key] не удалось разобрать JSON KEYSTATE:", err);
+        data = parseKeyStateFallback(rawText);
+        if (!data) parseFailed = true;
+        else {
+          // Резервный разбор сработал, предупреждаем в консоли
+          console.warn("[key] использован резервный парсер KEYSTATE");
+        }
       }
+    }
+    if (data && data.error) {
+      if (!opts.silent) note("KEYSTATE: " + data.error);
+      return;
+    }
+    if (data) {
       UI.key.state = data;
       UI.key.lastMessage = "";
       renderKeyState(data);
       if (!opts.silent) status("✓ KEYSTATE");
-    } catch (err) {
-      console.warn("[key] parse error", err);
-      note("Не удалось разобрать состояние ключа");
+      return;
     }
+    const plain = rawText.trim();
+    if (plain) {
+      const normalized = plain.toUpperCase();
+      UI.key.state = null;
+      if (normalized === "UNKNOWN") {
+        UI.key.lastMessage = "Команда KEYSTATE не поддерживается текущей прошивкой";
+        note("KEYSTATE: команда недоступна на устройстве");
+      } else {
+        UI.key.lastMessage = plain;
+        note("KEYSTATE: получен ответ без JSON — " + plain);
+      }
+      renderKeyState(null);
+      if (!opts.silent) status(parseFailed ? "✗ KEYSTATE" : "✓ KEYSTATE");
+      return;
+    }
+    if (parseFailed) note("Не удалось разобрать состояние ключа");
   } else if (!opts.silent) {
     status("✗ KEYSTATE");
     note("Ошибка KEYSTATE: " + res.error);
   }
   if (!res.ok) debugLog("KEYSTATE ✗ " + res.error);
+}
+
+// Пытаемся восстановить объект состояния ключа из нестрогого JSON или пары ключ=значение
+function parseKeyStateFallback(rawText) {
+  const raw = rawText != null ? String(rawText).trim() : "";
+  if (!raw) return null;
+  // Убираем фигурные скобки, если они есть, чтобы облегчить дальнейший разбор
+  const inner = raw.replace(/^[{\[]|[}\]]$/g, "");
+  const result = {};
+  let hasData = false;
+  inner
+    .split(/[,;\n]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .forEach((part) => {
+      const match = part.match(/^"?([A-Za-z0-9_]+)"?\s*[:=]\s*(.+)$/);
+      if (!match) return;
+      const key = match[1];
+      let value = match[2].trim();
+      if (!value) return;
+      // Удаляем кавычки вокруг значения, если они присутствуют
+      value = value.replace(/^"(.+)"$/, "$1").replace(/^'(.+)'$/, "$1");
+      if (!value) return;
+      // Приводим булевы значения к типу boolean
+      if (/^(true|false)$/i.test(value)) {
+        result[key] = /^true$/i.test(value);
+      } else if (/^\d+$/.test(value)) {
+        // Числовые значения оставляем строками, чтобы не менять текущую логику
+        result[key] = value;
+      } else {
+        result[key] = value;
+      }
+      hasData = true;
+    });
+  if (!hasData) return null;
+  // Нормализуем известные поля
+  if (result.type) result.type = String(result.type).toLowerCase();
+  if (result.id) result.id = String(result.id).toUpperCase();
+  if (result.public) result.public = String(result.public).toUpperCase();
+  if (result.peer) result.peer = String(result.peer).toUpperCase();
+  if (typeof result.hasBackup === "string") {
+    const backupStr = result.hasBackup.toLowerCase();
+    result.hasBackup = /^(1|true|yes|да|on)$/i.test(backupStr);
+  }
+  return result;
+}
+
+// Пытаемся извлечь полезную информацию из текстового ответа KEYGEN без JSON
+function parseKeygenPlainResponse(text) {
+  const raw = text != null ? String(text).trim() : "";
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  if (/(err|fail|ошиб|нет)/.test(lower)) return null; // текст похож на ошибку
+  const resultState = {};
+  let hasState = false;
+  const idMatch = raw.match(/\bID\s*[:=]?\s*([0-9a-f]{4,})/i);
+  if (idMatch) {
+    resultState.id = idMatch[1].toUpperCase();
+    hasState = true;
+  }
+  const pubMatch = raw.match(/\bPUB(?:LIC)?\s*[:=]?\s*([0-9a-f]{8,})/i);
+  if (pubMatch) {
+    resultState.public = pubMatch[1].toUpperCase();
+    hasState = true;
+  }
+  const peerMatch = raw.match(/\bPEER\s*[:=]?\s*([0-9a-f]{8,})/i);
+  if (peerMatch) {
+    resultState.peer = peerMatch[1].toUpperCase();
+    hasState = true;
+  }
+  const backupMatch = raw.match(/\b(BACKUP|RESERVE)\s*[:=]?\s*(YES|ДА|ON|TRUE|1|NO|НЕТ|OFF|FALSE|0)/i);
+  if (backupMatch) {
+    const flag = backupMatch[2].toLowerCase();
+    resultState.hasBackup = /yes|да|on|true|1/.test(flag);
+    hasState = true;
+  }
+  if (/external|внеш/i.test(lower)) {
+    resultState.type = "external";
+    hasState = true;
+  } else if (/local|локал/i.test(lower)) {
+    resultState.type = "local";
+    hasState = true;
+  }
+  const looksSuccess = hasState
+    || /keygen[^\n]*\b(ok|done|success|готов|сгенер|обновл)/i.test(raw)
+    || /^ok\b/i.test(raw)
+    || /ключ[^\n]*\b(готов|создан|обновлен|обновлён)/i.test(lower);
+  if (!looksSuccess) return null;
+  const messageParts = [];
+  if (resultState.id) messageParts.push("ID " + resultState.id);
+  if (resultState.public) messageParts.push("PUB " + resultState.public);
+  const friendly = messageParts.length ? "Ключ обновлён: " + messageParts.join(", ") : "Ключ обновлён";
+  return {
+    state: hasState ? resultState : null,
+    message: friendly,
+    note: "KEYGEN: " + friendly,
+    raw,
+  };
 }
 
 async function requestKeyGen() {
@@ -9059,23 +9355,63 @@ async function requestKeyGen() {
     note("Ошибка KEYGEN: " + res.error);
     return;
   }
+  const rawText = res.text != null ? String(res.text) : "";
+  debugLog("KEYGEN ← " + rawText);
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    status("✗ KEYGEN");
+    note("KEYGEN: устройство вернуло пустой ответ");
+    return;
+  }
+  let data = null;
   try {
-    debugLog("KEYGEN ← " + res.text);
-    const data = JSON.parse(res.text);
-    if (data && data.error) {
-      note("KEYGEN: " + data.error);
-      status("✗ KEYGEN");
-      return;
-    }
+    data = JSON.parse(trimmed);
+  } catch (err) {
+    console.warn("[key] не удалось разобрать ответ KEYGEN как JSON:", err);
+  }
+  if (data && data.error) {
+    note("KEYGEN: " + data.error);
+    status("✗ KEYGEN");
+    return;
+  }
+  if (data) {
     UI.key.state = data;
     UI.key.lastMessage = "Сгенерирован новый локальный ключ";
     renderKeyState(data);
     debugLog("KEYGEN ✓ ключ обновлён на устройстве");
     status("✓ KEYGEN");
-  } catch (err) {
-    status("✗ KEYGEN");
-    note("Некорректный ответ KEYGEN");
+    return;
   }
+  const plainInfo = parseKeygenPlainResponse(trimmed);
+  if (plainInfo) {
+    UI.key.lastMessage = plainInfo.message;
+    if (plainInfo.state) {
+      UI.key.state = plainInfo.state;
+      renderKeyState(plainInfo.state);
+    } else {
+      UI.key.state = null;
+      renderKeyState(null);
+    }
+    note(plainInfo.note);
+    status("✓ KEYGEN");
+    await refreshKeyState({ silent: true }).catch((err) => {
+      console.warn("[key] не удалось обновить состояние после KEYGEN:", err);
+    });
+    return;
+  }
+  const normalized = trimmed.toLowerCase();
+  if (/(err|fail|ошиб|нет)/.test(normalized)) {
+    status("✗ KEYGEN");
+    note("KEYGEN: " + trimmed);
+    return;
+  }
+  UI.key.lastMessage = "Ключ обновлён";
+  renderKeyState(UI.key.state);
+  note("KEYGEN: " + trimmed);
+  status("✓ KEYGEN");
+  await refreshKeyState({ silent: true }).catch((err) => {
+    console.warn("[key] не удалось обновить состояние после KEYGEN:", err);
+  });
 }
 
 async function requestKeyRestore() {
@@ -10426,4 +10762,5 @@ async function resyncAfterEndpointChange() {
     console.warn("[endpoint] resync error", err);
   }
 }
+
 )~~~";
