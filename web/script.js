@@ -414,6 +414,10 @@ async function init() {
   UI.els.chatLog = $("#chatLog");
   UI.els.chatInput = $("#chatInput");
   UI.els.chatScrollBtn = $("#chatScrollBottom");
+  UI.els.chatRxIndicator = $("#chatRxIndicator");
+  if (UI.els.chatRxIndicator) {
+    setChatReceivingIndicatorState(getReceivedMonitorState().awaiting);
+  }
   UI.els.sendBtn = $("#sendBtn");
   UI.els.chatImageBtn = $("#chatImageBtn");
   UI.els.chatImageInput = $("#chatImageInput");
@@ -3002,7 +3006,7 @@ function getReceivedMonitorState() {
   if (!UI.state || typeof UI.state !== "object") UI.state = {};
   let state = UI.state.received;
   if (!state || typeof state !== "object") {
-    state = { timer: null, running: false, known: new Set(), limit: null };
+    state = { timer: null, running: false, known: new Set(), limit: null, awaiting: false };
     UI.state.received = state;
   }
   if (!(state.known instanceof Set)) {
@@ -3019,6 +3023,29 @@ function getReceivedMonitorState() {
   return state;
 }
 
+// Обновляем визуальный индикатор, показывающий ожидание оставшихся пакетов SP-...
+function setChatReceivingIndicatorState(active) {
+  const indicator = UI.els && UI.els.chatRxIndicator ? UI.els.chatRxIndicator : null;
+  const state = getReceivedMonitorState();
+  state.awaiting = !!active;
+  if (!indicator) return;
+  const flag = !!active;
+  indicator.classList.toggle("active", flag);
+  indicator.hidden = !flag;
+}
+
+// Проверяем список RSTS и решаем, нужно ли показывать анимацию приёма
+function updateChatReceivingIndicatorFromRsts(items) {
+  const list = Array.isArray(items) ? items : [];
+  const awaiting = list.some((entry) => {
+    if (!entry) return false;
+    const name = entry.name != null ? String(entry.name).trim() : "";
+    const entryType = normalizeReceivedType(name, entry.type);
+    return entryType === "split";
+  });
+  setChatReceivingIndicatorState(awaiting);
+}
+
 function handleReceivedSnapshot(items) {
   const state = getReceivedMonitorState();
   const prev = state.known;
@@ -3032,6 +3059,7 @@ function handleReceivedSnapshot(items) {
     logReceivedMessage(entry, { isNew });
   }
   state.known = next;
+  updateChatReceivingIndicatorFromRsts(list);
 }
 
 async function pollReceivedMessages(opts) {

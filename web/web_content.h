@@ -99,6 +99,10 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
       <div class="chat-area">
         <div id="chatLog" class="chat-log"></div>
         <button type="button" id="chatScrollBottom" class="chat-scroll-down" aria-label="Прокрутить вниз"><span>↓</span></button>
+        <div id="chatRxIndicator" class="chat-receiving-indicator" hidden>
+          <span class="indicator-icon" aria-hidden="true"></span>
+          <span class="indicator-text">Приём сообщения…</span>
+        </div>
       </div>
       <div class="chat-input">
         <div class="send-row">
