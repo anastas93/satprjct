@@ -3,18 +3,13 @@
 #include <cstdint>
 #include <optional>
 
-namespace fs_utils {
-struct SpiffsMountResult;
-}
-
 namespace KeyLoader {
 
 // Доступные варианты хранилища ключей
 enum class StorageBackend : uint8_t {
   UNKNOWN = 0,  // режим автоопределения или отсутствие хранилища
-  SPIFFS = 1,   // файловый бэкенд на разделе SPIFFS
-  NVS = 2,      // Preferences/NVS (ESP32)
-  FILESYSTEM = 3, // обычная файловая система (хостовые сборки)
+  NVS = 1,      // Preferences/NVS (ESP32)
+  FILESYSTEM = 2, // обычная файловая система (хостовые сборки)
 };
 
 // Происхождение активного ключа
@@ -42,7 +37,7 @@ struct KeyState {
   std::array<uint8_t,16> session_key{};                // активный симметричный ключ
   std::array<uint8_t,32> root_public{};                // публичный корневой ключ устройства
   std::array<uint8_t,32> peer_public{};                // последний известный ключ удалённой стороны
-  bool has_backup = false;                             // есть ли резервная копия key.stkey.old
+  bool has_backup = false;                             // есть ли резервная копия предыдущего ключа
   StorageBackend backend = StorageBackend::UNKNOWN;    // используемое хранилище
 };
 
@@ -60,11 +55,10 @@ bool saveKey(const std::array<uint8_t,16>& key,
              uint32_t nonce_salt = 0);
 
 // Запись нового локального ключа (генерация пары Curve25519 и симметричного ключа из неё).
-// При сохранении предыдущая версия переименовывается в key.stkey.old (если была).
-bool generateLocalKey(KeyRecord* out = nullptr,
-                      fs_utils::SpiffsMountResult* mount_status = nullptr);
+// Предыдущее состояние переносится в секцию `previous`.
+bool generateLocalKey(KeyRecord* out = nullptr);
 
-// Восстановление предыдущего ключа (если существует key.stkey.old).
+// Восстановление предыдущего ключа (если сохранена секция `previous`).
 bool restorePreviousKey(KeyRecord* out = nullptr);
 
 // Обновление активного ключа по публичному ключу удалённой стороны (ECDH + SHA-256).
@@ -87,7 +81,7 @@ std::array<uint8_t,12> makeNonce(uint32_t msg_id, uint16_t frag_idx);
 // 4-байтовый идентификатор ключа (первые байты SHA-256 от симметричного ключа).
 std::array<uint8_t,4> keyId(const std::array<uint8_t,16>& key);
 
-// Активный бэкенд хранения (SPIFFS/NVS/файловая система).
+// Активный бэкенд хранения (NVS/файловая система).
 StorageBackend getBackend();
 
 // Предпочитаемый бэкенд (UNKNOWN означает автоматический выбор).

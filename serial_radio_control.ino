@@ -22,9 +22,6 @@
 #include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
 #include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
 #include "libs/protocol/ack_utils.h"              // обработка ACK-пакетов
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-#include "libs/fs_utils/spiffs_guard.h"           // единый контроль монтажа SPIFFS
-#endif
 
 // --- Сеть и веб-интерфейс ---
 #include <WiFi.h>        // работа с Wi-Fi
@@ -38,9 +35,6 @@
 #include <fstream>
 #else
 #include <FS.h>
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-#include <SPIFFS.h>
-#endif
 #endif
 
 #if defined(ESP32) && __has_include("esp_core_dump.h")
@@ -52,7 +46,7 @@
 #endif
 
 #ifdef ARDUINO
-// Резервная версия прошивки, чтобы /ver отвечал даже без SPIFFS
+// Резервная версия прошивки, чтобы /ver отвечал даже без внешнего файла
 static const char kEmbeddedVersion[] PROGMEM =
 #include "ver"
 ;
@@ -625,33 +619,6 @@ String readVersionFile() {
   if (fallback.length()) return fallback;
   return String("unknown");
 #else
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-  static bool spiffsMounted = false;
-  if (!spiffsMounted) {
-    auto mountResult = fs_utils::ensureSpiffsMounted();
-    spiffsMounted = mountResult.ok();
-    if (!spiffsMounted) {
-      DEBUG_LOG("SPIFFS: %s", fs_utils::describeStatus(mountResult.status));
-    }
-  }
-  if (spiffsMounted) {
-    File f = SPIFFS.open("/ver", "r");
-    if (f) {
-      String text = f.readStringUntil('\n');
-      f.close();
-      text.trim();
-      if (text.length() >= 2) {
-        char first = text.charAt(0);
-        char last = text.charAt(text.length() - 1);
-        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
-          text = text.substring(1, text.length() - 1);
-          text.trim();
-        }
-      }
-      if (text.length()) return text;
-    }
-  }
-#endif
   String fallback(FPSTR(kEmbeddedVersion));
   fallback.trim();
   if (fallback.length() >= 2) {
@@ -702,7 +669,7 @@ String cmdKeyState() {
   return makeKeyStateJson();
 }
 
-// Управление бэкендом хранилища ключей (SPIFFS/NVS/auto)
+// Управление бэкендом хранилища ключей (NVS/auto)
 String cmdKeyStorage(const String& mode) {
   String trimmed = mode;
   trimmed.trim();
@@ -712,10 +679,6 @@ String cmdKeyStorage(const String& mode) {
   KeyLoader::StorageBackend backend = KeyLoader::StorageBackend::UNKNOWN;
   if (trimmed.equalsIgnoreCase("AUTO")) {
     backend = KeyLoader::StorageBackend::UNKNOWN;
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-  } else if (trimmed.equalsIgnoreCase("SPIFFS")) {
-    backend = KeyLoader::StorageBackend::SPIFFS;
-#endif
   } else if (trimmed.equalsIgnoreCase("NVS")) {
     backend = KeyLoader::StorageBackend::NVS;
   } else if (trimmed.equalsIgnoreCase("FS") || trimmed.equalsIgnoreCase("FILESYSTEM")) {
@@ -735,29 +698,10 @@ String cmdKeyStorage(const String& mode) {
 
 String cmdKeyGenSecure() {
   DEBUG_LOG("Key: генерация нового ключа");
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-  fs_utils::SpiffsMountResult mountStatus{};
-  if (KeyLoader::generateLocalKey(nullptr, &mountStatus)) {
-    reloadCryptoModules();
-    return makeKeyStateJson();
-  }
-  if (!mountStatus.ok()) {
-    String json = "{\"error\":\"spiffs\",\"reason\":\"";
-    json += fs_utils::describeStatus(mountStatus.status);
-    json += "\"";
-    if (mountStatus.error_code != 0) {
-      json += ",\"code\":";
-      json += String(mountStatus.error_code);
-    }
-    json += "}";
-    return json;
-  }
-#else
   if (KeyLoader::generateLocalKey()) {
     reloadCryptoModules();
     return makeKeyStateJson();
   }
-#endif
   return String("{\"error\":\"keygen\"}");
 }
 
@@ -1745,11 +1689,7 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-#if DEFAULT_SETTINGS_ENABLE_SPIFFS
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|spiffs|nvs]");
-#else
   Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
-#endif
 }
 
 void loop() {
