@@ -410,6 +410,23 @@ async function init() {
   updateFooterVersion(); // сразу показываем сохранённую версию, если она есть
   UI.els.toast = $("#toast");
   UI.els.debugLog = $("#debugLog");
+  UI.els.receivedDiag = {
+    root: $("#recvDiag"),
+    status: $("#recvDiagStatus"),
+    interval: $("#recvDiagInterval"),
+    lastStart: $("#recvDiagLastStart"),
+    lastFinish: $("#recvDiagLastFinish"),
+    duration: $("#recvDiagDuration"),
+    avg: $("#recvDiagAvg"),
+    gap: $("#recvDiagGap"),
+    runningSince: $("#recvDiagRunning"),
+    totals: $("#recvDiagTotals"),
+    timeouts: $("#recvDiagTimeouts"),
+    overlaps: $("#recvDiagOverlaps"),
+    errorBox: $("#recvDiagLastError"),
+    blockedBox: $("#recvDiagBlocked"),
+  };
+  updateReceivedMonitorDiagnostics();
   UI.els.rstsFullBtn = $("#btnRstsFull");
   UI.els.rstsJsonBtn = $("#btnRstsJson");
   UI.els.rstsDownloadBtn = $("#btnRstsDownloadJson");
@@ -3141,7 +3158,7 @@ function getReceivedMonitorState() {
   if (!UI.state || typeof UI.state !== "object") UI.state = {};
   let state = UI.state.received;
   if (!state || typeof state !== "object") {
-    state = { timer: null, running: false, known: new Set(), limit: null, awaiting: false, progress: new Map() };
+    state = { timer: null, metricsTimer: null, running: false, known: new Set(), limit: null, awaiting: false, progress: new Map() };
     UI.state.received = state;
   }
   if (!(state.known instanceof Set)) {
@@ -3150,6 +3167,30 @@ function getReceivedMonitorState() {
   if (!(state.progress instanceof Map)) {
     // Карта отслеживания промежуточных сообщений (SP-xxxxx → индекс в истории чата)
     state.progress = new Map();
+  }
+  if (!state.metrics || typeof state.metrics !== "object") {
+    // Метрики фонового опроса RSTS для вкладки Debug
+    state.metrics = {
+      configuredIntervalMs: null,
+      lastStartedAt: null,
+      lastFinishedAt: null,
+      lastDurationMs: null,
+      averageDurationMs: null,
+      samples: 0,
+      totalAttempts: 0,
+      totalSuccess: 0,
+      totalErrors: 0,
+      totalTimeouts: 0,
+      skippedOverlaps: 0,
+      lastGapMs: null,
+      lastOkAt: null,
+      lastErrorAt: null,
+      lastErrorText: null,
+      lastBlockedAt: null,
+      lastBlockedReason: null,
+      consecutiveErrors: 0,
+      runningSince: null,
+    };
   }
   let limit = Number(state.limit);
   if (!Number.isFinite(limit) || limit <= 0) {
@@ -3160,6 +3201,133 @@ function getReceivedMonitorState() {
   if (!Number.isFinite(limit) || limit <= 0) limit = 20;
   state.limit = Math.min(Math.max(Math.round(limit), 1), 200);
   return state;
+}
+
+// Форматирование продолжительности запроса в человеко-понятный вид
+function formatDurationMs(ms) {
+  if (!Number.isFinite(ms)) return "—";
+  if (ms < 1) return ms.toFixed(2) + " мс";
+  if (ms < 1000) return Math.round(ms) + " мс";
+  const seconds = ms / 1000;
+  if (seconds < 60) return seconds.toFixed(seconds >= 10 ? 1 : 2) + " с";
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds - minutes * 60;
+  if (minutes < 60) return `${minutes} мин ${rest.toFixed(0)} с`;
+  const hours = Math.floor(minutes / 60);
+  const restMin = minutes - hours * 60;
+  return `${hours} ч ${restMin} мин`;
+}
+
+// Форматирование относительного времени (например, «5 с назад»)
+function formatRelativeTime(ts) {
+  if (!Number.isFinite(ts)) return "—";
+  const now = Date.now();
+  const delta = Math.max(0, now - ts);
+  if (delta < 5000) return "только что";
+  if (delta < 60000) return `${Math.round(delta / 1000)} с назад`;
+  if (delta < 3600000) {
+    const minutes = Math.round(delta / 60000);
+    return `${minutes} мин назад`;
+  }
+  const hours = Math.round(delta / 3600000);
+  return `${hours} ч назад`;
+}
+
+// Обновление панели диагностики опроса RSTS во вкладке Debug
+function updateReceivedMonitorDiagnostics() {
+  const els = UI.els && UI.els.receivedDiag ? UI.els.receivedDiag : null;
+  if (!els || !els.root) return;
+  const state = UI.state && UI.state.received ? UI.state.received : getReceivedMonitorState();
+  const metrics = state.metrics || {};
+  const statusEl = els.status;
+  const now = Date.now();
+  let statusText = "Ожидание запуска";
+  let statusClass = "";
+  if (state.running) {
+    statusText = "Выполняется запрос";
+    statusClass = "warn";
+  } else if (metrics.consecutiveErrors >= 3) {
+    statusText = "Нет ответа, проверьте соединение";
+    statusClass = "error";
+  } else if (metrics.consecutiveErrors > 0) {
+    statusText = "Есть ошибки опроса";
+    statusClass = "warn";
+  } else if (metrics.lastOkAt) {
+    statusText = "Ответ получен " + formatRelativeTime(metrics.lastOkAt);
+    statusClass = "";
+  } else if (metrics.totalAttempts > 0) {
+    statusText = "Ответ не получен";
+    statusClass = "warn";
+  }
+  if (statusEl) {
+    statusEl.textContent = statusText;
+    statusEl.classList.remove("warn", "error");
+    if (statusClass) statusEl.classList.add(statusClass);
+  }
+  const intervalMs = Number(metrics.configuredIntervalMs);
+  if (els.interval) {
+    els.interval.textContent = formatDurationMs(metrics.configuredIntervalMs);
+    els.interval.classList.remove("warn", "error");
+  }
+  if (els.lastStart) els.lastStart.textContent = metrics.lastStartedAt ? formatRelativeTime(metrics.lastStartedAt) : "—";
+  if (els.lastFinish) els.lastFinish.textContent = metrics.lastFinishedAt ? formatRelativeTime(metrics.lastFinishedAt) : "—";
+  if (els.duration) {
+    els.duration.textContent = formatDurationMs(metrics.lastDurationMs);
+    els.duration.classList.remove("warn", "error");
+    if (Number.isFinite(metrics.lastDurationMs) && Number.isFinite(intervalMs) && intervalMs > 0) {
+      if (metrics.lastDurationMs > intervalMs * 1.5) els.duration.classList.add("error");
+      else if (metrics.lastDurationMs > intervalMs) els.duration.classList.add("warn");
+    }
+  }
+  if (els.avg) {
+    els.avg.textContent = formatDurationMs(metrics.averageDurationMs);
+    els.avg.classList.remove("warn", "error");
+    if (Number.isFinite(metrics.averageDurationMs) && Number.isFinite(intervalMs) && intervalMs > 0) {
+      if (metrics.averageDurationMs > intervalMs * 1.3) els.avg.classList.add("warn");
+    }
+  }
+  if (els.gap) {
+    const gapText = Number.isFinite(metrics.lastGapMs) ? formatDurationMs(metrics.lastGapMs) : "—";
+    els.gap.textContent = gapText;
+    els.gap.classList.remove("warn", "error");
+    if (Number.isFinite(metrics.lastGapMs) && Number.isFinite(intervalMs) && intervalMs > 0) {
+      if (metrics.lastGapMs > intervalMs * 2.5) els.gap.classList.add("error");
+      else if (metrics.lastGapMs > intervalMs * 1.5) els.gap.classList.add("warn");
+    }
+  }
+  if (els.runningSince) {
+    els.runningSince.textContent = state.running && metrics.runningSince ? formatRelativeTime(metrics.runningSince) : "—";
+  }
+  if (els.totals) {
+    const ok = metrics.totalSuccess || 0;
+    const fail = metrics.totalErrors || 0;
+    els.totals.textContent = `${metrics.totalAttempts || 0} / ${ok} ✓ / ${fail} ✗`;
+    els.totals.classList.toggle("warn", fail > 0);
+  }
+  if (els.timeouts) {
+    els.timeouts.textContent = String(metrics.totalTimeouts || 0);
+    els.timeouts.classList.toggle("warn", (metrics.totalTimeouts || 0) > 0);
+  }
+  if (els.overlaps) {
+    const overlaps = metrics.skippedOverlaps || 0;
+    els.overlaps.textContent = String(overlaps);
+    els.overlaps.classList.toggle("warn", overlaps > 0);
+  }
+  if (els.errorBox) {
+    const hasError = !!metrics.lastErrorText;
+    els.errorBox.textContent = hasError
+      ? `${formatRelativeTime(metrics.lastErrorAt || now)} · ${metrics.lastErrorText}`
+      : "Ошибок нет";
+    els.errorBox.hidden = !hasError;
+    els.errorBox.classList.toggle("error", hasError);
+  }
+  if (els.blockedBox) {
+    const hasBlock = !!metrics.lastBlockedAt;
+    els.blockedBox.textContent = hasBlock
+      ? `${formatRelativeTime(metrics.lastBlockedAt)} · ${metrics.lastBlockedReason || "Блокировка"}`
+      : "Блокировок не было";
+    els.blockedBox.hidden = !hasBlock;
+  }
 }
 
 // Обновляем визуальный индикатор, показывающий ожидание оставшихся пакетов SP-...
@@ -3205,23 +3373,71 @@ function handleReceivedSnapshot(items) {
 // чтобы избежать преждевременного прерывания при нагруженных каналах.
 async function pollReceivedMessages(opts) {
   const state = getReceivedMonitorState();
-  if (state.running) return null;
+  const metrics = state.metrics;
+  if (state.running) {
+    metrics.skippedOverlaps += 1;
+    metrics.lastBlockedAt = Date.now();
+    metrics.lastBlockedReason = "Предыдущий запрос ещё выполняется";
+    updateReceivedMonitorDiagnostics();
+    return null;
+  }
   state.running = true;
   const options = opts || {};
   const params = { full: "1", json: "1", n: String(state.limit) };
+  const startedAt = Date.now();
+  const startedPrecise = typeof performance !== "undefined" && performance.now ? performance.now() : startedAt;
+  metrics.totalAttempts += 1;
+  metrics.lastGapMs = metrics.lastStartedAt != null ? Math.max(0, startedAt - metrics.lastStartedAt) : null;
+  metrics.lastStartedAt = startedAt;
+  metrics.runningSince = startedAt;
   try {
     const res = await deviceFetch("RSTS", params, options.timeoutMs || DEVICE_COMMAND_TIMEOUT_MS);
     if (!res.ok) {
       if (res.error) console.warn("[recv] RSTS недоступен:", res.error);
+      metrics.totalErrors += 1;
+      metrics.consecutiveErrors += 1;
+      const errText = res.error != null ? String(res.error) : "Unknown error";
+      metrics.lastErrorText = errText;
+      metrics.lastErrorAt = Date.now();
+      if (/abort/i.test(errText)) metrics.totalTimeouts += 1;
+      updateReceivedMonitorDiagnostics();
       return null;
     }
     const items = parseReceivedResponse(res.text);
     handleReceivedSnapshot(items);
+    metrics.totalSuccess += 1;
+    metrics.consecutiveErrors = 0;
+    metrics.lastOkAt = Date.now();
+    metrics.lastErrorText = null;
+    metrics.lastErrorAt = null;
     return items;
   } catch (err) {
     console.warn("[recv] ошибка фонового опроса:", err);
+    const errText = err != null ? String(err) : "Unknown error";
+    metrics.totalErrors += 1;
+    metrics.consecutiveErrors += 1;
+    metrics.lastErrorText = errText;
+    metrics.lastErrorAt = Date.now();
+    if (/abort/i.test(errText)) metrics.totalTimeouts += 1;
+    updateReceivedMonitorDiagnostics();
     return null;
   } finally {
+    const finishedAt = Date.now();
+    const finishedPrecise = typeof performance !== "undefined" && performance.now ? performance.now() : finishedAt;
+    const durationMs = Math.max(0, finishedPrecise - startedPrecise);
+    metrics.lastFinishedAt = finishedAt;
+    metrics.lastDurationMs = durationMs;
+    metrics.samples += 1;
+    if (Number.isFinite(durationMs)) {
+      if (!Number.isFinite(metrics.averageDurationMs)) {
+        metrics.averageDurationMs = durationMs;
+      } else {
+        const alpha = 1 / Math.min(metrics.samples, 30);
+        metrics.averageDurationMs = (1 - alpha) * metrics.averageDurationMs + alpha * durationMs;
+      }
+    }
+    metrics.runningSince = null;
+    updateReceivedMonitorDiagnostics();
     state.running = false;
   }
 }
@@ -3232,6 +3448,10 @@ function stopReceivedMonitor() {
     clearInterval(state.timer);
     state.timer = null;
   }
+  if (state && state.metricsTimer) {
+    clearInterval(state.metricsTimer);
+    state.metricsTimer = null;
+  }
 }
 
 function startReceivedMonitor(opts) {
@@ -3240,6 +3460,9 @@ function startReceivedMonitor(opts) {
   const intervalRaw = Number(options.intervalMs);
   const interval = Number.isFinite(intervalRaw) && intervalRaw >= 1000 ? intervalRaw : 5000;
   stopReceivedMonitor();
+  state.metrics.configuredIntervalMs = interval;
+  state.metrics.lastConfiguredAt = Date.now();
+  updateReceivedMonitorDiagnostics();
   const tick = () => {
     pollReceivedMessages({ silentError: true }).catch((err) => {
       console.warn("[recv] непредвиденная ошибка опроса:", err);
@@ -3249,6 +3472,11 @@ function startReceivedMonitor(opts) {
     tick();
   }
   state.timer = setInterval(tick, interval);
+  if (!state.metricsTimer) {
+    state.metricsTimer = setInterval(() => {
+      updateReceivedMonitorDiagnostics();
+    }, 1000);
+  }
 }
 
 /* Таблица каналов */
