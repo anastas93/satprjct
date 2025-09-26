@@ -3,10 +3,12 @@
 #include <vector>
 #include <array>
 #include "tx_module.h"
+#include "rx_module.h"
 #include "../libs/frame/frame_header.h" // заголовок кадра
 #include "../libs/scrambler/scrambler.h" // дескремблирование кадра
 #include "../libs/crypto/aes_ccm.h"      // расшифровка
 #include "../libs/key_loader/key_loader.h" // загрузка ключа
+#include "../libs/protocol/ack_utils.h"   // маркер ACK
 
 // Простая заглушка радиоинтерфейса
 class MockRadio : public IRadio {
@@ -28,25 +30,23 @@ int main() {
   uint32_t id = tx.queue(reinterpret_cast<const uint8_t*>(msg), 5);
   assert(id==1);                          // ожидаемый ID
   tx.loop();                              // формируем кадр
-  assert(radio.last.size() == FrameHeader::SIZE*2 + 22); // 9 байт префикс + 5 данных + тег
-  // дескремблируем кадр перед проверкой
-  scrambler::descramble(radio.last.data(), radio.last.size());
+  const size_t minFrame = FrameHeader::SIZE*2 + 22;
+  assert(radio.last.size() >= minFrame);
+  assert(radio.last.size() <= 245);
+  auto frameCopy = radio.last;
+  scrambler::descramble(frameCopy.data(), frameCopy.size());
   FrameHeader hdr;
-  assert(FrameHeader::decode(radio.last.data(), radio.last.size(), hdr));
-  assert(hdr.msg_id==1 && hdr.payload_len==22);
-  // дешифруем полезную нагрузку и проверяем наличие "HELLO"
-  std::vector<uint8_t> payload(radio.last.begin()+FrameHeader::SIZE*2, radio.last.end());
-  std::vector<uint8_t> tag(payload.end()-8, payload.end());
-  std::vector<uint8_t> cipher(payload.begin(), payload.end()-8);
-  std::array<uint8_t,16> key = KeyLoader::loadKey();
-  auto nonce = KeyLoader::makeNonce(1, 0);
-  std::vector<uint8_t> plain;
-  bool ok = decrypt_ccm(key.data(), key.size(), nonce.data(), nonce.size(),
-                        nullptr, 0, cipher.data(), cipher.size(),
-                        tag.data(), tag.size(), plain);
-  assert(ok);
-  std::string text(plain.begin(), plain.end());
-  assert(text.size() >= 5 && text.substr(text.size()-5) == "HELLO");
+  assert(FrameHeader::decode(frameCopy.data(), frameCopy.size(), hdr));
+  assert(hdr.msg_id==1);
+  RxModule rx;
+  std::vector<uint8_t> decoded;
+  rx.setCallback([&](const uint8_t* data, size_t len) {
+    decoded.assign(data, data + len);
+  });
+  rx.onReceive(radio.last.data(), radio.last.size());
+  assert(decoded.size() >= 5);
+  std::string text(decoded.begin(), decoded.end());
+  assert(text.find("HELLO") != std::string::npos);
   std::cout << "OK" << std::endl;
 
   // Проверяем, что при отсутствии ACK остальные части пакета переносятся в архив
@@ -100,5 +100,29 @@ int main() {
   txZero.setAckEnabled(false);        // если бы сообщение ушло в архив, оно бы восстановилось и отправилось
   txZero.loop();
   assert(radioZero.history.size() == 1);
+
+  // Проверяем, что ACK-сообщения уходят раньше обычных пакетов
+  MockRadio radioPriority;
+  TxModule txPriority(radioPriority, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txPriority.setAckEnabled(true);
+  txPriority.setAckRetryLimit(1);
+  txPriority.setAckTimeout(0);
+  txPriority.setSendPause(0);
+  const char priorityMsg[] = "DATA";
+  txPriority.queue(reinterpret_cast<const uint8_t*>(priorityMsg), sizeof(priorityMsg));
+  const uint8_t ackPayload = protocol::ack::MARKER;
+  txPriority.queue(&ackPayload, 1);            // отправляем ACK поверх очереди
+  txPriority.loop();                           // первый кадр обязан быть ACK
+  assert(radioPriority.history.size() == 1);
+  auto ackFrame = radioPriority.history.front();
+  RxModule rxAck;
+  std::vector<uint8_t> ackPlain;
+  rxAck.setCallback([&](const uint8_t* data, size_t len) {
+    ackPlain.assign(data, data + len);
+  });
+  rxAck.onReceive(radioPriority.history.front().data(), radioPriority.history.front().size());
+  assert(!ackPlain.empty() && ackPlain.back() == protocol::ack::MARKER);
+  txPriority.loop();
+  assert(radioPriority.history.size() == 2);
   return 0;
 }

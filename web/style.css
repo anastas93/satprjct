@@ -432,6 +432,29 @@ main {
 }
 .msg.rx .bubble-text { font-weight:600; }
 .msg.rx time { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); }
+.msg.rx.progress .bubble {
+  background: color-mix(in oklab, var(--good) 12%, var(--panel) 88%);
+  border-style: dashed;
+}
+.msg.rx.progress .bubble-text { font-weight:600; }
+.bubble-text.with-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+}
+.bubble-spinner {
+  width: .85rem;
+  height: .85rem;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklab, var(--good) 80%, transparent 20%);
+  border-top-color: color-mix(in oklab, var(--good) 20%, transparent 80%);
+  animation: bubble-spinner 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+@keyframes bubble-spinner {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 .bubble-text { line-height:1.55; }
 /* Полный текст системного ответа */
 .bubble-detail {
