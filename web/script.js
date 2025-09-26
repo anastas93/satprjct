@@ -3067,7 +3067,7 @@ async function pollReceivedMessages(opts) {
   if (state.running) return null;
   state.running = true;
   const options = opts || {};
-  const params = { full: "1", n: String(state.limit) };
+  const params = { full: "1", json: "1", n: String(state.limit) };
   try {
     const res = await deviceFetch("RSTS", params, options.timeoutMs || 3000);
     if (!res.ok) {
@@ -6483,21 +6483,46 @@ async function refreshKeyState(options) {
   debugLog("KEYSTATE → запрос состояния");
   const res = await deviceFetch("KEYSTATE", {}, 4000);
   if (res.ok) {
-    debugLog("KEYSTATE ← " + res.text);
-    try {
-      const data = JSON.parse(res.text);
-      if (data && data.error) {
-        if (!opts.silent) note("KEYSTATE: " + data.error);
-        return;
+    const rawText = res.text != null ? String(res.text) : "";
+    debugLog("KEYSTATE ← " + rawText);
+    let data = null;
+    let parseFailed = false;
+    if (rawText.trim()) {
+      try {
+        data = JSON.parse(rawText);
+      } catch (err) {
+        // Всегда оставляем комментарии на русском
+        console.warn("[key] не удалось разобрать JSON KEYSTATE:", err);
+        parseFailed = true;
       }
+    }
+    if (data && data.error) {
+      if (!opts.silent) note("KEYSTATE: " + data.error);
+      return;
+    }
+    if (data) {
       UI.key.state = data;
       UI.key.lastMessage = "";
       renderKeyState(data);
       if (!opts.silent) status("✓ KEYSTATE");
-    } catch (err) {
-      console.warn("[key] parse error", err);
-      note("Не удалось разобрать состояние ключа");
+      return;
     }
+    const plain = rawText.trim();
+    if (plain) {
+      const normalized = plain.toUpperCase();
+      UI.key.state = null;
+      if (normalized === "UNKNOWN") {
+        UI.key.lastMessage = "Команда KEYSTATE не поддерживается текущей прошивкой";
+        note("KEYSTATE: команда недоступна на устройстве");
+      } else {
+        UI.key.lastMessage = plain;
+        note("KEYSTATE: получен ответ без JSON — " + plain);
+      }
+      renderKeyState(null);
+      if (!opts.silent) status(parseFailed ? "✗ KEYSTATE" : "✓ KEYSTATE");
+      return;
+    }
+    if (parseFailed) note("Не удалось разобрать состояние ключа");
   } else if (!opts.silent) {
     status("✗ KEYSTATE");
     note("Ошибка KEYSTATE: " + res.error);
