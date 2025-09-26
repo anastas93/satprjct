@@ -20,6 +20,7 @@ int main() {
   assert(rec.valid);
   assert(rec.origin == KeyOrigin::LOCAL);
   assert(!rec.session_key.empty());
+  const auto first_public = rec.root_public;
   auto id = keyId(rec.session_key);
   std::cout << "local id=" << std::hex << int(id[0]) << int(id[1]) << std::dec << std::endl;
 
@@ -71,6 +72,8 @@ int main() {
   KeyRecord rec3;
   assert(loadKeyRecord(rec3));
   assert(rec3.origin == KeyOrigin::LOCAL);
+  // Проверяем, что новая генерация создаёт отличающийся публичный ключ.
+  assert(rec3.root_public != first_public);
   assert(restorePreviousKey());
   auto state_after_restore = getState();
   assert(!state_after_restore.has_backup);
