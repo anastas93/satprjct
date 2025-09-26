@@ -57,7 +57,12 @@ uint32_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data
     std::string prefix;
     std::vector<uint8_t> tmp;
     if (with_id) {
-      prefix = "[" + base + "|" + std::to_string(part_idx) + "]";
+      prefix = "[" + base + "|" + std::to_string(part_idx);
+      if (parts > 1) {
+        prefix += "/";
+        prefix += std::to_string(parts);
+      }
+      prefix += "]";
       tmp.assign(prefix.begin(), prefix.end());
     }
     tmp.insert(tmp.end(), data + offset, data + offset + part);
