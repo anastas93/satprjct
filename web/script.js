@@ -2679,26 +2679,93 @@ function parseReceivedResponse(raw) {
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
       const parsed = JSON.parse(trimmed);
-      const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.items) ? parsed.items : []);
-      if (Array.isArray(list)) {
-        return list.map((entry) => {
-          if (!entry) return null;
-          const name = entry.name != null ? String(entry.name).trim() : "";
-          const type = normalizeReceivedType(name, entry.type);
-          const text = entry.text != null ? String(entry.text) : "";
-          const hex = entry.hex != null ? String(entry.hex) : "";
-          const bytes = hexToBytes(hex);
-          const len = Number.isFinite(entry.len) ? Number(entry.len)
-            : (bytes && bytes.length ? bytes.length : text.length);
-          const normalized = { name, type, text, hex, len };
-          if (bytes && bytes.length) normalized._hexBytes = bytes;
-          const resolved = resolveReceivedText(normalized);
-          if (resolved && !normalized.text) normalized.text = resolved;
-          normalized.resolvedText = resolved;
-          normalized.resolvedLen = getReceivedLength(normalized);
-          return normalized;
-        }).filter(Boolean);
+      const out = [];
+      const seen = new Set();
+      const pushEntry = (sourceEntry, fallbackType) => {
+        if (sourceEntry == null) return;
+        const src = (sourceEntry && typeof sourceEntry === "object") ? sourceEntry : { name: sourceEntry };
+        const nameRaw = src.name != null ? String(src.name) : "";
+        const name = nameRaw.trim();
+        const typeHint = src.type != null ? src.type : (src.kind != null ? src.kind : (src.queue != null ? src.queue : fallbackType));
+        const type = normalizeReceivedType(name, typeHint);
+        let text = "";
+        if (src.text != null) text = String(src.text);
+        else if (src.payload && typeof src.payload === "object" && src.payload.text != null) text = String(src.payload.text);
+        else if (src.data && typeof src.data === "object" && src.data.text != null) text = String(src.data.text);
+        let hex = "";
+        if (src.hex != null) hex = String(src.hex);
+        else if (src.payload && typeof src.payload === "object" && src.payload.hex != null) hex = String(src.payload.hex);
+        else if (src.data && typeof src.data === "object" && src.data.hex != null) hex = String(src.data.hex);
+        hex = hex.trim();
+        let lenValue = src.len;
+        if (lenValue == null && src.length != null) lenValue = src.length;
+        if (lenValue == null && src.payload && typeof src.payload === "object" && src.payload.len != null) lenValue = src.payload.len;
+        if (lenValue == null && src.data && typeof src.data === "object" && src.data.len != null) lenValue = src.data.len;
+        let lenNum = Number(lenValue);
+        if (!Number.isFinite(lenNum) || lenNum < 0) lenNum = null;
+        let bytes = null;
+        if (src._hexBytes instanceof Uint8Array) bytes = src._hexBytes;
+        if ((!bytes || !bytes.length) && Array.isArray(src.bytes)) {
+          const collected = [];
+          for (let i = 0; i < src.bytes.length; i += 1) {
+            const value = Number(src.bytes[i]);
+            if (!Number.isFinite(value)) continue;
+            collected.push(Math.max(0, Math.min(255, Math.round(value))));
+          }
+          if (collected.length) bytes = new Uint8Array(collected);
+        }
+        if ((!bytes || !bytes.length) && hex) bytes = hexToBytes(hex);
+        if (bytes && bytes.length) {
+          if (!hex) {
+            let hexString = "";
+            for (let i = 0; i < bytes.length; i += 1) {
+              hexString += bytes[i].toString(16).padStart(2, "0");
+            }
+            hex = hexString;
+          }
+          if (lenNum == null) lenNum = bytes.length;
+        }
+        if (lenNum == null && text) lenNum = text.length;
+        const normalized = {
+          name,
+          type,
+          text: text != null ? String(text) : "",
+          hex,
+          len: Number.isFinite(lenNum) && lenNum >= 0 ? lenNum : 0,
+        };
+        if (bytes && bytes.length) normalized._hexBytes = bytes;
+        const resolved = resolveReceivedText(normalized);
+        if (resolved && !normalized.text) normalized.text = resolved;
+        normalized.resolvedText = resolved;
+        normalized.resolvedLen = getReceivedLength(normalized);
+        const key = (normalized.name || "") + "|" + normalized.type + "|" + (normalized.hex ? normalized.hex : normalized.text);
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push(normalized);
+      };
+      const processList = (value, fallbackType) => {
+        if (!value) return;
+        if (Array.isArray(value)) {
+          value.forEach((item) => pushEntry(item, fallbackType));
+          return;
+        }
+        if (value && typeof value === "object" && Array.isArray(value.items)) {
+          value.items.forEach((item) => pushEntry(item, fallbackType));
+        }
+      };
+      if (Array.isArray(parsed)) {
+        processList(parsed, null);
+      } else if (parsed && typeof parsed === "object") {
+        if (Array.isArray(parsed.items)) processList(parsed.items, null);
+        else if (parsed.items && typeof parsed.items === "object" && Array.isArray(parsed.items.items)) {
+          processList(parsed.items.items, null);
+        }
+        Object.keys(parsed).forEach((key) => {
+          if (key === "items") return;
+          processList(parsed[key], key);
+        });
       }
+      if (out.length) return out;
     } catch (err) {
       console.warn("[recv] не удалось разобрать ответ RSTS:", err);
     }
