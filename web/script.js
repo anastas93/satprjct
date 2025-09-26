@@ -2865,9 +2865,8 @@ function logReceivedMessage(entry, opts) {
   const options = opts || {};
   const name = entry.name != null ? String(entry.name).trim() : "";
   const entryType = normalizeReceivedType(name, entry.type);
-  const isGoPacket = name.toUpperCase().startsWith("GO-");
-  if (!isGoPacket || entryType !== "ready") {
-    // В чат попадают только финальные GO-пакеты.
+  if (!name || entryType !== "ready") {
+    // В чат попадают только элементы со статусом ready; без имени их сложно отслеживать.
     return;
   }
   const bytes = entry && entry._hexBytes instanceof Uint8Array ? entry._hexBytes : hexToBytes(entry.hex);
