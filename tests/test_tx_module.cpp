@@ -129,24 +129,26 @@ int main() {
   txPriority.loop();
   assert(radioPriority.history.size() == 2);
 
-  // Проверяем, что при ack_timeout=0 модуль ожидает подтверждение до его получения
-  MockRadio radioWait;
-  TxModule txWait(radioWait, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
-  txWait.setAckEnabled(true);
-  txWait.setAckRetryLimit(3);
-  txWait.setAckTimeout(0);            // бесконечное ожидание ACK
-  txWait.setSendPause(0);
-  const char wait_msg[] = "WAIT";
-  txWait.queue(reinterpret_cast<const uint8_t*>(wait_msg), sizeof(wait_msg));
-  bool firstSend = txWait.loop();
-  assert(firstSend);
-  assert(radioWait.history.size() == 1);
-  bool secondSend = txWait.loop();
-  assert(!secondSend);                // повтор не должен стартовать без подтверждения
-  assert(radioWait.history.size() == 1);
-  txWait.onAckReceived();             // имитируем приход подтверждения
-  bool afterAck = txWait.loop();
-  assert(!afterAck);
-  assert(radioWait.history.size() == 1);
+  // Проверяем, что после перевода ack_timeout=0 очередь продолжает двигаться без ожидания ACK
+  MockRadio radioFlow;
+  TxModule txFlow(radioFlow, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txFlow.setAckEnabled(true);
+  txFlow.setAckRetryLimit(3);
+  txFlow.setAckTimeout(10);
+  txFlow.setSendPause(0);
+  const char flowFirst[] = "FLOW1";
+  const char flowSecond[] = "FLOW2";
+  txFlow.queue(reinterpret_cast<const uint8_t*>(flowFirst), sizeof(flowFirst));
+  txFlow.queue(reinterpret_cast<const uint8_t*>(flowSecond), sizeof(flowSecond));
+  bool firstFlowSend = txFlow.loop();
+  assert(firstFlowSend);
+  assert(radioFlow.history.size() == 1);
+  txFlow.setAckTimeout(0);            // отключаем ожидание подтверждения на лету
+  bool secondFlowSend = txFlow.loop();
+  assert(secondFlowSend);             // второй пакет не должен зависнуть из-за ожидания ACK
+  assert(radioFlow.history.size() == 2);
+  bool noMore = txFlow.loop();
+  assert(!noMore);
+  assert(radioFlow.history.size() == 2);
   return 0;
 }
