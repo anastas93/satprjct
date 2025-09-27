@@ -1685,6 +1685,7 @@ void handleCmdHttp() {
     resp = cmdTx(payload);
   } else if (cmd == "ENCT") {
     resp = cmdEnct();
+    contentType = "application/json"; // Ответ в формате JSON
   } else if (cmd == "TESTRXM") {
     bool hasOverride = false;
     String overrideText;
@@ -1703,11 +1704,14 @@ void handleCmdHttp() {
     }
     if (hasOverride) {
       resp = cmdTestRxm(&overrideText);
+      contentType = "application/json"; // Ответ в формате JSON
     } else {
       resp = cmdTestRxm();
+      contentType = "application/json"; // Ответ в формате JSON
     }
   } else if (cmd == "KEYSTATE") {
     resp = cmdKeyState();
+    contentType = "application/json"; // Ответ в формате JSON
   } else if (cmd == "KEYSTORE") {
     String arg;
     if (server.hasArg("mode")) {
@@ -1718,22 +1722,30 @@ void handleCmdHttp() {
       arg = cmdArg;
     }
     resp = cmdKeyStorage(arg);
+    contentType = "application/json"; // Ответ в формате JSON
   } else if (cmd == "KEYGEN") {
     resp = cmdKeyGenSecure();
+    contentType = "application/json"; // Ответ в формате JSON
   } else if (cmd == "KEYRESTORE") {
     resp = cmdKeyRestoreSecure();
+    contentType = "application/json"; // Ответ в формате JSON
   } else if (cmd == "KEYSEND") {
     resp = cmdKeyTransferSendLora();
+    contentType = "application/json"; // Ответ в формате JSON
   } else if (cmd == "KEYRECV") {
     String hex = server.hasArg("pub") ? server.arg("pub") : String();
     resp = cmdKeyReceiveSecure(hex);
+    contentType = "application/json"; // Ответ в формате JSON
   } else if (cmd == "KEYTRANSFER") {
     if (cmdArg == "SEND") {
       resp = cmdKeyTransferSendLora();
+      contentType = "application/json"; // Ответ в формате JSON
     } else if (cmdArg == "RECEIVE") {
       resp = cmdKeyTransferReceiveLora();
+      contentType = "application/json"; // Ответ в формате JSON
     } else {
       resp = String("{\"error\":\"mode\"}");
+      contentType = "application/json"; // Ответ в формате JSON
     }
   } else {
     resp = "UNKNOWN";
