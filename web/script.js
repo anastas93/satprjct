@@ -2832,7 +2832,7 @@ async function pollReceivedAfterTestRxm(threshold, options) {
   const maxAttemptsRaw = Number(opts.maxAttempts);
   const maxAttempts = Number.isFinite(maxAttemptsRaw) && maxAttemptsRaw > 0 ? Math.ceil(maxAttemptsRaw) : 6;
   const delayRaw = Number(opts.delayMs);
-  const delayMs = Number.isFinite(delayRaw) && delayRaw >= 0 ? delayRaw : 1500;
+  const delayMs = Number.isFinite(delayRaw) && delayRaw >= 0 ? delayRaw : 320;
   const ensureLastName = () => {
     if (state.lastName) return state.lastName;
     const history = getChatHistory();

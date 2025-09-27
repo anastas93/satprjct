@@ -453,7 +453,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
                 <div id="ackRetryHint" class="field-hint">Доступно после включения ACK.</div>
               </label>
               <label>ACK тайм-аут (мс)
-                <input id="ACKT" type="number" min="0" max="60000" value="1500" />
+                <input id="ACKT" type="number" min="0" max="60000" value="320" />
                 <div id="ackTimeoutHint" class="field-hint">Время ожидания ACK не загружено.</div>
               </label>
               <label>ACK задержка (мс)
@@ -5185,7 +5185,7 @@ async function pollReceivedAfterTestRxm(threshold, options) {
   const maxAttemptsRaw = Number(opts.maxAttempts);
   const maxAttempts = Number.isFinite(maxAttemptsRaw) && maxAttemptsRaw > 0 ? Math.ceil(maxAttemptsRaw) : 6;
   const delayRaw = Number(opts.delayMs);
-  const delayMs = Number.isFinite(delayRaw) && delayRaw >= 0 ? delayRaw : 1500;
+  const delayMs = Number.isFinite(delayRaw) && delayRaw >= 0 ? delayRaw : 320;
   const ensureLastName = () => {
     if (state.lastName) return state.lastName;
     const history = getChatHistory();
