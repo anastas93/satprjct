@@ -556,7 +556,9 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
         <div class="debug-metrics__header">
           <h3>Мониторинг опроса RSTS</h3>
           <span id="recvDiagStatus" class="debug-metrics__status">Ожидание запуска</span>
+          <div id="recvDiagMode" class="debug-metrics__mode small muted">Push-канал не активен</div>
         </div>
+        <p class="small muted">Для push-подписки требуется новая прошивка с поддержкой SSE. Если канал недоступен, интерфейс автоматически использует прежний опрос командой RSTS.</p>
         <div class="debug-metrics-grid">
           <div class="debug-metrics-item">
             <span class="debug-metrics-item__label">Интервал опроса</span>

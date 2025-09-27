@@ -32,6 +32,7 @@ std::string ReceivedBuffer::pushRaw(uint32_t id, uint32_t part, const uint8_t* d
   item.part = part;
   item.data.assign(data, data + len);
   item.name = makeRawName(id, part);
+  if (onNotify_) onNotify_(Kind::Raw, item); // уведомляем о новом сыром пакете
   return item.name;
 }
 
@@ -44,6 +45,7 @@ std::string ReceivedBuffer::pushSplit(uint32_t id, const uint8_t* data, size_t l
   item.part = 0;
   item.data.assign(data, data + len);
   item.name = makeSplitName(id);
+  if (onNotify_) onNotify_(Kind::Split, item); // уведомляем о новом элементе SP
   return item.name;
 }
 
@@ -56,6 +58,7 @@ std::string ReceivedBuffer::pushReady(uint32_t id, const uint8_t* data, size_t l
   item.part = 0;
   item.data.assign(data, data + len);
   item.name = makeReadyName(id);
+  if (onNotify_) onNotify_(Kind::Ready, item); // уведомляем о готовом сообщении
   return item.name;
 }
 
@@ -129,5 +132,10 @@ std::vector<ReceivedBuffer::SnapshotEntry> ReceivedBuffer::snapshot(size_t count
   append(split_, Kind::Split);
   append(raw_, Kind::Raw);
   return out;
+}
+
+// Настройка обработчика уведомлений
+void ReceivedBuffer::setNotificationCallback(NotificationCallback cb) {
+  onNotify_ = std::move(cb);
 }
 

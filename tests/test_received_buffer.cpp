@@ -1,16 +1,32 @@
 #include <cassert>
 #include <iostream>
+#include <vector>
 #include "libs/received_buffer/received_buffer.h"
 
 // Проверка буфера принятых сообщений
 int main() {
   ReceivedBuffer buf;
+  int notifyCount = 0;
+  std::vector<ReceivedBuffer::Kind> notifyKinds;
+  std::vector<std::string> notifyNames;
+  buf.setNotificationCallback([&](ReceivedBuffer::Kind kind, const ReceivedBuffer::Item& item) {
+    // Колбэк должен вызываться по одному разу на каждый push
+    notifyCount += 1;
+    notifyKinds.push_back(kind);
+    notifyNames.push_back(item.name);
+  });
   uint8_t a[] = {1,2};
   uint8_t b[] = {3,4,5};
   uint8_t c[] = {6};
   std::string n1 = buf.pushRaw(1, 2, a, 2);
   std::string n2 = buf.pushSplit(7, b, 3);
   std::string n3 = buf.pushReady(5, c, 1);
+  assert(notifyCount == 3);
+  assert(notifyKinds.size() == 3);
+  assert(notifyKinds[0] == ReceivedBuffer::Kind::Raw);
+  assert(notifyKinds[1] == ReceivedBuffer::Kind::Split);
+  assert(notifyKinds[2] == ReceivedBuffer::Kind::Ready);
+  assert(notifyNames[0] == n1 && notifyNames[1] == n2 && notifyNames[2] == n3);
   assert(n1 == "R-000001|2");
   assert(n2 == "SP-00007");
   assert(n3 == "GO-00005");
