@@ -134,11 +134,7 @@ bool TxModule::loop() {
     return true;
   }
   auto now = std::chrono::steady_clock::now();
-  if (pause_ms_ && now - last_send_ < std::chrono::milliseconds(pause_ms_)) {
-    DEBUG_LOG("TxModule: пауза");
-    radio_.ensureReceiveMode();
-    return false;
-  }
+  bool bypass_pause = false;                      // признак обхода глобальной паузы при ретраях
 
   if (ack_enabled_ && waiting_ack_) {
     if (ack_timeout_ms_ == 0) {
@@ -153,6 +149,7 @@ bool TxModule::loop() {
         inflight_.reset();
       }
       scheduleFromArchive();
+      bypass_pause = true;                         // после отмены ожидания отправляем следующий пакет сразу
     } else {
       auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_attempt_);
       if (elapsed.count() < static_cast<long>(ack_timeout_ms_)) {
@@ -164,6 +161,7 @@ bool TxModule::loop() {
           --inflight_->attempts_left;
           waiting_ack_ = false;
           DEBUG_LOG("TxModule: повтор без ACK");
+          bypass_pause = true;                     // повторяем без учёта общей паузы
         } else {
           DEBUG_LOG("TxModule: ACK не получен, перенос в архив");
           uint8_t failed_qos = inflight_->qos;
@@ -173,10 +171,22 @@ bool TxModule::loop() {
           inflight_.reset();
           waiting_ack_ = false;
           archiveFollowingParts(failed_qos, failed_tag);
+          bypass_pause = true;                     // освобождаем место для следующего сообщения без задержки
         }
       } else {
         waiting_ack_ = false;
+        bypass_pause = true;                       // сбой ожидания ACK — продолжаем сразу
       }
+    }
+  }
+
+  if (pause_ms_) {
+    if (bypass_pause) {
+      last_send_ = now - std::chrono::milliseconds(pause_ms_); // отматываем таймер, чтобы не ждать паузу
+    } else if (now - last_send_ < std::chrono::milliseconds(pause_ms_)) {
+      DEBUG_LOG("TxModule: пауза");
+      radio_.ensureReceiveMode();
+      return false;
     }
   }
 
@@ -659,6 +669,9 @@ void TxModule::onAckReceived() {
   if (had_inflight) {
     inflight_->attempts_left = ack_retry_limit_;
     inflight_.reset();
+  }
+  if (pause_ms_ != 0) {
+    last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms_); // снимаем ограничение паузы после подтверждения
   }
   if (had_inflight) {
     DEBUG_LOG("TxModule: ACK получен для id=%u qos=%u",

@@ -4,6 +4,7 @@
 #include <array>
 #include <thread>
 #include <chrono>
+#include <sstream>
 #define private public
 #define protected public
 #include "tx_module.h"
@@ -180,5 +181,29 @@ int main() {
   bool noMore = txFlow.loop();
   assert(!noMore);
   assert(radioFlow.history.size() == 2);
+
+  // Проверяем, что при ack_timeout < pause повтор и следующий пакет не ждут паузу
+  MockRadio radioPauseAck;
+  TxModule txPauseAck(radioPauseAck, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txPauseAck.setAckResponseDelay(0);
+  txPauseAck.setAckEnabled(true);
+  txPauseAck.setAckRetryLimit(1);
+  txPauseAck.setAckTimeout(10);
+  txPauseAck.setSendPause(50);
+  const char retryMsg[] = "RETRY";
+  const char nextMsg[] = "NEXT";
+  txPauseAck.queue(reinterpret_cast<const uint8_t*>(retryMsg), sizeof(retryMsg));
+  txPauseAck.queue(reinterpret_cast<const uint8_t*>(nextMsg), sizeof(nextMsg));
+  bool firstPauseSend = txPauseAck.loop();
+  assert(firstPauseSend);
+  assert(radioPauseAck.history.size() == 1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(15)); // ждём меньше паузы, но дольше тайм-аута ACK
+  bool retryPauseSend = txPauseAck.loop();
+  assert(retryPauseSend);
+  assert(radioPauseAck.history.size() == 2);
+  txPauseAck.onAckReceived();
+  bool nextPauseSend = txPauseAck.loop();
+  assert(nextPauseSend);
+  assert(radioPauseAck.history.size() == 3);
   return 0;
 }
