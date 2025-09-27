@@ -102,6 +102,9 @@ ReceivedBuffer recvBuf;     // буфер полученных сообщени�
 bool ackEnabled = DefaultSettings::USE_ACK; // флаг автоматической отправки ACK
 bool encryptionEnabled = DefaultSettings::USE_ENCRYPTION; // режим шифрования
 uint8_t ackRetryLimit = DefaultSettings::ACK_RETRY_LIMIT; // число повторов при ожидании ACK
+static constexpr uint32_t kAckDelayMinMs = 0;             // минимально допустимая задержка ответа ACK
+static constexpr uint32_t kAckDelayMaxMs = 5000;          // максимально допустимая задержка ответа ACK
+uint32_t ackResponseDelayMs = DefaultSettings::ACK_RESPONSE_DELAY_MS; // текущая задержка перед ACK
 bool testModeEnabled = false;           // флаг тестового режима SendMsg_BR/received_msg
 uint8_t testModeLocalCounter = 0;       // локальный счётчик пакетов для тестового режима
 
@@ -1619,6 +1622,7 @@ String cmdInfo() {
   s += "\nPower: "; s += String(radio.getPower()); s += " dBm";
   s += "\nPause: "; s += String(tx.getSendPause()); s += " ms";
   s += "\nACK timeout: "; s += String(tx.getAckTimeout()); s += " ms";
+  s += "\nACK delay: "; s += String(ackResponseDelayMs); s += " ms";
   s += "\nACK: "; s += ackEnabled ? "включён" : "выключен";
   s += "\nRX boosted gain: ";
   s += radio.isRxBoostedGainEnabled() ? "включён" : "выключен";
@@ -1809,6 +1813,15 @@ void handleCmdHttp() {
     } else {
       resp = String(effective);
     }
+  } else if (cmd == "ACKD") {
+    if (server.hasArg("v")) {
+      long raw = server.arg("v").toInt();
+      if (raw < static_cast<long>(kAckDelayMinMs)) raw = static_cast<long>(kAckDelayMinMs);
+      if (raw > static_cast<long>(kAckDelayMaxMs)) raw = static_cast<long>(kAckDelayMaxMs);
+      ackResponseDelayMs = static_cast<uint32_t>(raw);
+      tx.setAckResponseDelay(ackResponseDelayMs);
+    }
+    resp = String(ackResponseDelayMs);
   } else if (cmd == "ENC") {
     if (server.hasArg("toggle")) {
       encryptionEnabled = !encryptionEnabled;
@@ -1990,7 +2003,8 @@ void setup() {
   tx.setAckRetryLimit(ackRetryLimit);
   tx.setSendPause(DefaultSettings::SEND_PAUSE_MS);
   tx.setAckTimeout(DefaultSettings::ACK_TIMEOUT_MS);
-  tx.setAckResponseDelay(DefaultSettings::ACK_RESPONSE_DELAY_MS);
+  ackResponseDelayMs = DefaultSettings::ACK_RESPONSE_DELAY_MS; // фиксируем стартовую задержку ACK
+  tx.setAckResponseDelay(ackResponseDelayMs);
   tx.setEncryptionEnabled(encryptionEnabled);
   rx.setEncryptionEnabled(encryptionEnabled);
   rx.setBuffer(&recvBuf);                                   // сохраняем принятые пакеты
@@ -2018,7 +2032,7 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ACKD <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
 }
 
 void loop() {
@@ -2147,6 +2161,7 @@ void loop() {
         Serial.print("Power: "); Serial.print(radio.getPower()); Serial.println(" dBm");
         Serial.print("Pause: "); Serial.print(tx.getSendPause()); Serial.println(" ms");
         Serial.print("ACK timeout: "); Serial.print(tx.getAckTimeout()); Serial.println(" ms");
+        Serial.print("ACK delay: "); Serial.print(ackResponseDelayMs); Serial.println(" ms");
         Serial.print("ACK: "); Serial.println(ackEnabled ? "включён" : "выключен");
       } else if (line.startsWith("STS")) {
         int cnt = line.length() > 3 ? line.substring(4).toInt() : 10;
@@ -2324,6 +2339,16 @@ void loop() {
         } else {
           Serial.println(" ms");
         }
+      } else if (line.startsWith("ACKD")) {
+        long value = static_cast<long>(ackResponseDelayMs);
+        if (line.length() > 4) value = line.substring(5).toInt();
+        if (value < static_cast<long>(kAckDelayMinMs)) value = static_cast<long>(kAckDelayMinMs);
+        if (value > static_cast<long>(kAckDelayMaxMs)) value = static_cast<long>(kAckDelayMaxMs);
+        ackResponseDelayMs = static_cast<uint32_t>(value);
+        tx.setAckResponseDelay(ackResponseDelayMs);
+        Serial.print("ACKD: ");
+        Serial.print(ackResponseDelayMs);
+        Serial.println(" ms");
       } else if (line.startsWith("ACK")) {
         if (line.length() > 3) {                          // установка явного значения
           ackEnabled = line.substring(4).toInt() != 0;
