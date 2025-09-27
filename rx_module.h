@@ -48,6 +48,8 @@ public:
   void reloadKey();
   // Управление режимом шифрования (fallback для старых кадров)
   void setEncryptionEnabled(bool enabled);
+  // Фоновая очистка очередей с незавершёнными блоками
+  void tickCleanup();
 private:
   Callback cb_;
   PacketGatherer gatherer_; // внутренний сборщик фрагментов
@@ -87,6 +89,8 @@ private:
   };
   std::unordered_map<std::string, PendingSplit> pending_split_; // незавершённые группы частей
   static constexpr std::chrono::seconds PENDING_SPLIT_TTL{30};  // время жизни незавершённых частей
+  static constexpr size_t PENDING_CONV_LIMIT = 64;              // максимум незавершённых свёрточных блоков
+  static constexpr size_t PENDING_SPLIT_LIMIT = 64;             // максимум незавершённых групп частей
   struct SplitProcessResult {
     bool deliver = false;               // готов ли результат к выдаче
     bool use_original = true;          // можно ли использовать исходный буфер без копирования
@@ -98,6 +102,8 @@ private:
   friend struct RxProfilingScope;
   void cleanupPendingConv(std::chrono::steady_clock::time_point now);
   void cleanupPendingSplits(std::chrono::steady_clock::time_point now);
+  void trimPendingConv();
+  void trimPendingSplits();
   SplitPrefixInfo parseSplitPrefix(const std::vector<uint8_t>& data, size_t& prefix_len) const;
   SplitProcessResult handleSplitPart(const SplitPrefixInfo& info, const std::vector<uint8_t>& chunk,
                                      uint32_t msg_id);

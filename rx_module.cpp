@@ -253,13 +253,18 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     size_t expected_conv_len = cipher_len_hint ? static_cast<size_t>(cipher_len_hint + CONV_TAIL_BYTES) * 2 : 0;
     const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | hdr.frag_idx;
     if (expected_conv_len && payload_buf_.size() < expected_conv_len) {
-      auto& slot = pending_conv_[conv_key];
+      auto [it, inserted] = pending_conv_.try_emplace(conv_key);
+      auto& slot = it->second;
+      if (inserted) {
+        slot.last_update = now;
+      }
       if (slot.expected_len != expected_conv_len) {
         slot.expected_len = expected_conv_len;         // запоминаем ожидаемую длину
         slot.data.clear();                             // обнуляем накопленный буфер
       }
       slot.data.insert(slot.data.end(), payload_buf_.begin(), payload_buf_.end());
       slot.last_update = now;
+      trimPendingConv();
       profile_scope.markDrop("ожидание продолжения свёрточного блока");
       return;                                          // ждём остальные части до полного блока
     }
@@ -272,6 +277,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     if (it != pending_conv_.end()) {
       it->second.data.insert(it->second.data.end(), payload_buf_.begin(), payload_buf_.end());
       it->second.last_update = now;
+      trimPendingConv();
       if (!it->second.expected_len && expected_conv_len) {
         it->second.expected_len = expected_conv_len;  // инициализация ожидания если не было
       }
@@ -455,6 +461,7 @@ void RxModule::cleanupPendingConv(std::chrono::steady_clock::time_point now) {
       ++it;
     }
   }
+  trimPendingConv();
 }
 
 void RxModule::cleanupPendingSplits(std::chrono::steady_clock::time_point now) {
@@ -466,6 +473,35 @@ void RxModule::cleanupPendingSplits(std::chrono::steady_clock::time_point now) {
       ++it;
     }
   }
+  trimPendingSplits();
+}
+
+void RxModule::trimPendingConv() {
+  while (pending_conv_.size() > PENDING_CONV_LIMIT) {
+    auto victim = std::min_element(pending_conv_.begin(), pending_conv_.end(),
+                                   [](const auto& lhs, const auto& rhs) {
+                                     return lhs.second.last_update < rhs.second.last_update;
+                                   });
+    if (victim == pending_conv_.end()) break;
+    pending_conv_.erase(victim);
+  }
+}
+
+void RxModule::trimPendingSplits() {
+  while (pending_split_.size() > PENDING_SPLIT_LIMIT) {
+    auto victim = std::min_element(pending_split_.begin(), pending_split_.end(),
+                                   [](const auto& lhs, const auto& rhs) {
+                                     return lhs.second.last_update < rhs.second.last_update;
+                                   });
+    if (victim == pending_split_.end()) break;
+    pending_split_.erase(victim);
+  }
+}
+
+void RxModule::tickCleanup() {
+  auto now = std::chrono::steady_clock::now();
+  cleanupPendingConv(now);
+  cleanupPendingSplits(now);
 }
 
 RxModule::SplitPrefixInfo RxModule::parseSplitPrefix(const std::vector<uint8_t>& data, size_t& prefix_len) const {
@@ -506,7 +542,12 @@ RxModule::SplitProcessResult RxModule::handleSplitPart(const SplitPrefixInfo& in
     res.use_original = true;
     return res;
   }
-  auto& slot = pending_split_[info.tag];
+  auto now = std::chrono::steady_clock::now();
+  auto [slot_it, inserted] = pending_split_.try_emplace(info.tag);
+  auto& slot = slot_it->second;
+  if (inserted) {
+    slot.last_update = now;
+  }
   if (info.part == 1 || slot.expected_total != info.total) {
     slot.data.clear();
     slot.next_part = 1;
@@ -517,12 +558,13 @@ RxModule::SplitProcessResult RxModule::handleSplitPart(const SplitPrefixInfo& in
     slot.next_part = 1;
     slot.expected_total = info.total;
     if (info.part != 1) {
-      slot.last_update = std::chrono::steady_clock::now();
+      slot.last_update = now;
       return res;
     }
   }
   slot.data.insert(slot.data.end(), chunk.begin(), chunk.end());
-  slot.last_update = std::chrono::steady_clock::now();
+  slot.last_update = now;
+  trimPendingSplits();
   slot.next_part = info.part + 1;
   if (info.part < info.total) {
     if (buf_) {

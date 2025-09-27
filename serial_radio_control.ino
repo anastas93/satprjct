@@ -1706,6 +1706,7 @@ void loop() {
 #endif
     server.handleClient();                  // обработка HTTP-запросов
     radio.loop();                           // обработка входящих пакетов
+    rx.tickCleanup();                       // фоновая очистка очередей RX даже без новых кадров
     tx.loop();                              // обработка очередей передачи
     processTestRxm();                       // генерация тестовых входящих сообщений
     if (Serial.available()) {
