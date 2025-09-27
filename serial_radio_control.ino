@@ -48,6 +48,7 @@
 #include "esp_core_dump.h"      // управление core dump на ESP32 (если заголовок доступен)
 #endif
 #include "esp_partition.h"      // прямой доступ к разделам флеша
+#include "esp_spi_flash.h"      // размер сектора флеша для корректного стирания
 #if SR_HAS_INCLUDE("esp_ipc.h")
 #include "esp_ipc.h"            // выполнение критичных операций на ядре 0
 #define SR_HAS_ESP_IPC 1
@@ -251,7 +252,9 @@ static void coreDumpClearIpc(void* arg) {
   if (!ctx || !ctx->part) {
     return;
   }
-  ctx->eraseErr = esp_partition_erase_range(ctx->part, 0, ctx->part->size);
+  // Стираем только первый сектор, чтобы не нарушать выравнивание по 4 КБ
+  size_t eraseSize = std::min<size_t>(ctx->part->size, SPI_FLASH_SEC_SIZE);
+  ctx->eraseErr = esp_partition_erase_range(ctx->part, 0, eraseSize);
   if (ctx->eraseErr != ESP_OK) {
     return;
   }
