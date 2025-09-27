@@ -149,16 +149,34 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   scrambler::descramble(frame_buf_.data(), frame_buf_.size()); // дескремблируем весь кадр
   profile_scope.mark(&ProfilingSnapshot::descramble);
 
-  FrameHeader hdr;
-  bool ok = FrameHeader::decode(frame_buf_.data(), frame_buf_.size(), hdr);
-  if (!ok)
-    ok = FrameHeader::decode(frame_buf_.data() + FrameHeader::SIZE,
-                             frame_buf_.size() - FrameHeader::SIZE, hdr);
+  FrameHeader primary_hdr;
+  FrameHeader secondary_hdr;
+  bool primary_ok = FrameHeader::decode(frame_buf_.data(), frame_buf_.size(), primary_hdr);
+  bool secondary_ok =
+      FrameHeader::decode(frame_buf_.data() + FrameHeader::SIZE,
+                          frame_buf_.size() - FrameHeader::SIZE, secondary_hdr);
   profile_scope.mark(&ProfilingSnapshot::header);
-  if (!ok) {                                            // оба заголовка повреждены
+  if (!primary_ok && !secondary_ok) {                   // оба заголовка повреждены
     forward_raw(data, len);
     profile_scope.markDrop("заголовок повреждён");
     return;
+  }
+
+  FrameHeader hdr = primary_ok ? primary_hdr : secondary_hdr;
+  if (primary_ok && secondary_ok) {
+    bool headers_match = (primary_hdr.msg_id == secondary_hdr.msg_id) &&
+                         (primary_hdr.frag_idx == secondary_hdr.frag_idx) &&
+                         (primary_hdr.frag_cnt == secondary_hdr.frag_cnt) &&
+                         (primary_hdr.flags == secondary_hdr.flags) &&
+                         (primary_hdr.payload_len == secondary_hdr.payload_len) &&
+                         (primary_hdr.ack_mask == secondary_hdr.ack_mask);
+    if (!headers_match) {
+      LOG_WARN("RxModule: дублированные заголовки расходятся");
+      forward_raw(data, len);                            // фиксируем испорченный кадр
+      profile_scope.markDrop("заголовки расходятся");
+      return;                                            // не продолжаем обработку полезной нагрузки
+    }
+    hdr = primary_hdr;                                   // обе копии одинаковые
   }
 
   const uint8_t* payload_p = frame_buf_.data() + FrameHeader::SIZE * 2;
