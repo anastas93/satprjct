@@ -116,31 +116,41 @@ bool TxModule::loop() {
 
   if (ack_enabled_ && waiting_ack_) {
     if (ack_timeout_ms_ == 0) {
-      radio_.ensureReceiveMode();                 // нулевой тайм-аут трактуем как бесконечное ожидание
-      return false;
-    }
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_attempt_);
-    if (elapsed.count() < static_cast<long>(ack_timeout_ms_)) {
-      radio_.ensureReceiveMode();
-      return false;
-    }
-    if (inflight_) {
-      if (inflight_->attempts_left > 0) {
-        --inflight_->attempts_left;
-        waiting_ack_ = false;
-        DEBUG_LOG("TxModule: повтор без ACK");
-      } else {
-        DEBUG_LOG("TxModule: ACK не получен, перенос в архив");
-        uint8_t failed_qos = inflight_->qos;
-        std::string failed_tag = inflight_->packet_tag;
-        inflight_->attempts_left = ack_retry_limit_;
-        archive_.push_back(std::move(*inflight_));
-        inflight_.reset();
-        waiting_ack_ = false;
-        archiveFollowingParts(failed_qos, failed_tag);
-      }
-    } else {
+      DEBUG_LOG("TxModule: ожидание ACK отключено нулевым тайм-аутом");
       waiting_ack_ = false;
+      if (inflight_) {
+        if (!inflight_->status_prefix.empty()) {
+          SimpleLogger::logStatus(inflight_->status_prefix + " GO");
+        }
+        inflight_->attempts_left = ack_retry_limit_;
+        inflight_->expect_ack = false;
+        inflight_.reset();
+      }
+      scheduleFromArchive();
+    } else {
+      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_attempt_);
+      if (elapsed.count() < static_cast<long>(ack_timeout_ms_)) {
+        radio_.ensureReceiveMode();
+        return false;
+      }
+      if (inflight_) {
+        if (inflight_->attempts_left > 0) {
+          --inflight_->attempts_left;
+          waiting_ack_ = false;
+          DEBUG_LOG("TxModule: повтор без ACK");
+        } else {
+          DEBUG_LOG("TxModule: ACK не получен, перенос в архив");
+          uint8_t failed_qos = inflight_->qos;
+          std::string failed_tag = inflight_->packet_tag;
+          inflight_->attempts_left = ack_retry_limit_;
+          archive_.push_back(std::move(*inflight_));
+          inflight_.reset();
+          waiting_ack_ = false;
+          archiveFollowingParts(failed_qos, failed_tag);
+        }
+      } else {
+        waiting_ack_ = false;
+      }
     }
   }
 
@@ -171,7 +181,7 @@ bool TxModule::loop() {
     out.data = std::move(msg);
     out.qos = qos_idx;
     out.attempts_left = ack_retry_limit_;
-    out.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(out.data);
+    out.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(out.data);
     out.packet_tag = extractPacketTag(out.data);
     out.status_prefix = extractStatusPrefix(out.data);
     if (!ack_enabled_) out.expect_ack = false;
@@ -249,8 +259,36 @@ uint32_t TxModule::getSendPause() const {
 
 void TxModule::setAckTimeout(uint32_t timeout_ms) {
   ack_timeout_ms_ = timeout_ms;
-  if (waiting_ack_) {
-    last_attempt_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(timeout_ms);
+  auto now = std::chrono::steady_clock::now();
+  if (ack_timeout_ms_ == 0) {
+    last_attempt_ = now;
+    bool had_waiting = waiting_ack_;
+    waiting_ack_ = false;
+    if (inflight_) {
+      if (had_waiting && !inflight_->status_prefix.empty()) {
+        SimpleLogger::logStatus(inflight_->status_prefix + " GO");
+      }
+      inflight_->attempts_left = ack_retry_limit_;
+      inflight_->expect_ack = false;
+      if (had_waiting) {
+        inflight_.reset();
+      }
+    }
+    if (delayed_) {
+      delayed_->attempts_left = ack_retry_limit_;
+      delayed_->expect_ack = false;
+    }
+    scheduleFromArchive();
+  } else {
+    if (waiting_ack_) {
+      last_attempt_ = now - std::chrono::milliseconds(timeout_ms);
+    }
+    if (inflight_) {
+      inflight_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(inflight_->data);
+    }
+    if (delayed_) {
+      delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(delayed_->data);
+    }
   }
 }
 
@@ -442,7 +480,7 @@ void TxModule::archiveFollowingParts(uint8_t qos, const std::string& tag) {
     archived.data = std::move(data);
     archived.qos = qos;
     archived.attempts_left = ack_retry_limit_;
-    archived.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(archived.data);
+    archived.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(archived.data);
     archived.packet_tag = tag;
     archived.status_prefix = extractStatusPrefix(archived.data);
     archive_.push_back(std::move(archived));
@@ -455,7 +493,7 @@ void TxModule::scheduleFromArchive() {
   delayed_.emplace(std::move(archive_.front()));
   archive_.pop_front();
   delayed_->attempts_left = ack_retry_limit_;
-  delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(delayed_->data);
+  delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(delayed_->data);
   if (!ack_enabled_) delayed_->expect_ack = false;
   DEBUG_LOG("TxModule: восстановлен пакет из архива");
 }
@@ -520,7 +558,7 @@ void TxModule::setAckRetryLimit(uint8_t retries) {
   }
   if (delayed_) {
     delayed_->attempts_left = ack_retry_limit_;
-    delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && !isAckPayload(delayed_->data);
+    delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(delayed_->data);
   }
   if (ack_retry_limit_ == 0 && waiting_ack_) {
     // При обнулении лимита считаем пакет доставленным и не ждём ACK
