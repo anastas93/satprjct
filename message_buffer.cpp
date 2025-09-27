@@ -14,9 +14,8 @@ MessageBuffer::MessageBuffer(size_t capacity, size_t slot_size) {
   capacity_ = capacity;
   slot_size_ = slot_size;
   slots_.resize(capacity_);
-  for (auto& slot : slots_) {
-    slot.data.reserve(slot_size_);              // заранее выделяем память под фрагменты
-  }
+  // Не пытаемся заранее выделить память под все слоты, чтобы не спровоцировать
+  // std::bad_alloc на устройствах с ограниченным ОЗУ (ESP32 и подобные).
 }
 
 // Добавление сообщения в буфер
