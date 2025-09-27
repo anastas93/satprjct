@@ -645,6 +645,16 @@ bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
   return true;
 }
 
+bool regenerateFromPeer(KeyRecord* out) {
+  StorageSnapshot snapshot = ensureSnapshot();
+  if (!snapshot.current_valid || !snapshot.current.valid) return false;
+  // Проверяем, что сохранённый публичный ключ удалённой стороны не нулевой
+  const auto& peer = snapshot.current.peer_public;
+  bool has_peer = std::any_of(peer.begin(), peer.end(), [](uint8_t b) { return b != 0; });
+  if (!has_peer) return false;
+  return applyRemotePublic(peer, out);
+}
+
 bool loadKeyRecord(KeyRecord& out) {
   StorageSnapshot& snapshot = ensureSnapshot();
   if (!snapshot.current_valid) return false;

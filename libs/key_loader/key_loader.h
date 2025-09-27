@@ -66,6 +66,9 @@ bool restorePreviousKey(KeyRecord* out = nullptr);
 bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
                        KeyRecord* out = nullptr);
 
+// Повторное применение сохранённого публичного ключа удалённой стороны.
+bool regenerateFromPeer(KeyRecord* out = nullptr);
+
 // Получение полного содержимого файла (для тестов и служебных задач).
 bool loadKeyRecord(KeyRecord& out);
 
