@@ -617,16 +617,16 @@ bool restorePreviousKey(KeyRecord* out) {
   return true;
 }
 
-bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
-                       KeyRecord* out) {
-  StorageSnapshot snapshot = ensureSnapshot();
-  if (!snapshot.current_valid || !snapshot.current.valid) return false;
+bool applyRemoteWithBase(StorageSnapshot snapshot,
+                         const KeyRecord& base,
+                         const std::array<uint8_t,32>& remote_public,
+                         KeyRecord* out) {
   std::array<uint8_t,32> shared{};
-  if (!crypto::x25519::compute_shared(snapshot.current.root_private, remote_public, shared)) {
+  if (!crypto::x25519::compute_shared(base.root_private, remote_public, shared)) {
     return false;
   }
-  KeyRecord rec = snapshot.current;
-  rec.session_key = deriveSessionFromShared(shared, snapshot.current.root_public, remote_public);
+  KeyRecord rec = base;
+  rec.session_key = deriveSessionFromShared(shared, base.root_public, remote_public);
   rec.nonce_salt = nonceSaltFromKey(rec.session_key);
   rec.origin = KeyOrigin::REMOTE;
   rec.peer_public = remote_public;
@@ -634,6 +634,8 @@ bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
   if (snapshot.current_valid && snapshot.current.valid) {
     snapshot.previous = snapshot.current;
     snapshot.previous_valid = true;
+  } else {
+    snapshot.previous_valid = false;
   }
   snapshot.current = rec;
   snapshot.current_valid = true;
@@ -645,14 +647,26 @@ bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
   return true;
 }
 
-bool regenerateFromPeer(KeyRecord* out) {
+bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
+                       KeyRecord* out) {
   StorageSnapshot snapshot = ensureSnapshot();
   if (!snapshot.current_valid || !snapshot.current.valid) return false;
-  // Проверяем, что сохранённый публичный ключ удалённой стороны не нулевой
-  const auto& peer = snapshot.current.peer_public;
-  bool has_peer = std::any_of(peer.begin(), peer.end(), [](uint8_t b) { return b != 0; });
-  if (!has_peer) return false;
-  return applyRemotePublic(peer, out);
+  return applyRemoteWithBase(snapshot, snapshot.current, remote_public, out);
+}
+
+bool regenerateFromPeer(KeyRecord* out) {
+  StorageSnapshot snapshot = ensureSnapshot();
+  auto has_peer = [](const std::array<uint8_t,32>& peer) {
+    return std::any_of(peer.begin(), peer.end(), [](uint8_t b) { return b != 0; });
+  };
+  if (snapshot.current_valid && snapshot.current.valid && has_peer(snapshot.current.peer_public)) {
+    return applyRemoteWithBase(snapshot, snapshot.current, snapshot.current.peer_public, out);
+  }
+  if (snapshot.previous_valid && snapshot.previous.valid && has_peer(snapshot.previous.peer_public)) {
+    // При откате на предыдущую запись пытаемся использовать старую пару ключей
+    return applyRemoteWithBase(snapshot, snapshot.previous, snapshot.previous.peer_public, out);
+  }
+  return false;
 }
 
 bool loadKeyRecord(KeyRecord& out) {

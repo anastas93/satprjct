@@ -479,6 +479,20 @@ String buildReceivedPushPayload(ReceivedBuffer::Kind kind, const ReceivedBuffer:
   payload += String(item.part);
   payload += ",\"len\":";
   payload += String(static_cast<unsigned long>(item.data.size()));
+  if (kind == ReceivedBuffer::Kind::Ready) {
+    String decoded = decodeCp1251ToString(item.data);
+    if (decoded.length() > 0) {
+      payload += ",\"text\":\"";
+      payload += jsonEscape(decoded);
+      payload += "\"";
+    }
+    String hex = toHex(item.data);
+    if (hex.length() > 0) {
+      payload += ",\"hex\":\"";
+      payload += hex;
+      payload += "\"";
+    }
+  }
   payload += "}";
   return payload;
 }
