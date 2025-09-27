@@ -201,11 +201,42 @@ void clearCorruptedCoreDumpConfig() {
     Serial.println("Core dump: раздел не найден");
     return;
   }
-  esp_err_t err = esp_partition_erase_range(part, 0, part->size);
-  if (err == ESP_OK) {
-    Serial.println("Core dump: раздел очищен");
-  } else {
+  // Сначала читаем начало раздела и проверяем, не сброшена ли конфигурация уже
+  static constexpr size_t kProbeSize = 32; // достаточно для структуры esp_core_dump_flash_config_t
+  uint8_t probe[kProbeSize];
+  esp_err_t err = esp_partition_read(part, 0, probe, sizeof(probe));
+  if (err != ESP_OK) {
+    Serial.print("Core dump: ошибка чтения, код=");
+    Serial.println(static_cast<int>(err));
+    return;
+  }
+  bool allZero = true;
+  for (uint8_t b : probe) {
+    if (b != 0) {
+      allZero = false;
+    }
+  }
+  if (allZero) {
+    Serial.println("Core dump: конфигурация уже чистая");
+    return;
+  }
+  // Полностью стираем раздел, чтобы убрать повреждённые данные и их CRC
+  err = esp_partition_erase_range(part, 0, part->size);
+  if (err != ESP_OK) {
     Serial.print("Core dump: ошибка стирания, код=");
+    Serial.println(static_cast<int>(err));
+    return;
+  }
+  // После стирания флеш содержит 0xFF, а esp_core_dump ожидает нули в конфигурации,
+  // поэтому записываем явные нули в начале раздела.
+  for (size_t i = 0; i < kProbeSize; ++i) {
+    probe[i] = 0;
+  }
+  err = esp_partition_write(part, 0, probe, sizeof(probe));
+  if (err == ESP_OK) {
+    Serial.println("Core dump: конфигурация сброшена");
+  } else {
+    Serial.print("Core dump: ошибка записи, код=");
     Serial.println(static_cast<int>(err));
   }
 }
