@@ -27,7 +27,7 @@ namespace DefaultSettings {
   constexpr bool RX_BOOSTED_GAIN = false;         // Режим повышенного усиления приёмника
   constexpr size_t GATHER_BLOCK_SIZE = 110;       // Размер блока для PacketGatherer
   constexpr uint32_t SEND_PAUSE_MS = 370;          // Ожидание между отправками и приёмом (мс)
-  constexpr uint32_t ACK_TIMEOUT_MS = 1500;        // Тайм-аут ожидания ACK перед повтором (мс)
+  constexpr uint32_t ACK_TIMEOUT_MS = 320;         // Тайм-аут ожидания ACK перед повтором (мс)
   constexpr uint32_t PING_WAIT_MS = 500;           // Ожидание ответа на пинг (мс)
   constexpr size_t PING_PACKET_SIZE = 5;           // Размер пинг-пакета (байты)
   constexpr size_t SERIAL_BUFFER_LIMIT = 500UL * 1024UL; // Максимальный размер буфера приёма по Serial (байты)
