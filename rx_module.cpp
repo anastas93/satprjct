@@ -17,6 +17,16 @@
 #include <cstddef>
 #include <utility>
 
+static constexpr size_t PILOT_INTERVAL = 64;             // период вставки пилотов
+static constexpr std::array<uint8_t,7> PILOT_MARKER{{
+    0x7E, 'S', 'A', 'T', 'P', 0xD6, 0x9F
+}};                                                     // маркер пилота с CRC16
+static constexpr size_t PILOT_PREFIX_LEN = PILOT_MARKER.size() - 2; // часть маркера без CRC
+static constexpr uint16_t PILOT_MARKER_CRC = 0x9FD6;                // CRC16(prefix)
+[[maybe_unused]] static const bool PILOT_MARKER_CRC_OK = []() {
+  return FrameHeader::crc16(PILOT_MARKER.data(), PILOT_PREFIX_LEN) == PILOT_MARKER_CRC;
+}();
+
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
 static constexpr size_t TAG_LEN = 8;              // длина тега аутентичности
 static constexpr size_t RS_ENC_LEN = 255;      // длина закодированного блока
@@ -32,6 +42,18 @@ static bool isDecimal(const std::string& s) {
   return true;
 }
 
+// Проверяем, соответствует ли подпоследовательность новому пилотному маркеру
+static bool isPilotMarker(const uint8_t* data, size_t len) {
+  if (!data || len < PILOT_MARKER.size()) return false;
+  if (!std::equal(PILOT_MARKER.begin(), PILOT_MARKER.begin() + PILOT_PREFIX_LEN, data)) {
+    return false;
+  }
+  uint16_t crc = static_cast<uint16_t>(data[PILOT_PREFIX_LEN]) |
+                 (static_cast<uint16_t>(data[PILOT_PREFIX_LEN + 1]) << 8);
+  if (crc != PILOT_MARKER_CRC) return false;
+  return FrameHeader::crc16(data, PILOT_PREFIX_LEN) == crc;
+}
+
 // Удаление пилотов из полезной нагрузки
 static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
   out.clear();
@@ -40,13 +62,18 @@ static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& 
   }
   out.reserve(len);
   size_t count = 0;
-  for (size_t i = 0; i < len; ++i) {
-    if (count && count % 64 == 0 && i + 1 < len && data[i] == 0x55 && data[i + 1] == 0x2D) {
-      i++; // пропускаем пилот
-      continue;
+  size_t i = 0;
+  while (i < len) {
+    if (count && count % PILOT_INTERVAL == 0) {
+      size_t remaining = len - i;
+      if (remaining >= PILOT_MARKER.size() && isPilotMarker(data + i, remaining)) {
+        i += PILOT_MARKER.size();
+        continue; // пропускаем весь маркер
+      }
     }
     out.push_back(data[i]);
     ++count;
+    ++i;
   }
 }
 
