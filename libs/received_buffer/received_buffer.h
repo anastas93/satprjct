@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <functional>
 
 // Буфер принятых сообщений с разделением по стадиям обработки
 class ReceivedBuffer {
@@ -51,6 +52,10 @@ public:
   // Получить копию первых элементов с данными и типом (максимум count)
   std::vector<SnapshotEntry> snapshot(size_t count) const;
 
+  // Назначить колбэк, который будет получать уведомления о новых элементах
+  using NotificationCallback = std::function<void(Kind kind, const Item& item)>;
+  void setNotificationCallback(NotificationCallback cb);
+
 private:
   std::string makeRawName(uint32_t id, uint32_t part) const;   // генерация имени R-
   std::string makeSplitName(uint32_t id) const;                // генерация имени SP-
@@ -59,5 +64,6 @@ private:
   std::deque<Item> raw_;    // очередь сырых пакетов
   std::deque<Item> split_;  // очередь объединённых данных
   std::deque<Item> ready_;  // очередь готовых данных
+  NotificationCallback onNotify_; // обработчик уведомлений о добавлении элемента
 };
 

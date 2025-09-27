@@ -436,6 +436,163 @@ String receivedItemToJson(const ReceivedBuffer::SnapshotEntry& entry) {
   return json;
 }
 
+// --- Поддержка push-уведомлений через SSE ---
+static constexpr uint32_t kPushKeepAliveMs = 15000;   // интервал keep-alive для SSE клиентов
+static constexpr size_t kPushMaxClients = 4;          // максимум одновременных подключений
+
+struct PushClientSession {
+  NetworkClient client;       // активное соединение SSE
+  uint32_t lastActivityMs;    // время последнего успешного события
+  uint32_t lastKeepAliveMs;   // время последнего keep-alive
+};
+
+static std::vector<PushClientSession> gPushSessions;  // список подписчиков SSE
+static uint32_t gPushNextEventId = 1;                 // глобальный счётчик событий
+
+// Формируем JSON-представление для уведомления о новом элементе буфера
+String buildReceivedPushPayload(ReceivedBuffer::Kind kind, const ReceivedBuffer::Item& item) {
+  String payload = "{";
+  payload += "\"kind\":\"";
+  payload += receivedKindToString(kind);
+  payload += "\",";
+  payload += "\"name\":\"";
+  payload += jsonEscape(String(item.name.c_str()));
+  payload += "\",";
+  payload += "\"id\":";
+  payload += String(item.id);
+  payload += ",\"part\":";
+  payload += String(item.part);
+  payload += ",\"len\":";
+  payload += String(static_cast<unsigned long>(item.data.size()));
+  payload += "}";
+  return payload;
+}
+
+// Отправка одного SSE-сообщения; возвращает false, если запись не удалась
+bool sendSseFrame(PushClientSession& session, const String& event, const String& data, uint32_t id) {
+  if (!session.client.connected()) {
+    return false;
+  }
+  String frame;
+  frame.reserve(event.length() + data.length() + 32);
+  if (id > 0) {
+    frame += F("id: ");
+    frame += String(id);
+    frame += '\n';
+  }
+  if (event.length() > 0) {
+    frame += F("event: ");
+    frame += event;
+    frame += '\n';
+  }
+  if (data.length() > 0) {
+    frame += F("data: ");
+    frame += data;
+    frame += '\n';
+  }
+  frame += '\n';
+  const size_t expected = static_cast<size_t>(frame.length());
+  size_t written = session.client.write(reinterpret_cast<const uint8_t*>(frame.c_str()), expected);
+  if (written != expected) {
+    return false;
+  }
+  uint32_t now = millis();
+  session.lastActivityMs = now;
+  session.lastKeepAliveMs = now;
+  return true;
+}
+
+// Очистка и keep-alive для всех активных клиентов
+void maintainPushSessions(bool forceKeepAlive = false) {
+  if (gPushSessions.empty()) return;
+  const uint32_t now = millis();
+  for (auto it = gPushSessions.begin(); it != gPushSessions.end(); ) {
+    PushClientSession& session = *it;
+    if (!session.client.connected()) {
+      it = gPushSessions.erase(it);
+      continue;
+    }
+    const uint32_t elapsed = now - session.lastKeepAliveMs;
+    if (forceKeepAlive || elapsed > kPushKeepAliveMs) {
+      static const char kKeepAliveLine[] = ": keep-alive\n\n";
+      const size_t expected = sizeof(kKeepAliveLine) - 1;
+      size_t written = session.client.write(reinterpret_cast<const uint8_t*>(kKeepAliveLine), expected);
+      if (written != expected) {
+        session.client.stop();
+        it = gPushSessions.erase(it);
+        continue;
+      }
+      session.lastKeepAliveMs = now;
+    }
+    ++it;
+  }
+}
+
+// Рассылка уведомления всем подключённым клиентам
+void broadcastReceivedPush(ReceivedBuffer::Kind kind, const ReceivedBuffer::Item& item) {
+  if (gPushSessions.empty()) return;
+  maintainPushSessions();
+  String payload = buildReceivedPushPayload(kind, item);
+  String eventName = F("received");
+  uint32_t eventId = gPushNextEventId++;
+  for (auto it = gPushSessions.begin(); it != gPushSessions.end(); ) {
+    if (!sendSseFrame(*it, eventName, payload, eventId)) {
+      it->client.stop();
+      it = gPushSessions.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+// Обработчик подключения SSE на /events
+void handleSseConnect() {
+  NetworkClient& baseClient = server.client();
+  if (!baseClient) {
+    return;
+  }
+  baseClient.setSSE(true);
+  baseClient.setTimeout(0);
+  baseClient.setNoDelay(true);
+  NetworkClient client = baseClient; // сохраняем копию для хранения в сессии
+  static const char kHeader[] =
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: text/event-stream\r\n"
+      "Cache-Control: no-cache\r\n"
+      "Connection: keep-alive\r\n"
+      "Access-Control-Allow-Origin: *\r\n"
+      "\r\n";
+  const size_t headerLen = sizeof(kHeader) - 1;
+  if (client.write(reinterpret_cast<const uint8_t*>(kHeader), headerLen) != headerLen) {
+    client.stop();
+    return;
+  }
+  static const char kRetryLine[] = "retry: 4000\n\n";
+  if (client.write(reinterpret_cast<const uint8_t*>(kRetryLine), sizeof(kRetryLine) - 1) != sizeof(kRetryLine) - 1) {
+    client.stop();
+    return;
+  }
+  PushClientSession session;
+  session.client = client;
+  uint32_t now = millis();
+  session.lastActivityMs = now;
+  session.lastKeepAliveMs = now;
+  if (gPushSessions.size() >= kPushMaxClients) {
+    gPushSessions.front().client.stop();
+    gPushSessions.erase(gPushSessions.begin());
+  }
+  gPushSessions.push_back(session);
+  PushClientSession& stored = gPushSessions.back();
+  String helloEvent = F("hello");
+  String helloPayload = F("{\"status\":\"ready\"}");
+  if (!sendSseFrame(stored, helloEvent, helloPayload, gPushNextEventId++)) {
+    stored.client.stop();
+    gPushSessions.pop_back();
+    return;
+  }
+  Serial.println(F("HTTP push: новое подключение"));
+}
+
 // Выдача нового идентификатора для тестовых сообщений
 uint32_t nextTestRxmId() {
   static uint32_t counter = 60000;
@@ -1807,6 +1964,7 @@ void setupWifi() {
   server.on("/libs/freq-info.csv", handleFreqInfoCsv);               // справочник частот каналов
   server.on("/libs/geostat_tle.js", handleGeostatTleJs);             // статический список спутников
   server.on("/ver", handleVer);                                      // версия приложения
+  server.on("/events", HTTP_GET, handleSseConnect);                  // SSE-канал push-уведомлений
   server.on("/api/tx", handleApiTx);                                 // отправка текста по радио
   server.on("/api/tx-image", handleApiTxImage);                      // отправка изображения по радио
   server.on("/cmd", handleCmdHttp);                                  // обработка команд
@@ -1836,6 +1994,10 @@ void setup() {
   tx.setEncryptionEnabled(encryptionEnabled);
   rx.setEncryptionEnabled(encryptionEnabled);
   rx.setBuffer(&recvBuf);                                   // сохраняем принятые пакеты
+  recvBuf.setNotificationCallback([](ReceivedBuffer::Kind kind, const ReceivedBuffer::Item& item) {
+    // Передаём уведомление всем подписчикам SSE
+    broadcastReceivedPush(kind, item);
+  });
   // обработка входящих данных с учётом ACK
   rx.setCallback([&](const uint8_t* d, size_t l){
     if (protocol::ack::isAckPayload(d, l)) {              // пришёл ACK любого формата
@@ -1868,6 +2030,7 @@ void loop() {
     }
 #endif
     server.handleClient();                  // обработка HTTP-запросов
+    maintainPushSessions();                 // поддержка активных push-клиентов
     radio.loop();                           // обработка входящих пакетов
     rx.tickCleanup();                       // фоновая очистка очередей RX даже без новых кадров
     tx.loop();                              // обработка очередей передачи
