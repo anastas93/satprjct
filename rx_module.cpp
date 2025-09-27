@@ -162,6 +162,10 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     return;
   }
 
+  if (primary_ok != secondary_ok) {
+    LOG_WARN("RxModule: обнаружено расхождение валидности копий заголовка"); // фиксируем частичный сбой
+    // В текущей реализации отдельный счётчик доверия не ведётся, поэтому дополнительных действий не требуется.
+  }
   FrameHeader hdr = primary_ok ? primary_hdr : secondary_hdr;
   if (primary_ok && secondary_ok) {
     bool headers_match = (primary_hdr.msg_id == secondary_hdr.msg_id) &&
