@@ -86,6 +86,7 @@ TxModule::TxModule(IRadio& radio, const std::array<size_t,4>& capacities, Payloa
   // ключ считывается один раз и используется при шифровании
   last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms_);
   last_attempt_ = last_send_;
+  next_ack_send_time_ = std::chrono::steady_clock::now(); // ACK можно отправлять сразу после старта
 }
 
 // Смена режима пакета
@@ -108,6 +109,10 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos) {
     ack_msg.attempts_left = 0;                    // повторы не нужны
     ack_msg.expect_ack = false;                   // ACK никогда не ждёт подтверждения
     ack_queue_.push_back(std::move(ack_msg));
+    auto now = std::chrono::steady_clock::now();
+    next_ack_send_time_ = ack_delay_ms_ == 0
+                              ? now
+                              : now + std::chrono::milliseconds(ack_delay_ms_); // выдерживаем задержку перед ответом
     DEBUG_LOG("TxModule: ACK добавлен в быстрый буфер id=%u qos=%u",
               static_cast<unsigned int>(ack_msg.id),
               static_cast<unsigned int>(ack_msg.qos));
@@ -315,6 +320,11 @@ void TxModule::setAckTimeout(uint32_t timeout_ms) {
 
 uint32_t TxModule::getAckTimeout() const {
   return ack_timeout_ms_;
+}
+
+void TxModule::setAckResponseDelay(uint32_t delay_ms) {
+  ack_delay_ms_ = delay_ms;                         // запоминаем новую задержку ответа
+  next_ack_send_time_ = std::chrono::steady_clock::now(); // сбрасываем таймер для последующего ACK
 }
 
 void TxModule::reloadKey() {
@@ -568,6 +578,11 @@ void TxModule::waitForPauseWindow() {
 
 bool TxModule::processImmediateAck() {
   if (ack_queue_.empty()) return false;            // нечего отправлять
+  auto now = std::chrono::steady_clock::now();
+  if (ack_delay_ms_ != 0 && now < next_ack_send_time_) {
+    radio_.ensureReceiveMode();                    // выдерживаем паузу перед ответом
+    return false;
+  }
   PendingMessage ack = std::move(ack_queue_.front());
   ack_queue_.pop_front();
   const uint32_t ack_id = ack.id;
@@ -575,9 +590,17 @@ bool TxModule::processImmediateAck() {
   bool sent = transmit(ack);                      // пытаемся отправить ACK обычным пайплайном
   if (!sent) {                                    // не удалось — возвращаем в начало очереди
     ack_queue_.push_front(std::move(ack));
+    auto retry = std::chrono::steady_clock::now();
+    next_ack_send_time_ = ack_delay_ms_ == 0
+                              ? retry
+                              : retry + std::chrono::milliseconds(ack_delay_ms_); // готовим новую попытку
     return false;
   }
   onSendSuccess();                                // позволяем архиву продолжить отдачу
+  auto sent_at = std::chrono::steady_clock::now();
+  next_ack_send_time_ = ack_delay_ms_ == 0
+                            ? sent_at
+                            : sent_at + std::chrono::milliseconds(ack_delay_ms_); // фиксируем паузу перед следующим ACK
   DEBUG_LOG("TxModule: ACK отправлен вне очереди id=%u qos=%u",
             static_cast<unsigned int>(ack_id),
             static_cast<unsigned int>(ack_qos));
