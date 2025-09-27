@@ -2,10 +2,20 @@
 #include "default_settings.h"
 
 // Конструктор с заданной вместимостью и размером слота
-MessageBuffer::MessageBuffer(size_t capacity, size_t slot_size)
-    : capacity_(capacity), slot_size_(slot_size), slots_(capacity) {
+MessageBuffer::MessageBuffer(size_t capacity, size_t slot_size) {
+  if (capacity == 0) {
+    LOG_WARN("MessageBuffer: запрошена нулевая вместимость, используем минимум 1");
+    capacity = 1;                               // защищаемся от деления по модулю 0
+  }
+  if (slot_size == 0) {
+    LOG_WARN("MessageBuffer: запрошен нулевой размер слота, используем минимум 1 байт");
+    slot_size = 1;                              // исключаем невозможные размеры сообщений
+  }
+  capacity_ = capacity;
+  slot_size_ = slot_size;
+  slots_.resize(capacity_);
   for (auto& slot : slots_) {
-    slot.data.reserve(slot_size_);            // заранее выделяем память под фрагменты
+    slot.data.reserve(slot_size_);              // заранее выделяем память под фрагменты
   }
 }
 
