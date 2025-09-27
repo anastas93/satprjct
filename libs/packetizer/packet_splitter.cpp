@@ -88,6 +88,15 @@ uint32_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data
   size_t added = 0;                                     // количество успешно добавленных частей
   uint32_t tag = 0;
   std::string base;
+  std::string prefix;                                   // переиспользуемый префикс статуса
+  std::vector<uint8_t> scratch;                         // единый буфер сборки части
+  scratch.reserve(buf.slotSize());
+  auto rollback = [&]() {
+    while (added > 0) {                                  // по одному снимаем добавленные элементы
+      buf.dropLast();
+      --added;
+    }
+  };
   if (with_id) {
     tag = nextTagValue();                              // новый уникальный ID
     char hex[9];
@@ -97,8 +106,8 @@ uint32_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data
   size_t part_idx = 1;
   while (offset < len) {
     size_t part = std::min(chunk, len - offset);
-    std::string prefix;
-    std::vector<uint8_t> tmp;
+    scratch.clear();
+    prefix.clear();
     if (with_id) {
       prefix = "[" + base + "|" + std::to_string(part_idx);
       if (parts > 1) {
@@ -106,14 +115,24 @@ uint32_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data
         prefix += std::to_string(parts);
       }
       prefix += "]";
-      tmp.assign(prefix.begin(), prefix.end());
+      if (prefix.size() > buf.slotSize()) {
+        DEBUG_LOG("PacketSplitter: префикс не помещается в слот");
+        rollback();
+        return 0;
+      }
+      scratch.insert(scratch.end(), prefix.begin(), prefix.end());
     }
-    tmp.insert(tmp.end(), data + offset, data + offset + part);
-    uint32_t id = buf.enqueue(tmp.data(), tmp.size());
+    if (scratch.size() + part > buf.slotSize()) {
+      DEBUG_LOG("PacketSplitter: фрагмент превышает размер слота");
+      rollback();
+      return 0;
+    }
+    scratch.insert(scratch.end(), data + offset, data + offset + part);
+    uint32_t id = buf.enqueue(scratch.data(), scratch.size());
     if (id == 0) {                                      // ошибка добавления
       if (with_id) SimpleLogger::logStatus(prefix + " ERR");
       DEBUG_LOG("PacketSplitter: ошибка добавления, откат");
-      while (added--) buf.dropLast();                   // откат всех ранее добавленных частей
+      rollback();                                       // откат всех ранее добавленных частей
       return 0;
     }
     if (with_id) SimpleLogger::logStatus(prefix + " PROG");

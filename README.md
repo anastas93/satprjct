@@ -376,7 +376,8 @@ ENCT: успех
 ## Справочник API
 
 ### MessageBuffer
-- `MessageBuffer(size_t capacity)` — создать буфер с ограничением на число сообщений.
+- `MessageBuffer(size_t capacity, size_t slot_size = 256)` — создать буфер с ограничением на число
+  сообщений и фиксированным размером слота под каждый фрагмент без повторного выделения памяти.
 - `uint32_t enqueue(const uint8_t* data, size_t len)` — добавить сообщение, при переполнении вернуть
   `0`.
 - `size_t freeSlots() const` — количество свободных слотов.
@@ -385,6 +386,7 @@ ENCT: успех
 - `bool pop(uint32_t& id, std::vector<uint8_t>& out)` — извлечь сообщение и его идентификатор.
 - `const std::vector<uint8_t>* peek(uint32_t& id) const` — указатель на данные первого сообщения без
   извлечения.
+- `size_t slotSize() const` — узнать, какой объём данных допустим в одном слоте очереди.
 
 ### ReceivedBuffer
 - `std::string pushRaw(uint32_t id, uint32_t part, const uint8_t* data, size_t len)` — сохранить

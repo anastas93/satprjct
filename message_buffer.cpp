@@ -1,8 +1,13 @@
 #include "message_buffer.h"
 #include "default_settings.h"
 
-// Конструктор с заданной вместимостью
-MessageBuffer::MessageBuffer(size_t capacity) : capacity_(capacity) {}
+// Конструктор с заданной вместимостью и размером слота
+MessageBuffer::MessageBuffer(size_t capacity, size_t slot_size)
+    : capacity_(capacity), slot_size_(slot_size), slots_(capacity) {
+  for (auto& slot : slots_) {
+    slot.data.reserve(slot_size_);            // заранее выделяем память под фрагменты
+  }
+}
 
 // Добавление сообщения в буфер
 uint32_t MessageBuffer::enqueue(const uint8_t* data, size_t len) {
@@ -10,28 +15,41 @@ uint32_t MessageBuffer::enqueue(const uint8_t* data, size_t len) {
     DEBUG_LOG("MessageBuffer: пустой ввод");
     return 0;
   }
-  if (q_.size() >= capacity_) {                // проверка переполнения
+  if (len > slot_size_) {                      // защита от переполнения слота
+    DEBUG_LOG("MessageBuffer: размер сообщения превышает слот");
+    return 0;
+  }
+  if (size_ >= capacity_) {                    // проверка переполнения
     DEBUG_LOG("MessageBuffer: переполнение");
     return 0;
   }
   uint32_t id = next_id_++;                    // текущий идентификатор
-  q_.emplace_back(id, std::vector<uint8_t>(data, data + len));
+  Slot& slot = slots_[tail_];
+  slot.id = id;
+  slot.data.assign(data, data + len);          // наполняем предварительно выделенный буфер
+  slot.used = true;
+  tail_ = (tail_ + 1) % capacity_;
+  ++size_;
   DEBUG_LOG_VAL("MessageBuffer: добавлен id=", id);
   return id;
 }
 
 // Количество свободных слотов
 size_t MessageBuffer::freeSlots() const {
-  return capacity_ - q_.size();
+  return capacity_ - size_;
 }
 
 // Удаление последнего сообщения (для отката)
 bool MessageBuffer::dropLast() {
-  if (q_.empty()) {
+  if (size_ == 0) {
     DEBUG_LOG("MessageBuffer: удаление из пустой очереди");
     return false;
   }
-  q_.pop_back();
+  tail_ = (tail_ + capacity_ - 1) % capacity_;
+  Slot& slot = slots_[tail_];
+  slot.data.clear();
+  slot.used = false;
+  --size_;
   // Идентификаторы сообщений должны оставаться уникальными, даже если
   // откатили незавершённую операцию. Поэтому счётчик не уменьшаем, чтобы
   // исключить повторную выдачу уже использованных значений.
@@ -41,28 +59,36 @@ bool MessageBuffer::dropLast() {
 
 // Проверка наличия сообщений
 bool MessageBuffer::hasPending() const {
-  return !q_.empty();
+  return size_ > 0;
 }
 
 // Извлечение сообщения
 bool MessageBuffer::pop(uint32_t& id, std::vector<uint8_t>& out) {
-  if (q_.empty()) {                            // очередь пуста
+  if (size_ == 0) {                            // очередь пуста
     DEBUG_LOG("MessageBuffer: извлечение из пустой очереди");
     return false;
   }
-  auto& front = q_.front();
-  id = front.first;                            // возвращаем идентификатор
-  out = std::move(front.second);               // забираем данные
-  q_.pop_front();
+  Slot& slot = slots_[head_];
+  id = slot.id;                                // возвращаем идентификатор
+  out.assign(slot.data.begin(), slot.data.end()); // копируем данные в выходной буфер
+  slot.data.clear();
+  slot.used = false;
+  head_ = (head_ + 1) % capacity_;
+  --size_;
   DEBUG_LOG_VAL("MessageBuffer: извлечён id=", id);
   return true;
 }
 
 const std::vector<uint8_t>* MessageBuffer::peek(uint32_t& id) const {
-  if (q_.empty()) {                              // очередь пуста
+  if (size_ == 0) {                              // очередь пуста
     DEBUG_LOG("MessageBuffer: просмотр пустой очереди");
     return nullptr;
   }
-  id = q_.front().first;
-  return &q_.front().second;                    // возвращаем указатель на данные без копирования
+  const Slot& slot = slots_[head_];
+  id = slot.id;
+  return slot.used ? &slot.data : nullptr;      // возвращаем указатель на данные без копирования
+}
+
+size_t MessageBuffer::slotSize() const {
+  return slot_size_;
 }
