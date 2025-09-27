@@ -32,6 +32,7 @@ public:
 int main() {
   MockRadio radio;
   TxModule tx(radio, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  tx.setAckResponseDelay(0);
   const char* msg = "HELLO";
   uint32_t id = tx.queue(reinterpret_cast<const uint8_t*>(msg), 5);
   assert(id==1);                          // ожидаемый ID
@@ -58,6 +59,7 @@ int main() {
   // Проверяем, что при отсутствии ACK остальные части пакета переносятся в архив
   MockRadio radioAck;
   TxModule txAck(radioAck, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txAck.setAckResponseDelay(0);
   txAck.setAckEnabled(true);
   txAck.setAckRetryLimit(1);          // одна повторная отправка
   txAck.setAckTimeout(1);             // минимальный положительный тайм-аут для ускоренных повторов
@@ -77,6 +79,7 @@ int main() {
   // Проверяем завершение пакета при обнулении лимита ретраев до прихода ACK
   MockRadio radioNoAck;
   TxModule txNoAck(radioNoAck, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txNoAck.setAckResponseDelay(0);
   txNoAck.setAckEnabled(true);
   txNoAck.setAckRetryLimit(2);
   txNoAck.setAckTimeout(1000);
@@ -94,6 +97,7 @@ int main() {
   // Проверяем, что при ack_timeout=0 пакет не попадает в архив после обнуления лимита
   MockRadio radioZero;
   TxModule txZero(radioZero, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txZero.setAckResponseDelay(0);
   txZero.setAckEnabled(true);
   txZero.setAckRetryLimit(2);
   txZero.setAckTimeout(0);
@@ -112,6 +116,7 @@ int main() {
   // Проверяем, что ACK-сообщения уходят раньше обычных пакетов
   MockRadio radioPriority;
   TxModule txPriority(radioPriority, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txPriority.setAckResponseDelay(0);
   txPriority.setAckEnabled(true);
   txPriority.setAckRetryLimit(1);
   txPriority.setAckTimeout(0);
@@ -136,6 +141,7 @@ int main() {
   // Проверяем, что поздний ACK после тайм-аута не приводит к дополнительному повтору
   MockRadio radioLateAck;
   TxModule txLateAck(radioLateAck, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txLateAck.setAckResponseDelay(0);
   txLateAck.setAckEnabled(true);
   txLateAck.setAckRetryLimit(1);
   txLateAck.setAckTimeout(5);
@@ -155,6 +161,7 @@ int main() {
   // Проверяем, что после перевода ack_timeout=0 очередь продолжает двигаться без ожидания ACK
   MockRadio radioFlow;
   TxModule txFlow(radioFlow, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txFlow.setAckResponseDelay(0);
   txFlow.setAckEnabled(true);
   txFlow.setAckRetryLimit(3);
   txFlow.setAckTimeout(10);

@@ -1832,6 +1832,7 @@ void setup() {
   tx.setAckRetryLimit(ackRetryLimit);
   tx.setSendPause(DefaultSettings::SEND_PAUSE_MS);
   tx.setAckTimeout(DefaultSettings::ACK_TIMEOUT_MS);
+  tx.setAckResponseDelay(DefaultSettings::ACK_RESPONSE_DELAY_MS);
   tx.setEncryptionEnabled(encryptionEnabled);
   rx.setEncryptionEnabled(encryptionEnabled);
   rx.setBuffer(&recvBuf);                                   // сохраняем принятые пакеты

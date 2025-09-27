@@ -31,6 +31,8 @@ public:
   void setAckTimeout(uint32_t timeout_ms);
   // Получить тайм-аут ожидания ACK (мс)
   uint32_t getAckTimeout() const;
+  // Задать задержку перед отправкой ACK после успешного приёма (мс)
+  void setAckResponseDelay(uint32_t delay_ms);
   // Перечитать ключ из хранилища (после смены через веб-интерфейс)
   void reloadKey();
   // Управление режимами подтверждений и шифрования
@@ -72,6 +74,7 @@ private:
   bool ack_enabled_ = DefaultSettings::USE_ACK;     // режим ожидания ACK
   uint8_t ack_retry_limit_ = DefaultSettings::ACK_RETRY_LIMIT; // число повторов
   uint32_t ack_timeout_ms_ = DefaultSettings::ACK_TIMEOUT_MS;  // тайм-аут ожидания
+  uint32_t ack_delay_ms_ = DefaultSettings::ACK_RESPONSE_DELAY_MS; // задержка перед ответным ACK
   bool waiting_ack_ = false;                        // ждём ли ACK
   std::chrono::steady_clock::time_point last_attempt_; // момент последней отправки
   std::optional<PendingMessage> inflight_;          // текущий пакет в работе
@@ -79,6 +82,7 @@ private:
   std::deque<PendingMessage> archive_;              // архив сообщений без ACK
   std::deque<PendingMessage> ack_queue_;            // очередь мгновенных ACK-сообщений
   uint32_t next_ack_id_ = 0x80000000u;              // идентификаторы ACK вне общей очереди
+  std::chrono::steady_clock::time_point next_ack_send_time_; // момент, когда ACK можно отправить
   bool encryption_enabled_ = DefaultSettings::USE_ENCRYPTION; // текущий режим шифрования
 };
 

@@ -18,10 +18,10 @@
 
 // Значения параметров радиомодуля по умолчанию
 namespace DefaultSettings {
-  constexpr ChannelBank BANK = ChannelBank::EAST; // Банк каналов
+  constexpr ChannelBank BANK = ChannelBank::TEST; // Банк каналов
   constexpr uint8_t CHANNEL = 0;                   // Номер канала
   constexpr uint8_t POWER_PRESET = 0;             // Индекс мощности
-  constexpr uint8_t BW_PRESET = 3;                // Индекс полосы
+  constexpr uint8_t BW_PRESET = 2;                // Индекс полосы (15,63 кГц)
   constexpr uint8_t SF_PRESET = 2;                // Индекс фактора расширения
   constexpr uint8_t CR_PRESET = 0;                // Индекс коэффициента кодирования
   constexpr bool RX_BOOSTED_GAIN = false;         // Режим повышенного усиления приёмника
@@ -35,6 +35,7 @@ namespace DefaultSettings {
   constexpr bool USE_RS = false;                   // использовать кодирование RS(255,223)
   constexpr bool USE_ACK = false;                  // использовать подтверждения ACK
   constexpr uint8_t ACK_RETRY_LIMIT = 3;           // Количество повторных отправок при ожидании ACK
+  constexpr uint32_t ACK_RESPONSE_DELAY_MS = 20;   // Задержка перед отправкой ACK после приёма (мс)
   constexpr bool USE_ENCRYPTION = true;            // Использовать шифрование AES-CCM
   constexpr const char* WIFI_SSID = "sat_ap";      // SSID точки доступа
   constexpr const char* WIFI_PASS = "12345678";    // пароль точки доступа
