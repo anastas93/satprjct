@@ -38,9 +38,12 @@
 #endif
 
 #if defined(ESP32) && __has_include("esp_core_dump.h")
-#include "esp_core_dump.h" // управление core dump на ESP32
-#include "esp_partition.h" // прямой доступ к разделам флеша
-#include "esp_ipc.h"       // выполнение критичных операций на ядре 0
+#include "esp_core_dump.h"      // управление core dump на ESP32
+#include "esp_partition.h"      // прямой доступ к разделам флеша
+#include "esp_ipc.h"            // выполнение критичных операций на ядре 0
+#if __has_include("esp_idf_version.h")
+#include "esp_idf_version.h"    // сведения о версии ESP-IDF
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #define SR_HAS_ESP_COREDUMP 1
@@ -193,6 +196,26 @@ String jsonEscape(const String& value) {
 }
 
 #if SR_HAS_ESP_COREDUMP
+// Унифицированные макросы совместимости для получения Idle-задачи и выбора ядра IPC
+#ifndef ESP_IDF_VERSION_VAL
+#define ESP_IDF_VERSION_VAL(major, minor, patch) (((major) << 16) | ((minor) << 8) | (patch))
+#endif
+
+#if defined(ESP_IDF_VERSION_MAJOR) && defined(ESP_IDF_VERSION_MINOR) && \
+    defined(ESP_IDF_VERSION_PATCH) && !defined(ESP_IDF_VERSION)
+#define ESP_IDF_VERSION \
+  ESP_IDF_VERSION_VAL(ESP_IDF_VERSION_MAJOR, ESP_IDF_VERSION_MINOR, ESP_IDF_VERSION_PATCH)
+#endif
+
+#if defined(ESP_IDF_VERSION_MAJOR) && defined(ESP_IDF_VERSION) && \
+    (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 0))
+#define SR_IDLE_TASK_HANDLE_FOR_CORE(core) xTaskGetIdleTaskHandleForCore(core)
+static constexpr uint32_t kCoreDumpIpcTargetCore = 0; // ядро PRO в новых версиях ESP-IDF
+#else
+#define SR_IDLE_TASK_HANDLE_FOR_CORE(core) xTaskGetIdleTaskHandleForCPU(core)
+static constexpr uint32_t kCoreDumpIpcTargetCore = ESP_IPC_CPU_PRO; // ядро PRO в старых версиях
+#endif
+
 // Флаги, управляющие отложенной очисткой core dump после старта FreeRTOS.
 bool gCoreDumpClearPending = true;
 uint32_t gCoreDumpClearAfterMs = 0;
@@ -220,9 +243,9 @@ static void coreDumpClearIpc(void* arg) {
 
 // Пытаемся очистить повреждённую конфигурацию core dump, чтобы убрать перезагрузки с ошибкой CRC
 bool clearCorruptedCoreDumpConfig() {
-  TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCPU(0);
+  TaskHandle_t idle0 = SR_IDLE_TASK_HANDLE_FOR_CORE(0);
 #if (portNUM_PROCESSORS > 1)
-  TaskHandle_t idle1 = xTaskGetIdleTaskHandleForCPU(1);
+  TaskHandle_t idle1 = SR_IDLE_TASK_HANDLE_FOR_CORE(1);
 #else
   TaskHandle_t idle1 = idle0;
 #endif
@@ -264,7 +287,7 @@ bool clearCorruptedCoreDumpConfig() {
   CoreDumpClearContext ctx;
   ctx.part = part;
   std::fill_n(ctx.zeros, sizeof(ctx.zeros), 0);
-  esp_err_t ipcErr = esp_ipc_call_blocking(ESP_IPC_CPU_PRO, &coreDumpClearIpc, &ctx);
+  esp_err_t ipcErr = esp_ipc_call_blocking(kCoreDumpIpcTargetCore, &coreDumpClearIpc, &ctx);
   if (ipcErr != ESP_OK) {
     Serial.print("Core dump: IPC-вызов завершился ошибкой, код=");
     Serial.println(static_cast<int>(ipcErr));
