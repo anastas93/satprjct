@@ -517,6 +517,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
       </div>
       <div class="actions">
         <button id="btnKeyGen" class="btn">KEYGEN</button>
+        <button id="btnKeyGenPeer" class="btn" disabled>KEYGEN PEER</button>
         <button id="btnKeyRestore" class="btn">KEY RESTORE</button>
         <button id="btnKeySend" class="btn">KEYTRANSFER SEND</button>
         <button id="btnKeyRecv" class="btn">KEYTRANSFER RECEIVE</button>

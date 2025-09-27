@@ -800,6 +800,11 @@ async function init() {
 
   // Безопасность
   const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", () => requestKeyGen());
+  const btnKeyGenPeer = $("#btnKeyGenPeer");
+  if (btnKeyGenPeer) {
+    UI.els.keyGenPeerBtn = btnKeyGenPeer;
+    btnKeyGenPeer.addEventListener("click", () => requestKeyGenPeer());
+  }
   const btnKeyRestore = $("#btnKeyRestore"); if (btnKeyRestore) btnKeyRestore.addEventListener("click", () => requestKeyRestore());
   const btnKeySend = $("#btnKeySend"); if (btnKeySend) btnKeySend.addEventListener("click", () => requestKeySend());
   const btnKeyRecv = $("#btnKeyRecv"); if (btnKeyRecv) btnKeyRecv.addEventListener("click", () => requestKeyReceive());
@@ -7054,12 +7059,14 @@ function renderKeyState(state) {
   const peerEl = $("#keyPeer");
   const backupEl = $("#keyBackup");
   const messageEl = $("#keyMessage");
+  const peerBtn = UI.els.keyGenPeerBtn || $("#btnKeyGenPeer");
   if (!data || typeof data !== "object") {
     if (stateEl) stateEl.textContent = "—";
     if (idEl) idEl.textContent = "";
     if (pubEl) pubEl.textContent = "";
     if (peerEl) peerEl.textContent = "";
     if (backupEl) backupEl.textContent = "";
+    if (peerBtn) peerBtn.disabled = true;
   } else {
     const type = data.type === "external" ? "EXTERNAL" : "LOCAL";
     if (stateEl) stateEl.textContent = type;
@@ -7075,6 +7082,11 @@ function renderKeyState(state) {
       }
     }
     if (backupEl) backupEl.textContent = data.hasBackup ? "Есть резерв" : "";
+    if (peerBtn) {
+      // Активируем кнопку KEYGEN PEER только когда известен удалённый ключ
+      const hasPeer = typeof data.peer === "string" && data.peer.trim().length > 0;
+      peerBtn.disabled = !hasPeer;
+    }
   }
   if (messageEl) messageEl.textContent = UI.key.lastMessage || "";
 }
@@ -7235,43 +7247,56 @@ function parseKeygenPlainResponse(text) {
   };
 }
 
-async function requestKeyGen() {
-  status("→ KEYGEN");
-  debugLog("KEYGEN → запрос генерации");
-  const res = await deviceFetch("KEYGEN", {}, 6000);
+// Универсальный обработчик команд, которые обновляют ключи устройства
+async function handleKeyGenerationCommand(options) {
+  const command = options.command;
+  const label = options.label || command;
+  const params = options.params || {};
+  const requestLog = options.requestLog || "запрос";
+  const successMessage = options.successMessage || "Ключ обновлён";
+  const emptyResponseMessage = options.emptyResponseMessage || "устройство вернуло пустой ответ";
+  const timeoutMs = options.timeoutMs || 6000;
+  const refreshAfterPlain = options.refreshAfterPlain !== false;
+
+  status(`→ ${label}`);
+  debugLog(`${label} → ${requestLog}`);
+  const res = await deviceFetch(command, params, timeoutMs);
   if (!res.ok) {
-    debugLog("KEYGEN ✗ " + res.error);
-    status("✗ KEYGEN");
-    note("Ошибка KEYGEN: " + res.error);
-    return;
+    debugLog(`${label} ✗ ${res.error}`);
+    status(`✗ ${label}`);
+    note(`Ошибка ${label}: ${res.error}`);
+    return false;
   }
+
   const rawText = res.text != null ? String(res.text) : "";
-  debugLog("KEYGEN ← " + rawText);
+  debugLog(`${label} ← ${rawText}`);
   const trimmed = rawText.trim();
   if (!trimmed) {
-    status("✗ KEYGEN");
-    note("KEYGEN: устройство вернуло пустой ответ");
-    return;
+    status(`✗ ${label}`);
+    note(`${label}: ${emptyResponseMessage}`);
+    return false;
   }
+
   let data = null;
   try {
     data = JSON.parse(trimmed);
   } catch (err) {
-    console.warn("[key] не удалось разобрать ответ KEYGEN как JSON:", err);
+    console.warn(`[key] не удалось разобрать ответ ${label} как JSON:`, err);
   }
   if (data && data.error) {
-    note("KEYGEN: " + data.error);
-    status("✗ KEYGEN");
-    return;
+    note(`${label}: ${data.error}`);
+    status(`✗ ${label}`);
+    return false;
   }
   if (data) {
     UI.key.state = data;
-    UI.key.lastMessage = "Сгенерирован новый локальный ключ";
+    UI.key.lastMessage = successMessage;
     renderKeyState(data);
-    debugLog("KEYGEN ✓ ключ обновлён на устройстве");
-    status("✓ KEYGEN");
-    return;
+    debugLog(`${label} ✓ ключ обновлён на устройстве`);
+    status(`✓ ${label}`);
+    return true;
   }
+
   const plainInfo = parseKeygenPlainResponse(trimmed);
   if (plainInfo) {
     UI.key.lastMessage = plainInfo.message;
@@ -7282,25 +7307,53 @@ async function requestKeyGen() {
       UI.key.state = null;
       renderKeyState(null);
     }
-    note(plainInfo.note);
-    status("✓ KEYGEN");
-    await refreshKeyState({ silent: true }).catch((err) => {
-      console.warn("[key] не удалось обновить состояние после KEYGEN:", err);
-    });
-    return;
+    note(`${label}: ${plainInfo.message}`);
+    status(`✓ ${label}`);
+    debugLog(`${label} ✓ ${plainInfo.message}`);
+    if (refreshAfterPlain) {
+      await refreshKeyState({ silent: true }).catch((err) => {
+        console.warn(`[key] не удалось обновить состояние после ${label}:`, err);
+      });
+    }
+    return true;
   }
+
   const normalized = trimmed.toLowerCase();
   if (/(err|fail|ошиб|нет)/.test(normalized)) {
-    status("✗ KEYGEN");
-    note("KEYGEN: " + trimmed);
-    return;
+    status(`✗ ${label}`);
+    note(`${label}: ${trimmed}`);
+    debugLog(`${label} ✗ ${trimmed}`);
+    return false;
   }
-  UI.key.lastMessage = "Ключ обновлён";
+
+  UI.key.lastMessage = successMessage;
   renderKeyState(UI.key.state);
-  note("KEYGEN: " + trimmed);
-  status("✓ KEYGEN");
-  await refreshKeyState({ silent: true }).catch((err) => {
-    console.warn("[key] не удалось обновить состояние после KEYGEN:", err);
+  note(`${label}: ${trimmed}`);
+  status(`✓ ${label}`);
+  debugLog(`${label} ✓ ${trimmed}`);
+  if (refreshAfterPlain) {
+    await refreshKeyState({ silent: true }).catch((err) => {
+      console.warn(`[key] не удалось обновить состояние после ${label}:`, err);
+    });
+  }
+  return true;
+}
+
+async function requestKeyGen() {
+  await handleKeyGenerationCommand({
+    command: "KEYGEN",
+    label: "KEYGEN",
+    requestLog: "запрос генерации",
+    successMessage: "Сгенерирован новый локальный ключ",
+  });
+}
+
+async function requestKeyGenPeer() {
+  await handleKeyGenerationCommand({
+    command: "KEYGEN PEER",
+    label: "KEYGEN PEER",
+    requestLog: "запрос повторного применения удалённого ключа",
+    successMessage: "Обновлён симметричный ключ по сохранённому удалённому ключу",
   });
 }
 

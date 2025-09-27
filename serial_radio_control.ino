@@ -1014,6 +1014,15 @@ String cmdKeyGenSecure() {
   return String("{\"error\":\"keygen\"}");
 }
 
+String cmdKeyGenPeer() {
+  DEBUG_LOG("Key: повторное применение удалённого ключа");
+  if (KeyLoader::regenerateFromPeer()) {
+    reloadCryptoModules();
+    return makeKeyStateJson();
+  }
+  return String("{\"error\":\"peer\"}");
+}
+
 String cmdKeyRestoreSecure() {
   DEBUG_LOG("Key: восстановление ключа из резервной копии");
   if (KeyLoader::restorePreviousKey()) {
@@ -1894,7 +1903,11 @@ void handleCmdHttp() {
     resp = cmdKeyStorage(arg);
     contentType = "application/json"; // Ответ в формате JSON
   } else if (cmd == "KEYGEN") {
-    resp = cmdKeyGenSecure();
+    if (cmdArg.equalsIgnoreCase("PEER")) {
+      resp = cmdKeyGenPeer();
+    } else {
+      resp = cmdKeyGenSecure();
+    }
     contentType = "application/json"; // Ответ в формате JSON
   } else if (cmd == "KEYRESTORE") {
     resp = cmdKeyRestoreSecure();
