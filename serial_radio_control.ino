@@ -37,11 +37,24 @@
 #include <FS.h>
 #endif
 
-#if defined(ESP32) && __has_include("esp_core_dump.h")
-#include "esp_core_dump.h"      // управление core dump на ESP32
+#if defined(__has_include)
+#define SR_HAS_INCLUDE(path) __has_include(path)
+#else
+#define SR_HAS_INCLUDE(path) 0
+#endif
+
+#if defined(ESP32) && SR_HAS_INCLUDE("esp_partition.h")
+#if SR_HAS_INCLUDE("esp_core_dump.h")
+#include "esp_core_dump.h"      // управление core dump на ESP32 (если заголовок доступен)
+#endif
 #include "esp_partition.h"      // прямой доступ к разделам флеша
+#if SR_HAS_INCLUDE("esp_ipc.h")
 #include "esp_ipc.h"            // выполнение критичных операций на ядре 0
-#if __has_include("esp_idf_version.h")
+#define SR_HAS_ESP_IPC 1
+#else
+#define SR_HAS_ESP_IPC 0
+#endif
+#if SR_HAS_INCLUDE("esp_idf_version.h")
 #include "esp_idf_version.h"    // сведения о версии ESP-IDF
 #endif
 #include "freertos/FreeRTOS.h"
@@ -49,6 +62,10 @@
 #define SR_HAS_ESP_COREDUMP 1
 #else
 #define SR_HAS_ESP_COREDUMP 0
+#endif
+
+#if defined(SR_HAS_INCLUDE)
+#undef SR_HAS_INCLUDE
 #endif
 
 #ifdef ARDUINO
@@ -289,7 +306,13 @@ bool clearCorruptedCoreDumpConfig() {
   CoreDumpClearContext ctx;
   ctx.part = part;
   std::fill_n(ctx.zeros, sizeof(ctx.zeros), 0);
-  esp_err_t ipcErr = esp_ipc_call_blocking(kCoreDumpIpcTargetCore, &coreDumpClearIpc, &ctx);
+  esp_err_t ipcErr = ESP_OK;
+#if SR_HAS_ESP_IPC
+  ipcErr = esp_ipc_call_blocking(kCoreDumpIpcTargetCore, &coreDumpClearIpc, &ctx);
+#else
+  // На платформах без esp_ipc выполняем очистку на текущем ядре, так как выбор ядра недоступен.
+  coreDumpClearIpc(&ctx);
+#endif
   if (ipcErr != ESP_OK) {
     Serial.print("Core dump: IPC-вызов завершился ошибкой, код=");
     Serial.println(static_cast<int>(ipcErr));
