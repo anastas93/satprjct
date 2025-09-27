@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <string>
 #include <array>
+#include <cstring>
 #ifndef ARDUINO
 #include <thread>
 #endif
@@ -57,18 +58,24 @@ static_assert(EFFECTIVE_DATA_CHUNK > 0, "Размер части для коди
 static constexpr size_t MAX_CIPHER_CHUNK = EFFECTIVE_DATA_CHUNK + TAG_LEN; // максимум байт шифртекста в одном блоке
 
 // Вставка пилотов каждые 64 байта
-static std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
-  std::vector<uint8_t> out;
-  out.reserve(in.size() + (in.size() / PILOT_INTERVAL) * PILOT_MARKER.size());
+static size_t insertPilots(const uint8_t* in, size_t len, uint8_t* out, size_t out_capacity) {
+  size_t written = 0;
   size_t count = 0;
-  for (uint8_t b : in) {
+  for (size_t i = 0; i < len; ++i) {
     if (count && count % PILOT_INTERVAL == 0) {
-      out.insert(out.end(), PILOT_MARKER.begin(), PILOT_MARKER.end());
+      if (written + PILOT_MARKER.size() > out_capacity) {
+        return 0;                                     // защита от выхода за пределы буфера
+      }
+      std::memcpy(out + written, PILOT_MARKER.data(), PILOT_MARKER.size());
+      written += PILOT_MARKER.size();
     }
-    out.push_back(b);
+    if (written >= out_capacity) {
+      return 0;                                       // буфер переполнен
+    }
+    out[written++] = in[i];
     ++count;
   }
-  return out;
+  return written;
 }
 
 // Инициализация модуля передачи с классами QoS
@@ -332,23 +339,36 @@ bool TxModule::transmit(const PendingMessage& message) {
   rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size(), false);
 
   struct PreparedFragment {
-    std::vector<uint8_t> payload;   // полезная нагрузка готового кадра
-    bool conv_encoded = false;      // применялось ли свёрточное кодирование
-    uint16_t cipher_len = 0;        // длина шифртекста вместе с тегом
-    uint16_t plain_len = 0;         // длина исходных данных до шифрования
-    uint16_t chunk_idx = 0;         // номер блока внутри сообщения для нонса
+    std::array<uint8_t, MAX_FRAGMENT_LEN> payload{}; // предвыделенный буфер полезной нагрузки
+    uint16_t payload_size = 0;                       // фактическая длина полезной нагрузки
+    bool conv_encoded = false;                      // применялось ли свёрточное кодирование
+    uint16_t cipher_len = 0;                        // длина шифртекста вместе с тегом
+    uint16_t plain_len = 0;                         // длина исходных данных до шифрования
+    uint16_t chunk_idx = 0;                         // номер блока внутри сообщения для нонса
   };
 
   std::vector<PreparedFragment> fragments;
+  fragments.reserve((msg.size() + EFFECTIVE_DATA_CHUNK - 1) / EFFECTIVE_DATA_CHUNK);
   bool sent = false;
 
+  std::vector<uint8_t> part;
+  part.reserve(tmp.slotSize());                     // используем вместимость слота
+  std::vector<uint8_t> enc;
+  enc.reserve(MAX_CIPHER_CHUNK);
+  std::vector<uint8_t> tag;
+  tag.reserve(TAG_LEN);
+  std::vector<uint8_t> conv;
+  conv.reserve(MAX_FRAGMENT_LEN);
+  std::vector<uint8_t> conv_input;
+  conv_input.reserve(RS_ENC_LEN + CONV_TAIL_BYTES);
+
   while (tmp.hasPending()) {
-    std::vector<uint8_t> part;
+    part.clear();
     uint32_t dummy = 0;
     if (!tmp.pop(dummy, part)) break;
 
-    std::vector<uint8_t> enc;
-    std::vector<uint8_t> tag;
+    enc.clear();
+    tag.clear();
     const size_t plain_len = part.size();
     uint16_t current_idx = static_cast<uint16_t>(fragments.size());
     auto nonce = KeyLoader::makeNonce(message.id, current_idx);
@@ -370,13 +390,12 @@ bool TxModule::transmit(const PendingMessage& message) {
       continue;                                       // пропускаем некорректный блок
     }
 
-    std::vector<uint8_t> conv;
     bool conv_applied = false;
     if (USE_RS && cipher_len == RS_DATA_LEN) {
       uint8_t rs_buf[RS_ENC_LEN];
       rs255223::encode(enc.data(), rs_buf);
       byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
-      std::vector<uint8_t> conv_input(rs_buf, rs_buf + RS_ENC_LEN);
+      conv_input.assign(rs_buf, rs_buf + RS_ENC_LEN);
       conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00);
       conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
       conv_applied = true;
@@ -384,7 +403,7 @@ bool TxModule::transmit(const PendingMessage& message) {
         bit_interleaver::interleave(conv.data(), conv.size());
       }
     } else if (!enc.empty()) {
-      std::vector<uint8_t> conv_input(enc.begin(), enc.end());
+      conv_input.assign(enc.begin(), enc.end());
       conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00); // добавляем «хвост» для сброса регистра
       conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
       conv_applied = true;
@@ -394,34 +413,42 @@ bool TxModule::transmit(const PendingMessage& message) {
     }
 
     if (!conv_applied) {
-      conv = enc;                                     // fallback: отправляем без свёртки
+      conv.assign(enc.begin(), enc.end());            // fallback: отправляем без свёртки
     }
 
     if (conv_applied && conv.size() > MAX_FRAGMENT_LEN) {
       LOG_WARN_VAL("TxModule: свёрнутый блок превышает лимит=", conv.size());
-      conv = enc;                                     // возвращаемся к исходному варианту
+      conv.assign(enc.begin(), enc.end());            // возвращаемся к исходному варианту
       conv_applied = false;
     }
 
     PreparedFragment frag;
-    frag.payload = std::move(conv);
+    if (conv.size() > frag.payload.size()) {
+      LOG_WARN("TxModule: подготовленный блок не помещается в слот");
+      continue;
+    }
+    frag.payload_size = static_cast<uint16_t>(conv.size());
+    if (!conv.empty()) {
+      std::memcpy(frag.payload.data(), conv.data(), conv.size());
+    }
     if (conv_applied) {
       frag.conv_encoded = true;
       frag.cipher_len = static_cast<uint16_t>(cipher_len);
       frag.plain_len = static_cast<uint16_t>(plain_len);
     }
     frag.chunk_idx = current_idx;
-    fragments.push_back(std::move(frag));
+    fragments.push_back(frag);
   }
 
   uint16_t frag_cnt = static_cast<uint16_t>(fragments.size());
+  std::array<uint8_t, MAX_FRAME_SIZE> frame_buf{};      // общий буфер кадра
   for (size_t idx = 0; idx < fragments.size(); ++idx) {
     auto& frag = fragments[idx];
     FrameHeader hdr;
     hdr.msg_id = message.id;
     hdr.frag_idx = static_cast<uint16_t>(idx);
     hdr.frag_cnt = frag_cnt;
-    hdr.payload_len = static_cast<uint16_t>(frag.payload.size());
+    hdr.payload_len = frag.payload_size;
     hdr.flags = 0;
     if (encryption_enabled_) hdr.flags |= FrameHeader::FLAG_ENCRYPTED;
     if (message.expect_ack) hdr.flags |= FrameHeader::FLAG_ACK_REQUIRED;
@@ -431,24 +458,32 @@ bool TxModule::transmit(const PendingMessage& message) {
     hdr.ack_mask = 0;                               // поле свободно для реальных масок подтверждений
 
     uint8_t hdr_buf[FrameHeader::SIZE];
-    if (!hdr.encode(hdr_buf, sizeof(hdr_buf), frag.payload.data(), frag.payload.size())) {
+    if (!hdr.encode(hdr_buf, sizeof(hdr_buf), frag.payload.data(), frag.payload_size)) {
       DEBUG_LOG("TxModule: ошибка кодирования заголовка");
       continue;
     }
 
-    std::vector<uint8_t> frame;
-    frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE);
-    frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE);
-    auto payload = insertPilots(frag.payload);
-    frame.insert(frame.end(), payload.begin(), payload.end());
-    scrambler::scramble(frame.data(), frame.size());
+    size_t frame_size = 0;
+    std::memcpy(frame_buf.data() + frame_size, hdr_buf, FrameHeader::SIZE);
+    frame_size += FrameHeader::SIZE;
+    std::memcpy(frame_buf.data() + frame_size, hdr_buf, FrameHeader::SIZE);
+    frame_size += FrameHeader::SIZE;
+    size_t payload_bytes = insertPilots(frag.payload.data(), frag.payload_size,
+                                        frame_buf.data() + frame_size,
+                                        frame_buf.size() - frame_size);
+    if (payload_bytes == 0 && frag.payload_size != 0) {
+      LOG_ERROR("TxModule: вставка пилотов не удалась");
+      continue;
+    }
+    frame_size += payload_bytes;
+    scrambler::scramble(frame_buf.data(), frame_size);
 
-    if (frame.size() > MAX_FRAME_SIZE) {
-      LOG_ERROR_VAL("TxModule: превышен размер кадра=", frame.size());
+    if (frame_size > MAX_FRAME_SIZE) {
+      LOG_ERROR_VAL("TxModule: превышен размер кадра=", frame_size);
       continue;
     }
     waitForPauseWindow();
-    radio_.send(frame.data(), frame.size());
+    radio_.send(frame_buf.data(), frame_size);
     last_send_ = std::chrono::steady_clock::now();
     DEBUG_LOG_VAL("TxModule: отправлен фрагмент=", idx);
     sent = true;

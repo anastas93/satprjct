@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <string>
+#include <cstddef>
 
 // Простейший журнал статусов сообщений
 namespace SimpleLogger {
