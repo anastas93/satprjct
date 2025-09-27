@@ -4,7 +4,11 @@
 #include <array>
 #include <thread>
 #include <chrono>
+#define private public
+#define protected public
 #include "tx_module.h"
+#undef private
+#undef protected
 #include "rx_module.h"
 #include "../libs/frame/frame_header.h" // заголовок кадра
 #include "../libs/scrambler/scrambler.h" // дескремблирование кадра
@@ -128,6 +132,25 @@ int main() {
   assert(!ackPlain.empty() && ackPlain.back() == protocol::ack::MARKER);
   txPriority.loop();
   assert(radioPriority.history.size() == 2);
+
+  // Проверяем, что поздний ACK после тайм-аута не приводит к дополнительному повтору
+  MockRadio radioLateAck;
+  TxModule txLateAck(radioLateAck, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txLateAck.setAckEnabled(true);
+  txLateAck.setAckRetryLimit(1);
+  txLateAck.setAckTimeout(5);
+  txLateAck.setSendPause(0);
+  const char late_msg[] = "LATE";
+  txLateAck.queue(reinterpret_cast<const uint8_t*>(late_msg), sizeof(late_msg));
+  txLateAck.loop();
+  assert(radioLateAck.history.size() == 1);
+  assert(txLateAck.inflight_.has_value());
+  txLateAck.waiting_ack_ = false; // имитируем срабатывание тайм-аута, сбросив ожидание ACK
+  txLateAck.onAckReceived();      // ACK пришёл до фактического повтора
+  assert(!txLateAck.inflight_.has_value());
+  bool lateAckLoop = txLateAck.loop();
+  assert(!lateAckLoop);
+  assert(radioLateAck.history.size() == 1);
 
   // Проверяем, что после перевода ack_timeout=0 очередь продолжает двигаться без ожидания ACK
   MockRadio radioFlow;

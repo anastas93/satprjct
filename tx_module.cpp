@@ -628,19 +628,24 @@ void TxModule::onAckReceived() {
     scheduleFromArchive();
     return;
   }
-  if (!waiting_ack_) return;
+  const bool had_inflight = static_cast<bool>(inflight_);
+  uint32_t inflight_id = had_inflight ? inflight_->id : 0;
+  uint8_t inflight_qos = had_inflight ? inflight_->qos : 0;
+  std::string status_prefix = had_inflight ? inflight_->status_prefix : std::string();
   waiting_ack_ = false;
-  uint32_t inflight_id = inflight_ ? inflight_->id : 0;
-  uint8_t inflight_qos = inflight_ ? inflight_->qos : 0;
-  DEBUG_LOG("TxModule: ACK получен для id=%u qos=%u",
-            static_cast<unsigned int>(inflight_id),
-            static_cast<unsigned int>(inflight_qos));
-  if (inflight_) {
-    if (!inflight_->status_prefix.empty()) {
-      SimpleLogger::logStatus(inflight_->status_prefix + " GO");
-    }
+  if (had_inflight) {
     inflight_->attempts_left = ack_retry_limit_;
     inflight_.reset();
+  }
+  if (had_inflight) {
+    DEBUG_LOG("TxModule: ACK получен для id=%u qos=%u",
+              static_cast<unsigned int>(inflight_id),
+              static_cast<unsigned int>(inflight_qos));
+    if (!status_prefix.empty()) {
+      SimpleLogger::logStatus(status_prefix + " GO");
+    }
+  } else {
+    DEBUG_LOG("TxModule: ACK получен без активного пакета");
   }
   scheduleFromArchive();
 }
