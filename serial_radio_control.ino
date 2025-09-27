@@ -270,7 +270,9 @@ bool clearCorruptedCoreDumpConfig() {
   if (err != ESP_OK) {
     Serial.print("Core dump: ошибка чтения, код=");
     Serial.println(static_cast<int>(err));
-    return true;
+    // Дадим флешу и подсистеме core dump возможность освободить ресурсы и попробуем позже.
+    gCoreDumpClearAfterMs = millis() + 1000;
+    return false;
   }
   bool allZero = true;
   for (uint8_t b : probe) {
@@ -291,20 +293,23 @@ bool clearCorruptedCoreDumpConfig() {
   if (ipcErr != ESP_OK) {
     Serial.print("Core dump: IPC-вызов завершился ошибкой, код=");
     Serial.println(static_cast<int>(ipcErr));
-    return true;
+    gCoreDumpClearAfterMs = millis() + 1000;
+    return false;
   }
   if (ctx.eraseErr != ESP_OK) {
     Serial.print("Core dump: ошибка стирания, код=");
     Serial.println(static_cast<int>(ctx.eraseErr));
-    return true;
+    gCoreDumpClearAfterMs = millis() + 1000;
+    return false;
   }
   if (ctx.writeErr == ESP_OK) {
     Serial.println("Core dump: конфигурация сброшена");
-  } else {
-    Serial.print("Core dump: ошибка записи, код=");
-    Serial.println(static_cast<int>(ctx.writeErr));
+    return true;
   }
-  return true;
+  Serial.print("Core dump: ошибка записи, код=");
+  Serial.println(static_cast<int>(ctx.writeErr));
+  gCoreDumpClearAfterMs = millis() + 1000;
+  return false;
 }
 #endif
 
