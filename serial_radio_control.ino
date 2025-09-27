@@ -1499,7 +1499,7 @@ void handleCmdHttp() {
     }
     uint32_t effective = tx.getAckTimeout();
     if (effective == 0) {
-      resp = String("0 (ожидание ACK отключено)");  // фиксируем особое значение 0
+      resp = String("0 (ожидание подтверждений выключено, очередь работает без тайм-аута)");  // фиксируем особое значение 0
     } else {
       resp = String(effective);
     }
@@ -1994,7 +1994,7 @@ void loop() {
         Serial.print("ACKT: ");
         Serial.print(applied);
         if (applied == 0) {
-          Serial.println(" ms (ожидание ACK отключено)");  // подчёркиваем особый режим ожидания
+          Serial.println(" ms (ожидание подтверждений выключено, очередь работает без тайм-аута)");  // подчёркиваем особый режим ожидания
         } else {
           Serial.println(" ms");
         }
