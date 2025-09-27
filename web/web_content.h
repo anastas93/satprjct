@@ -456,6 +456,10 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
                 <input id="ACKT" type="number" min="0" max="60000" value="1500" />
                 <div id="ackTimeoutHint" class="field-hint">Время ожидания ACK не загружено.</div>
               </label>
+              <label>ACK задержка (мс)
+                <input id="ACKD" type="number" min="0" max="5000" value="20" />
+                <div id="ackDelayHint" class="field-hint">Задержка отправки ACK не загружена.</div>
+              </label>
             </div>
             <label>Пауза между пакетами (мс)
               <input id="PAUSE" type="number" min="0" max="60000" value="370" />
@@ -2492,6 +2496,7 @@ const UI = {
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
+    ackDelay: null,
     encTest: null,
     autoNightTimer: null,
     autoNightActive: false,
@@ -2719,6 +2724,8 @@ const PAUSE_MIN_MS = 0;
 const PAUSE_MAX_MS = 60000;
 const ACK_TIMEOUT_MIN_MS = 0;
 const ACK_TIMEOUT_MAX_MS = 60000;
+const ACK_DELAY_MIN_MS = 0;
+const ACK_DELAY_MAX_MS = 5000;
 
 /* Определяем предпочитаемую тему только при наличии поддержки matchMedia */
 function detectPreferredTheme() {
@@ -2799,6 +2806,8 @@ async function init() {
   UI.els.pauseHint = $("#pauseHint");
   UI.els.ackTimeout = $("#ACKT");
   UI.els.ackTimeoutHint = $("#ackTimeoutHint");
+  UI.els.ackDelay = $("#ACKD");
+  UI.els.ackDelayHint = $("#ackDelayHint");
   UI.els.rxBoostedGain = $("#RXBG");
   UI.els.rxBoostedGainHint = $("#rxBoostedGainHint");
   UI.els.testRxmMessage = $("#TESTRXMMSG");
@@ -3100,6 +3109,7 @@ async function init() {
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
   if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
+  if (UI.els.ackDelay) UI.els.ackDelay.addEventListener("change", onAckDelayInputChange);
   if (UI.els.rxBoostedGain) {
     UI.els.rxBoostedGain.addEventListener("change", () => {
       UI.els.rxBoostedGain.indeterminate = false;
@@ -8353,6 +8363,13 @@ function clampAckTimeoutMs(value) {
   if (num > ACK_TIMEOUT_MAX_MS) return ACK_TIMEOUT_MAX_MS;
   return Math.round(num);
 }
+function clampAckDelayMs(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return ACK_DELAY_MIN_MS;
+  if (num < ACK_DELAY_MIN_MS) return ACK_DELAY_MIN_MS;
+  if (num > ACK_DELAY_MAX_MS) return ACK_DELAY_MAX_MS;
+  return Math.round(num);
+}
 function clampTestRxmMessage(value) {
   const text = value == null ? "" : String(value);
   if (text.length > TEST_RXM_MESSAGE_MAX) {
@@ -8377,6 +8394,12 @@ function parseAckTimeoutResponse(text) {
   const token = extractNumericToken(text);
   if (token == null) return null;
   return clampAckTimeoutMs(Number(token));
+}
+function parseAckDelayResponse(text) {
+  if (!text) return null;
+  const token = extractNumericToken(text);
+  if (token == null) return null;
+  return clampAckDelayMs(Number(token));
 }
 function parseRxBoostedGainResponse(text) {
   if (!text) return null;
@@ -8428,7 +8451,8 @@ function updateAckRetryUi() {
       const attempts = state != null ? state : "—";
       const timeout = UI.state.ackTimeout != null ? UI.state.ackTimeout + " мс" : "—";
       const pause = UI.state.pauseMs != null ? UI.state.pauseMs + " мс" : "—";
-      hint.textContent = "Повторные отправки: " + attempts + " раз. Пауза: " + pause + ". Ожидание ACK: " + timeout + ".";
+      const delay = UI.state.ackDelay != null ? UI.state.ackDelay + " мс" : "—";
+      hint.textContent = "Повторные отправки: " + attempts + " раз. Пауза: " + pause + ". Ожидание ACK: " + timeout + ". Задержка ответа: " + delay + ".";
     } else {
       hint.textContent = "Доступно после включения ACK.";
     }
@@ -8458,6 +8482,25 @@ function updateAckTimeoutUi() {
     hint.textContent = value != null ? ("Время ожидания ACK: " + value + " мс.") : "Время ожидания ACK не загружено.";
   }
 }
+function updateAckDelayUi() {
+  const input = UI.els.ackDelay;
+  const value = UI.state.ackDelay;
+  if (input && document.activeElement !== input && value != null) {
+    input.value = String(value);
+  }
+  const hint = UI.els.ackDelayHint;
+  if (hint) {
+    if (value == null) {
+      hint.textContent = "Задержка отправки ACK не загружена.";
+    } else {
+      let text = "Задержка перед отправкой подтверждения: " + value + " мс.";
+      if (UI.state.ack !== true) {
+        text += " Параметр вступит в силу после включения ACK.";
+      }
+      hint.textContent = text;
+    }
+  }
+}
 function updateAckUi() {
   const chip = UI.els.ackChip;
   const text = UI.els.ackText;
@@ -8484,6 +8527,7 @@ function updateAckUi() {
     }
   }
   updateAckRetryUi();
+  updateAckDelayUi();
 }
 function onPauseInputChange() {
   if (!UI.els.pauseInput) return;
@@ -8502,6 +8546,16 @@ function onAckTimeoutInputChange() {
   UI.state.ackTimeout = num;
   storage.set("set.ACKT", String(num));
   updateAckTimeoutUi();
+  updateAckRetryUi();
+}
+function onAckDelayInputChange() {
+  if (!UI.els.ackDelay) return;
+  const raw = UI.els.ackDelay.value;
+  const num = clampAckDelayMs(parseInt(raw, 10));
+  UI.els.ackDelay.value = String(num);
+  UI.state.ackDelay = num;
+  storage.set("set.ACKD", String(num));
+  updateAckDelayUi();
   updateAckRetryUi();
 }
 async function setAck(value) {
@@ -8571,6 +8625,23 @@ async function refreshAckRetry() {
     }
   }
   UI.state.ackRetry = null;
+  updateAckRetryUi();
+  return null;
+}
+async function refreshAckDelay() {
+  const res = await deviceFetch("ACKD", {}, 2000);
+  if (res.ok) {
+    const parsed = parseAckDelayResponse(res.text);
+    if (parsed !== null) {
+      UI.state.ackDelay = parsed;
+      storage.set("set.ACKD", String(parsed));
+      updateAckDelayUi();
+      updateAckRetryUi();
+      return parsed;
+    }
+  }
+  UI.state.ackDelay = null;
+  updateAckDelayUi();
   updateAckRetryUi();
   return null;
 }
@@ -8803,7 +8874,7 @@ async function refreshEncryptionState() {
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","TESTRXMMSG"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","ACKD","TESTRXMMSG"];
 function normalizePowerPreset(raw) {
   if (raw == null) return null;
   const str = String(raw).trim();
@@ -8861,6 +8932,12 @@ function loadSettings() {
       if (UI.els.ackTimeout) UI.els.ackTimeout.value = String(num);
       UI.state.ackTimeout = num;
       updateAckTimeoutUi();
+    } else if (key === "ACKD") {
+      const num = clampAckDelayMs(parseInt(v, 10));
+      if (UI.els.ackDelay) UI.els.ackDelay.value = String(num);
+      UI.state.ackDelay = num;
+      updateAckDelayUi();
+      updateAckRetryUi();
     } else if (key === "TESTRXMMSG") {
       const text = clampTestRxmMessage(v);
       if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = text;
@@ -8890,6 +8967,8 @@ function saveSettingsLocal() {
       v = String(clampPauseMs(parseInt(v, 10)));
     } else if (key === "ACKT") {
       v = String(clampAckTimeoutMs(parseInt(v, 10)));
+    } else if (key === "ACKD") {
+      v = String(clampAckDelayMs(parseInt(v, 10)));
     } else if (key === "TESTRXMMSG") {
       v = clampTestRxmMessage(v);
       if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = v;
@@ -8967,6 +9046,17 @@ async function applySettingsToDevice() {
         updateAckRetryUi();
         storage.set("set.ACKT", String(effective));
       }
+    } else if (key === "ACKD") {
+      const parsed = clampAckDelayMs(parseInt(value, 10));
+      const resp = await sendCommand("ACKD", { v: String(parsed) });
+      if (resp !== null) {
+        const applied = parseAckDelayResponse(resp);
+        const effective = applied != null ? applied : parsed;
+        UI.state.ackDelay = effective;
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(effective);
+        updateAckDelayUi();
+        storage.set("set.ACKD", String(effective));
+      }
     } else {
       const resp = await sendCommand(key, { v: value });
       if (resp !== null) storage.set("set." + key, value);
@@ -8975,6 +9065,7 @@ async function applySettingsToDevice() {
   note("Применение завершено.");
   await refreshChannels().catch(() => {});
   await refreshAckState();
+  await refreshAckDelay();
   await refreshRxBoostedGain();
 }
 function exportSettings() {
@@ -8992,6 +9083,8 @@ function exportSettings() {
       obj[key] = String(clampPauseMs(parseInt(el.value, 10)));
     } else if (key === "ACKT") {
       obj[key] = String(clampAckTimeoutMs(parseInt(el.value, 10)));
+    } else if (key === "ACKD") {
+      obj[key] = String(clampAckDelayMs(parseInt(el.value, 10)));
     } else if (key === "TESTRXMMSG") {
       obj[key] = clampTestRxmMessage(el.value || "");
     } else {
@@ -9059,6 +9152,15 @@ function importSettings() {
         updateAckTimeoutUi();
         updateAckRetryUi();
         storage.set("set.ACKT", String(num));
+        continue;
+      }
+      if (key === "ACKD") {
+        const num = clampAckDelayMs(parseInt(obj[key], 10));
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(num);
+        UI.state.ackDelay = num;
+        updateAckDelayUi();
+        updateAckRetryUi();
+        storage.set("set.ACKD", String(num));
         continue;
       }
       if (key === "TESTRXMMSG") {
@@ -9218,6 +9320,21 @@ async function syncSettingsFromDevice() {
     }
   } catch (err) {
     console.warn("[settings] ACKT", err);
+  }
+  try {
+    const ackDRes = await deviceFetch("ACKD", {}, 2000);
+    if (ackDRes.ok) {
+      const parsed = parseAckDelayResponse(ackDRes.text);
+      if (parsed !== null) {
+        UI.state.ackDelay = parsed;
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(parsed);
+        storage.set("set.ACKD", String(parsed));
+        updateAckDelayUi();
+        updateAckRetryUi();
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] ACKD", err);
   }
 
   updateChannelSelect();
