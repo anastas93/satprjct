@@ -22,9 +22,24 @@
 // Максимально допустимый размер кадра
 // Ограничение радиомодуля SX1262 — не более 245 байт в пакете
 static constexpr size_t MAX_FRAME_SIZE = 245;      // максимально допустимый кадр
+
+// Новый пилотный маркер: 0x7E «флаг PHY», далее ASCII "SATP" и CRC16 (0x9FD6) по этим 5 байтам.
+// За счёт комбинации зарезервированного символа PHY и контрольной суммы такой паттерн
+// гарантированно не появляется внутри закодированных полезных данных.
+static constexpr size_t PILOT_INTERVAL = 64;             // период вставки пилотов
+static constexpr std::array<uint8_t,7> PILOT_MARKER{{
+    0x7E, 'S', 'A', 'T', 'P', 0xD6, 0x9F
+}};
+static constexpr size_t PILOT_PREFIX_LEN = PILOT_MARKER.size() - 2; // часть без CRC
+static constexpr uint16_t PILOT_MARKER_CRC = 0x9FD6;                // CRC16(prefix)
+[[maybe_unused]] static const bool PILOT_MARKER_CRC_OK = []() {
+  return FrameHeader::crc16(PILOT_MARKER.data(), PILOT_PREFIX_LEN) == PILOT_MARKER_CRC;
+}();
+static_assert(PILOT_PREFIX_LEN == 5, "Ожидается пятибайтовый префикс пилота");
+
 // Допустимая длина полезной нагрузки одного кадра с учётом заголовков и пилотов
 static constexpr size_t MAX_FRAGMENT_LEN =
-    MAX_FRAME_SIZE - FrameHeader::SIZE * 2 - (MAX_FRAME_SIZE / 64) * 2;
+    MAX_FRAME_SIZE - FrameHeader::SIZE * 2 - (MAX_FRAME_SIZE / PILOT_INTERVAL) * PILOT_MARKER.size();
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
 static constexpr size_t TAG_LEN = 8;              // длина тега аутентичности
 static constexpr size_t RS_ENC_LEN = 255;         // длина закодированного блока
@@ -44,12 +59,11 @@ static constexpr size_t MAX_CIPHER_CHUNK = EFFECTIVE_DATA_CHUNK + TAG_LEN; // м
 // Вставка пилотов каждые 64 байта
 static std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
   std::vector<uint8_t> out;
-  out.reserve(in.size() + in.size() / 64 * 2);
+  out.reserve(in.size() + (in.size() / PILOT_INTERVAL) * PILOT_MARKER.size());
   size_t count = 0;
   for (uint8_t b : in) {
-    if (count && count % 64 == 0) {
-      out.push_back(0x55);
-      out.push_back(0x2D);
+    if (count && count % PILOT_INTERVAL == 0) {
+      out.insert(out.end(), PILOT_MARKER.begin(), PILOT_MARKER.end());
     }
     out.push_back(b);
     ++count;
