@@ -46,6 +46,9 @@
 #if defined(ESP32) && SR_HAS_INCLUDE("esp_partition.h")
 #if SR_HAS_INCLUDE("esp_core_dump.h")
 #include "esp_core_dump.h"      // управление core dump на ESP32 (если заголовок доступен)
+#define SR_HAS_COREDUMP_IMAGE_CHECK 1
+#else
+#define SR_HAS_COREDUMP_IMAGE_CHECK 0
 #endif
 #include "esp_partition.h"      // прямой доступ к разделам флеша
 #include "esp_spi_flash.h"      // размер сектора флеша для корректного стирания
@@ -63,6 +66,7 @@
 #define SR_HAS_ESP_COREDUMP 1
 #else
 #define SR_HAS_ESP_COREDUMP 0
+#define SR_HAS_COREDUMP_IMAGE_CHECK 0
 #endif
 
 #if defined(SR_HAS_INCLUDE)
@@ -263,6 +267,28 @@ static void coreDumpClearIpc(void* arg) {
 
 // Пытаемся очистить повреждённую конфигурацию core dump, чтобы убрать перезагрузки с ошибкой CRC
 bool clearCorruptedCoreDumpConfig() {
+#if SR_HAS_COREDUMP_IMAGE_CHECK
+  // Перед очисткой проверяем состояние core dump штатной функцией, чтобы не стирать
+  // исправную конфигурацию при каждом запуске.
+  esp_err_t checkErr = esp_core_dump_image_check();
+  if (checkErr == ESP_OK) {
+    Serial.println("Core dump: конфигурация корректна, очистка не требуется");
+    return true;
+  }
+  if (checkErr == ESP_ERR_NOT_FOUND) {
+    Serial.println("Core dump: данные отсутствуют, конфигурация считается чистой");
+    return true;
+  }
+  if (checkErr != ESP_ERR_INVALID_CRC && checkErr != ESP_ERR_INVALID_SIZE) {
+    Serial.print("Core dump: image_check вернул код=");
+    Serial.println(static_cast<int>(checkErr));
+    gCoreDumpClearAfterMs = millis() + 1000;
+    return false;
+  }
+  Serial.print("Core dump: image_check сообщает о повреждении (код=");
+  Serial.print(static_cast<int>(checkErr));
+  Serial.println(") — выполняем очистку");
+#endif
   TaskHandle_t idle0 = SR_IDLE_TASK_HANDLE_FOR_CORE(0);
 #if (portNUM_PROCESSORS > 1)
   TaskHandle_t idle1 = SR_IDLE_TASK_HANDLE_FOR_CORE(1);
