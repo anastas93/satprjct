@@ -40,6 +40,9 @@
 #if defined(ESP32) && __has_include("esp_core_dump.h")
 #include "esp_core_dump.h" // управление core dump на ESP32
 #include "esp_partition.h" // прямой доступ к разделам флеша
+#include "esp_ipc.h"       // выполнение критичных операций на ядре 0
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #define SR_HAS_ESP_COREDUMP 1
 #else
 #define SR_HAS_ESP_COREDUMP 0
@@ -190,8 +193,44 @@ String jsonEscape(const String& value) {
 }
 
 #if SR_HAS_ESP_COREDUMP
+// Флаги, управляющие отложенной очисткой core dump после старта FreeRTOS.
+bool gCoreDumpClearPending = true;
+uint32_t gCoreDumpClearAfterMs = 0;
+
+// Контекст для IPC-вызова очистки core dump
+struct CoreDumpClearContext {
+  const esp_partition_t* part = nullptr;      // раздел core dump
+  uint8_t zeros[32] = {};                     // буфер нулей для записи
+  esp_err_t eraseErr = ESP_OK;                // результат стирания
+  esp_err_t writeErr = ESP_OK;                // результат записи
+};
+
+// Выполняем стирание/запись core dump на ядре PRO через IPC
+static void coreDumpClearIpc(void* arg) {
+  CoreDumpClearContext* ctx = static_cast<CoreDumpClearContext*>(arg);
+  if (!ctx || !ctx->part) {
+    return;
+  }
+  ctx->eraseErr = esp_partition_erase_range(ctx->part, 0, ctx->part->size);
+  if (ctx->eraseErr != ESP_OK) {
+    return;
+  }
+  ctx->writeErr = esp_partition_write(ctx->part, 0, ctx->zeros, sizeof(ctx->zeros));
+}
+
 // Пытаемся очистить повреждённую конфигурацию core dump, чтобы убрать перезагрузки с ошибкой CRC
-void clearCorruptedCoreDumpConfig() {
+bool clearCorruptedCoreDumpConfig() {
+  TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCPU(0);
+#if (portNUM_PROCESSORS > 1)
+  TaskHandle_t idle1 = xTaskGetIdleTaskHandleForCPU(1);
+#else
+  TaskHandle_t idle1 = idle0;
+#endif
+  if (idle0 == nullptr || idle1 == nullptr) {
+    Serial.println("Core dump: Idle-задачи ещё не запущены, повторим позже");
+    gCoreDumpClearAfterMs = millis() + 500;
+    return false;
+  }
   // На некоторых сборках Arduino+ESP32 вызов esp_core_dump_image_erase()
   // приводит к assert внутри FreeRTOS (нет Idle-задачи на втором ядре).
   // Поэтому стираем раздел core dump напрямую через API разделов флеша.
@@ -199,7 +238,7 @@ void clearCorruptedCoreDumpConfig() {
       ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
   if (!part) {
     Serial.println("Core dump: раздел не найден");
-    return;
+    return true;
   }
   // Сначала читаем начало раздела и проверяем, не сброшена ли конфигурация уже
   static constexpr size_t kProbeSize = 32; // достаточно для структуры esp_core_dump_flash_config_t
@@ -208,7 +247,7 @@ void clearCorruptedCoreDumpConfig() {
   if (err != ESP_OK) {
     Serial.print("Core dump: ошибка чтения, код=");
     Serial.println(static_cast<int>(err));
-    return;
+    return true;
   }
   bool allZero = true;
   for (uint8_t b : probe) {
@@ -218,35 +257,34 @@ void clearCorruptedCoreDumpConfig() {
   }
   if (allZero) {
     Serial.println("Core dump: конфигурация уже чистая");
-    return;
-  }
-  // Полностью стираем раздел, чтобы убрать повреждённые данные и их CRC
-  err = esp_partition_erase_range(part, 0, part->size);
-  if (err != ESP_OK) {
-    Serial.print("Core dump: ошибка стирания, код=");
-    Serial.println(static_cast<int>(err));
-    return;
+    return true;
   }
   // После стирания флеш содержит 0xFF, а esp_core_dump ожидает нули в конфигурации,
-  // поэтому записываем явные нули в начале раздела.
-  for (size_t i = 0; i < kProbeSize; ++i) {
-    probe[i] = 0;
+  // поэтому записываем явные нули в начале раздела через IPC на ядре 0.
+  CoreDumpClearContext ctx;
+  ctx.part = part;
+  std::fill_n(ctx.zeros, sizeof(ctx.zeros), 0);
+  esp_err_t ipcErr = esp_ipc_call_blocking(ESP_IPC_CPU_PRO, &coreDumpClearIpc, &ctx);
+  if (ipcErr != ESP_OK) {
+    Serial.print("Core dump: IPC-вызов завершился ошибкой, код=");
+    Serial.println(static_cast<int>(ipcErr));
+    return true;
   }
-  err = esp_partition_write(part, 0, probe, sizeof(probe));
-  if (err == ESP_OK) {
+  if (ctx.eraseErr != ESP_OK) {
+    Serial.print("Core dump: ошибка стирания, код=");
+    Serial.println(static_cast<int>(ctx.eraseErr));
+    return true;
+  }
+  if (ctx.writeErr == ESP_OK) {
     Serial.println("Core dump: конфигурация сброшена");
   } else {
     Serial.print("Core dump: ошибка записи, код=");
-    Serial.println(static_cast<int>(err));
+    Serial.println(static_cast<int>(ctx.writeErr));
   }
+  return true;
 }
 #endif
 
-#if SR_HAS_ESP_COREDUMP
-// Флаги, управляющие отложенной очисткой core dump после старта FreeRTOS.
-bool gCoreDumpClearPending = true;
-uint32_t gCoreDumpClearAfterMs = 0;
-#endif
 
 // Преобразование буфера байтов в строку ASCII
 String vectorToString(const std::vector<uint8_t>& data) {
@@ -1731,8 +1769,9 @@ void setup() {
 void loop() {
 #if SR_HAS_ESP_COREDUMP
     if (gCoreDumpClearPending && millis() >= gCoreDumpClearAfterMs) {
-      clearCorruptedCoreDumpConfig();
-      gCoreDumpClearPending = false;
+      if (clearCorruptedCoreDumpConfig()) {
+        gCoreDumpClearPending = false;
+      }
     }
 #endif
     server.handleClient();                  // обработка HTTP-запросов
