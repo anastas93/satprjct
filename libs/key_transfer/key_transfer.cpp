@@ -9,8 +9,17 @@ namespace KeyTransfer {
 namespace {
 
 constexpr size_t MAX_FRAME_SIZE = 245;                   // ограничение SX1262
+constexpr size_t PILOT_INTERVAL = 64;                    // период пилотов
+constexpr std::array<uint8_t,7> PILOT_MARKER{{
+    0x7E, 'S', 'A', 'T', 'P', 0xD6, 0x9F
+}};                                                     // маркер с CRC16
+constexpr size_t PILOT_PREFIX_LEN = PILOT_MARKER.size() - 2; // часть без CRC
+constexpr uint16_t PILOT_MARKER_CRC = 0x9FD6;                // CRC16(prefix)
+[[maybe_unused]] const bool PILOT_MARKER_CRC_OK = []() {
+  return FrameHeader::crc16(PILOT_MARKER.data(), PILOT_PREFIX_LEN) == PILOT_MARKER_CRC;
+}();
 constexpr size_t MAX_FRAGMENT_LEN =
-    MAX_FRAME_SIZE - FrameHeader::SIZE * 2 - (MAX_FRAME_SIZE / 64) * 2;
+    MAX_FRAME_SIZE - FrameHeader::SIZE * 2 - (MAX_FRAME_SIZE / PILOT_INTERVAL) * PILOT_MARKER.size();
 constexpr uint32_t NONCE_SALT = 0x4B54524E;              // "KTRN" — соль нонса
 
 // Статический корневой ключ AES-CCM для защищённого обмена
@@ -24,12 +33,11 @@ const std::array<uint8_t,16> ROOT_KEY{
 // Добавление пилотов каждые 64 байта
 std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
   std::vector<uint8_t> out;
-  out.reserve(in.size() + in.size() / 64 * 2);
+  out.reserve(in.size() + (in.size() / PILOT_INTERVAL) * PILOT_MARKER.size());
   size_t count = 0;
   for (uint8_t b : in) {
-    if (count && count % 64 == 0) {
-      out.push_back(0x55);
-      out.push_back(0x2D);
+    if (count && count % PILOT_INTERVAL == 0) {
+      out.insert(out.end(), PILOT_MARKER.begin(), PILOT_MARKER.end());
     }
     out.push_back(b);
     ++count;
@@ -43,13 +51,24 @@ void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
   if (!data || len == 0) return;
   out.reserve(len);
   size_t count = 0;
-  for (size_t i = 0; i < len; ++i) {
-    if (count && count % 64 == 0 && i + 1 < len && data[i] == 0x55 && data[i + 1] == 0x2D) {
-      ++i;
-      continue;
+  size_t i = 0;
+  while (i < len) {
+    if (count && count % PILOT_INTERVAL == 0) {
+      size_t remaining = len - i;
+      if (remaining >= PILOT_MARKER.size() &&
+          std::equal(PILOT_MARKER.begin(), PILOT_MARKER.begin() + PILOT_PREFIX_LEN, data + i)) {
+        uint16_t crc = static_cast<uint16_t>(data[i + PILOT_PREFIX_LEN]) |
+                       (static_cast<uint16_t>(data[i + PILOT_PREFIX_LEN + 1]) << 8);
+        if (crc == PILOT_MARKER_CRC &&
+            FrameHeader::crc16(data + i, PILOT_PREFIX_LEN) == crc) {
+          i += PILOT_MARKER.size();
+          continue;
+        }
+      }
     }
     out.push_back(data[i]);
     ++count;
+    ++i;
   }
 }
 
