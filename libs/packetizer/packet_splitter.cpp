@@ -1,10 +1,53 @@
 #include "packet_splitter.h"
 #include <algorithm>
-#include <cstdlib>
+#include <atomic>
 #include <cstdio>
+#include <random>
 #include <string>
 #include "default_settings.h"
 #include "libs/simple_logger/simple_logger.h" // журнал статусов
+
+namespace {
+
+// Монотонный генератор идентификаторов для префиксов [TAG|...]
+class TagGenerator {
+public:
+  // Получить следующее значение счётчика
+  uint32_t next() {
+    // Увеличиваем счётчик и избегаем нулевого значения
+    uint32_t value = counter_.fetch_add(1, std::memory_order_relaxed);
+    if (value == 0) value = counter_.fetch_add(1, std::memory_order_relaxed);
+    return value;
+  }
+
+  // Доступ к единственному экземпляру
+  static TagGenerator& instance() {
+    static TagGenerator generator;
+    return generator;
+  }
+
+private:
+  // Инициализация счётчика случайным стартовым смещением
+  TagGenerator() : counter_(initialSeed()) {}
+
+  // Сбор энтропии для стартового значения
+  static uint32_t initialSeed() {
+    std::random_device rd;
+    uint32_t hi = rd();
+    uint32_t lo = rd();
+    uint32_t seed = (hi << 16) ^ lo;
+    return seed ? seed : 1u;  // избегаем нулевого запуска
+  }
+
+  std::atomic<uint32_t> counter_;
+};
+
+// Удобная обёртка для получения свежего тега
+uint32_t nextTagValue() {
+  return TagGenerator::instance().next();
+}
+
+}  // namespace
 
 // Конструктор
 PacketSplitter::PacketSplitter(PayloadMode mode, size_t custom)
@@ -46,9 +89,9 @@ uint32_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data
   uint32_t tag = 0;
   std::string base;
   if (with_id) {
-    tag = static_cast<uint32_t>(std::rand()) & 0xFFFFF; // случайный ID
-    char hex[6];
-    std::snprintf(hex, sizeof(hex), "%05X", tag);
+    tag = nextTagValue();                              // новый уникальный ID
+    char hex[9];
+    std::snprintf(hex, sizeof(hex), "%08X", tag);
     base = hex;
   }
   size_t part_idx = 1;
