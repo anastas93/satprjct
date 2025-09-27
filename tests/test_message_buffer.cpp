@@ -27,6 +27,20 @@ int main() {
   assert(buf.dropLast());                // откат последнего добавления
   uint32_t after_drop = buf.enqueue(e,2);
   assert(after_drop > first);            // идентификаторы продолжают расти
+
+  // Проверяем автоисправление нулевых параметров конструктора
+  MessageBuffer zero_buf(0, 0);
+  assert(zero_buf.freeSlots() == 1);     // вместимость поправлена до минимума
+  assert(zero_buf.slotSize() == 1);      // размер слота не позволяет отправить пустое сообщение
+  uint8_t payload = 42;
+  uint32_t zero_id = zero_buf.enqueue(&payload, 1);
+  assert(zero_id != 0);
+  assert(zero_buf.hasPending());
+  uint32_t read_id = 0;
+  std::vector<uint8_t> read_payload;
+  assert(zero_buf.pop(read_id, read_payload));
+  assert(read_id == zero_id);
+  assert(read_payload.size() == 1 && read_payload[0] == payload);
   std::cout << "OK" << std::endl;
   return 0;
 }
