@@ -51,7 +51,14 @@
 #define SR_HAS_COREDUMP_IMAGE_CHECK 0
 #endif
 #include "esp_partition.h"      // прямой доступ к разделам флеша
-#include "esp_spi_flash.h"      // размер сектора флеша для корректного стирания
+#if SR_HAS_INCLUDE("spi_flash_mmap.h")
+#include "spi_flash_mmap.h"     // современный заголовок для работы с флешем
+#elif SR_HAS_INCLUDE("esp_spi_flash.h")
+#include "esp_spi_flash.h"      // совместимость с устаревшим заголовком
+#endif
+#ifndef SPI_FLASH_SEC_SIZE
+#define SPI_FLASH_SEC_SIZE 4096  // резервное определение размера сектора флеша
+#endif
 #if SR_HAS_INCLUDE("esp_ipc.h")
 #include "esp_ipc.h"            // выполнение критичных операций на ядре 0
 #define SR_HAS_ESP_IPC 1
@@ -109,6 +116,11 @@ bool testModeEnabled = false;           // флаг тестового режи�
 uint8_t testModeLocalCounter = 0;       // локальный счётчик пакетов для тестового режима
 
 WebServer server(80);       // HTTP-сервер для веб-интерфейса
+
+// Предварительные объявления для блоков SSE, чтобы Arduino-процессор прототипов
+// корректно обрабатывал пользовательские типы.
+struct PushClientSession;
+bool sendSseFrame(PushClientSession& session, const String& event, const String& data, uint32_t id);
 
 // Состояние генератора тестовых входящих сообщений
 struct TestRxmState {
