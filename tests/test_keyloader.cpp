@@ -64,6 +64,13 @@ int main() {
   for (uint8_t b : rec2.session_key) std::cout << std::hex << int(b);
   std::cout << std::dec << std::endl;
   assert(expected == rec2.session_key);
+  const auto remote_session = rec2.session_key;
+
+  KeyRecord recPeer;
+  assert(regenerateFromPeer(&recPeer));
+  assert(recPeer.session_key == remote_session);
+  auto state_after_peer_regen = getState();
+  assert(state_after_peer_regen.session_key == remote_session);
 
   // Проверяем резервную копию и восстановление
   assert(generateLocalKey());
@@ -74,13 +81,19 @@ int main() {
   assert(rec3.origin == KeyOrigin::LOCAL);
   // Проверяем, что новая генерация создаёт отличающийся публичный ключ.
   assert(rec3.root_public != first_public);
+  // После генерации локального ключа пробуем вернуть удалённый ключ из бэкапа
+  KeyRecord recPeer2;
+  assert(regenerateFromPeer(&recPeer2));
+  assert(recPeer2.session_key == remote_session);
   assert(restorePreviousKey());
   auto state_after_restore = getState();
   assert(!state_after_restore.has_backup);
   KeyRecord rec4;
   assert(loadKeyRecord(rec4));
-  assert(rec4.origin == KeyOrigin::REMOTE);
-  assert(rec4.peer_public == remote_pub);
+  assert(rec4.origin == KeyOrigin::LOCAL);
+  for (uint8_t b : rec4.peer_public) {
+    assert(b == 0);
+  }
 
   std::cout << "OK" << std::endl;
   return 0;
