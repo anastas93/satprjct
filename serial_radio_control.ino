@@ -1020,6 +1020,11 @@ String cmdKeyStorage(const String& mode) {
 String cmdKeyGenSecure() {
   DEBUG_LOG("Key: генерация нового ключа");
   if (KeyLoader::generateLocalKey()) {
+    const bool synced_with_peer = KeyLoader::regenerateFromPeer();
+    // Если есть сохранённый ключ удалённой стороны, пересчитываем сессию сразу.
+    if (synced_with_peer) {
+      DEBUG_LOG("Key: сессия пересчитана по сохранённому ключу удалённой стороны");
+    }
     reloadCryptoModules();
     return makeKeyStateJson();
   }

@@ -585,13 +585,28 @@ bool saveKey(const std::array<uint8_t,16>& key,
 
 bool generateLocalKey(KeyRecord* out) {
   StorageSnapshot snapshot = ensureSnapshot();
+  std::array<uint8_t,32> preserved_peer{};
+  bool has_peer = false;
+  if (snapshot.current_valid && snapshot.current.valid) {
+    const auto& current_peer = snapshot.current.peer_public;
+    has_peer = std::any_of(current_peer.begin(), current_peer.end(), [](uint8_t b) {
+      return b != 0;
+    });
+    if (has_peer) {
+      preserved_peer = current_peer;
+    }
+  }
   KeyRecord rec;
   crypto::x25519::random_bytes(rec.root_private.data(), rec.root_private.size());
   crypto::x25519::derive_public(rec.root_public, rec.root_private);
   rec.session_key = deriveLocalSession(rec.root_public, rec.root_private);
   rec.nonce_salt = nonceSaltFromKey(rec.session_key);
   rec.origin = KeyOrigin::LOCAL;
-  rec.peer_public.fill(0);
+  if (has_peer) {
+    rec.peer_public = preserved_peer;
+  } else {
+    rec.peer_public.fill(0);
+  }
   rec.valid = true;
   if (snapshot.current_valid && snapshot.current.valid) {
     snapshot.previous = snapshot.current;
