@@ -8,9 +8,9 @@ namespace crypto {
 namespace chacha20poly1305 {
 
 // Размеры ключа, нонса и тега для варианта IETF (12-байтовый nonce)
-constexpr size_t KEY_SIZE = 32;                 // длина ключа алгоритма
-constexpr size_t NONCE_SIZE = 12;               // длина нонса
-constexpr size_t TAG_SIZE = 16;                 // длина тега Poly1305
+inline constexpr size_t KEY_SIZE = 32;                 // длина ключа алгоритма
+inline constexpr size_t NONCE_SIZE = 12;               // длина нонса
+inline constexpr size_t TAG_SIZE = 16;                 // длина тега Poly1305
 
 // Шифрование с отделённым тегом аутентичности
 // key/nonce могут иметь размеры 16 и 12 байт соответственно: ключ автоматически
