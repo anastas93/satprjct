@@ -1,4 +1,3 @@
-#pragma once
 #ifndef LIBS_FRAME_FRAME_HEADER_H
 #define LIBS_FRAME_FRAME_HEADER_H
 #include <cstddef>

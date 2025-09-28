@@ -1,4 +1,3 @@
-#pragma once
 #ifndef LIBS_SCRAMBLER_SCRAMBLER_H
 #define LIBS_SCRAMBLER_SCRAMBLER_H
 #include <cstddef>

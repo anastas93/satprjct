@@ -1,5 +1,3 @@
-#pragma once
-
 #ifndef SATPRJCT_LIBS_CRYPTO_ED25519_H_
 #define SATPRJCT_LIBS_CRYPTO_ED25519_H_
 #include <array>

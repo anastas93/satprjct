@@ -1,4 +1,3 @@
-#pragma once
 #ifndef DEFAULT_SETTINGS_H
 #define DEFAULT_SETTINGS_H // защита от повторного включения
 
