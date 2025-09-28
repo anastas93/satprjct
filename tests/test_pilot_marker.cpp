@@ -9,6 +9,7 @@
 #include "rx_module.h"
 #include "../libs/frame/frame_header.h" // структура заголовка кадра
 #include "../libs/scrambler/scrambler.h" // операции скремблирования
+#include "../libs/protocol/ack_utils.h"  // маркер компактного ACK
 
 // Заглушка радиоинтерфейса с накоплением последнего отправленного кадра
 class CaptureRadio : public IRadio {
@@ -71,6 +72,19 @@ int main() {
     rx.onReceive(frame.data(), frame.size());
   }
   assert(decoded == payload);
+
+  // Дополнительно убеждаемся, что компактный ACK формируется без заголовка
+  size_t before_ack = radio.history.size();
+  const uint8_t ack_marker = protocol::ack::MARKER;
+  uint32_t ack_id = tx.queue(&ack_marker, 1);
+  assert(ack_id != 0);
+  while (tx.loop()) {
+    // дожидаемся отправки ACK
+  }
+  assert(radio.history.size() == before_ack + 1);
+  const auto& ack_frame = radio.history.back();
+  assert(ack_frame.size() == 1);
+  assert(ack_frame.front() == protocol::ack::MARKER);
 
   std::cout << "OK" << std::endl;
   return 0;

@@ -2143,10 +2143,12 @@ void setup() {
     broadcastReceivedPush(kind, item);
   });
   // обработка входящих данных с учётом ACK
+  rx.setAckCallback([&]() {
+    Serial.println("ACK: получен");
+    tx.onAckReceived();
+  });
   rx.setCallback([&](const uint8_t* d, size_t l){
-    if (protocol::ack::isAckPayload(d, l)) {              // пришёл ACK любого формата
-      Serial.println("ACK: получен");
-      tx.onAckReceived();
+    if (protocol::ack::isAckPayload(d, l)) {              // ACK уже обработан отдельным колбэком
       return;
     }
     Serial.print("RX: ");

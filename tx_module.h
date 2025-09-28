@@ -51,6 +51,7 @@ private:
     uint8_t qos = 0;                         // очередь QoS
     uint8_t attempts_left = 0;               // оставшиеся повторы
     bool expect_ack = false;                 // требуется ли подтверждение
+    bool is_ack = false;                     // флаг компактного ACK
     std::string packet_tag;                  // идентификатор пакета для группировки частей
     std::string status_prefix;               // префикс для журнала статусов
   };
