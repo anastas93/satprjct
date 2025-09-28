@@ -2,10 +2,13 @@
 #include <array>
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <vector>
 #include "libs/key_loader/key_loader.h"
 #include "libs/crypto/x25519.h"
 #include "libs/crypto/hkdf.h"
+#include "libs/crypto/sha256.h"
 
 int main() {
   using namespace KeyLoader;
@@ -28,6 +31,61 @@ int main() {
   const auto first_public = rec.root_public;
   auto id = keyId(rec.session_key);
   std::cout << "local id=" << std::hex << int(id[0]) << int(id[1]) << std::dec << std::endl;
+
+  // Проверяем, что приватный ключ не хранится в файле в открытом виде.
+  std::ifstream raw_file("key_storage/key.stkey", std::ios::binary);
+  std::vector<uint8_t> raw_storage((std::istreambuf_iterator<char>(raw_file)), std::istreambuf_iterator<char>());
+  assert(!raw_storage.empty());
+  size_t offset = 0;
+  assert(raw_storage.size() > 4);
+  assert(raw_storage[offset++] == 'S');
+  assert(raw_storage[offset++] == 'T');
+  assert(raw_storage[offset++] == 'B');
+  assert(raw_storage[offset++] == '1');
+  uint8_t snapshot_version = raw_storage[offset++];
+  assert(snapshot_version == 1);
+  uint8_t snapshot_flags = raw_storage[offset++];
+  (void)snapshot_flags;
+  offset += 2; // reserved
+  auto read_u32 = [&](uint32_t& value) {
+    value = static_cast<uint32_t>(raw_storage[offset]) |
+            (static_cast<uint32_t>(raw_storage[offset + 1]) << 8) |
+            (static_cast<uint32_t>(raw_storage[offset + 2]) << 16) |
+            (static_cast<uint32_t>(raw_storage[offset + 3]) << 24);
+    offset += 4;
+  };
+  uint32_t current_len = 0;
+  uint32_t previous_len = 0;
+  read_u32(current_len);
+  read_u32(previous_len);
+  assert(raw_storage.size() >= offset + current_len + previous_len + crypto::sha256::DIGEST_SIZE);
+  std::vector<uint8_t> packed_record(current_len);
+  std::copy_n(raw_storage.data() + offset, current_len, packed_record.begin());
+  offset += current_len;
+  if (previous_len > 0) {
+    offset += previous_len;
+  }
+  size_t rec_offset = 0;
+  assert(packed_record[rec_offset++] == 'S');
+  assert(packed_record[rec_offset++] == 'T');
+  assert(packed_record[rec_offset++] == 'K');
+  assert(packed_record[rec_offset++] == '1');
+  uint8_t record_version = packed_record[rec_offset++];
+  assert(record_version >= 2);
+  uint8_t record_origin = packed_record[rec_offset++];
+  (void)record_origin;
+  uint8_t record_flags = packed_record[rec_offset++];
+  assert((record_flags & 0x01) != 0);
+  rec_offset++; // reserved
+  rec_offset += 4; // nonce salt
+  rec_offset += 4; // priv salt
+  rec_offset += 16; // session key
+  rec_offset += 32; // root public
+  const size_t root_priv_offset = rec_offset;
+  bool identical_private = std::equal(packed_record.begin() + root_priv_offset,
+                                      packed_record.begin() + root_priv_offset + rec.root_private.size(),
+                                      rec.root_private.begin());
+  assert(!identical_private);
 
   // Подготовка удалённой стороны для ECDH
   std::array<uint8_t,32> remote_priv{};
