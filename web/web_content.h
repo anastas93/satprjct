@@ -78,7 +78,7 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
   <header class="site-header glass">
     <div class="brand">SAT-COMMUNICATION<span class="tag">web</span></div>
     <nav class="nav" id="siteNav">
-      <a href="#" data-tab="chat">Chat</a>
+      <a href="#" data-tab="chat">Chat<span class="nav-badge" aria-label="Непрочитанные сообщения: 0" aria-live="off" hidden>0</span></a>
       <a href="#" data-tab="channels">Channels/Ping</a>
       <a href="#" data-tab="pointing">Antenna helper</a>
       <a href="#" data-tab="settings">Settings</a>
