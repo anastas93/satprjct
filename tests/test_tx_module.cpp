@@ -31,6 +31,12 @@ public:
 
 // Проверка формирования кадра и вызова send
 int main() {
+  // Проверяем, что ACK определяется только бинарным маркером
+  const uint8_t ack_marker = protocol::ack::MARKER;
+  assert(protocol::ack::isAckPayload(&ack_marker, 1));
+  const uint8_t ack_text[] = {'A', 'C', 'K'};
+  assert(!protocol::ack::isAckPayload(ack_text, sizeof(ack_text)));
+
   MockRadio radio;
   TxModule tx(radio, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
   tx.setAckResponseDelay(0);
