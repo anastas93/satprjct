@@ -129,13 +129,18 @@ int main() {
   txPriority.loop();                           // первый кадр обязан быть ACK
   assert(radioPriority.history.size() == 1);
   auto ackFrame = radioPriority.history.front();
+  assert(ackFrame.size() == 1);
+  assert(ackFrame.front() == protocol::ack::MARKER);
   RxModule rxAck;
   std::vector<uint8_t> ackPlain;
+  bool ackNotified = false;
+  rxAck.setAckCallback([&]() { ackNotified = true; });
   rxAck.setCallback([&](const uint8_t* data, size_t len) {
     ackPlain.assign(data, data + len);
   });
   rxAck.onReceive(radioPriority.history.front().data(), radioPriority.history.front().size());
-  assert(!ackPlain.empty() && ackPlain.back() == protocol::ack::MARKER);
+  assert(ackNotified);
+  assert(ackPlain.size() == 1 && ackPlain.back() == protocol::ack::MARKER);
   txPriority.loop();
   assert(radioPriority.history.size() == 2);
 

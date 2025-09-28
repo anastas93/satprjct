@@ -42,6 +42,8 @@ public:
   ProfilingSnapshot lastProfiling() const { return last_profile_; }
   // Установка пользовательского колбэка
   void setCallback(Callback cb);
+  // Установка колбэка для уведомления о получении ACK
+  void setAckCallback(std::function<void()> cb);
   // Привязка внешнего буфера для хранения готовых сообщений
   void setBuffer(ReceivedBuffer* buf);
   // Обновление ключа дешифрования (после смены в хранилище)
@@ -52,6 +54,7 @@ public:
   void tickCleanup();
 private:
   Callback cb_;
+  std::function<void()> ack_cb_;              // отдельный обработчик ACK
   PacketGatherer gatherer_; // внутренний сборщик фрагментов
   ReceivedBuffer* buf_ = nullptr; // внешний буфер готовых данных
   std::array<uint8_t,16> key_{};   // ключ для дешифрования

@@ -126,6 +126,7 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos) {
     ack_msg.qos = qos;                            // запоминаем исходный класс
     ack_msg.attempts_left = 0;                    // повторы не нужны
     ack_msg.expect_ack = false;                   // ACK никогда не ждёт подтверждения
+    ack_msg.is_ack = true;                        // помечаем быстрый кадр подтверждения
     ack_queue_.push_back(std::move(ack_msg));
     auto now = std::chrono::steady_clock::now();
     next_ack_send_time_ = ack_delay_ms_ == 0
@@ -365,6 +366,15 @@ bool TxModule::transmit(const PendingMessage& message) {
   if (msg.empty()) {
     DEBUG_LOG("TxModule: пустой пакет");
     return false;
+  }
+
+  if (message.is_ack) {
+    // Компактный ACK отправляем напрямую, минуя кодирование и вставку пилотов
+    waitForPauseWindow();
+    radio_.send(msg.data(), msg.size());
+    last_send_ = std::chrono::steady_clock::now();
+    DEBUG_LOG_VAL("TxModule: отправлен компактный ACK длиной=", msg.size());
+    return true;
   }
 
   std::string prefix = message.status_prefix;
@@ -623,7 +633,7 @@ bool TxModule::processImmediateAck() {
   ack_queue_.pop_front();
   const uint32_t ack_id = ack.id;
   const uint8_t ack_qos = ack.qos;
-  bool sent = transmit(ack);                      // пытаемся отправить ACK обычным пайплайном
+  bool sent = transmit(ack);                      // отправляем ACK отдельной веткой
   if (!sent) {                                    // не удалось — возвращаем в начало очереди
     ack_queue_.push_front(std::move(ack));
     auto retry = std::chrono::steady_clock::now();

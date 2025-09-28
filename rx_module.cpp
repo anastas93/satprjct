@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <utility>
 
+static constexpr size_t COMPACT_ACK_MAX_LEN = 5;         // маркер + до четырёх байт идентификатора
 static constexpr size_t PILOT_INTERVAL = 64;             // период вставки пилотов
 static constexpr std::array<uint8_t,7> PILOT_MARKER{{
     0x7E, 'S', 'A', 'T', 'P', 0xD6, 0x9F
@@ -169,6 +170,17 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   auto now = std::chrono::steady_clock::now();          // фиксируем момент для очистки временных структур
   cleanupPendingConv(now);
   cleanupPendingSplits(now);
+
+  if (len >= 1 && len <= COMPACT_ACK_MAX_LEN && data[0] == protocol::ack::MARKER) {
+    if (ack_cb_) {
+      ack_cb_();                                     // немедленно уведомляем передатчик
+    }
+    if (cb_) {                                       // пробрасываем полезную нагрузку для совместимости
+      cb_(data, len);
+    }
+    profile_scope.mark(&ProfilingSnapshot::deliver);
+    return;                                          // компактный ACK обработан, остальные шаги не нужны
+  }
 
   auto forward_raw = [&](const uint8_t* raw, size_t raw_len) {
     if (!raw || raw_len == 0) return;                  // пропускаем пустые вызовы
@@ -496,6 +508,9 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
       deliver_len = split_result.data.size();
     }
     bool is_ack_payload = protocol::ack::isAckPayload(deliver_ptr, deliver_len);
+    if (is_ack_payload && ack_cb_) {
+      ack_cb_();
+    }
     if (buf_ && !is_ack_payload) {
       buf_->pushReady(hdr.msg_id, deliver_ptr, deliver_len);
     }
@@ -651,6 +666,11 @@ void RxModule::enableProfiling(bool enable) {
 // Установка колбэка для обработки сообщений
 void RxModule::setCallback(Callback cb) {
   cb_ = cb;
+}
+
+// Привязка обработчика, который уведомляется о приходе компактного ACK
+void RxModule::setAckCallback(std::function<void()> cb) {
+  ack_cb_ = std::move(cb);
 }
 
 // Указание внешнего буфера для сохранения готовых сообщений
