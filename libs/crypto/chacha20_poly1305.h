@@ -1,5 +1,8 @@
 #pragma once
 
+#ifndef SATPRJCT_LIBS_CRYPTO_CHACHA20_POLY1305_H_
+#define SATPRJCT_LIBS_CRYPTO_CHACHA20_POLY1305_H_
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -34,4 +37,6 @@ bool decrypt(const uint8_t* key, size_t key_len,
 
 } // namespace chacha20poly1305
 } // namespace crypto
+
+#endif  // SATPRJCT_LIBS_CRYPTO_CHACHA20_POLY1305_H_
 
