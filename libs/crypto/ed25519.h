@@ -1,4 +1,7 @@
 #pragma once
+
+#ifndef SATPRJCT_LIBS_CRYPTO_ED25519_H_
+#define SATPRJCT_LIBS_CRYPTO_ED25519_H_
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -16,4 +19,6 @@ bool verify(const uint8_t* message, size_t message_len,
 
 }  // namespace ed25519
 }  // namespace crypto
+
+#endif  // SATPRJCT_LIBS_CRYPTO_ED25519_H_
 
