@@ -401,6 +401,36 @@ ENCT: успех
 Обмен сообщениями `KEYTRANSFER` использует отдельный статический AES-ключ из `libs/key_transfer`.
 Он шифрует только LoRa-кадры с публичными ключами и не влияет на рабочий симметричный ключ трафика.
 
+### Сертификаты KEYTRANSFER
+- `KeyTransfer::setTrustedRoot(const std::array<uint8_t,32>&)` — сохраняет публичный корневой ключ
+  удостоверяющего центра, относительно которого проверяется цепочка доверия. Корень хранится в
+  памяти процесса и используется для всех входящих кадров.
+- `KeyTransfer::setLocalCertificate(const CertificateBundle&)` — регистрирует локальную цепочку
+  сертификатов Ed25519, которая будет автоматически добавлена при формировании кадров через
+  `KeyTransfer::buildFrame()`.
+- `KeyTransfer::verifyCertificateChain(const std::array<uint8_t,32>&, const CertificateBundle&, std::string*)`
+  — проверяет подписи Ed25519 в цепочке и подтверждает, что она восходит к доверенному корню.
+- `KeyTransfer::hasTrustedRoot()/getTrustedRoot()` и `KeyTransfer::hasLocalCertificate()/getLocalCertificate()`
+  позволяют проверить наличие данных перед отправкой или обработкой кадра.
+
+Для проверки подписей используется библиотека libsodium (`crypto_sign_ed25519_verify_detached`). В
+хостовых сборках необходимо установить пакет `libsodium-dev` и при сборке тестов добавлять флаг
+`-lsodium`:
+
+```bash
+g++ -I. tests/test_key_transfer.cpp \
+    libs/key_transfer/key_transfer.cpp \
+    libs/frame/frame_header.cpp \
+    libs/scrambler/scrambler.cpp \
+    libs/crypto/aes_ccm.cpp \
+    libs/crypto/ed25519.cpp \
+    libs/crypto/curve25519_donna.cpp \
+    libs/crypto/x25519.cpp \
+    libs/mbedtls/aes.c \
+    libs/mbedtls/ccm.c \
+    -lsodium -std=c++17 && ./a.out
+```
+
 ## Типы пакетов
 
 Полный справочник вынесен в файл [docs/packet_types.md](docs/packet_types.md). Ниже приведена краткая сводка основных форматов:
