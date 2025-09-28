@@ -1,4 +1,3 @@
-#pragma once
 #ifndef CHANNEL_BANK_H
 #define CHANNEL_BANK_H // защита от повторного включения
 

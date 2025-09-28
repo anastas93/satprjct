@@ -1,4 +1,3 @@
-#pragma once
 #ifndef LIBS_QOS_H
 #define LIBS_QOS_H
 
