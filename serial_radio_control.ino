@@ -968,12 +968,43 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
     SimpleLogger::logStatus("KEYTRANSFER IGN");   // пришёл неожиданный ключ
     return true;                                   // не передаём дальше в RxModule
   }
+  KeyLoader::KeyRecord previous_snapshot;          // сохраняем снимок до применения удалённого ключа
+  bool has_previous_snapshot = KeyLoader::loadKeyRecord(previous_snapshot);
   if (!KeyLoader::applyRemotePublic(remote_pub)) {
     keyTransferRuntime.error = String("apply");
     keyTransferRuntime.waiting = false;
     keyTransferRuntime.completed = false;
     SimpleLogger::logStatus("KEYTRANSFER ERR");
     Serial.println("KEYTRANSFER: ошибка применения удалённого ключа");
+    return true;
+  }
+  auto local_id = KeyLoader::keyId(KeyLoader::loadKey());
+  bool ids_match = std::equal(local_id.begin(), local_id.end(), remote_id.begin());
+  if (!ids_match) {
+    bool restored = KeyLoader::restorePreviousKey();
+    if (!restored && has_previous_snapshot) {
+      restored = KeyLoader::saveKey(previous_snapshot.session_key,
+                                    previous_snapshot.origin,
+                                    &previous_snapshot.peer_public,
+                                    previous_snapshot.nonce_salt);
+    }
+    if (restored) {
+      reloadCryptoModules();                        // возвращаемся к предыдущему ключу
+    }
+    keyTransferRuntime.completed = false;
+    keyTransferRuntime.waiting = false;
+    keyTransferRuntime.error = String("verify");
+    std::string log = "KEYTRANSFER MISMATCH ";
+    log += toHex(local_id).c_str();
+    log += "/";
+    log += toHex(remote_id).c_str();
+    SimpleLogger::logStatus(log);
+    Serial.print("KEYTRANSFER: несовпадение идентификаторов (local=");
+    Serial.print(toHex(local_id));
+    Serial.print(", remote=");
+    Serial.print(toHex(remote_id));
+    Serial.println(")");
+    Serial.println("KEYTRANSFER: откатываемся на предыдущий ключ");
     return true;
   }
   reloadCryptoModules();                          // обновляем Tx/Rx новым ключом
@@ -1104,7 +1135,12 @@ String cmdKeyTransferReceiveLora() {
       String err = keyTransferRuntime.error;
       keyTransferRuntime.error = String();
       keyTransferRuntime.waiting = false;
-      return String("{\"error\":\"") + err + "\"}";
+      String response = String("{\"error\":\"") + err + "\"";
+      if (err.equalsIgnoreCase("verify")) {
+        response += ",\"message\":\"несовпадение идентификаторов ключей\"";
+      }
+      response += "}";
+      return response;
     }
     radio.loop();                                     // даём шанс обработать входящие пакеты
     tx.loop();                                        // обрабатываем очередь передачи
@@ -1115,7 +1151,12 @@ String cmdKeyTransferReceiveLora() {
   if (keyTransferRuntime.error.length()) {
     String err = keyTransferRuntime.error;
     keyTransferRuntime.error = String();
-    return String("{\"error\":\"") + err + "\"}";
+    String response = String("{\"error\":\"") + err + "\"";
+    if (err.equalsIgnoreCase("verify")) {
+      response += ",\"message\":\"несовпадение идентификаторов ключей\"";
+    }
+    response += "}";
+    return response;
   }
   return String("{\"error\":\"timeout\"}");
 }
