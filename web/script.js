@@ -3599,27 +3599,6 @@ function handleReceivedPushMessage(event) {
       setChatReceivingIndicatorState(true);
     } else if (kind === "ready") {
       state.awaiting = false;
-      const nameRaw = payload.name != null ? String(payload.name) : "";
-      const name = nameRaw.trim();
-      if (name) {
-        if (!(state.known instanceof Set)) state.known = new Set(state.known ? Array.from(state.known) : []);
-        const alreadyKnown = state.known.has(name);
-        if (!alreadyKnown) {
-          state.known.add(name);
-          const entry = {
-            name,
-            type: kind,
-          };
-          const text = payload.text != null ? String(payload.text) : "";
-          if (text) entry.text = text;
-          const hex = payload.hex != null ? String(payload.hex) : "";
-          if (hex) entry.hex = hex;
-          const lenValue = Number(payload.len);
-          if (Number.isFinite(lenValue) && lenValue >= 0) entry.len = lenValue;
-          // Немедленно публикуем готовое сообщение, чтобы вкладка чата не отставала от Serial
-          logReceivedMessage(entry, { isNew: true });
-        }
-      }
     }
   }
   scheduleReceivedRefreshFromPush(payload);
