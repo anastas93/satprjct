@@ -56,6 +56,14 @@ StorageSnapshot g_snapshot;
 bool g_snapshot_loaded = false;
 StorageBackend g_preferred_backend = StorageBackend::UNKNOWN;
 
+struct EphemeralState {
+  bool active = false;                                 // есть ли сгенерированная пара
+  std::array<uint8_t,32> private_key{};                // эпемерный приватный ключ
+  std::array<uint8_t,32> public_key{};                 // эпемерный публичный ключ
+};
+
+EphemeralState g_ephemeral;
+
 #ifdef ARDUINO
 StorageBackend activeBackend() {
 #if KEY_LOADER_HAS_NVS
@@ -637,15 +645,41 @@ bool restorePreviousKey(KeyRecord* out) {
 }
 
 bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
+                       const std::array<uint8_t,32>* remote_ephemeral,
                        KeyRecord* out) {
   StorageSnapshot snapshot = ensureSnapshot();
-  if (!snapshot.current_valid || !snapshot.current.valid) return false;
-  std::array<uint8_t,32> shared{};
-  if (!crypto::x25519::compute_shared(snapshot.current.root_private, remote_public, shared)) {
+  if (!snapshot.current_valid || !snapshot.current.valid) {
+    if (remote_ephemeral) endEphemeralSession();
     return false;
   }
+
+  if (remote_ephemeral && !g_ephemeral.active) {
+    // Удалённая сторона ожидает эпемерный обмен, но локальная сторона не готова.
+    endEphemeralSession();
+    return false;
+  }
+
+  std::array<uint8_t,32> shared{};
+  std::array<uint8_t,32> local_pub{};
+  std::array<uint8_t,32> remote_pub_for_hash{};
+  if (remote_ephemeral) {
+    if (!crypto::x25519::compute_shared(g_ephemeral.private_key, *remote_ephemeral, shared)) {
+      endEphemeralSession();
+      return false;
+    }
+    local_pub = g_ephemeral.public_key;
+    remote_pub_for_hash = *remote_ephemeral;
+  } else {
+    if (!crypto::x25519::compute_shared(snapshot.current.root_private, remote_public, shared)) {
+      if (g_ephemeral.active) endEphemeralSession();
+      return false;
+    }
+    local_pub = snapshot.current.root_public;
+    remote_pub_for_hash = remote_public;
+  }
+
   KeyRecord rec = snapshot.current;
-  rec.session_key = deriveSessionFromShared(shared, snapshot.current.root_public, remote_public);
+  rec.session_key = deriveSessionFromShared(shared, local_pub, remote_pub_for_hash);
   rec.nonce_salt = nonceSaltFromKey(rec.session_key);
   rec.origin = KeyOrigin::REMOTE;
   rec.peer_public = remote_public;
@@ -656,22 +690,30 @@ bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
   }
   snapshot.current = rec;
   snapshot.current_valid = true;
-  if (!ensureBackendReady()) return false;
-  if (!writeSnapshot(snapshot)) return false;
+  if (!ensureBackendReady()) {
+    endEphemeralSession();
+    return false;
+  }
+  if (!writeSnapshot(snapshot)) {
+    endEphemeralSession();
+    return false;
+  }
   g_snapshot = snapshot;
   g_snapshot_loaded = true;
   if (out) *out = rec;
+  // Независимо от результата обмена очищаем эпемерный приватный ключ.
+  endEphemeralSession();
   return true;
 }
 
-bool regenerateFromPeer(KeyRecord* out) {
+bool regenerateFromPeer(const std::array<uint8_t,32>* remote_ephemeral,
+                        KeyRecord* out) {
   StorageSnapshot snapshot = ensureSnapshot();
   if (!snapshot.current_valid || !snapshot.current.valid) return false;
-  // Проверяем, что сохранённый публичный ключ удалённой стороны не нулевой
   const auto& peer = snapshot.current.peer_public;
   bool has_peer = std::any_of(peer.begin(), peer.end(), [](uint8_t b) { return b != 0; });
   if (!has_peer) return false;
-  return applyRemotePublic(peer, out);
+  return applyRemotePublic(peer, remote_ephemeral, out);
 }
 
 bool loadKeyRecord(KeyRecord& out) {
@@ -716,6 +758,28 @@ bool previewPeerKeyId(std::array<uint8_t,4>& key_id_out) {
   }
   auto session = deriveSessionFromShared(shared, snapshot.current.root_public, peer);
   key_id_out = keyId(session);
+  return true;
+}
+
+bool hasEphemeralSession() { return g_ephemeral.active; }
+
+void endEphemeralSession() {
+  if (!g_ephemeral.active) return;
+  std::fill(g_ephemeral.private_key.begin(), g_ephemeral.private_key.end(), 0);
+  std::fill(g_ephemeral.public_key.begin(), g_ephemeral.public_key.end(), 0);
+  g_ephemeral.active = false;
+}
+
+bool startEphemeralSession(std::array<uint8_t,32>& public_out, bool force_new) {
+  if (g_ephemeral.active && !force_new) {
+    public_out = g_ephemeral.public_key;
+    return true;
+  }
+  endEphemeralSession();
+  crypto::x25519::random_bytes(g_ephemeral.private_key.data(), g_ephemeral.private_key.size());
+  crypto::x25519::derive_public(g_ephemeral.public_key, g_ephemeral.private_key);
+  g_ephemeral.active = true;
+  public_out = g_ephemeral.public_key;
   return true;
 }
 
