@@ -69,22 +69,46 @@ int main() {
   std::cout << std::dec << std::endl;
   assert(expected == rec2.session_key);
 
-  // Проверяем резервную копию и восстановление
+  // Сценарий: устройство A генерирует новый ключ, устройство B применяет его,
+  // затем устройство A пересчитывает сессию через regenerateFromPeer.
   assert(generateLocalKey());
-  auto state_after_regen = getState();
-  assert(state_after_regen.has_backup);
   KeyRecord rec3;
   assert(loadKeyRecord(rec3));
   assert(rec3.origin == KeyOrigin::LOCAL);
+  assert(rec3.peer_public == remote_pub);
   // Проверяем, что новая генерация создаёт отличающийся публичный ключ.
   assert(rec3.root_public != first_public);
-  assert(restorePreviousKey());
-  auto state_after_restore = getState();
-  assert(!state_after_restore.has_backup);
+  std::array<uint8_t,32> shared_remote_second{};
+  crypto::x25519::compute_shared(remote_priv, rec3.root_public, shared_remote_second);
+  std::array<uint8_t,96> buf_second{};
+  std::copy(shared_remote_second.begin(), shared_remote_second.end(), buf_second.begin());
+  std::array<std::array<uint8_t,32>, 2> ordered_pubs_second = {rec3.root_public, remote_pub};
+  std::sort(ordered_pubs_second.begin(), ordered_pubs_second.end());
+  // Буфер формируется так же, как и в прошивке, чтобы смоделировать сторону B.
+  std::copy(ordered_pubs_second[0].begin(), ordered_pubs_second[0].end(),
+            buf_second.begin() + shared_remote_second.size());
+  std::copy(ordered_pubs_second[1].begin(), ordered_pubs_second[1].end(),
+            buf_second.begin() + shared_remote_second.size() + ordered_pubs_second[0].size());
+  auto digest_second = crypto::sha256::hash(buf_second.data(), buf_second.size());
+  std::array<uint8_t,16> expected_second{};
+  std::copy_n(digest_second.begin(), expected_second.size(), expected_second.begin());
+  assert(regenerateFromPeer());
   KeyRecord rec4;
   assert(loadKeyRecord(rec4));
   assert(rec4.origin == KeyOrigin::REMOTE);
   assert(rec4.peer_public == remote_pub);
+  assert(rec4.session_key == expected_second);
+  auto state_after_regen = getState();
+  assert(state_after_regen.has_backup);
+  // Проверяем восстановление локального ключа после пересчёта сессии.
+  assert(restorePreviousKey());
+  auto state_after_restore = getState();
+  assert(!state_after_restore.has_backup);
+  KeyRecord rec5;
+  assert(loadKeyRecord(rec5));
+  assert(rec5.origin == KeyOrigin::LOCAL);
+  assert(rec5.peer_public == remote_pub);
+  assert(rec5.root_public == rec3.root_public);
 
   std::cout << "OK" << std::endl;
   return 0;
