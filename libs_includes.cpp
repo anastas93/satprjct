@@ -16,6 +16,7 @@
 #include "libs/key_transfer/key_transfer.cpp"       // передача корневого ключа по LoRa
 #include "libs/crypto/ed25519.cpp"            // проверка подписей Ed25519 через libsodium
 #include "libs/crypto/aes_ccm.cpp"            // AES-CCM шифрование
+#include "libs/crypto/chacha20_poly1305.cpp"  // AEAD ChaCha20-Poly1305
 #include "libs/crypto/hkdf.cpp"               // HKDF-SHA256 для вывода ключевого материала
 #include "libs/crypto/sha256.cpp"             // SHA-256 для ключевого хранилища
 #include "libs/crypto/curve25519_donna.cpp"   // низкоуровневая математика Curve25519

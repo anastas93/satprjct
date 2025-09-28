@@ -7,6 +7,7 @@
 #include "libs/scrambler/scrambler.h" // скремблер
 #include "libs/key_loader/key_loader.h" // загрузка ключа
 #include "libs/crypto/aes_ccm.h" // AES-CCM шифрование
+#include "libs/crypto/chacha20_poly1305.h" // AEAD ChaCha20-Poly1305
 #include "libs/protocol/ack_utils.h" // проверка ACK для фильтрации буфера
 #include "default_settings.h"         // параметры по умолчанию
 #include <vector>
@@ -27,8 +28,10 @@ static constexpr uint16_t PILOT_MARKER_CRC = 0x9FD6;                // CRC16(pre
   return FrameHeader::crc16(PILOT_MARKER.data(), PILOT_PREFIX_LEN) == PILOT_MARKER_CRC;
 }();
 
+static constexpr uint8_t FRAME_VERSION_AEAD = 2;  // новая версия кадра
+static constexpr size_t TAG_LEN_V1 = 8;           // длина тега в старом формате
+static constexpr size_t TAG_LEN = crypto::chacha20poly1305::TAG_SIZE; // длина тега Poly1305
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
-static constexpr size_t TAG_LEN = 8;              // длина тега аутентичности
 static constexpr size_t RS_ENC_LEN = 255;      // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
 static constexpr bool USE_RS = DefaultSettings::USE_RS; // использовать RS(255,223)
@@ -75,6 +78,23 @@ static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& 
     ++count;
     ++i;
   }
+}
+
+static std::array<uint8_t,8> makeAad(uint8_t version,
+                                     uint8_t flags,
+                                     uint32_t msg_id,
+                                     uint16_t frag_idx) {
+  std::array<uint8_t,8> aad{};
+  aad[0] = version;
+  aad[1] = static_cast<uint8_t>(flags &
+                                 (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED));
+  aad[2] = static_cast<uint8_t>(msg_id >> 24);
+  aad[3] = static_cast<uint8_t>(msg_id >> 16);
+  aad[4] = static_cast<uint8_t>(msg_id >> 8);
+  aad[5] = static_cast<uint8_t>(msg_id);
+  aad[6] = static_cast<uint8_t>(frag_idx >> 8);
+  aad[7] = static_cast<uint8_t>(frag_idx);
+  return aad;
 }
 
 struct RxModule::RxProfilingScope {
@@ -394,12 +414,13 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   }
 
   // Дешифрование и сборка сообщения
-  if (result_len < TAG_LEN) {
+  size_t tag_len = (hdr.ver >= FRAME_VERSION_AEAD) ? TAG_LEN : TAG_LEN_V1;
+  if (result_len < tag_len) {
     profile_scope.markDrop("payload короче тега");
     return;                                          // недостаточно данных
   }
   const uint8_t* cipher = result_buf_.data();
-  size_t cipher_len = result_len - TAG_LEN;
+  size_t cipher_len = result_len - tag_len;
   const uint8_t* tag = result_buf_.data() + cipher_len;
   bool encrypted = (hdr.flags & FrameHeader::FLAG_ENCRYPTED) != 0;
   bool should_decrypt = encrypted || encryption_forced_;
@@ -407,14 +428,28 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   if (should_decrypt) {
     uint16_t nonce_idx = hdr.frag_idx;                // индекс части задаёт уникальный нонс
     nonce_ = KeyLoader::makeNonce(hdr.msg_id, nonce_idx);
-    decrypt_ok = decrypt_ccm(key_.data(), key_.size(), nonce_.data(), nonce_.size(),
-                             nullptr, 0, cipher, cipher_len,
-                             tag, TAG_LEN, plain_buf_);
+    if (hdr.ver >= FRAME_VERSION_AEAD) {
+      auto aad = makeAad(hdr.ver,
+                         static_cast<uint8_t>(hdr.flags &
+                                              (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED)),
+                         hdr.msg_id,
+                         hdr.frag_idx);
+      decrypt_ok = crypto::chacha20poly1305::decrypt(key_.data(), key_.size(),
+                                                     nonce_.data(), nonce_.size(),
+                                                     aad.data(), aad.size(),
+                                                     cipher, cipher_len,
+                                                     tag, tag_len,
+                                                     plain_buf_);
+    } else {
+      decrypt_ok = decrypt_ccm(key_.data(), key_.size(), nonce_.data(), nonce_.size(),
+                               nullptr, 0, cipher, cipher_len,
+                               tag, tag_len, plain_buf_);
+    }
     if (!decrypt_ok) {
       if (encrypted) {
         LOG_ERROR("RxModule: ошибка дешифрования");
         profile_scope.mark(&ProfilingSnapshot::decrypt);
-        profile_scope.markDrop("ошибка AES-CCM");
+        profile_scope.markDrop("ошибка AEAD");
         return;                                      // завершаем обработку повреждённого кадра
       }
       LOG_WARN("RxModule: получен незашифрованный фрагмент при принудительном режиме");

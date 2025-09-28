@@ -5,6 +5,7 @@
 #include "libs/frame/frame_header.h"
 #include "libs/scrambler/scrambler.h"
 #include "libs/crypto/aes_ccm.h"
+#include "libs/crypto/chacha20_poly1305.h"
 #include "libs/crypto/ed25519.h"
 
 namespace KeyTransfer {
@@ -25,7 +26,7 @@ constexpr size_t MAX_FRAGMENT_LEN =
 constexpr uint32_t NONCE_SALT = 0x4B54524E;              // "KTRN" — соль нонса
 constexpr uint8_t CERT_MAGIC[4] = {'K','T','C','F'};     // сигнатура сообщения сертификата
 
-// Статический корневой ключ AES-CCM для защищённого обмена
+// Статический корневой ключ для AEAD (расширяется до 32 байт внутри обёртки)
 const std::array<uint8_t,16> ROOT_KEY{
   0x4B, 0x54, 0x52, 0x46, // "KTRF"
   0x2D, 0x52, 0x4F, 0x4F, // "-ROO"
@@ -101,6 +102,23 @@ std::array<uint8_t,12> makeNonce(uint32_t msg_id, uint16_t frag_idx) {
   return nonce;
 }
 
+std::array<uint8_t,8> makeAad(uint8_t version,
+                              uint8_t flags,
+                              uint32_t msg_id,
+                              uint16_t frag_idx) {
+  std::array<uint8_t,8> aad{};
+  aad[0] = version;
+  aad[1] = static_cast<uint8_t>(flags &
+                                 (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED));
+  aad[2] = static_cast<uint8_t>(msg_id >> 24);
+  aad[3] = static_cast<uint8_t>(msg_id >> 16);
+  aad[4] = static_cast<uint8_t>(msg_id >> 8);
+  aad[5] = static_cast<uint8_t>(msg_id);
+  aad[6] = static_cast<uint8_t>(frag_idx >> 8);
+  aad[7] = static_cast<uint8_t>(frag_idx);
+  return aad;
+}
+
 bool buildFrame(uint32_t msg_id,
                 const std::array<uint8_t,32>& public_key,
                 const std::array<uint8_t,4>& key_id,
@@ -148,21 +166,25 @@ bool buildFrame(uint32_t msg_id,
   auto nonce = makeNonce(msg_id, 0);
   std::vector<uint8_t> cipher;
   std::vector<uint8_t> tag;
-  if (!encrypt_ccm(rootKey().data(), rootKey().size(),
-                   nonce.data(), nonce.size(),
-                   nullptr, 0,
-                   plain.data(), plain.size(),
-                   cipher, tag, TAG_LEN)) {
+  uint8_t base_flags = FrameHeader::FLAG_ENCRYPTED;
+  auto aad = makeAad(FRAME_VERSION_AEAD, base_flags, msg_id, 0);
+  if (!crypto::chacha20poly1305::encrypt(rootKey().data(), rootKey().size(),
+                                         nonce.data(), nonce.size(),
+                                         aad.data(), aad.size(),
+                                         plain.data(), plain.size(),
+                                         cipher, tag)) {
     return false;
   }
   cipher.insert(cipher.end(), tag.begin(), tag.end());
   if (cipher.size() > MAX_FRAGMENT_LEN) return false;
 
   FrameHeader hdr;
+  hdr.ver = FRAME_VERSION_AEAD;
   hdr.msg_id = msg_id;
   hdr.frag_idx = 0;
   hdr.frag_cnt = 1;
   hdr.payload_len = static_cast<uint16_t>(cipher.size());
+  hdr.flags = base_flags;
   uint8_t hdr_buf[FrameHeader::SIZE];
   if (!hdr.encode(hdr_buf, sizeof(hdr_buf), cipher.data(), cipher.size())) {
     return false;
@@ -191,6 +213,7 @@ bool parseFrame(const uint8_t* frame, size_t len,
   }
   if (!ok) return false;
   if (hdr.frag_cnt != 1 || hdr.frag_idx != 0) return false;
+  if (hdr.ver != 1 && hdr.ver < FRAME_VERSION_AEAD) return false;
 
   const uint8_t* payload_p = buf.data() + FrameHeader::SIZE * 2;
   size_t payload_len = buf.size() - FrameHeader::SIZE * 2;
@@ -198,18 +221,34 @@ bool parseFrame(const uint8_t* frame, size_t len,
   removePilots(payload_p, payload_len, payload_bytes);
   if (payload_bytes.size() != hdr.payload_len) return false;
   if (!hdr.checkFrameCrc(payload_bytes.data(), payload_bytes.size())) return false;
-  if (payload_bytes.size() < TAG_LEN) return false;
+  size_t tag_len = (hdr.ver >= FRAME_VERSION_AEAD) ? TAG_LEN : TAG_LEN_V1;
+  if (payload_bytes.size() < tag_len) return false;
 
-  size_t cipher_len = payload_bytes.size() - TAG_LEN;
+  size_t cipher_len = payload_bytes.size() - tag_len;
   const uint8_t* tag = payload_bytes.data() + cipher_len;
   auto nonce = makeNonce(hdr.msg_id, hdr.frag_idx);
   std::vector<uint8_t> plain;
-  if (!decrypt_ccm(rootKey().data(), rootKey().size(),
-                   nonce.data(), nonce.size(),
-                   nullptr, 0,
-                   payload_bytes.data(), cipher_len,
-                   tag, TAG_LEN, plain)) {
-    return false;
+  if (hdr.ver >= FRAME_VERSION_AEAD) {
+    auto aad = makeAad(hdr.ver,
+                       static_cast<uint8_t>(hdr.flags &
+                                            (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED)),
+                       hdr.msg_id,
+                       hdr.frag_idx);
+    if (!crypto::chacha20poly1305::decrypt(rootKey().data(), rootKey().size(),
+                                           nonce.data(), nonce.size(),
+                                           aad.data(), aad.size(),
+                                           payload_bytes.data(), cipher_len,
+                                           tag, tag_len, plain)) {
+      return false;
+    }
+  } else {
+    if (!decrypt_ccm(rootKey().data(), rootKey().size(),
+                     nonce.data(), nonce.size(),
+                     nullptr, 0,
+                     payload_bytes.data(), cipher_len,
+                     tag, tag_len, plain)) {
+      return false;
+    }
   }
   if (plain.size() < 4 + 1 + 3 + payload.key_id.size() + payload.public_key.size()) return false;
   if (!std::equal(std::begin(MAGIC), std::end(MAGIC), plain.begin())) return false;
