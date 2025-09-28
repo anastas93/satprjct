@@ -6,16 +6,21 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cctype>
 #include <cstring>
+#include <cstdlib>
 #include <vector>
 
 #ifndef ARDUINO
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #else
 #if defined(ESP32)
 #include <Preferences.h>
 #define KEY_LOADER_HAS_NVS 1
+#include <esp_system.h>
+#include <esp_flash_encrypt.h>
 #else
 #define KEY_LOADER_HAS_NVS 0
 #endif
@@ -29,13 +34,16 @@ namespace KeyLoader {
 namespace {
 
 constexpr uint8_t RECORD_MAGIC[4] = {'S', 'T', 'K', '1'};
-constexpr uint8_t RECORD_VERSION = 1;
+constexpr uint8_t RECORD_VERSION = 2;
 constexpr size_t RECORD_PACKED_SIZE = 4 + 1 + 1 + 2 + 4 + 4 + 16 + 32 + 32 + 32;
 constexpr size_t DIGEST_SIZE = crypto::sha256::DIGEST_SIZE;
 
 constexpr uint8_t STORAGE_MAGIC[4] = {'S', 'T', 'B', '1'};
 constexpr uint8_t STORAGE_VERSION = 1;
 constexpr size_t STORAGE_HEADER_SIZE = 4 + 1 + 1 + 2 + 4 + 4;
+
+constexpr uint8_t RECORD_FLAG_SEALED_PRIV = 0x01;
+constexpr char PRIVATE_SEAL_INFO[] = "KeyLoader sealed root v1";
 
 #ifndef ARDUINO
 const char* KEY_DIR = "key_storage";
@@ -81,6 +89,178 @@ constexpr char LOCAL_INFO[] = "KeyLoader local session v2";
 constexpr char REMOTE_STATIC_INFO[] = "KeyLoader remote session v2 static";
 constexpr char REMOTE_EPHEMERAL_INFO[] = "KeyLoader remote session v2 ephemeral";
 constexpr char NONCE_INFO[] = "KeyLoader nonce v2";
+
+#ifndef ARDUINO
+bool g_warned_host_key = false;
+bool g_warned_hkdf_fallback = false;
+
+// Разбор HEX-ключа из переменной окружения.
+bool parseHexKey(const char* value, std::array<uint8_t,32>& key) {
+  if (!value) return false;
+  size_t len = std::strlen(value);
+  if (len != key.size() * 2) return false;
+  auto hexVal = [](char c) -> int {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+    return -1;
+  };
+  for (size_t i = 0; i < key.size(); ++i) {
+    int hi = hexVal(value[2 * i]);
+    int lo = hexVal(value[2 * i + 1]);
+    if (hi < 0 || lo < 0) return false;
+    key[i] = static_cast<uint8_t>((hi << 4) | lo);
+  }
+  return true;
+}
+
+// Получение мастер-ключа для шифрования приватного ключа в файловой системе.
+bool getHostMasterKey(std::array<uint8_t,32>& key) {
+  const char* env = std::getenv("KEYLOADER_HOST_MASTER_KEY");
+  if (parseHexKey(env, key)) {
+    return true;
+  }
+  // Фолбэк: используем детерминированное значение и предупреждаем разработчика.
+  auto digest = crypto::sha256::hash(reinterpret_cast<const uint8_t*>("KeyLoader host default"),
+                                     sizeof("KeyLoader host default") - 1);
+  std::copy_n(digest.begin(), key.size(), key.begin());
+  if (!g_warned_host_key) {
+    g_warned_host_key = true;
+    std::cerr << "[KeyLoader] ВНИМАНИЕ: используется предустановленный ключ для эмуляции шифрования."
+              << " Задайте переменную KEYLOADER_HOST_MASTER_KEY для повышения безопасности." << std::endl;
+  }
+  return true;
+}
+#endif
+
+// Нужна ли программная защита приватного ключа в хранилище.
+bool shouldSealPrivateKey() {
+#ifdef ARDUINO
+#if KEY_LOADER_HAS_NVS
+  return false;  // При включённом Flash Encryption данные защищены аппаратно.
+#else
+  return true;
+#endif
+#else
+  return true;
+#endif
+}
+
+// Формирование маски для зашифровки приватного ключа.
+bool deriveSealMask(uint32_t salt,
+                    std::array<uint8_t,32>& mask,
+                    bool& used_fallback) {
+  std::array<uint8_t,4> salt_bytes{
+      static_cast<uint8_t>(salt & 0xFF),
+      static_cast<uint8_t>((salt >> 8) & 0xFF),
+      static_cast<uint8_t>((salt >> 16) & 0xFF),
+      static_cast<uint8_t>((salt >> 24) & 0xFF)};
+  used_fallback = false;
+#ifdef ARDUINO
+#if KEY_LOADER_HAS_NVS
+  // Для ESP32 делаем вид, что Flash Encryption обрабатывает ключ на уровне носителя.
+  (void)salt_bytes;
+  mask.fill(0);
+  return true;
+#else
+  (void)salt_bytes;
+  mask.fill(0);
+  return false;
+#endif
+#else
+  std::array<uint8_t,32> master{};
+  if (!getHostMasterKey(master)) return false;
+  bool ok = crypto::hkdf::derive(salt_bytes.data(),
+                                 salt_bytes.size(),
+                                 master.data(),
+                                 master.size(),
+                                 reinterpret_cast<const uint8_t*>(PRIVATE_SEAL_INFO),
+                                 sizeof(PRIVATE_SEAL_INFO) - 1,
+                                 mask.data(),
+                                 mask.size());
+  if (!ok) {
+    used_fallback = true;
+    std::array<uint8_t,36> buf{};
+    std::copy(master.begin(), master.end(), buf.begin());
+    std::copy(salt_bytes.begin(), salt_bytes.end(), buf.begin() + master.size());
+    auto digest = crypto::sha256::hash(buf.data(), buf.size());
+    std::copy_n(digest.begin(), mask.size(), mask.begin());
+  }
+  return true;
+#endif
+}
+
+// Шифрование приватного ключа при записи в файловую систему.
+bool sealPrivateKey(std::array<uint8_t,32>& priv, uint32_t& salt_out) {
+  if (!shouldSealPrivateKey()) {
+    salt_out = 0;
+    return true;
+  }
+#ifdef ARDUINO
+#if KEY_LOADER_HAS_NVS
+  salt_out = 0;
+  return true;
+#else
+  return false;
+#endif
+#else
+  uint32_t salt = 0;
+  std::array<uint8_t,32> mask{};
+  bool used_fallback = false;
+  // Генерируем ненулевую соль.
+  do {
+    std::array<uint8_t,4> tmp{};
+    crypto::x25519::random_bytes(tmp.data(), tmp.size());
+    salt = static_cast<uint32_t>(tmp[0]) |
+           (static_cast<uint32_t>(tmp[1]) << 8) |
+           (static_cast<uint32_t>(tmp[2]) << 16) |
+           (static_cast<uint32_t>(tmp[3]) << 24);
+  } while (salt == 0);
+  if (!deriveSealMask(salt, mask, used_fallback)) return false;
+  for (size_t i = 0; i < priv.size(); ++i) {
+    priv[i] ^= mask[i];
+  }
+  salt_out = salt;
+  if (used_fallback && !g_warned_hkdf_fallback) {
+    g_warned_hkdf_fallback = true;
+    std::cerr << "[KeyLoader] ВНИМАНИЕ: HKDF недоступен, используется SHA-256 для шифрования приватного ключа." << std::endl;
+  }
+  return true;
+#endif
+}
+
+// Расшифровка приватного ключа после чтения из хранилища.
+bool unsealPrivateKey(std::array<uint8_t,32>& priv, uint32_t salt, bool was_sealed) {
+  if (!shouldSealPrivateKey()) {
+    return true;
+  }
+#ifdef ARDUINO
+#if KEY_LOADER_HAS_NVS
+  (void)priv;
+  (void)salt;
+  (void)was_sealed;
+  return true;
+#else
+  return false;
+#endif
+#else
+  if (!was_sealed) {
+    // Старый формат: приватный ключ не зашифрован, ничего не делаем.
+    return true;
+  }
+  std::array<uint8_t,32> mask{};
+  bool used_fallback = false;
+  if (!deriveSealMask(salt, mask, used_fallback)) return false;
+  for (size_t i = 0; i < priv.size(); ++i) {
+    priv[i] ^= mask[i];
+  }
+  if (used_fallback && !g_warned_hkdf_fallback) {
+    g_warned_hkdf_fallback = true;
+    std::cerr << "[KeyLoader] ВНИМАНИЕ: HKDF недоступен, используется SHA-256 для расшифровки приватного ключа." << std::endl;
+  }
+  return true;
+#endif
+}
 
 uint32_t nonceSaltFromKeyLegacy(const std::array<uint8_t,16>& key) {
   auto digest = crypto::sha256::hash(key.data(), key.size());
@@ -162,22 +342,35 @@ std::array<uint8_t,16> deriveSessionFromShared(const std::array<uint8_t,32>& sha
 }
 
 std::vector<uint8_t> serializeRecord(const KeyRecord& rec) {
+  KeyRecord sealed = rec;
+  uint8_t flags = 0;
+  uint32_t priv_salt = 0;
+  if (!sealPrivateKey(sealed.root_private, priv_salt)) {
+    return {};
+  }
+  if (shouldSealPrivateKey() && priv_salt != 0) {
+    flags |= RECORD_FLAG_SEALED_PRIV;
+  }
   std::vector<uint8_t> data(RECORD_PACKED_SIZE + DIGEST_SIZE, 0);
   size_t offset = 0;
   std::memcpy(data.data() + offset, RECORD_MAGIC, sizeof(RECORD_MAGIC)); offset += sizeof(RECORD_MAGIC);
   data[offset++] = RECORD_VERSION;
-  data[offset++] = static_cast<uint8_t>(rec.origin);
-  data[offset++] = 0; data[offset++] = 0; // reserved
-  uint32_t salt = rec.nonce_salt;
+  data[offset++] = static_cast<uint8_t>(sealed.origin);
+  data[offset++] = flags;
+  data[offset++] = 0; // reserved
+  uint32_t salt = sealed.nonce_salt;
   data[offset++] = static_cast<uint8_t>(salt & 0xFF);
   data[offset++] = static_cast<uint8_t>((salt >> 8) & 0xFF);
   data[offset++] = static_cast<uint8_t>((salt >> 16) & 0xFF);
   data[offset++] = static_cast<uint8_t>((salt >> 24) & 0xFF);
-  offset += 4; // reserved2
-  std::memcpy(data.data() + offset, rec.session_key.data(), rec.session_key.size()); offset += rec.session_key.size();
-  std::memcpy(data.data() + offset, rec.root_public.data(), rec.root_public.size()); offset += rec.root_public.size();
-  std::memcpy(data.data() + offset, rec.root_private.data(), rec.root_private.size()); offset += rec.root_private.size();
-  std::memcpy(data.data() + offset, rec.peer_public.data(), rec.peer_public.size()); offset += rec.peer_public.size();
+  data[offset++] = static_cast<uint8_t>(priv_salt & 0xFF);
+  data[offset++] = static_cast<uint8_t>((priv_salt >> 8) & 0xFF);
+  data[offset++] = static_cast<uint8_t>((priv_salt >> 16) & 0xFF);
+  data[offset++] = static_cast<uint8_t>((priv_salt >> 24) & 0xFF);
+  std::memcpy(data.data() + offset, sealed.session_key.data(), sealed.session_key.size()); offset += sealed.session_key.size();
+  std::memcpy(data.data() + offset, sealed.root_public.data(), sealed.root_public.size()); offset += sealed.root_public.size();
+  std::memcpy(data.data() + offset, sealed.root_private.data(), sealed.root_private.size()); offset += sealed.root_private.size();
+  std::memcpy(data.data() + offset, sealed.peer_public.data(), sealed.peer_public.size()); offset += sealed.peer_public.size();
   auto digest = crypto::sha256::hash(data.data(), RECORD_PACKED_SIZE);
   std::memcpy(data.data() + offset, digest.data(), digest.size());
   return data;
@@ -193,16 +386,29 @@ bool deserializeRecord(const std::vector<uint8_t>& raw, KeyRecord& out) {
   if (std::memcmp(raw.data(), RECORD_MAGIC, sizeof(RECORD_MAGIC)) != 0) return false;
   offset += sizeof(RECORD_MAGIC);
   uint8_t version = raw[offset++];
-  if (version != RECORD_VERSION) return false;
+  if (version == 0 || version > RECORD_VERSION) return false;
   uint8_t origin = raw[offset++];
   if (origin > static_cast<uint8_t>(KeyOrigin::REMOTE)) return false;
-  offset += 2; // reserved
+  uint8_t flags = 0;
+  if (version >= 2) {
+    flags = raw[offset++];
+    offset++; // reserved
+  } else {
+    offset += 2;
+  }
   uint32_t salt = static_cast<uint32_t>(raw[offset]) |
                   (static_cast<uint32_t>(raw[offset + 1]) << 8) |
                   (static_cast<uint32_t>(raw[offset + 2]) << 16) |
                   (static_cast<uint32_t>(raw[offset + 3]) << 24);
   offset += 4;
-  offset += 4; // reserved2
+  uint32_t priv_salt = 0;
+  if (version >= 2) {
+    priv_salt = static_cast<uint32_t>(raw[offset]) |
+                (static_cast<uint32_t>(raw[offset + 1]) << 8) |
+                (static_cast<uint32_t>(raw[offset + 2]) << 16) |
+                (static_cast<uint32_t>(raw[offset + 3]) << 24);
+  }
+  offset += 4;
   KeyRecord rec;
   rec.origin = static_cast<KeyOrigin>(origin);
   rec.nonce_salt = salt;
@@ -210,16 +416,26 @@ bool deserializeRecord(const std::vector<uint8_t>& raw, KeyRecord& out) {
   std::copy_n(raw.data() + offset, rec.root_public.size(), rec.root_public.begin()); offset += rec.root_public.size();
   std::copy_n(raw.data() + offset, rec.root_private.size(), rec.root_private.begin()); offset += rec.root_private.size();
   std::copy_n(raw.data() + offset, rec.peer_public.size(), rec.peer_public.begin()); offset += rec.peer_public.size();
+  bool sealed = (flags & RECORD_FLAG_SEALED_PRIV) != 0;
+  if (version >= 2) {
+    if (!unsealPrivateKey(rec.root_private, priv_salt, sealed)) return false;
+  }
   rec.valid = true;
   out = rec;
   return true;
 }
 
 std::vector<uint8_t> serializeSnapshot(const StorageSnapshot& snapshot) {
-  std::vector<uint8_t> current_blob =
-      (snapshot.current_valid && snapshot.current.valid) ? serializeRecord(snapshot.current) : std::vector<uint8_t>();
-  std::vector<uint8_t> previous_blob =
-      (snapshot.previous_valid && snapshot.previous.valid) ? serializeRecord(snapshot.previous) : std::vector<uint8_t>();
+  std::vector<uint8_t> current_blob;
+  if (snapshot.current_valid && snapshot.current.valid) {
+    current_blob = serializeRecord(snapshot.current);
+    if (current_blob.empty()) return {};
+  }
+  std::vector<uint8_t> previous_blob;
+  if (snapshot.previous_valid && snapshot.previous.valid) {
+    previous_blob = serializeRecord(snapshot.previous);
+    if (previous_blob.empty()) return {};
+  }
   size_t payload_size = STORAGE_HEADER_SIZE + current_blob.size() + previous_blob.size();
   std::vector<uint8_t> data(payload_size + DIGEST_SIZE, 0);
   size_t offset = 0;
@@ -424,9 +640,22 @@ Preferences& prefsInstance() {
   return prefs;
 }
 
+bool ensureFlashEncryptionEnabled() {
+  bool enabled = esp_flash_encryption_enabled();
+  static bool warned = false;
+  if (!enabled && !warned) {
+    warned = true;
+    Serial.println(F("KeyLoader: Flash Encryption выключена, доступ к NVS запрещён"));
+  }
+  return enabled;
+}
+
 bool ensurePrefs() {
   static bool opened = false;
   if (!opened) {
+    if (!ensureFlashEncryptionEnabled()) {
+      return false;
+    }
     Preferences& prefs = prefsInstance();
     if (!prefs.begin("key_store", false)) {
       Serial.println(F("KeyLoader: не удалось открыть раздел NVS"));
@@ -438,6 +667,7 @@ bool ensurePrefs() {
 }
 
 BlobType readBlob(std::vector<uint8_t>& out) {
+  if (!ensureFlashEncryptionEnabled()) return BlobType::kNone;
   if (!ensurePrefs()) return BlobType::kNone;
   Preferences& prefs = prefsInstance();
   size_t len = prefs.getBytesLength("records");
@@ -459,6 +689,7 @@ BlobType readBlob(std::vector<uint8_t>& out) {
 }
 
 bool readLegacyBackup(KeyRecord& out) {
+  if (!ensureFlashEncryptionEnabled()) return false;
   if (!ensurePrefs()) return false;
   Preferences& prefs = prefsInstance();
   size_t len = prefs.getBytesLength("backup");
@@ -470,6 +701,7 @@ bool readLegacyBackup(KeyRecord& out) {
 }
 
 void clearLegacyBlobs() {
+  if (!ensureFlashEncryptionEnabled()) return;
   if (!ensurePrefs()) return;
   Preferences& prefs = prefsInstance();
   if (prefs.isKey("current")) prefs.remove("current");
@@ -477,6 +709,7 @@ void clearLegacyBlobs() {
 }
 
 bool writePrimary(const std::vector<uint8_t>& data) {
+  if (!ensureFlashEncryptionEnabled()) return false;
   if (!ensurePrefs()) return false;
   Preferences& prefs = prefsInstance();
   size_t written = prefs.putBytes("records", data.data(), data.size());
@@ -564,6 +797,14 @@ LoadOutcome loadFromBackend(StorageSnapshot& snapshot) {
 
 bool writeSnapshot(const StorageSnapshot& snapshot) {
   std::vector<uint8_t> blob = serializeSnapshot(snapshot);
+  if (blob.empty()) {
+#ifdef ARDUINO
+    Serial.println(F("KeyLoader: ошибка сериализации snapshot"));
+#else
+    std::cerr << "[KeyLoader] не удалось сериализовать snapshot" << std::endl;
+#endif
+    return false;
+  }
 #ifdef ARDUINO
 #if KEY_LOADER_HAS_NVS
   return writePrimary(blob);
