@@ -117,8 +117,8 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos) {
     return 0;
   }
   if (qos > 3) qos = 3;                           // ограничение диапазона QoS
-  bool is_plain_ack = protocol::ack::isAckPayload(data, len);
-  if (is_plain_ack) {
+  bool is_ack_marker = protocol::ack::isAckPayload(data, len);
+  if (is_ack_marker) {
     PendingMessage ack_msg;                       // формируем отдельную запись для ACK
     ack_msg.id = next_ack_id_++;                  // выделяем идентификатор вне общей очереди
     if (next_ack_id_ < 0x80000000u) next_ack_id_ = 0x80000000u; // не даём переполнению уйти в «обычный» диапазон

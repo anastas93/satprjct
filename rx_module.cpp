@@ -18,7 +18,6 @@
 #include <cstddef>
 #include <utility>
 
-static constexpr size_t COMPACT_ACK_MAX_LEN = 5;         // маркер + до четырёх байт идентификатора
 static constexpr size_t PILOT_INTERVAL = 64;             // период вставки пилотов
 static constexpr std::array<uint8_t,7> PILOT_MARKER{{
     0x7E, 'S', 'A', 'T', 'P', 0xD6, 0x9F
@@ -171,7 +170,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   cleanupPendingConv(now);
   cleanupPendingSplits(now);
 
-  if (len >= 1 && len <= COMPACT_ACK_MAX_LEN && data[0] == protocol::ack::MARKER) {
+  if (len == 1 && data[0] == protocol::ack::MARKER) {
     if (ack_cb_) {
       ack_cb_();                                     // немедленно уведомляем передатчик
     }
