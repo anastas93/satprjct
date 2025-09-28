@@ -111,7 +111,7 @@ TxModule::TxModule(IRadio& radio, const std::array<size_t,4>& capacities, Payloa
 void TxModule::setPayloadMode(PayloadMode mode) { splitter_.setMode(mode); }
 
 // Помещаем сообщение в очередь согласно классу QoS
-uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos) {
+uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos, bool with_prefix) {
   if (!data || len == 0) {                        // проверка указателя
     DEBUG_LOG("TxModule: пустой ввод");
     return 0;
@@ -138,11 +138,30 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos) {
     return ack_queue_.back().id;
   }
   DEBUG_LOG_VAL("TxModule: постановка длины=", len);
-  uint32_t res = splitter_.splitAndEnqueue(buffers_[qos], data, len);
+  uint32_t res = splitter_.splitAndEnqueue(buffers_[qos], data, len, with_prefix);
   if (res) {
     DEBUG_LOG_VAL("TxModule: сообщение id=", res);
   } else {
     DEBUG_LOG("TxModule: ошибка постановки");
+  }
+  return res;
+}
+
+uint32_t TxModule::queuePlain(const uint8_t* data, size_t len, uint8_t qos) {
+  if (!data || len == 0) {
+    DEBUG_LOG("TxModule: пустой ввод для plain");
+    return 0;
+  }
+  if (qos > 3) qos = 3;
+  if (len > buffers_[qos].slotSize()) {
+    DEBUG_LOG("TxModule: plain сообщение не помещается в слот");
+    return 0;
+  }
+  uint32_t res = buffers_[qos].enqueue(data, len);
+  if (res) {
+    DEBUG_LOG_VAL("TxModule: plain сообщение id=", res);
+  } else {
+    DEBUG_LOG("TxModule: очередь переполнена при plain постановке");
   }
   return res;
 }

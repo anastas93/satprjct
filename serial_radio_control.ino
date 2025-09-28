@@ -112,6 +112,7 @@ uint8_t ackRetryLimit = DefaultSettings::ACK_RETRY_LIMIT; // число повт
 static constexpr uint32_t kAckDelayMinMs = 0;             // минимально допустимая задержка ответа ACK
 static constexpr uint32_t kAckDelayMaxMs = 5000;          // максимально допустимая задержка ответа ACK
 uint32_t ackResponseDelayMs = DefaultSettings::ACK_RESPONSE_DELAY_MS; // текущая задержка перед ACK
+bool lightPackMode = false;             // режим прямой передачи текста без префикса
 bool testModeEnabled = false;           // флаг тестового режима SendMsg_BR/received_msg
 uint8_t testModeLocalCounter = 0;       // локальный счётчик пакетов для тестового режима
 
@@ -1544,6 +1545,11 @@ String ackStateText() {
   return ackEnabled ? String("ACK:1") : String("ACK:0");
 }
 
+// Текущее состояние режима Light pack
+String lightPackStateText() {
+  return lightPackMode ? String("LIGHT:1") : String("LIGHT:0");
+}
+
 // Общая функция постановки текстового сообщения в очередь
 bool enqueueTextMessage(const String& payload, uint32_t& outId, String& err) {
   String trimmed = payload;
@@ -1557,7 +1563,15 @@ bool enqueueTextMessage(const String& payload, uint32_t& outId, String& err) {
     err = "пустое сообщение";
     return false;
   }
-  uint32_t id = tx.queue(data.data(), data.size());
+  uint32_t id = 0;
+  if (lightPackMode) {                                   // Light pack пытается отправить сообщение без префикса
+    id = tx.queuePlain(data.data(), data.size());
+    if (id == 0) {                                       // если не удалось (слишком длинно или очередь занята)
+      id = tx.queue(data.data(), data.size(), 0, true);  // откатываемся к стандартному режиму с префиксом
+    }
+  } else {
+    id = tx.queue(data.data(), data.size(), 0, true);
+  }
   if (id == 0) {
     err = "очередь заполнена";
     return false;
@@ -1752,6 +1766,7 @@ String cmdInfo() {
   s += "\nACK: "; s += ackEnabled ? "включён" : "выключен";
   s += "\nRX boosted gain: ";
   s += radio.isRxBoostedGainEnabled() ? "включён" : "выключен";
+  s += "\nLight pack: "; s += lightPackMode ? "включён" : "выключен";
   return s;
 }
 
@@ -1909,6 +1924,13 @@ void handleCmdHttp() {
     }
     tx.setAckEnabled(ackEnabled);
     resp = ackStateText();
+  } else if (cmd == "LIGHT") {
+    if (server.hasArg("toggle")) {
+      lightPackMode = !lightPackMode;
+    } else if (server.hasArg("v")) {
+      lightPackMode = server.arg("v").toInt() != 0;
+    }
+    resp = lightPackStateText();
   } else if (cmd == "ACKR") {
     if (server.hasArg("v")) {
       int raw = server.arg("v").toInt();
@@ -2164,7 +2186,7 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ACKD <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
+  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], LIGHT [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ACKD <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
 }
 
 void loop() {
@@ -2490,6 +2512,14 @@ void loop() {
         tx.setAckEnabled(ackEnabled);
         Serial.print("ACK: ");
         Serial.println(ackEnabled ? "включён" : "выключен");
+      } else if (line.startsWith("LIGHT")) {
+        if (line.length() > 5) {                          // обработка явного значения
+          lightPackMode = line.substring(6).toInt() != 0;
+        } else {
+          lightPackMode = !lightPackMode;                 // простое переключение
+        }
+        Serial.print("LIGHT: ");
+        Serial.println(lightPackMode ? "включён" : "выключен");
       } else if (line.equalsIgnoreCase("PI")) {
         // очистка буфера от прежних пакетов
         ReceivedBuffer::Item dump;
