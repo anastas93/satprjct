@@ -15,6 +15,11 @@ int main() {
 
   // Генерация локального ключа и проверка записи
   assert(generateLocalKey());
+  assert(!hasPeerPublic());
+  // При отсутствии публичного ключа собеседника превью идентификатора недоступно,
+  // что соответствует отправке нулевого key_id при первом KEYTRANSFER.
+  std::array<uint8_t,4> preview_id{};
+  assert(!previewPeerKeyId(preview_id));
   KeyRecord rec;
   assert(loadKeyRecord(rec));
   assert(rec.valid);
@@ -34,10 +39,18 @@ int main() {
   assert(applyRemotePublic(remote_pub));
   auto state_after_remote = getState();
   assert(state_after_remote.has_backup);
+  // Моделируем первичный KEYTRANSFER: до применения удалённого ключа peer_public отсутствовал,
+  // но ключ успешно принят без отката.
+  assert(hasPeerPublic());
   KeyRecord rec2;
   assert(loadKeyRecord(rec2));
   assert(rec2.origin == KeyOrigin::REMOTE);
   assert(rec2.peer_public == remote_pub);
+  std::array<uint8_t,4> peer_key_id{};
+  // После получения ключа без сохранённого peer_public проверяем, что пересчёт идентификатора
+  // выполняется по фактическому ECDH-значению.
+  assert(previewPeerKeyId(peer_key_id));
+  assert(peer_key_id == keyId(rec2.session_key));
 
   std::array<uint8_t,32> shared_remote{};
   crypto::x25519::compute_shared(remote_priv, rec2.root_public, shared_remote);
@@ -76,6 +89,8 @@ int main() {
   assert(loadKeyRecord(rec3));
   assert(rec3.origin == KeyOrigin::LOCAL);
   assert(rec3.peer_public == remote_pub);
+  std::array<uint8_t,4> peer_key_id_after_local{};
+  assert(previewPeerKeyId(peer_key_id_after_local));
   // Проверяем, что новая генерация создаёт отличающийся публичный ключ.
   assert(rec3.root_public != first_public);
   std::array<uint8_t,32> shared_remote_second{};
@@ -92,12 +107,16 @@ int main() {
   auto digest_second = crypto::sha256::hash(buf_second.data(), buf_second.size());
   std::array<uint8_t,16> expected_second{};
   std::copy_n(digest_second.begin(), expected_second.size(), expected_second.begin());
+  assert(peer_key_id_after_local == keyId(expected_second));
   assert(regenerateFromPeer());
   KeyRecord rec4;
   assert(loadKeyRecord(rec4));
   assert(rec4.origin == KeyOrigin::REMOTE);
   assert(rec4.peer_public == remote_pub);
   assert(rec4.session_key == expected_second);
+  std::array<uint8_t,4> peer_key_id_after_regen{};
+  assert(previewPeerKeyId(peer_key_id_after_regen));
+  assert(peer_key_id_after_regen == keyId(rec4.session_key));
   auto state_after_regen = getState();
   assert(state_after_regen.has_backup);
   // Проверяем восстановление локального ключа после пересчёта сессии.
