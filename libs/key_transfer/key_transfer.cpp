@@ -1,9 +1,11 @@
 #include "key_transfer.h"
 #include <algorithm>
 #include <cstring>
+#include <string>
 #include "libs/frame/frame_header.h"
 #include "libs/scrambler/scrambler.h"
 #include "libs/crypto/aes_ccm.h"
+#include "libs/crypto/ed25519.h"
 
 namespace KeyTransfer {
 namespace {
@@ -21,6 +23,7 @@ constexpr uint16_t PILOT_MARKER_CRC = 0x9FD6;                // CRC16(prefix)
 constexpr size_t MAX_FRAGMENT_LEN =
     MAX_FRAME_SIZE - FrameHeader::SIZE * 2 - (MAX_FRAME_SIZE / PILOT_INTERVAL) * PILOT_MARKER.size();
 constexpr uint32_t NONCE_SALT = 0x4B54524E;              // "KTRN" — соль нонса
+constexpr uint8_t CERT_MAGIC[4] = {'K','T','C','F'};     // сигнатура сообщения сертификата
 
 // Статический корневой ключ AES-CCM для защищённого обмена
 const std::array<uint8_t,16> ROOT_KEY{
@@ -72,6 +75,11 @@ void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
   }
 }
 
+std::array<uint8_t,32> TRUSTED_ROOT{};                   // доверенный корневой ключ
+bool TRUSTED_ROOT_SET = false;
+CertificateBundle LOCAL_CERTIFICATE;                     // локальная цепочка для отправки
+bool LOCAL_CERTIFICATE_SET = false;
+
 } // namespace
 
 const std::array<uint8_t,16>& rootKey() { return ROOT_KEY; }
@@ -97,13 +105,28 @@ bool buildFrame(uint32_t msg_id,
                 const std::array<uint8_t,32>& public_key,
                 const std::array<uint8_t,4>& key_id,
                 std::vector<uint8_t>& frame_out,
-                const std::array<uint8_t,32>* ephemeral_public) {
+                const std::array<uint8_t,32>* ephemeral_public,
+                const CertificateBundle* certificate) {
   frame_out.clear();
   std::vector<uint8_t> plain;
   const bool has_ephemeral = (ephemeral_public != nullptr);
-  const uint8_t version = has_ephemeral ? VERSION_EPHEMERAL : VERSION_LEGACY;
-  const uint8_t flags = has_ephemeral ? FLAG_HAS_EPHEMERAL : 0;
-  plain.reserve(4 + 1 + 3 + key_id.size() + public_key.size() + (has_ephemeral ? ephemeral_public->size() : 0));
+  const CertificateBundle* bundle_ptr = certificate;
+  const bool has_certificate = (bundle_ptr != nullptr && bundle_ptr->valid && !bundle_ptr->chain.empty());
+  uint8_t version = has_ephemeral ? VERSION_EPHEMERAL : VERSION_LEGACY;
+  if (has_certificate) {
+    version = VERSION_CERTIFICATE;
+  }
+  uint8_t flags = 0;
+  if (has_ephemeral) flags |= FLAG_HAS_EPHEMERAL;
+  if (has_certificate) flags |= FLAG_HAS_CERTIFICATE;
+
+  size_t certificate_bytes = 0;
+  if (has_certificate) {
+    certificate_bytes = 1 + bundle_ptr->chain.size() * (32 + 64);
+  }
+
+  plain.reserve(4 + 1 + 3 + key_id.size() + public_key.size() +
+                (has_ephemeral ? ephemeral_public->size() : 0) + certificate_bytes);
   plain.insert(plain.end(), std::begin(MAGIC), std::end(MAGIC));
   plain.push_back(version);
   plain.push_back(flags);
@@ -113,6 +136,13 @@ bool buildFrame(uint32_t msg_id,
   plain.insert(plain.end(), public_key.begin(), public_key.end());
   if (has_ephemeral) {
     plain.insert(plain.end(), ephemeral_public->begin(), ephemeral_public->end());
+  }
+  if (has_certificate) {
+    plain.push_back(static_cast<uint8_t>(bundle_ptr->chain.size()));
+    for (const auto& record : bundle_ptr->chain) {
+      plain.insert(plain.end(), record.issuer_public.begin(), record.issuer_public.end());
+      plain.insert(plain.end(), record.signature.begin(), record.signature.end());
+    }
   }
 
   auto nonce = makeNonce(msg_id, 0);
@@ -185,29 +215,64 @@ bool parseFrame(const uint8_t* frame, size_t len,
   if (!std::equal(std::begin(MAGIC), std::end(MAGIC), plain.begin())) return false;
   payload.version = plain[4];
   payload.flags = plain[5];
-  if (payload.version != VERSION_LEGACY && payload.version != VERSION_EPHEMERAL) {
+  if (payload.version != VERSION_LEGACY &&
+      payload.version != VERSION_EPHEMERAL &&
+      payload.version != VERSION_CERTIFICATE) {
     return false;
   }
   std::copy_n(plain.data() + 8, payload.key_id.size(), payload.key_id.begin());
   std::copy_n(plain.data() + 12, payload.public_key.size(), payload.public_key.begin());
+  size_t offset = 12 + payload.public_key.size();
   payload.has_ephemeral = false;
-  if (payload.version == VERSION_EPHEMERAL) {
-    if ((payload.flags & FLAG_HAS_EPHEMERAL) == 0) {
-      return false;  // версия 2 всегда должна содержать эпемерный ключ
+  if (payload.version == VERSION_EPHEMERAL || payload.version == VERSION_CERTIFICATE) {
+    if ((payload.flags & FLAG_HAS_EPHEMERAL) != 0) {
+      if (plain.size() < offset + payload.ephemeral_public.size()) {
+        return false;
+      }
+      std::copy_n(plain.data() + offset, payload.ephemeral_public.size(),
+                  payload.ephemeral_public.begin());
+      offset += payload.ephemeral_public.size();
+      payload.has_ephemeral = true;
+    } else {
+      payload.ephemeral_public.fill(0);
     }
-    if (plain.size() < 12 + payload.public_key.size() + payload.ephemeral_public.size()) {
-      return false;
-    }
-    std::copy_n(plain.data() + 12 + payload.public_key.size(),
-                payload.ephemeral_public.size(),
-                payload.ephemeral_public.begin());
-    payload.has_ephemeral = true;
   } else {
     if (payload.flags != 0) {
-      // В старой версии флаги должны быть равны нулю
-      return false;
+      return false;  // для легаси не допускаем дополнительные флаги
     }
     payload.ephemeral_public.fill(0);
+  }
+
+  payload.certificate = {};
+  if (payload.version == VERSION_CERTIFICATE) {
+    if ((payload.flags & FLAG_HAS_CERTIFICATE) == 0) {
+      return false;
+    }
+    if (plain.size() <= offset) {
+      return false;
+    }
+    uint8_t count = plain[offset++];
+    size_t need = static_cast<size_t>(count) * (32 + 64);
+    if (plain.size() < offset + need) {
+      return false;
+    }
+    payload.certificate.valid = (count > 0);
+    payload.certificate.chain.clear();
+    payload.certificate.chain.reserve(count);
+    for (uint8_t i = 0; i < count; ++i) {
+      CertificateRecord rec;
+      std::copy_n(plain.data() + offset, rec.issuer_public.size(), rec.issuer_public.begin());
+      offset += rec.issuer_public.size();
+      std::copy_n(plain.data() + offset, rec.signature.size(), rec.signature.begin());
+      offset += rec.signature.size();
+      payload.certificate.chain.push_back(rec);
+    }
+  } else {
+    if (payload.flags & FLAG_HAS_CERTIFICATE) {
+      return false;  // флаг установлен, но версия не поддерживает
+    }
+    payload.certificate.valid = false;
+    payload.certificate.chain.clear();
   }
   msg_id_out = hdr.msg_id;
   return true;
@@ -225,5 +290,53 @@ bool parseFrame(const uint8_t* frame, size_t len,
   key_id = payload.key_id;
   return true;
 }
+
+void setTrustedRoot(const std::array<uint8_t,32>& root_public) {
+  TRUSTED_ROOT = root_public;
+  TRUSTED_ROOT_SET = true;
+}
+
+bool hasTrustedRoot() { return TRUSTED_ROOT_SET; }
+
+const std::array<uint8_t,32>& getTrustedRoot() { return TRUSTED_ROOT; }
+
+bool verifyCertificateChain(const std::array<uint8_t,32>& subject,
+                            const CertificateBundle& bundle,
+                            std::string* error) {
+  if (!bundle.valid || bundle.chain.empty()) {
+    if (error) *error = "пустая цепочка";
+    return false;
+  }
+  if (!hasTrustedRoot()) {
+    if (error) *error = "не задан доверенный корень";
+    return false;
+  }
+  std::array<uint8_t,32> current = subject;
+  for (size_t i = 0; i < bundle.chain.size(); ++i) {
+    const auto& rec = bundle.chain[i];
+    std::array<uint8_t,36> message{};
+    std::copy(std::begin(CERT_MAGIC), std::end(CERT_MAGIC), message.begin());
+    std::copy(current.begin(), current.end(), message.begin() + sizeof(CERT_MAGIC));
+    if (!crypto::ed25519::verify(message.data(), message.size(), rec.signature, rec.issuer_public)) {
+      if (error) *error = "подпись не прошла";
+      return false;
+    }
+    current = rec.issuer_public;
+  }
+  if (!std::equal(current.begin(), current.end(), TRUSTED_ROOT.begin())) {
+    if (error) *error = "корневой ключ не совпал";
+    return false;
+  }
+  return true;
+}
+
+void setLocalCertificate(const CertificateBundle& bundle) {
+  LOCAL_CERTIFICATE = bundle;
+  LOCAL_CERTIFICATE_SET = bundle.valid && !bundle.chain.empty();
+}
+
+bool hasLocalCertificate() { return LOCAL_CERTIFICATE_SET; }
+
+const CertificateBundle& getLocalCertificate() { return LOCAL_CERTIFICATE; }
 
 } // namespace KeyTransfer

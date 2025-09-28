@@ -969,6 +969,22 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
     SimpleLogger::logStatus("KEYTRANSFER IGN");   // пришёл неожиданный ключ
     return true;                                   // не передаём дальше в RxModule
   }
+  if ((payload.flags & KeyTransfer::FLAG_HAS_CERTIFICATE) != 0 ||
+      payload.version == KeyTransfer::VERSION_CERTIFICATE) {
+    std::string cert_error;
+    if (!KeyTransfer::verifyCertificateChain(payload.public_key, payload.certificate, &cert_error)) {
+      keyTransferRuntime.error = String("cert");
+      keyTransferRuntime.waiting = false;
+      keyTransferRuntime.completed = false;
+      SimpleLogger::logStatus("KEYTRANSFER CERT ERR");
+      Serial.print("KEYTRANSFER: ошибка проверки сертификата: ");
+      Serial.println(cert_error.c_str());
+      return true;
+    }
+  } else if (KeyTransfer::hasTrustedRoot()) {
+    Serial.println("KEYTRANSFER: предупреждение — нет сертификата при наличии доверенного корня");
+  }
+
   KeyLoader::KeyRecord previous_snapshot;          // сохраняем снимок до применения удалённого ключа
   bool has_previous_snapshot = KeyLoader::loadKeyRecord(previous_snapshot);
   const std::array<uint8_t,32>* remote_ephemeral = payload.has_ephemeral ? &payload.ephemeral_public : nullptr;
@@ -1138,7 +1154,11 @@ String cmdKeyTransferSendLora() {
   }
   std::vector<uint8_t> frame;
   uint32_t msg_id = generateKeyTransferMsgId();
-  if (!KeyTransfer::buildFrame(msg_id, state.root_public, key_id, frame, ephemeral_ptr)) {
+  const KeyTransfer::CertificateBundle* cert_ptr = nullptr;
+  if (KeyTransfer::hasLocalCertificate()) {
+    cert_ptr = &KeyTransfer::getLocalCertificate();
+  }
+  if (!KeyTransfer::buildFrame(msg_id, state.root_public, key_id, frame, ephemeral_ptr, cert_ptr)) {
     return String("{\"error\":\"build\"}");
   }
   tx.prepareExternalSend();
