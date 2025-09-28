@@ -695,6 +695,30 @@ KeyState getState() {
   return st;
 }
 
+bool hasPeerPublic() {
+  StorageSnapshot& snapshot = ensureSnapshot();
+  if (!snapshot.current_valid || !snapshot.current.valid) return false;
+  const auto& peer = snapshot.current.peer_public;
+  return std::any_of(peer.begin(), peer.end(), [](uint8_t b) { return b != 0; });
+}
+
+bool previewPeerKeyId(std::array<uint8_t,4>& key_id_out) {
+  StorageSnapshot& snapshot = ensureSnapshot();
+  if (!snapshot.current_valid || !snapshot.current.valid) return false;
+  const auto& peer = snapshot.current.peer_public;
+  bool has_peer = std::any_of(peer.begin(), peer.end(), [](uint8_t b) {
+    return b != 0;
+  });
+  if (!has_peer) return false;
+  std::array<uint8_t,32> shared{};
+  if (!crypto::x25519::compute_shared(snapshot.current.root_private, peer, shared)) {
+    return false;
+  }
+  auto session = deriveSessionFromShared(shared, snapshot.current.root_public, peer);
+  key_id_out = keyId(session);
+  return true;
+}
+
 std::array<uint8_t,32> getPublicKey() {
   StorageSnapshot& snapshot = ensureSnapshot();
   return snapshot.current.root_public;

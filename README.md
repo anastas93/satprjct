@@ -600,6 +600,9 @@ ENCT: успех
 - `bool restorePreviousKey(KeyRecord* out = nullptr)` — восстановить `key.stkey` из резервной копии.
 - `bool applyRemotePublic(const std::array<uint8_t,32>& remote)` — вычислить общий секрет и сохранить
   внешний симметричный ключ.
+- `bool hasPeerPublic()` — проверить, сохранён ли публичный ключ удалённого собеседника.
+- `bool previewPeerKeyId(std::array<uint8_t,4>& key_id)` — пересчитать идентификатор ECDH-ключа для
+  текущего партнёра без изменения снимка.
 - `KeyState getState()` — текущее состояние ключа (тип, идентификатор, публичные ключи, резервная
   копия).
 - `std::array<uint8_t,12> makeNonce(uint32_t msg_id, uint16_t frag_idx)` — сформировать nonce для

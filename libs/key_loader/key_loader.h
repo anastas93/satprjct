@@ -84,6 +84,12 @@ std::array<uint8_t,12> makeNonce(uint32_t msg_id, uint16_t frag_idx);
 // 4-байтовый идентификатор ключа (первые байты SHA-256 от симметричного ключа).
 std::array<uint8_t,4> keyId(const std::array<uint8_t,16>& key);
 
+// Есть ли сохранённый публичный ключ удалённой стороны.
+bool hasPeerPublic();
+
+// Предпросчёт идентификатора ключа для текущего удалённого партнёра без изменения состояния.
+bool previewPeerKeyId(std::array<uint8_t,4>& key_id_out);
+
 // Активный бэкенд хранения (NVS/файловая система).
 StorageBackend getBackend();
 

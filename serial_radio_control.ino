@@ -978,34 +978,39 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
     Serial.println("KEYTRANSFER: ошибка применения удалённого ключа");
     return true;
   }
-  auto local_id = KeyLoader::keyId(KeyLoader::loadKey());
-  bool ids_match = std::equal(local_id.begin(), local_id.end(), remote_id.begin());
-  if (!ids_match) {
-    bool restored = KeyLoader::restorePreviousKey();
-    if (!restored && has_previous_snapshot) {
-      restored = KeyLoader::saveKey(previous_snapshot.session_key,
-                                    previous_snapshot.origin,
-                                    &previous_snapshot.peer_public,
-                                    previous_snapshot.nonce_salt);
+  bool skip_remote_check = std::all_of(remote_id.begin(), remote_id.end(), [](uint8_t b) {
+    return b == 0;
+  });
+  if (!skip_remote_check) {
+    auto local_id = KeyLoader::keyId(KeyLoader::loadKey());
+    bool ids_match = std::equal(local_id.begin(), local_id.end(), remote_id.begin());
+    if (!ids_match) {
+      bool restored = KeyLoader::restorePreviousKey();
+      if (!restored && has_previous_snapshot) {
+        restored = KeyLoader::saveKey(previous_snapshot.session_key,
+                                      previous_snapshot.origin,
+                                      &previous_snapshot.peer_public,
+                                      previous_snapshot.nonce_salt);
+      }
+      if (restored) {
+        reloadCryptoModules();                        // возвращаемся к предыдущему ключу
+      }
+      keyTransferRuntime.completed = false;
+      keyTransferRuntime.waiting = false;
+      keyTransferRuntime.error = String("verify");
+      std::string log = "KEYTRANSFER MISMATCH ";
+      log += toHex(local_id).c_str();
+      log += "/";
+      log += toHex(remote_id).c_str();
+      SimpleLogger::logStatus(log);
+      Serial.print("KEYTRANSFER: несовпадение идентификаторов (local=");
+      Serial.print(toHex(local_id));
+      Serial.print(", remote=");
+      Serial.print(toHex(remote_id));
+      Serial.println(")");
+      Serial.println("KEYTRANSFER: откатываемся на предыдущий ключ");
+      return true;
     }
-    if (restored) {
-      reloadCryptoModules();                        // возвращаемся к предыдущему ключу
-    }
-    keyTransferRuntime.completed = false;
-    keyTransferRuntime.waiting = false;
-    keyTransferRuntime.error = String("verify");
-    std::string log = "KEYTRANSFER MISMATCH ";
-    log += toHex(local_id).c_str();
-    log += "/";
-    log += toHex(remote_id).c_str();
-    SimpleLogger::logStatus(log);
-    Serial.print("KEYTRANSFER: несовпадение идентификаторов (local=");
-    Serial.print(toHex(local_id));
-    Serial.print(", remote=");
-    Serial.print(toHex(remote_id));
-    Serial.println(")");
-    Serial.println("KEYTRANSFER: откатываемся на предыдущий ключ");
-    return true;
   }
   reloadCryptoModules();                          // обновляем Tx/Rx новым ключом
   keyTransferRuntime.completed = true;
@@ -1101,7 +1106,19 @@ String cmdKeyReceiveSecure(const String& hex) {
 String cmdKeyTransferSendLora() {
   DEBUG_LOG("Key: отправка ключа по LoRa");
   auto state = KeyLoader::getState();
-  auto key_id = KeyLoader::keyId(state.session_key);
+  std::array<uint8_t,4> key_id{};
+  bool has_peer = KeyLoader::hasPeerPublic();
+  if (has_peer) {
+    // Если известен партнёр, рассчитываем идентификатор по фактическому ECDH-ключу
+    if (!KeyLoader::previewPeerKeyId(key_id)) {
+      SimpleLogger::logStatus("KEYTRANSFER ERR PREVIEW");
+      Serial.println("KEYTRANSFER: ошибка расчёта идентификатора ключа");
+      return String("{\"error\":\"peer\"}");
+    }
+  } else {
+    // Для первичного обмена передаём специальное значение (все нули)
+    key_id.fill(0);
+  }
   std::vector<uint8_t> frame;
   uint32_t msg_id = generateKeyTransferMsgId();
   if (!KeyTransfer::buildFrame(msg_id, state.root_public, key_id, frame)) {
