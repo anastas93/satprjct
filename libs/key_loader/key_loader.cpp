@@ -96,8 +96,12 @@ std::array<uint8_t,16> deriveSessionFromShared(const std::array<uint8_t,32>& sha
                                                const std::array<uint8_t,32>& remote_pub) {
   std::array<uint8_t,96> buf{};
   std::copy(shared.begin(), shared.end(), buf.begin());
-  std::copy(local_pub.begin(), local_pub.end(), buf.begin() + shared.size());
-  std::copy(remote_pub.begin(), remote_pub.end(), buf.begin() + shared.size() + local_pub.size());
+  std::array<std::array<uint8_t,32>, 2> ordered_pubs = {local_pub, remote_pub};
+  std::sort(ordered_pubs.begin(), ordered_pubs.end());
+  // Сортируем публичные ключи, чтобы обе стороны формировали одинаковый буфер.
+  std::copy(ordered_pubs[0].begin(), ordered_pubs[0].end(), buf.begin() + shared.size());
+  std::copy(ordered_pubs[1].begin(), ordered_pubs[1].end(),
+            buf.begin() + shared.size() + ordered_pubs[0].size());
   auto digest = crypto::sha256::hash(buf.data(), buf.size());
   return truncateDigest(digest);
 }
