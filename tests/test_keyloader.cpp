@@ -53,8 +53,12 @@ int main() {
   assert(shared_remote == shared_local);
   std::array<uint8_t,96> buf{};
   std::copy(shared_local.begin(), shared_local.end(), buf.begin());
-  std::copy(rec2.root_public.begin(), rec2.root_public.end(), buf.begin() + shared_local.size());
-  std::copy(remote_pub.begin(), remote_pub.end(), buf.begin() + shared_local.size() + rec2.root_public.size());
+  std::array<std::array<uint8_t,32>, 2> ordered_pubs = {rec2.root_public, remote_pub};
+  std::sort(ordered_pubs.begin(), ordered_pubs.end());
+  // Буфер формируется идентично прошивке: сортируем ключи и конкатенируем.
+  std::copy(ordered_pubs[0].begin(), ordered_pubs[0].end(), buf.begin() + shared_local.size());
+  std::copy(ordered_pubs[1].begin(), ordered_pubs[1].end(),
+            buf.begin() + shared_local.size() + ordered_pubs[0].size());
   auto digest = crypto::sha256::hash(buf.data(), buf.size());
   std::array<uint8_t,16> expected{};
   std::copy_n(digest.begin(), expected.size(), expected.begin());
