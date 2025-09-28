@@ -18,7 +18,7 @@
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
 #include "libs/packetizer/packet_gatherer.h"      // собиратель пакетов для теста
 #include "libs/packetizer/packet_splitter.h"      // параметры делителя пакетов
-#include "libs/crypto/aes_ccm.h"                  // AES-CCM шифрование
+#include "libs/crypto/chacha20_poly1305.h"        // AEAD ChaCha20-Poly1305
 #include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
 #include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
 #include "libs/protocol/ack_utils.h"              // обработка ACK-пакетов
@@ -1687,16 +1687,16 @@ String cmdEnct() {
   const char* text = "Test ENCT";
   size_t len = strlen(text);
   std::vector<uint8_t> cipher, tag, plain;
-  bool enc = encrypt_ccm(key, sizeof(key), nonce.data(), nonce.size(),
-                         nullptr, 0,
-                         reinterpret_cast<const uint8_t*>(text), len,
-                         cipher, tag, 8);
+  bool enc = crypto::chacha20poly1305::encrypt(key, sizeof(key), nonce.data(), nonce.size(),
+                                               nullptr, 0,
+                                               reinterpret_cast<const uint8_t*>(text), len,
+                                               cipher, tag);
   bool dec = false;
   if (enc) {
-    dec = decrypt_ccm(key, sizeof(key), nonce.data(), nonce.size(),
-                      nullptr, 0,
-                      cipher.data(), cipher.size(),
-                      tag.data(), tag.size(), plain);
+    dec = crypto::chacha20poly1305::decrypt(key, sizeof(key), nonce.data(), nonce.size(),
+                                            nullptr, 0,
+                                            cipher.data(), cipher.size(),
+                                            tag.data(), tag.size(), plain);
   }
   if (enc && dec && plain.size() == len &&
       std::equal(plain.begin(), plain.end(),
@@ -2394,16 +2394,16 @@ void loop() {
         const char* text = "Test ENCT";                    // исходное сообщение
         size_t len = strlen(text);
         std::vector<uint8_t> cipher, tag, plain;
-        bool enc = encrypt_ccm(key, sizeof(key), nonce, sizeof(nonce),
-                               nullptr, 0,
-                               reinterpret_cast<const uint8_t*>(text), len,
-                               cipher, tag, 8);
+        bool enc = crypto::chacha20poly1305::encrypt(key, sizeof(key), nonce, sizeof(nonce),
+                                                     nullptr, 0,
+                                                     reinterpret_cast<const uint8_t*>(text), len,
+                                                     cipher, tag);
         bool dec = false;
         if (enc) {
-          dec = decrypt_ccm(key, sizeof(key), nonce, sizeof(nonce),
-                            nullptr, 0,
-                            cipher.data(), cipher.size(),
-                            tag.data(), tag.size(), plain);
+          dec = crypto::chacha20poly1305::decrypt(key, sizeof(key), nonce, sizeof(nonce),
+                                                  nullptr, 0,
+                                                  cipher.data(), cipher.size(),
+                                                  tag.data(), tag.size(), plain);
         }
         if (enc && dec && plain.size() == len &&
             std::equal(plain.begin(), plain.end(),

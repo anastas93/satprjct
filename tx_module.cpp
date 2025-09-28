@@ -6,7 +6,7 @@
 #include "libs/bit_interleaver/bit_interleaver.h" // битовый интерливинг
 #include "libs/scrambler/scrambler.h" // скремблер
 #include "libs/key_loader/key_loader.h" // загрузка ключа
-#include "libs/crypto/aes_ccm.h" // AES-CCM шифрование
+#include "libs/crypto/chacha20_poly1305.h" // AEAD ChaCha20-Poly1305
 #include "libs/protocol/ack_utils.h" // проверка ACK-пакетов
 #include "default_settings.h"
 #include <vector>
@@ -42,7 +42,8 @@ static_assert(PILOT_PREFIX_LEN == 5, "Ожидается пятибайтовы�
 static constexpr size_t MAX_FRAGMENT_LEN =
     MAX_FRAME_SIZE - FrameHeader::SIZE * 2 - (MAX_FRAME_SIZE / PILOT_INTERVAL) * PILOT_MARKER.size();
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
-static constexpr size_t TAG_LEN = 8;              // длина тега аутентичности
+static constexpr uint8_t FRAME_VERSION_AEAD = 2;  // версия кадра с новым AEAD
+static constexpr size_t TAG_LEN = crypto::chacha20poly1305::TAG_SIZE; // новый тег Poly1305
 static constexpr size_t RS_ENC_LEN = 255;         // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
 static constexpr bool USE_RS = DefaultSettings::USE_RS; // включение кода RS(255,223)
@@ -76,6 +77,23 @@ static size_t insertPilots(const uint8_t* in, size_t len, uint8_t* out, size_t o
     ++count;
   }
   return written;
+}
+
+static std::array<uint8_t,8> makeAad(uint8_t version,
+                                     uint8_t flags,
+                                     uint32_t msg_id,
+                                     uint16_t frag_idx) {
+  std::array<uint8_t,8> aad{};
+  aad[0] = version;
+  aad[1] = static_cast<uint8_t>(flags &
+                                 (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED));
+  aad[2] = static_cast<uint8_t>(msg_id >> 24);
+  aad[3] = static_cast<uint8_t>(msg_id >> 16);
+  aad[4] = static_cast<uint8_t>(msg_id >> 8);
+  aad[5] = static_cast<uint8_t>(msg_id);
+  aad[6] = static_cast<uint8_t>(frag_idx >> 8);
+  aad[7] = static_cast<uint8_t>(frag_idx);
+  return aad;
 }
 
 // Инициализация модуля передачи с классами QoS
@@ -365,6 +383,7 @@ bool TxModule::transmit(const PendingMessage& message) {
     uint16_t cipher_len = 0;                        // длина шифртекста вместе с тегом
     uint16_t plain_len = 0;                         // длина исходных данных до шифрования
     uint16_t chunk_idx = 0;                         // номер блока внутри сообщения для нонса
+    uint8_t base_flags = 0;                         // флаги для AAD без служебных битов
   };
 
   std::vector<PreparedFragment> fragments;
@@ -392,9 +411,16 @@ bool TxModule::transmit(const PendingMessage& message) {
     const size_t plain_len = part.size();
     uint16_t current_idx = static_cast<uint16_t>(fragments.size());
     auto nonce = KeyLoader::makeNonce(message.id, current_idx);
+    uint8_t base_flags = 0;
+    if (encryption_enabled_) base_flags |= FrameHeader::FLAG_ENCRYPTED;
+    if (message.expect_ack) base_flags |= FrameHeader::FLAG_ACK_REQUIRED;
     if (encryption_enabled_) {
-      if (!encrypt_ccm(key_.data(), key_.size(), nonce.data(), nonce.size(),
-                       nullptr, 0, part.data(), part.size(), enc, tag, TAG_LEN)) {
+      auto aad = makeAad(FRAME_VERSION_AEAD, base_flags, message.id, current_idx);
+      if (!crypto::chacha20poly1305::encrypt(key_.data(), key_.size(),
+                                             nonce.data(), nonce.size(),
+                                             aad.data(), aad.size(),
+                                             part.data(), part.size(),
+                                             enc, tag)) {
         LOG_ERROR("TxModule: ошибка шифрования");
         continue;
       }
@@ -457,6 +483,7 @@ bool TxModule::transmit(const PendingMessage& message) {
       frag.plain_len = static_cast<uint16_t>(plain_len);
     }
     frag.chunk_idx = current_idx;
+    frag.base_flags = base_flags;
     fragments.push_back(frag);
   }
 
@@ -465,13 +492,12 @@ bool TxModule::transmit(const PendingMessage& message) {
   for (size_t idx = 0; idx < fragments.size(); ++idx) {
     auto& frag = fragments[idx];
     FrameHeader hdr;
+    hdr.ver = FRAME_VERSION_AEAD;
     hdr.msg_id = message.id;
     hdr.frag_idx = static_cast<uint16_t>(idx);
     hdr.frag_cnt = frag_cnt;
     hdr.payload_len = frag.payload_size;
-    hdr.flags = 0;
-    if (encryption_enabled_) hdr.flags |= FrameHeader::FLAG_ENCRYPTED;
-    if (message.expect_ack) hdr.flags |= FrameHeader::FLAG_ACK_REQUIRED;
+    hdr.flags = frag.base_flags;
     if (frag.conv_encoded) {
       hdr.flags |= FrameHeader::FLAG_CONV_ENCODED;
     }

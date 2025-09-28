@@ -8,7 +8,9 @@
 namespace KeyTransfer {
 
 // Константы формата пакета
-constexpr size_t TAG_LEN = 8;                            // длина тега аутентичности AES-CCM
+constexpr uint8_t FRAME_VERSION_AEAD = 2;                // версия кадра с ChaCha20-Poly1305
+constexpr size_t TAG_LEN_V1 = 8;                         // длина тега в старом формате AES-CCM
+constexpr size_t TAG_LEN = 16;                           // длина тега Poly1305
 constexpr uint8_t MAGIC[4] = {'K','T','R','F'};          // сигнатура пакета
 constexpr uint8_t VERSION_LEGACY = 1;                    // версия без эпемерных ключей
 constexpr uint8_t VERSION_EPHEMERAL = 2;                 // версия с эпемерным ключом
@@ -38,7 +40,7 @@ struct FramePayload {
   uint8_t flags = 0;                                    // дополнительные флаги
 };
 
-// Специальный корневой ключ AES-CCM, используемый только для обмена ключами
+// Специальный корневой ключ AEAD, используемый только для обмена ключами
 const std::array<uint8_t,16>& rootKey();
 
 // Формирование нонса для обмена ключами (по msg_id и индексу фрагмента)

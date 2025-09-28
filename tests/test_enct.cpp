@@ -3,7 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
-#include "libs/crypto/aes_ccm.h"
+#include "libs/crypto/chacha20_poly1305.h"
 #include "libs/key_loader/key_loader.h"
 
 // Проверка команды ENCT: шифруем и расшифровываем тестовое сообщение
@@ -15,14 +15,14 @@ TEST_CASE(enct_check) {
   const char* text = "Test ENCT";                     // исходное сообщение
   size_t len = strlen(text);
   std::vector<uint8_t> cipher, tag, plain;
-  assert(encrypt_ccm(key, sizeof(key), nonce, sizeof(nonce),
-                     nullptr, 0,
-                     reinterpret_cast<const uint8_t*>(text), len,
-                     cipher, tag, 8));
-  assert(decrypt_ccm(key, sizeof(key), nonce, sizeof(nonce),
-                     nullptr, 0,
-                     cipher.data(), cipher.size(),
-                     tag.data(), tag.size(), plain));
+  assert(crypto::chacha20poly1305::encrypt(key, sizeof(key), nonce, sizeof(nonce),
+                                           nullptr, 0,
+                                           reinterpret_cast<const uint8_t*>(text), len,
+                                           cipher, tag));
+  assert(crypto::chacha20poly1305::decrypt(key, sizeof(key), nonce, sizeof(nonce),
+                                           nullptr, 0,
+                                           cipher.data(), cipher.size(),
+                                           tag.data(), tag.size(), plain));
   assert(plain.size() == len);
   assert(std::equal(plain.begin(), plain.end(),
                     reinterpret_cast<const uint8_t*>(text)));
