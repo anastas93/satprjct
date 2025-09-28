@@ -7128,11 +7128,16 @@ async function refreshKeyState(options) {
       } catch (err) {
         // Всегда оставляем комментарии на русском
         console.warn("[key] не удалось разобрать JSON KEYSTATE:", err);
-        data = parseKeyStateFallback(rawText);
-        if (!data) parseFailed = true;
-        else {
-          // Резервный разбор сработал, предупреждаем в консоли
-          console.warn("[key] использован резервный парсер KEYSTATE");
+        data = parseJsonLenient(rawText);
+        if (data) {
+          console.warn("[key] JSON KEYSTATE очищен и разобран повторно");
+        } else {
+          data = parseKeyStateFallback(rawText);
+          if (!data) parseFailed = true;
+          else {
+            // Резервный разбор сработал, предупреждаем в консоли
+            console.warn("[key] использован резервный парсер KEYSTATE");
+          }
         }
       }
     }
@@ -7168,6 +7173,26 @@ async function refreshKeyState(options) {
     note("Ошибка KEYSTATE: " + res.error);
   }
   if (!res.ok) debugLog("KEYSTATE ✗ " + res.error);
+}
+
+// Аккуратно очищаем нестандартный JSON прежде чем отдавать его в JSON.parse
+function parseJsonLenient(rawText) {
+  const raw = rawText != null ? String(rawText).trim() : "";
+  if (!raw) return null;
+  let sanitized = raw.replace(/^\uFEFF/, "");
+  sanitized = sanitized
+    .replace(/\/\*[\s\S]*?\*\//g, "") // убираем блочные комментарии
+    .replace(/(^|[^:])\/\/.*$/gm, "$1"); // убираем построчные комментарии без трогания URL
+  sanitized = sanitized.replace(/,\s*([}\]])/g, "$1"); // отрезаем висячие запятые
+  sanitized = sanitized.replace(/([\{,]\s*)'([^'"\n]*)'\s*:/g, "$1\"$2\":"); // нормализуем ключи в кавычках
+  sanitized = sanitized.replace(/:\s*'([^'"\n]*)'/g, ': "$1"'); // заменяем одиночные кавычки в значениях
+  if (!sanitized.trim()) return null;
+  try {
+    return JSON.parse(sanitized);
+  } catch (err) {
+    console.warn("[key] повторная попытка JSON.parse не удалась:", err);
+    return null;
+  }
 }
 
 // Пытаемся восстановить объект состояния ключа из нестрогого JSON или пары ключ=значение
