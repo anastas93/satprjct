@@ -2497,6 +2497,7 @@ const UI = {
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
+    ackDelay: null,
     encTest: null,
     autoNightTimer: null,
     autoNightActive: false,
@@ -2724,6 +2725,8 @@ const PAUSE_MIN_MS = 0;
 const PAUSE_MAX_MS = 60000;
 const ACK_TIMEOUT_MIN_MS = 0;
 const ACK_TIMEOUT_MAX_MS = 60000;
+const ACK_DELAY_MIN_MS = 0;
+const ACK_DELAY_MAX_MS = 5000;
 
 /* Определяем предпочитаемую тему только при наличии поддержки matchMedia */
 function detectPreferredTheme() {
@@ -2763,7 +2766,6 @@ async function init() {
   UI.els.receivedDiag = {
     root: $("#recvDiag"),
     status: $("#recvDiagStatus"),
-    mode: $("#recvDiagMode"),
     interval: $("#recvDiagInterval"),
     lastStart: $("#recvDiagLastStart"),
     lastFinish: $("#recvDiagLastFinish"),
@@ -2805,6 +2807,8 @@ async function init() {
   UI.els.pauseHint = $("#pauseHint");
   UI.els.ackTimeout = $("#ACKT");
   UI.els.ackTimeoutHint = $("#ackTimeoutHint");
+  UI.els.ackDelay = $("#ACKD");
+  UI.els.ackDelayHint = $("#ackDelayHint");
   UI.els.rxBoostedGain = $("#RXBG");
   UI.els.rxBoostedGainHint = $("#rxBoostedGainHint");
   UI.els.testRxmMessage = $("#TESTRXMMSG");
@@ -3093,7 +3097,6 @@ async function init() {
 
   loadChatHistory();
   startReceivedMonitor({ immediate: true });
-  openReceivedPushChannel();
 
   // Управление ACK и тестами
   if (UI.els.ackChip) UI.els.ackChip.addEventListener("click", onAckChipToggle);
@@ -3107,6 +3110,7 @@ async function init() {
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
   if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
+  if (UI.els.ackDelay) UI.els.ackDelay.addEventListener("change", onAckDelayInputChange);
   if (UI.els.rxBoostedGain) {
     UI.els.rxBoostedGain.addEventListener("change", () => {
       UI.els.rxBoostedGain.indeterminate = false;
@@ -3150,11 +3154,6 @@ async function init() {
 
   // Безопасность
   const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", () => requestKeyGen());
-  const btnKeyGenPeer = $("#btnKeyGenPeer");
-  if (btnKeyGenPeer) {
-    UI.els.keyGenPeerBtn = btnKeyGenPeer;
-    btnKeyGenPeer.addEventListener("click", () => requestKeyGenPeer());
-  }
   const btnKeyRestore = $("#btnKeyRestore"); if (btnKeyRestore) btnKeyRestore.addEventListener("click", () => requestKeyRestore());
   const btnKeySend = $("#btnKeySend"); if (btnKeySend) btnKeySend.addEventListener("click", () => requestKeySend());
   const btnKeyRecv = $("#btnKeyRecv"); if (btnKeyRecv) btnKeyRecv.addEventListener("click", () => requestKeyReceive());
@@ -5616,24 +5615,6 @@ function getReceivedMonitorState() {
       runningSince: null,
     };
   }
-  if (!state.push || typeof state.push !== "object") {
-    state.push = {
-      supported: typeof EventSource !== "undefined",
-      connected: false,
-      connecting: false,
-      source: null,
-      mode: "poll",
-      lastEventAt: null,
-      lastOpenAt: null,
-      lastErrorAt: null,
-      retryCount: 0,
-      pendingRefresh: false,
-      refreshScheduled: false,
-      lastHint: null,
-    };
-  } else if (typeof EventSource === "undefined") {
-    state.push.supported = false;
-  }
   let limit = Number(state.limit);
   if (!Number.isFinite(limit) || limit <= 0) {
     const storedRaw = storage.get("recvLimit");
@@ -5683,17 +5664,9 @@ function updateReceivedMonitorDiagnostics() {
   const metrics = state.metrics || {};
   const statusEl = els.status;
   const now = Date.now();
-  const push = state.push || {};
   let statusText = "Ожидание запуска";
   let statusClass = "";
-  if (push.connected) {
-    const last = push.lastEventAt ? formatRelativeTime(push.lastEventAt) : "недавно";
-    statusText = "Push подписка активна · " + last;
-    statusClass = "";
-  } else if (push.connecting) {
-    statusText = "Подключение к push-каналу…";
-    statusClass = "";
-  } else if (state.running) {
+  if (state.running) {
     statusText = "Выполняется запрос";
     statusClass = "warn";
   } else if (metrics.consecutiveErrors >= 3) {
@@ -5713,19 +5686,6 @@ function updateReceivedMonitorDiagnostics() {
     statusEl.textContent = statusText;
     statusEl.classList.remove("warn", "error");
     if (statusClass) statusEl.classList.add(statusClass);
-  }
-  if (els.mode) {
-    let modeText = "Push-канал не активен";
-    if (push.supported === false) {
-      modeText = "Push недоступен в этом браузере, используется опрос";
-    } else if (push.connected) {
-      modeText = "Push активен, резервный опрос каждые 30 с";
-    } else if (push.connecting) {
-      modeText = "Push: ожидаем подключение, работает стандартный опрос";
-    } else {
-      modeText = "Используется опрос каждые 5 с";
-    }
-    els.mode.textContent = modeText;
   }
   const intervalMs = Number(metrics.configuredIntervalMs);
   if (els.interval) {
@@ -5832,148 +5792,6 @@ function handleReceivedSnapshot(items) {
   updateChatReceivingIndicatorFromRsts(list);
 }
 
-function scheduleReceivedRefreshFromPush(hint) {
-  const state = getReceivedMonitorState();
-  const push = state.push;
-  if (!push) return;
-  push.lastHint = hint || null;
-  if (push.refreshScheduled) return;
-  push.refreshScheduled = true;
-  Promise.resolve().then(() => {
-    push.refreshScheduled = false;
-    if (state.running) {
-      push.pendingRefresh = true;
-      return;
-    }
-    pollReceivedMessages({ silentError: true }).catch((err) => {
-      console.warn("[push] ошибка обновления списка сообщений:", err);
-    });
-  });
-}
-
-function handleReceivedPushMessage(event) {
-  const state = getReceivedMonitorState();
-  const push = state.push;
-  if (!push) return;
-  const raw = event && typeof event.data === "string" ? event.data : "";
-  let payload = null;
-  if (raw) {
-    try {
-      payload = JSON.parse(raw);
-    } catch (err) {
-      push.lastHint = raw;
-    }
-  }
-  if (payload && payload.kind) {
-    const kind = String(payload.kind).toLowerCase();
-    if (kind === "split") {
-      state.awaiting = true;
-      setChatReceivingIndicatorState(true);
-    } else if (kind === "ready") {
-      state.awaiting = false;
-      const nameRaw = payload.name != null ? String(payload.name) : "";
-      const name = nameRaw.trim();
-      if (name) {
-        if (!(state.known instanceof Set)) state.known = new Set(state.known ? Array.from(state.known) : []);
-        const alreadyKnown = state.known.has(name);
-        if (!alreadyKnown) {
-          state.known.add(name);
-          const entry = {
-            name,
-            type: kind,
-          };
-          const text = payload.text != null ? String(payload.text) : "";
-          if (text) entry.text = text;
-          const hex = payload.hex != null ? String(payload.hex) : "";
-          if (hex) entry.hex = hex;
-          const lenValue = Number(payload.len);
-          if (Number.isFinite(lenValue) && lenValue >= 0) entry.len = lenValue;
-          // Немедленно публикуем готовое сообщение, чтобы вкладка чата не отставала от Serial
-          logReceivedMessage(entry, { isNew: true });
-        }
-      }
-    }
-  }
-  scheduleReceivedRefreshFromPush(payload);
-}
-
-function closeReceivedPushChannel(opts) {
-  const options = opts || {};
-  const state = getReceivedMonitorState();
-  const push = state.push;
-  if (!push) return;
-  if (push.source && typeof push.source.close === "function") {
-    try {
-      push.source.close();
-    } catch (err) {
-      if (!options.silent) console.warn("[push] ошибка закрытия EventSource:", err);
-    }
-  }
-  push.source = null;
-  push.connected = false;
-  push.connecting = false;
-  push.mode = "poll";
-}
-
-function openReceivedPushChannel() {
-  const state = getReceivedMonitorState();
-  const push = state.push;
-  if (!push || push.supported === false || typeof EventSource === "undefined") {
-    if (push) push.mode = "poll";
-    startReceivedMonitor({ intervalMs: 5000, immediate: false });
-    updateReceivedMonitorDiagnostics();
-    return;
-  }
-  closeReceivedPushChannel({ silent: true });
-  let url;
-  try {
-    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
-    url = new URL("/events", base).toString();
-  } catch (err) {
-    url = "http://192.168.4.1/events";
-  }
-  try {
-    const source = new EventSource(url);
-    push.source = source;
-    push.connecting = true;
-    push.retryCount = 0;
-    push.mode = "push";
-    updateReceivedMonitorDiagnostics();
-    source.addEventListener("open", () => {
-      push.connected = true;
-      push.connecting = false;
-      push.lastOpenAt = Date.now();
-      push.lastErrorAt = null;
-      push.retryCount = 0;
-      push.mode = "push";
-      startReceivedMonitor({ intervalMs: 30000, immediate: false });
-      updateReceivedMonitorDiagnostics();
-    });
-    source.addEventListener("message", (event) => {
-      push.connected = true;
-      push.lastEventAt = Date.now();
-      handleReceivedPushMessage(event);
-      updateReceivedMonitorDiagnostics();
-    });
-    source.addEventListener("error", () => {
-      push.connected = false;
-      push.connecting = true;
-      push.lastErrorAt = Date.now();
-      push.retryCount = (push.retryCount || 0) + 1;
-      if (push.retryCount >= 3) {
-        push.mode = "poll";
-        startReceivedMonitor({ intervalMs: 5000, immediate: false });
-      }
-      updateReceivedMonitorDiagnostics();
-    });
-  } catch (err) {
-    console.warn("[push] не удалось открыть EventSource:", err);
-    push.supported = false;
-    push.mode = "poll";
-    updateReceivedMonitorDiagnostics();
-  }
-}
-
 // Фоновый запрос RSTS использует тот же базовый тайм-аут, что и sendCommand,
 // чтобы избежать преждевременного прерывания при нагруженных каналах.
 async function pollReceivedMessages(opts) {
@@ -6044,10 +5862,6 @@ async function pollReceivedMessages(opts) {
     metrics.runningSince = null;
     updateReceivedMonitorDiagnostics();
     state.running = false;
-    if (state.push && state.push.pendingRefresh) {
-      state.push.pendingRefresh = false;
-      scheduleReceivedRefreshFromPush(state.push.lastHint);
-    }
   }
 }
 
@@ -8550,6 +8364,13 @@ function clampAckTimeoutMs(value) {
   if (num > ACK_TIMEOUT_MAX_MS) return ACK_TIMEOUT_MAX_MS;
   return Math.round(num);
 }
+function clampAckDelayMs(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return ACK_DELAY_MIN_MS;
+  if (num < ACK_DELAY_MIN_MS) return ACK_DELAY_MIN_MS;
+  if (num > ACK_DELAY_MAX_MS) return ACK_DELAY_MAX_MS;
+  return Math.round(num);
+}
 function clampTestRxmMessage(value) {
   const text = value == null ? "" : String(value);
   if (text.length > TEST_RXM_MESSAGE_MAX) {
@@ -8574,6 +8395,12 @@ function parseAckTimeoutResponse(text) {
   const token = extractNumericToken(text);
   if (token == null) return null;
   return clampAckTimeoutMs(Number(token));
+}
+function parseAckDelayResponse(text) {
+  if (!text) return null;
+  const token = extractNumericToken(text);
+  if (token == null) return null;
+  return clampAckDelayMs(Number(token));
 }
 function parseRxBoostedGainResponse(text) {
   if (!text) return null;
@@ -8625,7 +8452,8 @@ function updateAckRetryUi() {
       const attempts = state != null ? state : "—";
       const timeout = UI.state.ackTimeout != null ? UI.state.ackTimeout + " мс" : "—";
       const pause = UI.state.pauseMs != null ? UI.state.pauseMs + " мс" : "—";
-      hint.textContent = "Повторные отправки: " + attempts + " раз. Пауза: " + pause + ". Ожидание ACK: " + timeout + ".";
+      const delay = UI.state.ackDelay != null ? UI.state.ackDelay + " мс" : "—";
+      hint.textContent = "Повторные отправки: " + attempts + " раз. Пауза: " + pause + ". Ожидание ACK: " + timeout + ". Задержка ответа: " + delay + ".";
     } else {
       hint.textContent = "Доступно после включения ACK.";
     }
@@ -8655,6 +8483,25 @@ function updateAckTimeoutUi() {
     hint.textContent = value != null ? ("Время ожидания ACK: " + value + " мс.") : "Время ожидания ACK не загружено.";
   }
 }
+function updateAckDelayUi() {
+  const input = UI.els.ackDelay;
+  const value = UI.state.ackDelay;
+  if (input && document.activeElement !== input && value != null) {
+    input.value = String(value);
+  }
+  const hint = UI.els.ackDelayHint;
+  if (hint) {
+    if (value == null) {
+      hint.textContent = "Задержка отправки ACK не загружена.";
+    } else {
+      let text = "Задержка перед отправкой подтверждения: " + value + " мс.";
+      if (UI.state.ack !== true) {
+        text += " Параметр вступит в силу после включения ACK.";
+      }
+      hint.textContent = text;
+    }
+  }
+}
 function updateAckUi() {
   const chip = UI.els.ackChip;
   const text = UI.els.ackText;
@@ -8681,6 +8528,7 @@ function updateAckUi() {
     }
   }
   updateAckRetryUi();
+  updateAckDelayUi();
 }
 function onPauseInputChange() {
   if (!UI.els.pauseInput) return;
@@ -8699,6 +8547,16 @@ function onAckTimeoutInputChange() {
   UI.state.ackTimeout = num;
   storage.set("set.ACKT", String(num));
   updateAckTimeoutUi();
+  updateAckRetryUi();
+}
+function onAckDelayInputChange() {
+  if (!UI.els.ackDelay) return;
+  const raw = UI.els.ackDelay.value;
+  const num = clampAckDelayMs(parseInt(raw, 10));
+  UI.els.ackDelay.value = String(num);
+  UI.state.ackDelay = num;
+  storage.set("set.ACKD", String(num));
+  updateAckDelayUi();
   updateAckRetryUi();
 }
 async function setAck(value) {
@@ -8768,6 +8626,23 @@ async function refreshAckRetry() {
     }
   }
   UI.state.ackRetry = null;
+  updateAckRetryUi();
+  return null;
+}
+async function refreshAckDelay() {
+  const res = await deviceFetch("ACKD", {}, 2000);
+  if (res.ok) {
+    const parsed = parseAckDelayResponse(res.text);
+    if (parsed !== null) {
+      UI.state.ackDelay = parsed;
+      storage.set("set.ACKD", String(parsed));
+      updateAckDelayUi();
+      updateAckRetryUi();
+      return parsed;
+    }
+  }
+  UI.state.ackDelay = null;
+  updateAckDelayUi();
   updateAckRetryUi();
   return null;
 }
@@ -9000,7 +8875,7 @@ async function refreshEncryptionState() {
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","TESTRXMMSG"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","ACKD","TESTRXMMSG"];
 function normalizePowerPreset(raw) {
   if (raw == null) return null;
   const str = String(raw).trim();
@@ -9058,6 +8933,12 @@ function loadSettings() {
       if (UI.els.ackTimeout) UI.els.ackTimeout.value = String(num);
       UI.state.ackTimeout = num;
       updateAckTimeoutUi();
+    } else if (key === "ACKD") {
+      const num = clampAckDelayMs(parseInt(v, 10));
+      if (UI.els.ackDelay) UI.els.ackDelay.value = String(num);
+      UI.state.ackDelay = num;
+      updateAckDelayUi();
+      updateAckRetryUi();
     } else if (key === "TESTRXMMSG") {
       const text = clampTestRxmMessage(v);
       if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = text;
@@ -9087,6 +8968,8 @@ function saveSettingsLocal() {
       v = String(clampPauseMs(parseInt(v, 10)));
     } else if (key === "ACKT") {
       v = String(clampAckTimeoutMs(parseInt(v, 10)));
+    } else if (key === "ACKD") {
+      v = String(clampAckDelayMs(parseInt(v, 10)));
     } else if (key === "TESTRXMMSG") {
       v = clampTestRxmMessage(v);
       if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = v;
@@ -9164,6 +9047,17 @@ async function applySettingsToDevice() {
         updateAckRetryUi();
         storage.set("set.ACKT", String(effective));
       }
+    } else if (key === "ACKD") {
+      const parsed = clampAckDelayMs(parseInt(value, 10));
+      const resp = await sendCommand("ACKD", { v: String(parsed) });
+      if (resp !== null) {
+        const applied = parseAckDelayResponse(resp);
+        const effective = applied != null ? applied : parsed;
+        UI.state.ackDelay = effective;
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(effective);
+        updateAckDelayUi();
+        storage.set("set.ACKD", String(effective));
+      }
     } else {
       const resp = await sendCommand(key, { v: value });
       if (resp !== null) storage.set("set." + key, value);
@@ -9172,6 +9066,7 @@ async function applySettingsToDevice() {
   note("Применение завершено.");
   await refreshChannels().catch(() => {});
   await refreshAckState();
+  await refreshAckDelay();
   await refreshRxBoostedGain();
 }
 function exportSettings() {
@@ -9189,6 +9084,8 @@ function exportSettings() {
       obj[key] = String(clampPauseMs(parseInt(el.value, 10)));
     } else if (key === "ACKT") {
       obj[key] = String(clampAckTimeoutMs(parseInt(el.value, 10)));
+    } else if (key === "ACKD") {
+      obj[key] = String(clampAckDelayMs(parseInt(el.value, 10)));
     } else if (key === "TESTRXMMSG") {
       obj[key] = clampTestRxmMessage(el.value || "");
     } else {
@@ -9256,6 +9153,15 @@ function importSettings() {
         updateAckTimeoutUi();
         updateAckRetryUi();
         storage.set("set.ACKT", String(num));
+        continue;
+      }
+      if (key === "ACKD") {
+        const num = clampAckDelayMs(parseInt(obj[key], 10));
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(num);
+        UI.state.ackDelay = num;
+        updateAckDelayUi();
+        updateAckRetryUi();
+        storage.set("set.ACKD", String(num));
         continue;
       }
       if (key === "TESTRXMMSG") {
@@ -9416,6 +9322,21 @@ async function syncSettingsFromDevice() {
   } catch (err) {
     console.warn("[settings] ACKT", err);
   }
+  try {
+    const ackDRes = await deviceFetch("ACKD", {}, 2000);
+    if (ackDRes.ok) {
+      const parsed = parseAckDelayResponse(ackDRes.text);
+      if (parsed !== null) {
+        UI.state.ackDelay = parsed;
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(parsed);
+        storage.set("set.ACKD", String(parsed));
+        updateAckDelayUi();
+        updateAckRetryUi();
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] ACKD", err);
+  }
 
   updateChannelSelect();
   updateChannelSelectHint();
@@ -9430,14 +9351,12 @@ function renderKeyState(state) {
   const peerEl = $("#keyPeer");
   const backupEl = $("#keyBackup");
   const messageEl = $("#keyMessage");
-  const peerBtn = UI.els.keyGenPeerBtn || $("#btnKeyGenPeer");
   if (!data || typeof data !== "object") {
     if (stateEl) stateEl.textContent = "—";
     if (idEl) idEl.textContent = "";
     if (pubEl) pubEl.textContent = "";
     if (peerEl) peerEl.textContent = "";
     if (backupEl) backupEl.textContent = "";
-    if (peerBtn) peerBtn.disabled = true;
   } else {
     const type = data.type === "external" ? "EXTERNAL" : "LOCAL";
     if (stateEl) stateEl.textContent = type;
@@ -9453,11 +9372,6 @@ function renderKeyState(state) {
       }
     }
     if (backupEl) backupEl.textContent = data.hasBackup ? "Есть резерв" : "";
-    if (peerBtn) {
-      // Активируем кнопку KEYGEN PEER только когда известен удалённый ключ
-      const hasPeer = typeof data.peer === "string" && data.peer.trim().length > 0;
-      peerBtn.disabled = !hasPeer;
-    }
   }
   if (messageEl) messageEl.textContent = UI.key.lastMessage || "";
 }
@@ -9618,56 +9532,43 @@ function parseKeygenPlainResponse(text) {
   };
 }
 
-// Универсальный обработчик команд, которые обновляют ключи устройства
-async function handleKeyGenerationCommand(options) {
-  const command = options.command;
-  const label = options.label || command;
-  const params = options.params || {};
-  const requestLog = options.requestLog || "запрос";
-  const successMessage = options.successMessage || "Ключ обновлён";
-  const emptyResponseMessage = options.emptyResponseMessage || "устройство вернуло пустой ответ";
-  const timeoutMs = options.timeoutMs || 6000;
-  const refreshAfterPlain = options.refreshAfterPlain !== false;
-
-  status(`→ ${label}`);
-  debugLog(`${label} → ${requestLog}`);
-  const res = await deviceFetch(command, params, timeoutMs);
+async function requestKeyGen() {
+  status("→ KEYGEN");
+  debugLog("KEYGEN → запрос генерации");
+  const res = await deviceFetch("KEYGEN", {}, 6000);
   if (!res.ok) {
-    debugLog(`${label} ✗ ${res.error}`);
-    status(`✗ ${label}`);
-    note(`Ошибка ${label}: ${res.error}`);
-    return false;
+    debugLog("KEYGEN ✗ " + res.error);
+    status("✗ KEYGEN");
+    note("Ошибка KEYGEN: " + res.error);
+    return;
   }
-
   const rawText = res.text != null ? String(res.text) : "";
-  debugLog(`${label} ← ${rawText}`);
+  debugLog("KEYGEN ← " + rawText);
   const trimmed = rawText.trim();
   if (!trimmed) {
-    status(`✗ ${label}`);
-    note(`${label}: ${emptyResponseMessage}`);
-    return false;
+    status("✗ KEYGEN");
+    note("KEYGEN: устройство вернуло пустой ответ");
+    return;
   }
-
   let data = null;
   try {
     data = JSON.parse(trimmed);
   } catch (err) {
-    console.warn(`[key] не удалось разобрать ответ ${label} как JSON:`, err);
+    console.warn("[key] не удалось разобрать ответ KEYGEN как JSON:", err);
   }
   if (data && data.error) {
-    note(`${label}: ${data.error}`);
-    status(`✗ ${label}`);
-    return false;
+    note("KEYGEN: " + data.error);
+    status("✗ KEYGEN");
+    return;
   }
   if (data) {
     UI.key.state = data;
-    UI.key.lastMessage = successMessage;
+    UI.key.lastMessage = "Сгенерирован новый локальный ключ";
     renderKeyState(data);
-    debugLog(`${label} ✓ ключ обновлён на устройстве`);
-    status(`✓ ${label}`);
-    return true;
+    debugLog("KEYGEN ✓ ключ обновлён на устройстве");
+    status("✓ KEYGEN");
+    return;
   }
-
   const plainInfo = parseKeygenPlainResponse(trimmed);
   if (plainInfo) {
     UI.key.lastMessage = plainInfo.message;
@@ -9678,53 +9579,25 @@ async function handleKeyGenerationCommand(options) {
       UI.key.state = null;
       renderKeyState(null);
     }
-    note(`${label}: ${plainInfo.message}`);
-    status(`✓ ${label}`);
-    debugLog(`${label} ✓ ${plainInfo.message}`);
-    if (refreshAfterPlain) {
-      await refreshKeyState({ silent: true }).catch((err) => {
-        console.warn(`[key] не удалось обновить состояние после ${label}:`, err);
-      });
-    }
-    return true;
+    note(plainInfo.note);
+    status("✓ KEYGEN");
+    await refreshKeyState({ silent: true }).catch((err) => {
+      console.warn("[key] не удалось обновить состояние после KEYGEN:", err);
+    });
+    return;
   }
-
   const normalized = trimmed.toLowerCase();
   if (/(err|fail|ошиб|нет)/.test(normalized)) {
-    status(`✗ ${label}`);
-    note(`${label}: ${trimmed}`);
-    debugLog(`${label} ✗ ${trimmed}`);
-    return false;
+    status("✗ KEYGEN");
+    note("KEYGEN: " + trimmed);
+    return;
   }
-
-  UI.key.lastMessage = successMessage;
+  UI.key.lastMessage = "Ключ обновлён";
   renderKeyState(UI.key.state);
-  note(`${label}: ${trimmed}`);
-  status(`✓ ${label}`);
-  debugLog(`${label} ✓ ${trimmed}`);
-  if (refreshAfterPlain) {
-    await refreshKeyState({ silent: true }).catch((err) => {
-      console.warn(`[key] не удалось обновить состояние после ${label}:`, err);
-    });
-  }
-  return true;
-}
-
-async function requestKeyGen() {
-  await handleKeyGenerationCommand({
-    command: "KEYGEN",
-    label: "KEYGEN",
-    requestLog: "запрос генерации",
-    successMessage: "Сгенерирован новый локальный ключ",
-  });
-}
-
-async function requestKeyGenPeer() {
-  await handleKeyGenerationCommand({
-    command: "KEYGEN PEER",
-    label: "KEYGEN PEER",
-    requestLog: "запрос повторного применения удалённого ключа",
-    successMessage: "Обновлён симметричный ключ по сохранённому удалённому ключу",
+  note("KEYGEN: " + trimmed);
+  status("✓ KEYGEN");
+  await refreshKeyState({ silent: true }).catch((err) => {
+    console.warn("[key] не удалось обновить состояние после KEYGEN:", err);
   });
 }
 
@@ -11072,11 +10945,9 @@ async function resyncAfterEndpointChange() {
     const monitor = getReceivedMonitorState();
     if (monitor && monitor.known) monitor.known = new Set();
     await pollReceivedMessages({ silentError: true });
-    openReceivedPushChannel();
   } catch (err) {
     console.warn("[endpoint] resync error", err);
   }
 }
-
 
 )~~~";
