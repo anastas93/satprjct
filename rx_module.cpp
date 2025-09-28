@@ -255,6 +255,25 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     return;
   }
 
+  const bool ack_no_flags = (hdr.flags &
+                             (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0;
+  const bool ack_single_fragment = hdr.frag_cnt == 1 && hdr.frag_idx == 0;
+  const bool ack_marker_only = payload_buf_.size() == 1 && payload_buf_.front() == protocol::ack::MARKER;
+  if (ack_no_flags && ack_single_fragment && ack_marker_only) {
+    profile_scope.noteConv(false);                         // подтверждение приходит без кодирования
+    profile_scope.noteDecrypt(false);                      // шифрование не применяется
+    profile_scope.mark(&ProfilingSnapshot::decode);        // отмечаем обход декодера
+    profile_scope.mark(&ProfilingSnapshot::decrypt);       // и отсутствие дешифрования
+    if (ack_cb_) {
+      ack_cb_();                                           // уведомляем о полученном подтверждении
+    }
+    if (cb_) {
+      cb_(payload_buf_.data(), payload_buf_.size());       // пробрасываем маркер наружу
+    }
+    profile_scope.mark(&ProfilingSnapshot::deliver);
+    return;                                                // ACK обработан, дальнейшие этапы не нужны
+  }
+
   if (!assembling_ || hdr.msg_id != active_msg_id_) {       // обнаружили новое сообщение
     if (assembling_) {
       inflight_prefix_.erase(active_msg_id_);

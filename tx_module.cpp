@@ -368,23 +368,12 @@ bool TxModule::transmit(const PendingMessage& message) {
     return false;
   }
 
-  if (message.is_ack) {
-    // Компактный ACK отправляем напрямую, минуя кодирование и вставку пилотов
-    waitForPauseWindow();
-    radio_.send(msg.data(), msg.size());
-    last_send_ = std::chrono::steady_clock::now();
-    DEBUG_LOG_VAL("TxModule: отправлен компактный ACK длиной=", msg.size());
-    return true;
-  }
+  const bool is_ack_frame = message.is_ack;
 
   std::string prefix = message.status_prefix;
-  if (prefix.empty()) {
+  if (prefix.empty() && !is_ack_frame) {
     prefix = extractStatusPrefix(msg);
   }
-
-  PacketSplitter rs_splitter(PayloadMode::SMALL, EFFECTIVE_DATA_CHUNK);
-  MessageBuffer tmp((msg.size() + EFFECTIVE_DATA_CHUNK - 1) / EFFECTIVE_DATA_CHUNK);
-  rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size(), false);
 
   struct PreparedFragment {
     std::array<uint8_t, MAX_FRAGMENT_LEN> payload{}; // предвыделенный буфер полезной нагрузки
@@ -397,104 +386,123 @@ bool TxModule::transmit(const PendingMessage& message) {
   };
 
   std::vector<PreparedFragment> fragments;
-  fragments.reserve((msg.size() + EFFECTIVE_DATA_CHUNK - 1) / EFFECTIVE_DATA_CHUNK);
+  fragments.reserve(is_ack_frame ? 1
+                                 : (msg.size() + EFFECTIVE_DATA_CHUNK - 1) / EFFECTIVE_DATA_CHUNK);
   bool sent = false;
 
-  std::vector<uint8_t> part;
-  part.reserve(tmp.slotSize());                     // используем вместимость слота
-  std::vector<uint8_t> enc;
-  enc.reserve(MAX_CIPHER_CHUNK);
-  std::vector<uint8_t> tag;
-  tag.reserve(TAG_LEN);
-  std::vector<uint8_t> conv;
-  conv.reserve(MAX_FRAGMENT_LEN);
-  std::vector<uint8_t> conv_input;
-  conv_input.reserve(RS_ENC_LEN + CONV_TAIL_BYTES);
+  if (is_ack_frame) {
+    PreparedFragment frag;
+    if (msg.size() > frag.payload.size()) {
+      LOG_ERROR("TxModule: ACK превышает размер слота");
+      return false;
+    }
+    frag.payload_size = static_cast<uint16_t>(msg.size());
+    if (!msg.empty()) {
+      std::memcpy(frag.payload.data(), msg.data(), msg.size());
+    }
+    frag.base_flags = 0;                               // подтверждение всегда отправляется открытым текстом
+    fragments.push_back(frag);
+  } else {
+    PacketSplitter rs_splitter(PayloadMode::SMALL, EFFECTIVE_DATA_CHUNK);
+    MessageBuffer tmp((msg.size() + EFFECTIVE_DATA_CHUNK - 1) / EFFECTIVE_DATA_CHUNK);
+    rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size(), false);
 
-  while (tmp.hasPending()) {
-    part.clear();
-    uint32_t dummy = 0;
-    if (!tmp.pop(dummy, part)) break;
+    std::vector<uint8_t> part;
+    part.reserve(tmp.slotSize());                     // используем вместимость слота
+    std::vector<uint8_t> enc;
+    enc.reserve(MAX_CIPHER_CHUNK);
+    std::vector<uint8_t> tag;
+    tag.reserve(TAG_LEN);
+    std::vector<uint8_t> conv;
+    conv.reserve(MAX_FRAGMENT_LEN);
+    std::vector<uint8_t> conv_input;
+    conv_input.reserve(RS_ENC_LEN + CONV_TAIL_BYTES);
 
-    enc.clear();
-    tag.clear();
-    const size_t plain_len = part.size();
-    uint16_t current_idx = static_cast<uint16_t>(fragments.size());
-    auto nonce = KeyLoader::makeNonce(message.id, current_idx);
-    uint8_t base_flags = 0;
-    if (encryption_enabled_) base_flags |= FrameHeader::FLAG_ENCRYPTED;
-    if (message.expect_ack) base_flags |= FrameHeader::FLAG_ACK_REQUIRED;
-    if (encryption_enabled_) {
-      auto aad = makeAad(FRAME_VERSION_AEAD, base_flags, message.id, current_idx);
-      if (!crypto::chacha20poly1305::encrypt(key_.data(), key_.size(),
-                                             nonce.data(), nonce.size(),
-                                             aad.data(), aad.size(),
-                                             part.data(), part.size(),
-                                             enc, tag)) {
-        LOG_ERROR("TxModule: ошибка шифрования");
+    while (tmp.hasPending()) {
+      part.clear();
+      uint32_t dummy = 0;
+      if (!tmp.pop(dummy, part)) break;
+
+      enc.clear();
+      tag.clear();
+      const size_t plain_len = part.size();
+      uint16_t current_idx = static_cast<uint16_t>(fragments.size());
+      auto nonce = KeyLoader::makeNonce(message.id, current_idx);
+      uint8_t base_flags = 0;
+      if (encryption_enabled_) base_flags |= FrameHeader::FLAG_ENCRYPTED;
+      if (message.expect_ack) base_flags |= FrameHeader::FLAG_ACK_REQUIRED;
+      if (encryption_enabled_) {
+        auto aad = makeAad(FRAME_VERSION_AEAD, base_flags, message.id, current_idx);
+        if (!crypto::chacha20poly1305::encrypt(key_.data(), key_.size(),
+                                               nonce.data(), nonce.size(),
+                                               aad.data(), aad.size(),
+                                               part.data(), part.size(),
+                                               enc, tag)) {
+          LOG_ERROR("TxModule: ошибка шифрования");
+          continue;
+        }
+        enc.insert(enc.end(), tag.begin(), tag.end());
+      } else {
+        enc.assign(part.begin(), part.end());
+        enc.insert(enc.end(), TAG_LEN, 0x00);              // добавляем пустой тег для выравнивания
+      }
+
+      const size_t cipher_len = enc.size();
+      if (cipher_len > MAX_CIPHER_CHUNK) {
+        LOG_WARN_VAL("TxModule: блок шифртекста превышает лимит=", cipher_len);
+        continue;                                       // пропускаем некорректный блок
+      }
+
+      bool conv_applied = false;
+      if (USE_RS && cipher_len == RS_DATA_LEN) {
+        uint8_t rs_buf[RS_ENC_LEN];
+        rs255223::encode(enc.data(), rs_buf);
+        byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
+        conv_input.assign(rs_buf, rs_buf + RS_ENC_LEN);
+        conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00);
+        conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
+        conv_applied = true;
+        if (USE_BIT_INTERLEAVER && !conv.empty()) {
+          bit_interleaver::interleave(conv.data(), conv.size());
+        }
+      } else if (!enc.empty()) {
+        conv_input.assign(enc.begin(), enc.end());
+        conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00); // добавляем «хвост» для сброса регистра
+        conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
+        conv_applied = true;
+        if (USE_BIT_INTERLEAVER && !conv.empty()) {
+          bit_interleaver::interleave(conv.data(), conv.size());
+        }
+      }
+
+      if (!conv_applied) {
+        conv.assign(enc.begin(), enc.end());            // fallback: отправляем без свёртки
+      }
+
+      if (conv_applied && conv.size() > MAX_FRAGMENT_LEN) {
+        LOG_WARN_VAL("TxModule: свёрнутый блок превышает лимит=", conv.size());
+        conv.assign(enc.begin(), enc.end());            // возвращаемся к исходному варианту
+        conv_applied = false;
+      }
+
+      PreparedFragment frag;
+      if (conv.size() > frag.payload.size()) {
+        LOG_WARN("TxModule: подготовленный блок не помещается в слот");
         continue;
       }
-      enc.insert(enc.end(), tag.begin(), tag.end());
-    } else {
-      enc.assign(part.begin(), part.end());
-      enc.insert(enc.end(), TAG_LEN, 0x00);              // добавляем пустой тег для выравнивания
-    }
-
-    const size_t cipher_len = enc.size();
-    if (cipher_len > MAX_CIPHER_CHUNK) {
-      LOG_WARN_VAL("TxModule: блок шифртекста превышает лимит=", cipher_len);
-      continue;                                       // пропускаем некорректный блок
-    }
-
-    bool conv_applied = false;
-    if (USE_RS && cipher_len == RS_DATA_LEN) {
-      uint8_t rs_buf[RS_ENC_LEN];
-      rs255223::encode(enc.data(), rs_buf);
-      byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
-      conv_input.assign(rs_buf, rs_buf + RS_ENC_LEN);
-      conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00);
-      conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
-      conv_applied = true;
-      if (USE_BIT_INTERLEAVER && !conv.empty()) {
-        bit_interleaver::interleave(conv.data(), conv.size());
+      frag.payload_size = static_cast<uint16_t>(conv.size());
+      if (!conv.empty()) {
+        std::memcpy(frag.payload.data(), conv.data(), conv.size());
       }
-    } else if (!enc.empty()) {
-      conv_input.assign(enc.begin(), enc.end());
-      conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00); // добавляем «хвост» для сброса регистра
-      conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
-      conv_applied = true;
-      if (USE_BIT_INTERLEAVER && !conv.empty()) {
-        bit_interleaver::interleave(conv.data(), conv.size());
+      if (conv_applied) {
+        frag.conv_encoded = true;
+        frag.cipher_len = static_cast<uint16_t>(cipher_len);
+        frag.plain_len = static_cast<uint16_t>(plain_len);
       }
+      frag.chunk_idx = current_idx;
+      frag.base_flags = base_flags;
+      fragments.push_back(frag);
     }
-
-    if (!conv_applied) {
-      conv.assign(enc.begin(), enc.end());            // fallback: отправляем без свёртки
-    }
-
-    if (conv_applied && conv.size() > MAX_FRAGMENT_LEN) {
-      LOG_WARN_VAL("TxModule: свёрнутый блок превышает лимит=", conv.size());
-      conv.assign(enc.begin(), enc.end());            // возвращаемся к исходному варианту
-      conv_applied = false;
-    }
-
-    PreparedFragment frag;
-    if (conv.size() > frag.payload.size()) {
-      LOG_WARN("TxModule: подготовленный блок не помещается в слот");
-      continue;
-    }
-    frag.payload_size = static_cast<uint16_t>(conv.size());
-    if (!conv.empty()) {
-      std::memcpy(frag.payload.data(), conv.data(), conv.size());
-    }
-    if (conv_applied) {
-      frag.conv_encoded = true;
-      frag.cipher_len = static_cast<uint16_t>(cipher_len);
-      frag.plain_len = static_cast<uint16_t>(plain_len);
-    }
-    frag.chunk_idx = current_idx;
-    frag.base_flags = base_flags;
-    fragments.push_back(frag);
   }
 
   uint16_t frag_cnt = static_cast<uint16_t>(fragments.size());

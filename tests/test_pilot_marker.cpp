@@ -83,8 +83,15 @@ int main() {
   }
   assert(radio.history.size() == before_ack + 1);
   const auto& ack_frame = radio.history.back();
-  assert(ack_frame.size() == 1);
-  assert(ack_frame.front() == protocol::ack::MARKER);
+  auto ack_descrambled = ack_frame;
+  scrambler::descramble(ack_descrambled.data(), ack_descrambled.size());
+  FrameHeader ack_hdr;
+  assert(FrameHeader::decode(ack_descrambled.data(), ack_descrambled.size(), ack_hdr));
+  assert((ack_hdr.flags & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0);
+  assert(ack_hdr.payload_len == 1);
+  assert(ack_frame.size() == FrameHeader::SIZE * 2 + ack_hdr.payload_len);
+  const uint8_t* ack_payload = ack_descrambled.data() + FrameHeader::SIZE * 2;
+  assert(*ack_payload == protocol::ack::MARKER);
 
   std::cout << "OK" << std::endl;
   return 0;

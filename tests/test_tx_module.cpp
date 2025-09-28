@@ -129,8 +129,15 @@ int main() {
   txPriority.loop();                           // первый кадр обязан быть ACK
   assert(radioPriority.history.size() == 1);
   auto ackFrame = radioPriority.history.front();
-  assert(ackFrame.size() == 1);
-  assert(ackFrame.front() == protocol::ack::MARKER);
+  auto ackDecoded = ackFrame;
+  scrambler::descramble(ackDecoded.data(), ackDecoded.size());
+  FrameHeader ackHdr;
+  assert(FrameHeader::decode(ackDecoded.data(), ackDecoded.size(), ackHdr));
+  assert((ackHdr.flags & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0);
+  assert(ackHdr.payload_len == 1);
+  assert(ackFrame.size() == FrameHeader::SIZE * 2 + ackHdr.payload_len);
+  const uint8_t* ackPayloadPtr = ackDecoded.data() + FrameHeader::SIZE * 2;
+  assert(*ackPayloadPtr == protocol::ack::MARKER);
   RxModule rxAck;
   std::vector<uint8_t> ackPlain;
   bool ackNotified = false;
