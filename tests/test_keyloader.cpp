@@ -5,7 +5,7 @@
 #include <iostream>
 #include "libs/key_loader/key_loader.h"
 #include "libs/crypto/x25519.h"
-#include "libs/crypto/sha256.h"
+#include "libs/crypto/hkdf.h"
 
 int main() {
   using namespace KeyLoader;
@@ -64,23 +64,43 @@ int main() {
     std::cout << std::dec << std::endl;
   }
   assert(shared_remote == shared_local);
-  std::array<uint8_t,96> buf{};
-  std::copy(shared_local.begin(), shared_local.end(), buf.begin());
   std::array<std::array<uint8_t,32>, 2> ordered_pubs = {rec2.root_public, remote_pub};
   std::sort(ordered_pubs.begin(), ordered_pubs.end());
-  // Буфер формируется идентично прошивке: сортируем ключи и конкатенируем.
-  std::copy(ordered_pubs[0].begin(), ordered_pubs[0].end(), buf.begin() + shared_local.size());
-  std::copy(ordered_pubs[1].begin(), ordered_pubs[1].end(),
-            buf.begin() + shared_local.size() + ordered_pubs[0].size());
-  auto digest = crypto::sha256::hash(buf.data(), buf.size());
+  std::array<uint8_t,64> salt{};
+  std::copy(ordered_pubs[0].begin(), ordered_pubs[0].end(), salt.begin());
+  std::copy(ordered_pubs[1].begin(), ordered_pubs[1].end(), salt.begin() + ordered_pubs[0].size());
   std::array<uint8_t,16> expected{};
-  std::copy_n(digest.begin(), expected.size(), expected.begin());
+  bool ok = crypto::hkdf::derive(salt.data(),
+                                 salt.size(),
+                                 shared_local.data(),
+                                 shared_local.size(),
+                                 reinterpret_cast<const uint8_t*>("KeyLoader remote session v2 static"),
+                                 sizeof("KeyLoader remote session v2 static") - 1,
+                                 expected.data(),
+                                 expected.size());
+  assert(ok);
   std::cout << "expected=";
   for (uint8_t b : expected) std::cout << std::hex << int(b);
   std::cout << " actual=";
   for (uint8_t b : rec2.session_key) std::cout << std::hex << int(b);
   std::cout << std::dec << std::endl;
   assert(expected == rec2.session_key);
+
+  std::array<uint8_t,4> nonce_block{};
+  bool nonce_ok = crypto::hkdf::derive(nullptr,
+                                       0,
+                                       rec2.session_key.data(),
+                                       rec2.session_key.size(),
+                                       reinterpret_cast<const uint8_t*>("KeyLoader nonce v2"),
+                                       sizeof("KeyLoader nonce v2") - 1,
+                                       nonce_block.data(),
+                                       nonce_block.size());
+  assert(nonce_ok);
+  uint32_t expected_nonce = static_cast<uint32_t>(nonce_block[0]) |
+                            (static_cast<uint32_t>(nonce_block[1]) << 8) |
+                            (static_cast<uint32_t>(nonce_block[2]) << 16) |
+                            (static_cast<uint32_t>(nonce_block[3]) << 24);
+  assert(rec2.nonce_salt == expected_nonce);
 
   // Сценарий: устройство A генерирует новый ключ, устройство B применяет его,
   // затем устройство A пересчитывает сессию через regenerateFromPeer.
@@ -95,18 +115,22 @@ int main() {
   assert(rec3.root_public != first_public);
   std::array<uint8_t,32> shared_remote_second{};
   crypto::x25519::compute_shared(remote_priv, rec3.root_public, shared_remote_second);
-  std::array<uint8_t,96> buf_second{};
-  std::copy(shared_remote_second.begin(), shared_remote_second.end(), buf_second.begin());
   std::array<std::array<uint8_t,32>, 2> ordered_pubs_second = {rec3.root_public, remote_pub};
   std::sort(ordered_pubs_second.begin(), ordered_pubs_second.end());
-  // Буфер формируется так же, как и в прошивке, чтобы смоделировать сторону B.
-  std::copy(ordered_pubs_second[0].begin(), ordered_pubs_second[0].end(),
-            buf_second.begin() + shared_remote_second.size());
+  std::array<uint8_t,64> salt_second{};
+  std::copy(ordered_pubs_second[0].begin(), ordered_pubs_second[0].end(), salt_second.begin());
   std::copy(ordered_pubs_second[1].begin(), ordered_pubs_second[1].end(),
-            buf_second.begin() + shared_remote_second.size() + ordered_pubs_second[0].size());
-  auto digest_second = crypto::sha256::hash(buf_second.data(), buf_second.size());
+            salt_second.begin() + ordered_pubs_second[0].size());
   std::array<uint8_t,16> expected_second{};
-  std::copy_n(digest_second.begin(), expected_second.size(), expected_second.begin());
+  bool ok_second = crypto::hkdf::derive(salt_second.data(),
+                                        salt_second.size(),
+                                        shared_remote_second.data(),
+                                        shared_remote_second.size(),
+                                        reinterpret_cast<const uint8_t*>("KeyLoader remote session v2 static"),
+                                        sizeof("KeyLoader remote session v2 static") - 1,
+                                        expected_second.data(),
+                                        expected_second.size());
+  assert(ok_second);
   assert(peer_key_id_after_local == keyId(expected_second));
   assert(regenerateFromPeer());
   KeyRecord rec4;
@@ -114,6 +138,21 @@ int main() {
   assert(rec4.origin == KeyOrigin::REMOTE);
   assert(rec4.peer_public == remote_pub);
   assert(rec4.session_key == expected_second);
+  std::array<uint8_t,4> nonce_second_block{};
+  bool nonce_second_ok = crypto::hkdf::derive(nullptr,
+                                              0,
+                                              rec4.session_key.data(),
+                                              rec4.session_key.size(),
+                                              reinterpret_cast<const uint8_t*>("KeyLoader nonce v2"),
+                                              sizeof("KeyLoader nonce v2") - 1,
+                                              nonce_second_block.data(),
+                                              nonce_second_block.size());
+  assert(nonce_second_ok);
+  uint32_t expected_second_nonce = static_cast<uint32_t>(nonce_second_block[0]) |
+                                   (static_cast<uint32_t>(nonce_second_block[1]) << 8) |
+                                   (static_cast<uint32_t>(nonce_second_block[2]) << 16) |
+                                   (static_cast<uint32_t>(nonce_second_block[3]) << 24);
+  assert(rec4.nonce_salt == expected_second_nonce);
   std::array<uint8_t,4> peer_key_id_after_regen{};
   assert(previewPeerKeyId(peer_key_id_after_regen));
   assert(peer_key_id_after_regen == keyId(rec4.session_key));

@@ -1,4 +1,5 @@
 #include "key_loader.h"
+#include "../crypto/hkdf.h"
 #include "../crypto/sha256.h"
 #include "../crypto/x25519.h"
 #include "default_settings.h"
@@ -76,13 +77,12 @@ StorageBackend activeBackend() {
 StorageBackend activeBackend() { return StorageBackend::FILESYSTEM; }
 #endif
 
-std::array<uint8_t,16> truncateDigest(const std::array<uint8_t, crypto::sha256::DIGEST_SIZE>& digest) {
-  std::array<uint8_t,16> out{};
-  std::copy_n(digest.begin(), out.size(), out.begin());
-  return out;
-}
+constexpr char LOCAL_INFO[] = "KeyLoader local session v2";
+constexpr char REMOTE_STATIC_INFO[] = "KeyLoader remote session v2 static";
+constexpr char REMOTE_EPHEMERAL_INFO[] = "KeyLoader remote session v2 ephemeral";
+constexpr char NONCE_INFO[] = "KeyLoader nonce v2";
 
-uint32_t nonceSaltFromKey(const std::array<uint8_t,16>& key) {
+uint32_t nonceSaltFromKeyLegacy(const std::array<uint8_t,16>& key) {
   auto digest = crypto::sha256::hash(key.data(), key.size());
   return static_cast<uint32_t>(digest[0]) |
          (static_cast<uint32_t>(digest[1]) << 8) |
@@ -90,28 +90,75 @@ uint32_t nonceSaltFromKey(const std::array<uint8_t,16>& key) {
          (static_cast<uint32_t>(digest[3]) << 24);
 }
 
+uint32_t nonceSaltFromKey(const std::array<uint8_t,16>& key) {
+  std::array<uint8_t, sizeof(uint32_t)> okm{};
+  if (!crypto::hkdf::derive(nullptr,
+                             0,
+                             key.data(),
+                             key.size(),
+                             reinterpret_cast<const uint8_t*>(NONCE_INFO),
+                             sizeof(NONCE_INFO) - 1,
+                             okm.data(),
+                             okm.size())) {
+    return nonceSaltFromKeyLegacy(key);
+  }
+  return static_cast<uint32_t>(okm[0]) |
+         (static_cast<uint32_t>(okm[1]) << 8) |
+         (static_cast<uint32_t>(okm[2]) << 16) |
+         (static_cast<uint32_t>(okm[3]) << 24);
+}
+
 std::array<uint8_t,16> deriveLocalSession(const std::array<uint8_t,32>& pub,
                                           const std::array<uint8_t,32>& priv) {
-  std::array<uint8_t,64> buf{};
-  std::copy(pub.begin(), pub.end(), buf.begin());
-  std::copy(priv.begin(), priv.end(), buf.begin() + pub.size());
-  auto digest = crypto::sha256::hash(buf.data(), buf.size());
-  return truncateDigest(digest);
+  std::array<uint8_t,16> session{};
+  bool ok = crypto::hkdf::derive(pub.data(),
+                                 pub.size(),
+                                 priv.data(),
+                                 priv.size(),
+                                 reinterpret_cast<const uint8_t*>(LOCAL_INFO),
+                                 sizeof(LOCAL_INFO) - 1,
+                                 session.data(),
+                                 session.size());
+  if (!ok) {
+    std::array<uint8_t,64> buf{};
+    std::copy(pub.begin(), pub.end(), buf.begin());
+    std::copy(priv.begin(), priv.end(), buf.begin() + pub.size());
+    auto digest = crypto::sha256::hash(buf.data(), buf.size());
+    std::copy_n(digest.begin(), session.size(), session.begin());
+  }
+  return session;
 }
 
 std::array<uint8_t,16> deriveSessionFromShared(const std::array<uint8_t,32>& shared,
                                                const std::array<uint8_t,32>& local_pub,
-                                               const std::array<uint8_t,32>& remote_pub) {
-  std::array<uint8_t,96> buf{};
-  std::copy(shared.begin(), shared.end(), buf.begin());
+                                               const std::array<uint8_t,32>& remote_pub,
+                                               bool use_ephemeral = false) {
   std::array<std::array<uint8_t,32>, 2> ordered_pubs = {local_pub, remote_pub};
   std::sort(ordered_pubs.begin(), ordered_pubs.end());
-  // Сортируем публичные ключи, чтобы обе стороны формировали одинаковый буфер.
-  std::copy(ordered_pubs[0].begin(), ordered_pubs[0].end(), buf.begin() + shared.size());
-  std::copy(ordered_pubs[1].begin(), ordered_pubs[1].end(),
-            buf.begin() + shared.size() + ordered_pubs[0].size());
-  auto digest = crypto::sha256::hash(buf.data(), buf.size());
-  return truncateDigest(digest);
+  std::array<uint8_t,64> salt{};
+  std::copy(ordered_pubs[0].begin(), ordered_pubs[0].end(), salt.begin());
+  std::copy(ordered_pubs[1].begin(), ordered_pubs[1].end(), salt.begin() + ordered_pubs[0].size());
+  const uint8_t* info_ptr = reinterpret_cast<const uint8_t*>(use_ephemeral ? REMOTE_EPHEMERAL_INFO : REMOTE_STATIC_INFO);
+  size_t info_len = (use_ephemeral ? sizeof(REMOTE_EPHEMERAL_INFO) : sizeof(REMOTE_STATIC_INFO)) - 1;
+  std::array<uint8_t,16> session{};
+  bool ok = crypto::hkdf::derive(salt.data(),
+                                 salt.size(),
+                                 shared.data(),
+                                 shared.size(),
+                                 info_ptr,
+                                 info_len,
+                                 session.data(),
+                                 session.size());
+  if (!ok) {
+    std::array<uint8_t,96> buf{};
+    std::copy(shared.begin(), shared.end(), buf.begin());
+    std::copy(ordered_pubs[0].begin(), ordered_pubs[0].end(), buf.begin() + shared.size());
+    std::copy(ordered_pubs[1].begin(), ordered_pubs[1].end(),
+              buf.begin() + shared.size() + ordered_pubs[0].size());
+    auto digest = crypto::sha256::hash(buf.data(), buf.size());
+    std::copy_n(digest.begin(), session.size(), session.begin());
+  }
+  return session;
 }
 
 std::vector<uint8_t> serializeRecord(const KeyRecord& rec) {
@@ -257,10 +304,23 @@ bool deserializeSnapshot(const std::vector<uint8_t>& raw, StorageSnapshot& snaps
 }
 
 void finalizeRecord(KeyRecord& rec) {
-  if (rec.nonce_salt == 0) {
-    rec.nonce_salt = nonceSaltFromKey(rec.session_key);
+  uint32_t derived = nonceSaltFromKey(rec.session_key);
+  uint32_t legacy = nonceSaltFromKeyLegacy(rec.session_key);
+  if (rec.nonce_salt == 0 || rec.nonce_salt == legacy) {
+    rec.nonce_salt = derived;
   }
   rec.valid = true;
+}
+
+bool migrateNonceSalt(KeyRecord& rec) {
+  if (!rec.valid) return false;
+  uint32_t derived = nonceSaltFromKey(rec.session_key);
+  uint32_t legacy = nonceSaltFromKeyLegacy(rec.session_key);
+  if (rec.nonce_salt == 0 || rec.nonce_salt == legacy) {
+    rec.nonce_salt = derived;
+    return true;
+  }
+  return false;
 }
 
 StorageSnapshot makeDefaultSnapshot() {
@@ -276,7 +336,7 @@ StorageSnapshot makeDefaultSnapshot() {
   crypto::x25519::derive_public(rec.root_public, rec.root_private);
   rec.peer_public.fill(0);
   rec.nonce_salt = nonceSaltFromKey(rec.session_key);
-  rec.valid = true;
+  finalizeRecord(rec);
   snapshot.current = rec;
   snapshot.current_valid = true;
   snapshot.previous_valid = false;
@@ -348,7 +408,7 @@ bool readLegacyBinary(KeyRecord& key) {
   key.root_private[31] &= 127;
   key.root_private[31] |= 64;
   crypto::x25519::derive_public(key.root_public, key.root_private);
-  key.valid = true;
+  finalizeRecord(key);
   return true;
 }
 #else
@@ -536,12 +596,21 @@ StorageSnapshot& ensureSnapshot() {
   if (backend_ok) {
     outcome = loadFromBackend(snapshot);
   }
+  bool migrated = false;
+  if (outcome.loaded && snapshot.current_valid) {
+    if (snapshot.current_valid && snapshot.current.valid) {
+      migrated |= migrateNonceSalt(snapshot.current);
+    }
+    if (snapshot.previous_valid && snapshot.previous.valid) {
+      migrated |= migrateNonceSalt(snapshot.previous);
+    }
+  }
   if (!outcome.loaded || !snapshot.current_valid) {
     snapshot = makeDefaultSnapshot();
     if (backend_ok) {
       writeSnapshot(snapshot);
     }
-  } else if (outcome.from_legacy && backend_ok) {
+  } else if ((outcome.from_legacy || migrated) && backend_ok) {
     writeSnapshot(snapshot);
   }
   g_snapshot = snapshot;
@@ -679,7 +748,8 @@ bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
   }
 
   KeyRecord rec = snapshot.current;
-  rec.session_key = deriveSessionFromShared(shared, local_pub, remote_pub_for_hash);
+  bool use_ephemeral = (remote_ephemeral != nullptr);
+  rec.session_key = deriveSessionFromShared(shared, local_pub, remote_pub_for_hash, use_ephemeral);
   rec.nonce_salt = nonceSaltFromKey(rec.session_key);
   rec.origin = KeyOrigin::REMOTE;
   rec.peer_public = remote_public;
