@@ -468,6 +468,18 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           </div>
         </section>
         <section class="settings-section">
+          <h3>Режим передачи</h3>
+          <div class="settings-group">
+            <div class="settings-toggle" id="lightPackControl">
+              <label class="chip switch">
+                <input type="checkbox" id="LIGHTPACK" />
+                <span>Light pack — прямой текст</span>
+              </label>
+              <div id="lightPackHint" class="field-hint">Сообщения передаются без служебного префикса и отображаются как есть.</div>
+            </div>
+          </div>
+        </section>
+        <section class="settings-section">
           <h3>Тестовые сообщения</h3>
           <div class="settings-group">
             <label>Сообщение для TESTRXM

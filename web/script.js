@@ -96,6 +96,8 @@ const UI = {
     ack: null,
     ackRetry: null,
     ackBusy: false,
+    lightPack: null,
+    lightPackBusy: false,
     rxBoostedGain: null,
     encBusy: false,
     encryption: null,
@@ -461,6 +463,9 @@ async function init() {
   UI.els.ackSettingHint = $("#ackSettingHint");
   UI.els.ackRetry = $("#ACKR");
   UI.els.ackRetryHint = $("#ackRetryHint");
+  UI.els.lightPack = $("#LIGHTPACK");
+  UI.els.lightPackHint = $("#lightPackHint");
+  UI.els.lightPackControl = $("#lightPackControl");
   UI.els.pauseInput = $("#PAUSE");
   UI.els.pauseHint = $("#pauseHint");
   UI.els.ackTimeout = $("#ACKT");
@@ -766,6 +771,9 @@ async function init() {
       void withAckLock(() => setAck(UI.els.ackSetting.checked));
     });
   }
+  if (UI.els.lightPack) {
+    UI.els.lightPack.addEventListener("change", onLightPackToggle);
+  }
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
   if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
@@ -825,6 +833,7 @@ async function init() {
   await syncSettingsFromDevice();
   await refreshAckState();
   await refreshAckRetry();
+  await refreshLightPackState();
   await refreshEncryptionState();
 
   await loadVersion().catch(() => {});
@@ -6463,6 +6472,95 @@ async function refreshAckState() {
   updateAckUi();
   return null;
 }
+function parseLightPackResponse(text) {
+  if (!text) return null;
+  const trimmed = String(text).trim();
+  if (!trimmed) return null;
+  const token = extractNumericToken(trimmed);
+  if (token === "1") return true;
+  if (token === "0") return false;
+  const low = trimmed.toLowerCase();
+  if (low.indexOf("light:1") >= 0) return true;
+  if (low.indexOf("light:0") >= 0) return false;
+  if (low.indexOf("on") >= 0 || low.indexOf("включ") >= 0) return true;
+  if (low.indexOf("off") >= 0 || low.indexOf("выключ") >= 0) return false;
+  return null;
+}
+function updateLightPackUi() {
+  const input = UI.els.lightPack;
+  const hint = UI.els.lightPackHint;
+  const wrap = UI.els.lightPackControl;
+  const state = UI.state.lightPack;
+  const busy = UI.state.lightPackBusy;
+  if (wrap) {
+    wrap.classList.toggle("waiting", busy);
+    if (busy) wrap.setAttribute("aria-busy", "true");
+    else wrap.removeAttribute("aria-busy");
+  }
+  if (input) {
+    input.disabled = busy;
+    if (state === null) {
+      input.indeterminate = true;
+    } else {
+      input.indeterminate = false;
+      input.checked = state;
+    }
+  }
+  if (hint) {
+    if (state === true) {
+      hint.textContent = "Light pack активен: текст передаётся без служебного префикса.";
+    } else if (state === false) {
+      hint.textContent = "Light pack выключен: используется стандартный префикс для пакетов.";
+    } else {
+      hint.textContent = "Состояние Light pack ещё не получено.";
+    }
+  }
+}
+async function refreshLightPackState() {
+  const res = await deviceFetch("LIGHT", {}, 2000);
+  if (res.ok) {
+    const state = parseLightPackResponse(res.text);
+    if (state !== null) {
+      UI.state.lightPack = state;
+      storage.set("set.LIGHTPACK", state ? "1" : "0");
+      updateLightPackUi();
+      return state;
+    }
+  }
+  UI.state.lightPack = null;
+  updateLightPackUi();
+  return null;
+}
+async function setLightPack(value) {
+  if (UI.state.lightPackBusy) return UI.state.lightPack;
+  UI.state.lightPackBusy = true;
+  updateLightPackUi();
+  try {
+    const response = await sendCommand("LIGHT", { v: value ? "1" : "0" });
+    if (typeof response === "string") {
+      const parsed = parseLightPackResponse(response);
+      if (parsed !== null) {
+        UI.state.lightPack = parsed;
+        storage.set("set.LIGHTPACK", parsed ? "1" : "0");
+        updateLightPackUi();
+        return parsed;
+      }
+    }
+    return await refreshLightPackState();
+  } finally {
+    UI.state.lightPackBusy = false;
+    updateLightPackUi();
+  }
+}
+async function onLightPackToggle(event) {
+  if (!UI.els.lightPack) return;
+  if (UI.state.lightPackBusy) {
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    updateLightPackUi();
+    return;
+  }
+  await setLightPack(UI.els.lightPack.checked);
+}
 async function refreshAckRetry() {
   const res = await deviceFetch("ACKR", {}, 2000);
   if (res.ok) {
@@ -6777,6 +6875,15 @@ function loadSettings() {
     }
   }
   updateRxBoostedGainUi();
+  if (UI.els.lightPack) {
+    const stored = storage.get("set.LIGHTPACK");
+    if (stored === "1" || stored === "0") {
+      UI.state.lightPack = stored === "1";
+    } else {
+      UI.state.lightPack = null;
+    }
+    updateLightPackUi();
+  }
 }
 function saveSettingsLocal() {
   for (let i = 0; i < SETTINGS_KEYS.length; i++) {
@@ -6879,6 +6986,7 @@ async function applySettingsToDevice() {
   note("Применение завершено.");
   await refreshChannels().catch(() => {});
   await refreshAckState();
+  await refreshLightPackState();
   await refreshRxBoostedGain();
 }
 function exportSettings() {
