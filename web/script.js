@@ -1,53 +1,4 @@
 /* satprjct web/app.js — vanilla JS only */
-const FALLBACK_ENDPOINT = "http://192.168.4.1"; // стандартный адрес точки доступа
-
-/* Определяем endpoint по умолчанию: стараемся использовать текущий origin устройства */
-function detectDefaultEndpoint() {
-  try {
-    if (typeof window !== "undefined" && window.location) {
-      const { protocol, origin, hostname } = window.location;
-      if (/^https?:$/i.test(protocol) && origin && origin !== "null") {
-        return origin;
-      }
-      if (!protocol && hostname) {
-        return `http://${hostname}`;
-      }
-    }
-  } catch (err) {
-    console.warn("[endpoint] не удалось определить origin по умолчанию:", err);
-  }
-  return FALLBACK_ENDPOINT;
-}
-
-const DEFAULT_ENDPOINT = detectDefaultEndpoint();
-
-/* Нормализуем endpoint: добавляем схему и убираем лишние символы */
-function normalizeEndpoint(value) {
-  const raw = value == null ? "" : String(value).trim();
-  if (!raw) return DEFAULT_ENDPOINT;
-  const ensureHttp = (candidate) => {
-    const url = new URL(candidate);
-    if (!/^https?:$/i.test(url.protocol)) {
-      throw new Error("unsupported protocol");
-    }
-    return url.origin || `${url.protocol}//${url.host}`;
-  };
-  try {
-    return ensureHttp(raw);
-  } catch (err) {
-    if (/^[A-Za-z0-9_.:-]+$/.test(raw)) {
-      try {
-        return ensureHttp(`http://${raw}`);
-      } catch (nested) {
-        console.warn("[endpoint] адрес без схемы не удалось нормализовать:", nested);
-      }
-    } else {
-      console.warn("[endpoint] некорректный endpoint, используется значение по умолчанию:", err);
-    }
-  }
-  return DEFAULT_ENDPOINT;
-}
-
 /* Безопасная обёртка для localStorage: веб-приложение должно работать даже без постоянного хранилища */
 const storage = (() => {
   const memory = new Map();
@@ -113,13 +64,6 @@ const storage = (() => {
   }
 })();
 
-const savedEndpoint = storage.get("endpoint");
-const initialEndpoint = normalizeEndpoint(savedEndpoint != null ? savedEndpoint : DEFAULT_ENDPOINT);
-if (savedEndpoint !== null && initialEndpoint !== savedEndpoint) {
-  // Сохраняем нормализованный адрес, чтобы повторно не обрабатывать его на каждой загрузке
-  storage.set("endpoint", initialEndpoint);
-}
-
 // Константы для вкладки наведения антенны
 const EARTH_RADIUS_KM = 6378.137; // экваториальный радиус Земли
 const GEO_ALTITUDE_KM = 35786.0;   // высота геостационарной орбиты над поверхностью
@@ -135,7 +79,7 @@ const UI = {
   tabs: ["chat", "channels", "pointing", "settings", "security", "debug"],
   els: {},
   cfg: {
-    endpoint: initialEndpoint,
+    endpoint: storage.get("endpoint") || "http://192.168.4.1",
     theme: storage.get("theme") || detectPreferredTheme(),
     accent: (storage.get("accent") === "red") ? "red" : "default",
     autoNight: storage.get("autoNight") !== "0",
@@ -742,11 +686,10 @@ async function init() {
   if (UI.els.endpoint) {
     UI.els.endpoint.value = UI.cfg.endpoint;
     UI.els.endpoint.addEventListener("change", () => {
-      const normalized = normalizeEndpoint(UI.els.endpoint.value);
-      UI.cfg.endpoint = normalized;
-      UI.els.endpoint.value = normalized;
-      storage.set("endpoint", normalized);
-      note("Endpoint: " + normalized);
+      const value = UI.els.endpoint.value.trim() || "http://192.168.4.1";
+      UI.cfg.endpoint = value;
+      storage.set("endpoint", UI.cfg.endpoint);
+      note("Endpoint: " + UI.cfg.endpoint);
       resyncAfterEndpointChange().catch((err) => console.warn("[endpoint] resync", err));
     });
   }
@@ -2089,13 +2032,11 @@ function parseSlashCommand(raw) {
 /* Команды устройства */
 async function deviceFetch(cmd, params, timeoutMs) {
   const timeout = timeoutMs || 4000;
-  const endpoint = normalizeEndpoint(UI.cfg.endpoint);
-  UI.cfg.endpoint = endpoint;
   let base;
   try {
-    base = new URL(endpoint);
+    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
   } catch (e) {
-    base = new URL(DEFAULT_ENDPOINT);
+    base = new URL("http://192.168.4.1");
   }
   const candidates = [
     new URL("/cmd", base),
@@ -2197,13 +2138,11 @@ async function sendCommand(cmd, params, opts) {
 }
 async function postTx(text, timeoutMs) {
   const timeout = timeoutMs || 5000;
-  const endpoint = normalizeEndpoint(UI.cfg.endpoint);
-  UI.cfg.endpoint = endpoint;
   let base;
   try {
-    base = new URL(endpoint);
+    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
   } catch (e) {
-    base = new URL(DEFAULT_ENDPOINT);
+    base = new URL("http://192.168.4.1");
   }
   const url = new URL("/api/tx", base);
   const ctrl = new AbortController();
@@ -2232,13 +2171,11 @@ async function postTx(text, timeoutMs) {
 
 async function postImage(blob, meta, timeoutMs) {
   const timeout = timeoutMs || 8000;
-  const endpoint = normalizeEndpoint(UI.cfg.endpoint);
-  UI.cfg.endpoint = endpoint;
   let base;
   try {
-    base = new URL(endpoint);
+    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
   } catch (e) {
-    base = new URL(DEFAULT_ENDPOINT);
+    base = new URL("http://192.168.4.1");
   }
   const url = new URL("/api/tx-image", base);
   const headers = buildImageHeaders(meta);
@@ -3716,14 +3653,12 @@ function openReceivedPushChannel() {
     return;
   }
   closeReceivedPushChannel({ silent: true });
-  const endpoint = normalizeEndpoint(UI.cfg.endpoint);
-  UI.cfg.endpoint = endpoint;
   let url;
   try {
-    const base = new URL(endpoint);
+    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
     url = new URL("/events", base).toString();
   } catch (err) {
-    url = new URL("/events", DEFAULT_ENDPOINT).toString();
+    url = "http://192.168.4.1/events";
   }
   try {
     const source = new EventSource(url);
@@ -8813,12 +8748,10 @@ async function loadVersion() {
     // окно может не иметь корректного href (например, file://)
   }
   try {
-    const endpoint = normalizeEndpoint(UI.cfg.endpoint);
-    UI.cfg.endpoint = endpoint;
-    const base = new URL(endpoint);
+    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
     targets.push(new URL("/ver", base));
   } catch (err) {
-    targets.push(new URL("/ver", DEFAULT_ENDPOINT));
+    targets.push(new URL("/ver", "http://192.168.4.1"));
   }
   const seen = new Set();
   let lastError = null;
