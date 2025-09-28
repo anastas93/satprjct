@@ -96,17 +96,24 @@ std::array<uint8_t,12> makeNonce(uint32_t msg_id, uint16_t frag_idx) {
 bool buildFrame(uint32_t msg_id,
                 const std::array<uint8_t,32>& public_key,
                 const std::array<uint8_t,4>& key_id,
-                std::vector<uint8_t>& frame_out) {
+                std::vector<uint8_t>& frame_out,
+                const std::array<uint8_t,32>* ephemeral_public) {
   frame_out.clear();
   std::vector<uint8_t> plain;
-  plain.reserve(4 + 1 + 3 + key_id.size() + public_key.size());
+  const bool has_ephemeral = (ephemeral_public != nullptr);
+  const uint8_t version = has_ephemeral ? VERSION_EPHEMERAL : VERSION_LEGACY;
+  const uint8_t flags = has_ephemeral ? FLAG_HAS_EPHEMERAL : 0;
+  plain.reserve(4 + 1 + 3 + key_id.size() + public_key.size() + (has_ephemeral ? ephemeral_public->size() : 0));
   plain.insert(plain.end(), std::begin(MAGIC), std::end(MAGIC));
-  plain.push_back(VERSION);
-  plain.push_back(0);
+  plain.push_back(version);
+  plain.push_back(flags);
   plain.push_back(0);
   plain.push_back(0);
   plain.insert(plain.end(), key_id.begin(), key_id.end());
   plain.insert(plain.end(), public_key.begin(), public_key.end());
+  if (has_ephemeral) {
+    plain.insert(plain.end(), ephemeral_public->begin(), ephemeral_public->end());
+  }
 
   auto nonce = makeNonce(msg_id, 0);
   std::vector<uint8_t> cipher;
@@ -141,8 +148,7 @@ bool buildFrame(uint32_t msg_id,
 }
 
 bool parseFrame(const uint8_t* frame, size_t len,
-                std::array<uint8_t,32>& public_key,
-                std::array<uint8_t,4>& key_id,
+                FramePayload& payload,
                 uint32_t& msg_id_out) {
   if (!frame || len < FrameHeader::SIZE * 2) return false;
   std::vector<uint8_t> buf(frame, frame + len);
@@ -158,30 +164,65 @@ bool parseFrame(const uint8_t* frame, size_t len,
 
   const uint8_t* payload_p = buf.data() + FrameHeader::SIZE * 2;
   size_t payload_len = buf.size() - FrameHeader::SIZE * 2;
-  std::vector<uint8_t> payload;
-  removePilots(payload_p, payload_len, payload);
-  if (payload.size() != hdr.payload_len) return false;
-  if (!hdr.checkFrameCrc(payload.data(), payload.size())) return false;
-  if (payload.size() < TAG_LEN) return false;
+  std::vector<uint8_t> payload_bytes;
+  removePilots(payload_p, payload_len, payload_bytes);
+  if (payload_bytes.size() != hdr.payload_len) return false;
+  if (!hdr.checkFrameCrc(payload_bytes.data(), payload_bytes.size())) return false;
+  if (payload_bytes.size() < TAG_LEN) return false;
 
-  size_t cipher_len = payload.size() - TAG_LEN;
-  const uint8_t* tag = payload.data() + cipher_len;
+  size_t cipher_len = payload_bytes.size() - TAG_LEN;
+  const uint8_t* tag = payload_bytes.data() + cipher_len;
   auto nonce = makeNonce(hdr.msg_id, hdr.frag_idx);
   std::vector<uint8_t> plain;
   if (!decrypt_ccm(rootKey().data(), rootKey().size(),
                    nonce.data(), nonce.size(),
                    nullptr, 0,
-                   payload.data(), cipher_len,
+                   payload_bytes.data(), cipher_len,
                    tag, TAG_LEN, plain)) {
     return false;
   }
-  if (plain.size() < 4 + 1 + 3 + key_id.size() + public_key.size()) return false;
+  if (plain.size() < 4 + 1 + 3 + payload.key_id.size() + payload.public_key.size()) return false;
   if (!std::equal(std::begin(MAGIC), std::end(MAGIC), plain.begin())) return false;
-  if (plain[4] != VERSION) return false;
-
-  std::copy_n(plain.data() + 8, key_id.size(), key_id.begin());
-  std::copy_n(plain.data() + 12, public_key.size(), public_key.begin());
+  payload.version = plain[4];
+  payload.flags = plain[5];
+  if (payload.version != VERSION_LEGACY && payload.version != VERSION_EPHEMERAL) {
+    return false;
+  }
+  std::copy_n(plain.data() + 8, payload.key_id.size(), payload.key_id.begin());
+  std::copy_n(plain.data() + 12, payload.public_key.size(), payload.public_key.begin());
+  payload.has_ephemeral = false;
+  if (payload.version == VERSION_EPHEMERAL) {
+    if ((payload.flags & FLAG_HAS_EPHEMERAL) == 0) {
+      return false;  // версия 2 всегда должна содержать эпемерный ключ
+    }
+    if (plain.size() < 12 + payload.public_key.size() + payload.ephemeral_public.size()) {
+      return false;
+    }
+    std::copy_n(plain.data() + 12 + payload.public_key.size(),
+                payload.ephemeral_public.size(),
+                payload.ephemeral_public.begin());
+    payload.has_ephemeral = true;
+  } else {
+    if (payload.flags != 0) {
+      // В старой версии флаги должны быть равны нулю
+      return false;
+    }
+    payload.ephemeral_public.fill(0);
+  }
   msg_id_out = hdr.msg_id;
+  return true;
+}
+
+bool parseFrame(const uint8_t* frame, size_t len,
+                std::array<uint8_t,32>& public_key,
+                std::array<uint8_t,4>& key_id,
+                uint32_t& msg_id_out) {
+  FramePayload payload;
+  if (!parseFrame(frame, len, payload, msg_id_out)) {
+    return false;
+  }
+  public_key = payload.public_key;
+  key_id = payload.key_id;
   return true;
 }
 

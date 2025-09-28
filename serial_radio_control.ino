@@ -160,6 +160,7 @@ struct KeyTransferRuntime {
   bool completed = false;               // удалось ли применить ключ
   String error;                         // код ошибки для ответа в HTTP/Serial
   uint32_t last_msg_id = 0;             // идентификатор последнего пакета
+  bool legacy_peer = false;             // последний принятый кадр был в легаси-формате
 } keyTransferRuntime;
 
 // Преобразование массива байтов в hex-строку (верхний регистр)
@@ -957,20 +958,21 @@ String readVersionFile() {
 
 // Обработка специального кадра KEYTRANSFER; возвращает true, если пакет потреблён
 bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
-  std::array<uint8_t,32> remote_pub{};
-  std::array<uint8_t,4> remote_id{};
   uint32_t msg_id = 0;
-  if (!KeyTransfer::parseFrame(data, len, remote_pub, remote_id, msg_id)) {
+  KeyTransfer::FramePayload payload;
+  if (!KeyTransfer::parseFrame(data, len, payload, msg_id)) {
     return false;                                  // кадр не относится к обмену ключами
   }
   keyTransferRuntime.last_msg_id = msg_id;
+  keyTransferRuntime.legacy_peer = (payload.version == KeyTransfer::VERSION_LEGACY);
   if (!keyTransferRuntime.waiting) {
     SimpleLogger::logStatus("KEYTRANSFER IGN");   // пришёл неожиданный ключ
     return true;                                   // не передаём дальше в RxModule
   }
   KeyLoader::KeyRecord previous_snapshot;          // сохраняем снимок до применения удалённого ключа
   bool has_previous_snapshot = KeyLoader::loadKeyRecord(previous_snapshot);
-  if (!KeyLoader::applyRemotePublic(remote_pub)) {
+  const std::array<uint8_t,32>* remote_ephemeral = payload.has_ephemeral ? &payload.ephemeral_public : nullptr;
+  if (!KeyLoader::applyRemotePublic(payload.public_key, remote_ephemeral)) {
     keyTransferRuntime.error = String("apply");
     keyTransferRuntime.waiting = false;
     keyTransferRuntime.completed = false;
@@ -978,12 +980,13 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
     Serial.println("KEYTRANSFER: ошибка применения удалённого ключа");
     return true;
   }
-  bool skip_remote_check = std::all_of(remote_id.begin(), remote_id.end(), [](uint8_t b) {
-    return b == 0;
-  });
+  bool skip_remote_check = (payload.version == KeyTransfer::VERSION_EPHEMERAL) ||
+                           std::all_of(payload.key_id.begin(), payload.key_id.end(), [](uint8_t b) {
+                             return b == 0;
+                           });
   if (!skip_remote_check) {
     auto local_id = KeyLoader::keyId(KeyLoader::loadKey());
-    bool ids_match = std::equal(local_id.begin(), local_id.end(), remote_id.begin());
+    bool ids_match = std::equal(local_id.begin(), local_id.end(), payload.key_id.begin());
     if (!ids_match) {
       bool restored = KeyLoader::restorePreviousKey();
       if (!restored && has_previous_snapshot) {
@@ -1001,12 +1004,12 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
       std::string log = "KEYTRANSFER MISMATCH ";
       log += toHex(local_id).c_str();
       log += "/";
-      log += toHex(remote_id).c_str();
+      log += toHex(payload.key_id).c_str();
       SimpleLogger::logStatus(log);
       Serial.print("KEYTRANSFER: несовпадение идентификаторов (local=");
       Serial.print(toHex(local_id));
       Serial.print(", remote=");
-      Serial.print(toHex(remote_id));
+      Serial.print(toHex(payload.key_id));
       Serial.println(")");
       Serial.println("KEYTRANSFER: откатываемся на предыдущий ключ");
       return true;
@@ -1107,21 +1110,35 @@ String cmdKeyTransferSendLora() {
   DEBUG_LOG("Key: отправка ключа по LoRa");
   auto state = KeyLoader::getState();
   std::array<uint8_t,4> key_id{};
-  bool has_peer = KeyLoader::hasPeerPublic();
-  if (has_peer) {
-    // Если известен партнёр, рассчитываем идентификатор по фактическому ECDH-ключу
-    if (!KeyLoader::previewPeerKeyId(key_id)) {
-      SimpleLogger::logStatus("KEYTRANSFER ERR PREVIEW");
-      Serial.println("KEYTRANSFER: ошибка расчёта идентификатора ключа");
-      return String("{\"error\":\"peer\"}");
+  std::array<uint8_t,32> ephemeral_public{};
+  const std::array<uint8_t,32>* ephemeral_ptr = nullptr;
+  bool use_legacy = keyTransferRuntime.legacy_peer;
+  if (use_legacy) {
+    // При выявленном легаси-пире отправляем старый формат без эпемерного ключа
+    KeyLoader::endEphemeralSession();
+    bool has_peer = KeyLoader::hasPeerPublic();
+    if (has_peer) {
+      if (!KeyLoader::previewPeerKeyId(key_id)) {
+        SimpleLogger::logStatus("KEYTRANSFER ERR PREVIEW");
+        Serial.println("KEYTRANSFER: ошибка расчёта идентификатора ключа");
+        return String("{\"error\":\"peer\"}");
+      }
+    } else {
+      key_id.fill(0);
     }
   } else {
-    // Для первичного обмена передаём специальное значение (все нули)
-    key_id.fill(0);
+    // Для нового обмена формируем эпемерную пару X25519
+    if (!KeyLoader::startEphemeralSession(ephemeral_public, true)) {
+      SimpleLogger::logStatus("KEYTRANSFER ERR EPHEM");
+      Serial.println("KEYTRANSFER: не удалось подготовить эпемерный ключ");
+      return String("{\"error\":\"ephemeral\"}");
+    }
+    key_id.fill(0);  // удалённая сторона проверяет результат после применения кадра
+    ephemeral_ptr = &ephemeral_public;
   }
   std::vector<uint8_t> frame;
   uint32_t msg_id = generateKeyTransferMsgId();
-  if (!KeyTransfer::buildFrame(msg_id, state.root_public, key_id, frame)) {
+  if (!KeyTransfer::buildFrame(msg_id, state.root_public, key_id, frame, ephemeral_ptr)) {
     return String("{\"error\":\"build\"}");
   }
   tx.prepareExternalSend();
@@ -1136,6 +1153,8 @@ String cmdKeyTransferSendLora() {
 // Ожидание и приём корневого ключа через LoRa
 String cmdKeyTransferReceiveLora() {
   DEBUG_LOG("Key: ожидание ключа по LoRa");
+  std::array<uint8_t,32> prepared_ephemeral{};
+  KeyLoader::startEphemeralSession(prepared_ephemeral, false);  // гарантируем наличие пары для обмена
   keyTransferRuntime.waiting = true;
   keyTransferRuntime.completed = false;
   keyTransferRuntime.error = String();
@@ -1152,6 +1171,7 @@ String cmdKeyTransferReceiveLora() {
       String err = keyTransferRuntime.error;
       keyTransferRuntime.error = String();
       keyTransferRuntime.waiting = false;
+      KeyLoader::endEphemeralSession();
       String response = String("{\"error\":\"") + err + "\"";
       if (err.equalsIgnoreCase("verify")) {
         response += ",\"message\":\"несовпадение идентификаторов ключей\"";
@@ -1168,6 +1188,7 @@ String cmdKeyTransferReceiveLora() {
   if (keyTransferRuntime.error.length()) {
     String err = keyTransferRuntime.error;
     keyTransferRuntime.error = String();
+    KeyLoader::endEphemeralSession();
     String response = String("{\"error\":\"") + err + "\"";
     if (err.equalsIgnoreCase("verify")) {
       response += ",\"message\":\"несовпадение идентификаторов ключей\"";
@@ -1175,6 +1196,7 @@ String cmdKeyTransferReceiveLora() {
     response += "}";
     return response;
   }
+  KeyLoader::endEphemeralSession();
   return String("{\"error\":\"timeout\"}");
 }
 

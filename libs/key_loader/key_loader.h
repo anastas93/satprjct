@@ -64,10 +64,12 @@ bool restorePreviousKey(KeyRecord* out = nullptr);
 // Обновление активного ключа по публичному ключу удалённой стороны (ECDH + SHA-256).
 // Возвращает false при недопустимом публичном ключе или ошибке записи.
 bool applyRemotePublic(const std::array<uint8_t,32>& remote_public,
+                       const std::array<uint8_t,32>* remote_ephemeral = nullptr,
                        KeyRecord* out = nullptr);
 
 // Повторное применение сохранённого публичного ключа удалённой стороны.
-bool regenerateFromPeer(KeyRecord* out = nullptr);
+bool regenerateFromPeer(const std::array<uint8_t,32>* remote_ephemeral = nullptr,
+                        KeyRecord* out = nullptr);
 
 // Получение полного содержимого файла (для тестов и служебных задач).
 bool loadKeyRecord(KeyRecord& out);
@@ -101,6 +103,15 @@ bool setPreferredBackend(StorageBackend backend);
 
 // Короткое текстовое имя бэкенда для логов/UI.
 const char* backendName(StorageBackend backend);
+
+// Запуск нового эпемерного сеанса: генерирует пару X25519 и возвращает публичный ключ.
+bool startEphemeralSession(std::array<uint8_t,32>& public_out, bool force_new = true);
+
+// Проверка наличия активной эпемерной пары.
+bool hasEphemeralSession();
+
+// Сброс активной эпемерной пары (зануление приватного ключа).
+void endEphemeralSession();
 
 }  // namespace KeyLoader
 
