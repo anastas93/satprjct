@@ -90,6 +90,7 @@ const UI = {
     lastMessage: "",
   },
   state: {
+    activeTab: null,
     bank: null,
     channel: null,
     ack: null,
@@ -129,6 +130,12 @@ const UI = {
     chatHistory: [],
     chatHydrating: false,
     chatScrollPinned: true,
+    chatUnread: (() => {
+      const raw = storage.get(CHAT_UNREAD_STORAGE_KEY);
+      const parsed = raw != null ? parseInt(raw, 10) : NaN;
+      if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+      return Math.min(Math.max(parsed, 0), CHAT_UNREAD_MAX);
+    })(),
     chatSoundCtx: null,
     chatSoundLast: 0,
     chatImages: null,
@@ -191,6 +198,9 @@ const IMAGE_ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/heic", "i
 const IMAGE_MAX_SOURCE_SIZE = 20 * 1024 * 1024; // 20 МБ — верхний предел исходного файла
 const IMAGE_CACHE_LIMIT = 32; // ограничение количества кэшированных изображений в памяти
 let chatDropCounter = 0; // глубина вложенных dragenter для зоны чата
+
+const CHAT_UNREAD_STORAGE_KEY = "chatUnread"; // ключ хранения количества непрочитанных сообщений
+const CHAT_UNREAD_MAX = 999; // максимальное значение счётчика, отображаемое в бейдже
 
 // Справочные данные по каналам из CSV
 const channelReference = {
@@ -628,6 +638,7 @@ async function init() {
   // Навигация по вкладкам
   const hash = location.hash ? location.hash.slice(1) : "";
   const initialTab = UI.tabs.includes(hash) ? hash : (storage.get("activeTab") || "chat");
+  UI.state.activeTab = initialTab;
   for (const tab of UI.tabs) {
     const link = UI.els.nav ? UI.els.nav.querySelector('[data-tab="' + tab + '"]') : null;
     if (link) {
@@ -638,6 +649,7 @@ async function init() {
       });
     }
   }
+  updateChatUnreadBadge();
   setTab(initialTab);
   initPointingTab();
 
@@ -832,8 +844,48 @@ function setMenuOpen(open) {
   document.body.classList.toggle("nav-open", open);
 }
 
+/* Обновляем бейдж непрочитанных сообщений в меню */
+function updateChatUnreadBadge(opts) {
+  const options = opts || {};
+  const nav = UI.els.nav || $("#siteNav");
+  const link = nav ? nav.querySelector('[data-tab="chat"]') : $(".nav [data-tab=\"chat\"]");
+  if (!link) return;
+  const badge = link.querySelector(".nav-badge");
+  if (!badge) return;
+  if (!badge.dataset.listener) {
+    badge.addEventListener("animationend", () => {
+      badge.classList.remove("nav-badge-pop");
+    });
+    badge.dataset.listener = "1";
+  }
+  const unreadRaw = Number(UI.state.chatUnread || 0);
+  const unread = Math.max(0, Math.min(unreadRaw, CHAT_UNREAD_MAX));
+  if (unread <= 0) {
+    badge.hidden = true;
+    badge.textContent = "";
+    badge.setAttribute("aria-live", "off");
+    badge.setAttribute("aria-label", "Непрочитанных сообщений нет");
+    badge.classList.remove("nav-badge-pop");
+    badge.dataset.count = "0";
+    return;
+  }
+  const text = unread > 99 ? "99+" : String(unread);
+  badge.hidden = false;
+  badge.textContent = text;
+  badge.setAttribute("aria-live", "polite");
+  badge.setAttribute("aria-label", `Непрочитанные сообщения: ${text}`);
+  badge.dataset.count = String(unread);
+  if (options.animate) {
+    badge.classList.remove("nav-badge-pop");
+    // Перезапуск анимации появления бейджа
+    void badge.offsetWidth;
+    badge.classList.add("nav-badge-pop");
+  }
+}
+
 /* Вкладки */
 function setTab(tab) {
+  UI.state.activeTab = tab;
   for (const t of UI.tabs) {
     const panel = $("#tab-" + t);
     const link = UI.els.nav ? UI.els.nav.querySelector('[data-tab="' + t + '"]') : null;
@@ -846,7 +898,16 @@ function setTab(tab) {
   }
   storage.set("activeTab", tab);
   if (tab !== "channels") hideChannelInfo();
-  if (tab === "chat") updateChatScrollButton();
+  if (tab === "chat") {
+    if (UI.state.chatUnread !== 0) {
+      UI.state.chatUnread = 0;
+    }
+    storage.set(CHAT_UNREAD_STORAGE_KEY, "0");
+    updateChatUnreadBadge();
+    updateChatScrollButton();
+  } else {
+    updateChatUnreadBadge();
+  }
 }
 
 /* Тема */
@@ -3082,6 +3143,21 @@ function logReceivedMessage(entry, opts) {
     // В чат попадают только элементы со статусом ready; без имени их сложно отслеживать.
     return;
   }
+  if (options.isNew && UI.state.activeTab !== "chat") {
+    const current = Math.max(0, Number(UI.state.chatUnread) || 0);
+    const next = Math.min(current + 1, CHAT_UNREAD_MAX);
+    if (next !== current) {
+      UI.state.chatUnread = next;
+      storage.set(CHAT_UNREAD_STORAGE_KEY, String(next));
+    }
+    updateChatUnreadBadge({ animate: true });
+  } else if (options.isNew && UI.state.activeTab === "chat") {
+    if (UI.state.chatUnread !== 0) {
+      UI.state.chatUnread = 0;
+      storage.set(CHAT_UNREAD_STORAGE_KEY, "0");
+    }
+    updateChatUnreadBadge();
+  }
   const bytes = entry && entry._hexBytes instanceof Uint8Array ? entry._hexBytes : hexToBytes(entry.hex);
   const isImage = entryType === "ready" && bytes && bytes.length >= 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
   const textValue = resolveReceivedText(entry);
@@ -3471,14 +3547,16 @@ function handleReceivedSnapshot(items) {
   const prev = state.known;
   const next = new Set();
   const list = Array.isArray(items) ? items : [];
+  const firstLoad = !state.snapshotReady;
   for (let i = 0; i < list.length; i += 1) {
     const entry = list[i];
     const name = entry && entry.name ? String(entry.name).trim() : "";
     if (name) next.add(name);
-    const isNew = !!(name && !prev.has(name));
+    const isNew = !firstLoad && !!(name && !prev.has(name));
     logReceivedMessage(entry, { isNew });
   }
   state.known = next;
+  state.snapshotReady = true;
   updateChatReceivingIndicatorFromRsts(list);
 }
 

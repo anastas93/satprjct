@@ -196,6 +196,43 @@ body.nav-open { overflow: hidden; }
   font-weight: 700;
   position: relative;
 }
+.nav a .nav-badge {
+  /* Бейдж непрочитанных сообщений в шапке */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 .35rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--danger) 78%, black 15%);
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: .02em;
+  box-shadow: 0 4px 10px rgba(239, 68, 68, .35);
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+:root.light .nav a .nav-badge {
+  background: color-mix(in oklab, var(--danger) 85%, white 20%);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(220, 38, 38, .35);
+}
+:root.red .nav a .nav-badge {
+  background: color-mix(in oklab, var(--accent-2) 80%, black 10%);
+  box-shadow: 0 4px 10px rgba(244, 63, 94, .4);
+}
+.nav a .nav-badge.nav-badge-pop {
+  animation: nav-badge-pop .45s cubic-bezier(.2, .75, .3, 1.2);
+}
+@keyframes nav-badge-pop {
+  0% { transform: scale(.6); opacity: 0; }
+  55% { transform: scale(1.08); opacity: 1; }
+  75% { transform: scale(.95); }
+  100% { transform: scale(1); opacity: 1; }
+}
 .nav a[aria-current="page"] {
   color: var(--text);
   background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 70%, white 30%), var(--panel-2));
