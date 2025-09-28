@@ -2349,6 +2349,55 @@ const char MGRS_JS[] PROGMEM = R"~~~(
 // script.js
 const char SCRIPT_JS[] PROGMEM = R"~~~(
 /* satprjct web/app.js — vanilla JS only */
+const FALLBACK_ENDPOINT = "http://192.168.4.1"; // стандартный адрес точки доступа
+
+/* Определяем endpoint по умолчанию: стараемся использовать текущий origin устройства */
+function detectDefaultEndpoint() {
+  try {
+    if (typeof window !== "undefined" && window.location) {
+      const { protocol, origin, hostname } = window.location;
+      if (/^https?:$/i.test(protocol) && origin && origin !== "null") {
+        return origin;
+      }
+      if (!protocol && hostname) {
+        return `http://${hostname}`;
+      }
+    }
+  } catch (err) {
+    console.warn("[endpoint] не удалось определить origin по умолчанию:", err);
+  }
+  return FALLBACK_ENDPOINT;
+}
+
+const DEFAULT_ENDPOINT = detectDefaultEndpoint();
+
+/* Нормализуем endpoint: добавляем схему и убираем лишние символы */
+function normalizeEndpoint(value) {
+  const raw = value == null ? "" : String(value).trim();
+  if (!raw) return DEFAULT_ENDPOINT;
+  const ensureHttp = (candidate) => {
+    const url = new URL(candidate);
+    if (!/^https?:$/i.test(url.protocol)) {
+      throw new Error("unsupported protocol");
+    }
+    return url.origin || `${url.protocol}//${url.host}`;
+  };
+  try {
+    return ensureHttp(raw);
+  } catch (err) {
+    if (/^[A-Za-z0-9_.:-]+$/.test(raw)) {
+      try {
+        return ensureHttp(`http://${raw}`);
+      } catch (nested) {
+        console.warn("[endpoint] адрес без схемы не удалось нормализовать:", nested);
+      }
+    } else {
+      console.warn("[endpoint] некорректный endpoint, используется значение по умолчанию:", err);
+    }
+  }
+  return DEFAULT_ENDPOINT;
+}
+
 /* Безопасная обёртка для localStorage: веб-приложение должно работать даже без постоянного хранилища */
 const storage = (() => {
   const memory = new Map();
@@ -2414,6 +2463,13 @@ const storage = (() => {
   }
 })();
 
+const savedEndpoint = storage.get("endpoint");
+const initialEndpoint = normalizeEndpoint(savedEndpoint != null ? savedEndpoint : DEFAULT_ENDPOINT);
+if (savedEndpoint !== null && initialEndpoint !== savedEndpoint) {
+  // Сохраняем нормализованный адрес, чтобы повторно не обрабатывать его на каждой загрузке
+  storage.set("endpoint", initialEndpoint);
+}
+
 // Константы для вкладки наведения антенны
 const EARTH_RADIUS_KM = 6378.137; // экваториальный радиус Земли
 const GEO_ALTITUDE_KM = 35786.0;   // высота геостационарной орбиты над поверхностью
@@ -2429,7 +2485,7 @@ const UI = {
   tabs: ["chat", "channels", "pointing", "settings", "security", "debug"],
   els: {},
   cfg: {
-    endpoint: storage.get("endpoint") || "http://192.168.4.1",
+    endpoint: initialEndpoint,
     theme: storage.get("theme") || detectPreferredTheme(),
     accent: (storage.get("accent") === "red") ? "red" : "default",
     autoNight: storage.get("autoNight") !== "0",
@@ -2440,6 +2496,7 @@ const UI = {
     lastMessage: "",
   },
   state: {
+    activeTab: null,
     bank: null,
     channel: null,
     ack: null,
@@ -2479,6 +2536,12 @@ const UI = {
     chatHistory: [],
     chatHydrating: false,
     chatScrollPinned: true,
+    chatUnread: (() => {
+      const raw = storage.get(CHAT_UNREAD_STORAGE_KEY);
+      const parsed = raw != null ? parseInt(raw, 10) : NaN;
+      if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+      return Math.min(Math.max(parsed, 0), CHAT_UNREAD_MAX);
+    })(),
     chatSoundCtx: null,
     chatSoundLast: 0,
     chatImages: null,
@@ -2541,6 +2604,9 @@ const IMAGE_ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/heic", "i
 const IMAGE_MAX_SOURCE_SIZE = 20 * 1024 * 1024; // 20 МБ — верхний предел исходного файла
 const IMAGE_CACHE_LIMIT = 32; // ограничение количества кэшированных изображений в памяти
 let chatDropCounter = 0; // глубина вложенных dragenter для зоны чата
+
+const CHAT_UNREAD_STORAGE_KEY = "chatUnread"; // ключ хранения количества непрочитанных сообщений
+const CHAT_UNREAD_MAX = 999; // максимальное значение счётчика, отображаемое в бейдже
 
 // Справочные данные по каналам из CSV
 const channelReference = {
@@ -2978,6 +3044,7 @@ async function init() {
   // Навигация по вкладкам
   const hash = location.hash ? location.hash.slice(1) : "";
   const initialTab = UI.tabs.includes(hash) ? hash : (storage.get("activeTab") || "chat");
+  UI.state.activeTab = initialTab;
   for (const tab of UI.tabs) {
     const link = UI.els.nav ? UI.els.nav.querySelector('[data-tab="' + tab + '"]') : null;
     if (link) {
@@ -2988,6 +3055,7 @@ async function init() {
       });
     }
   }
+  updateChatUnreadBadge();
   setTab(initialTab);
   initPointingTab();
 
@@ -3024,10 +3092,11 @@ async function init() {
   if (UI.els.endpoint) {
     UI.els.endpoint.value = UI.cfg.endpoint;
     UI.els.endpoint.addEventListener("change", () => {
-      const value = UI.els.endpoint.value.trim() || "http://192.168.4.1";
-      UI.cfg.endpoint = value;
-      storage.set("endpoint", UI.cfg.endpoint);
-      note("Endpoint: " + UI.cfg.endpoint);
+      const normalized = normalizeEndpoint(UI.els.endpoint.value);
+      UI.cfg.endpoint = normalized;
+      UI.els.endpoint.value = normalized;
+      storage.set("endpoint", normalized);
+      note("Endpoint: " + normalized);
       resyncAfterEndpointChange().catch((err) => console.warn("[endpoint] resync", err));
     });
   }
@@ -3182,8 +3251,48 @@ function setMenuOpen(open) {
   document.body.classList.toggle("nav-open", open);
 }
 
+/* Обновляем бейдж непрочитанных сообщений в меню */
+function updateChatUnreadBadge(opts) {
+  const options = opts || {};
+  const nav = UI.els.nav || $("#siteNav");
+  const link = nav ? nav.querySelector('[data-tab="chat"]') : $(".nav [data-tab=\"chat\"]");
+  if (!link) return;
+  const badge = link.querySelector(".nav-badge");
+  if (!badge) return;
+  if (!badge.dataset.listener) {
+    badge.addEventListener("animationend", () => {
+      badge.classList.remove("nav-badge-pop");
+    });
+    badge.dataset.listener = "1";
+  }
+  const unreadRaw = Number(UI.state.chatUnread || 0);
+  const unread = Math.max(0, Math.min(unreadRaw, CHAT_UNREAD_MAX));
+  if (unread <= 0) {
+    badge.hidden = true;
+    badge.textContent = "";
+    badge.setAttribute("aria-live", "off");
+    badge.setAttribute("aria-label", "Непрочитанных сообщений нет");
+    badge.classList.remove("nav-badge-pop");
+    badge.dataset.count = "0";
+    return;
+  }
+  const text = unread > 99 ? "99+" : String(unread);
+  badge.hidden = false;
+  badge.textContent = text;
+  badge.setAttribute("aria-live", "polite");
+  badge.setAttribute("aria-label", `Непрочитанные сообщения: ${text}`);
+  badge.dataset.count = String(unread);
+  if (options.animate) {
+    badge.classList.remove("nav-badge-pop");
+    // Перезапуск анимации появления бейджа
+    void badge.offsetWidth;
+    badge.classList.add("nav-badge-pop");
+  }
+}
+
 /* Вкладки */
 function setTab(tab) {
+  UI.state.activeTab = tab;
   for (const t of UI.tabs) {
     const panel = $("#tab-" + t);
     const link = UI.els.nav ? UI.els.nav.querySelector('[data-tab="' + t + '"]') : null;
@@ -3196,7 +3305,16 @@ function setTab(tab) {
   }
   storage.set("activeTab", tab);
   if (tab !== "channels") hideChannelInfo();
-  if (tab === "chat") updateChatScrollButton();
+  if (tab === "chat") {
+    if (UI.state.chatUnread !== 0) {
+      UI.state.chatUnread = 0;
+    }
+    storage.set(CHAT_UNREAD_STORAGE_KEY, "0");
+    updateChatUnreadBadge();
+    updateChatScrollButton();
+  } else {
+    updateChatUnreadBadge();
+  }
 }
 
 /* Тема */
@@ -4321,11 +4439,13 @@ function parseSlashCommand(raw) {
 /* Команды устройства */
 async function deviceFetch(cmd, params, timeoutMs) {
   const timeout = timeoutMs || 4000;
+  const endpoint = normalizeEndpoint(UI.cfg.endpoint);
+  UI.cfg.endpoint = endpoint;
   let base;
   try {
-    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+    base = new URL(endpoint);
   } catch (e) {
-    base = new URL("http://192.168.4.1");
+    base = new URL(DEFAULT_ENDPOINT);
   }
   const candidates = [
     new URL("/cmd", base),
@@ -4427,11 +4547,13 @@ async function sendCommand(cmd, params, opts) {
 }
 async function postTx(text, timeoutMs) {
   const timeout = timeoutMs || 5000;
+  const endpoint = normalizeEndpoint(UI.cfg.endpoint);
+  UI.cfg.endpoint = endpoint;
   let base;
   try {
-    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+    base = new URL(endpoint);
   } catch (e) {
-    base = new URL("http://192.168.4.1");
+    base = new URL(DEFAULT_ENDPOINT);
   }
   const url = new URL("/api/tx", base);
   const ctrl = new AbortController();
@@ -4460,11 +4582,13 @@ async function postTx(text, timeoutMs) {
 
 async function postImage(blob, meta, timeoutMs) {
   const timeout = timeoutMs || 8000;
+  const endpoint = normalizeEndpoint(UI.cfg.endpoint);
+  UI.cfg.endpoint = endpoint;
   let base;
   try {
-    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+    base = new URL(endpoint);
   } catch (e) {
-    base = new URL("http://192.168.4.1");
+    base = new URL(DEFAULT_ENDPOINT);
   }
   const url = new URL("/api/tx-image", base);
   const headers = buildImageHeaders(meta);
@@ -5432,6 +5556,21 @@ function logReceivedMessage(entry, opts) {
     // В чат попадают только элементы со статусом ready; без имени их сложно отслеживать.
     return;
   }
+  if (options.isNew && UI.state.activeTab !== "chat") {
+    const current = Math.max(0, Number(UI.state.chatUnread) || 0);
+    const next = Math.min(current + 1, CHAT_UNREAD_MAX);
+    if (next !== current) {
+      UI.state.chatUnread = next;
+      storage.set(CHAT_UNREAD_STORAGE_KEY, String(next));
+    }
+    updateChatUnreadBadge({ animate: true });
+  } else if (options.isNew && UI.state.activeTab === "chat") {
+    if (UI.state.chatUnread !== 0) {
+      UI.state.chatUnread = 0;
+      storage.set(CHAT_UNREAD_STORAGE_KEY, "0");
+    }
+    updateChatUnreadBadge();
+  }
   const bytes = entry && entry._hexBytes instanceof Uint8Array ? entry._hexBytes : hexToBytes(entry.hex);
   const isImage = entryType === "ready" && bytes && bytes.length >= 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
   const textValue = resolveReceivedText(entry);
@@ -5821,14 +5960,16 @@ function handleReceivedSnapshot(items) {
   const prev = state.known;
   const next = new Set();
   const list = Array.isArray(items) ? items : [];
+  const firstLoad = !state.snapshotReady;
   for (let i = 0; i < list.length; i += 1) {
     const entry = list[i];
     const name = entry && entry.name ? String(entry.name).trim() : "";
     if (name) next.add(name);
-    const isNew = !!(name && !prev.has(name));
+    const isNew = !firstLoad && !!(name && !prev.has(name));
     logReceivedMessage(entry, { isNew });
   }
   state.known = next;
+  state.snapshotReady = true;
   updateChatReceivingIndicatorFromRsts(list);
 }
 
@@ -5925,12 +6066,14 @@ function openReceivedPushChannel() {
     return;
   }
   closeReceivedPushChannel({ silent: true });
+  const endpoint = normalizeEndpoint(UI.cfg.endpoint);
+  UI.cfg.endpoint = endpoint;
   let url;
   try {
-    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+    const base = new URL(endpoint);
     url = new URL("/events", base).toString();
   } catch (err) {
-    url = "http://192.168.4.1/events";
+    url = new URL("/events", DEFAULT_ENDPOINT).toString();
   }
   try {
     const source = new EventSource(url);
@@ -9478,11 +9621,16 @@ async function refreshKeyState(options) {
       } catch (err) {
         // Всегда оставляем комментарии на русском
         console.warn("[key] не удалось разобрать JSON KEYSTATE:", err);
-        data = parseKeyStateFallback(rawText);
-        if (!data) parseFailed = true;
-        else {
-          // Резервный разбор сработал, предупреждаем в консоли
-          console.warn("[key] использован резервный парсер KEYSTATE");
+        data = parseJsonLenient(rawText);
+        if (data) {
+          console.warn("[key] JSON KEYSTATE очищен и разобран повторно");
+        } else {
+          data = parseKeyStateFallback(rawText);
+          if (!data) parseFailed = true;
+          else {
+            // Резервный разбор сработал, предупреждаем в консоли
+            console.warn("[key] использован резервный парсер KEYSTATE");
+          }
         }
       }
     }
@@ -9518,6 +9666,26 @@ async function refreshKeyState(options) {
     note("Ошибка KEYSTATE: " + res.error);
   }
   if (!res.ok) debugLog("KEYSTATE ✗ " + res.error);
+}
+
+// Аккуратно очищаем нестандартный JSON прежде чем отдавать его в JSON.parse
+function parseJsonLenient(rawText) {
+  const raw = rawText != null ? String(rawText).trim() : "";
+  if (!raw) return null;
+  let sanitized = raw.replace(/^\uFEFF/, "");
+  sanitized = sanitized
+    .replace(/\/\*[\s\S]*?\*\//g, "") // убираем блочные комментарии
+    .replace(/(^|[^:])\/\/.*$/gm, "$1"); // убираем построчные комментарии без трогания URL
+  sanitized = sanitized.replace(/,\s*([}\]])/g, "$1"); // отрезаем висячие запятые
+  sanitized = sanitized.replace(/([\{,]\s*)'([^'"\n]*)'\s*:/g, "$1\"$2\":"); // нормализуем ключи в кавычках
+  sanitized = sanitized.replace(/:\s*'([^'"\n]*)'/g, ': "$1"'); // заменяем одиночные кавычки в значениях
+  if (!sanitized.trim()) return null;
+  try {
+    return JSON.parse(sanitized);
+  } catch (err) {
+    console.warn("[key] повторная попытка JSON.parse не удалась:", err);
+    return null;
+  }
 }
 
 // Пытаемся восстановить объект состояния ключа из нестрогого JSON или пары ключ=значение
@@ -10995,10 +11163,12 @@ async function loadVersion() {
     // окно может не иметь корректного href (например, file://)
   }
   try {
-    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+    const endpoint = normalizeEndpoint(UI.cfg.endpoint);
+    UI.cfg.endpoint = endpoint;
+    const base = new URL(endpoint);
     targets.push(new URL("/ver", base));
   } catch (err) {
-    targets.push(new URL("/ver", "http://192.168.4.1"));
+    targets.push(new URL("/ver", DEFAULT_ENDPOINT));
   }
   const seen = new Set();
   let lastError = null;
@@ -11077,6 +11247,4 @@ async function resyncAfterEndpointChange() {
     console.warn("[endpoint] resync error", err);
   }
 }
-
-
 )~~~";
