@@ -3656,7 +3656,7 @@ function openReceivedPushChannel() {
       startReceivedMonitor({ intervalMs: 30000, immediate: false });
       updateReceivedMonitorDiagnostics();
     });
-    source.addEventListener("message", (event) => {
+    source.addEventListener("received", (event) => {
       push.connected = true;
       push.lastEventAt = Date.now();
       handleReceivedPushMessage(event);
