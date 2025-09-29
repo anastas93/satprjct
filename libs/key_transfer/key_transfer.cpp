@@ -180,11 +180,11 @@ bool buildFrame(uint32_t msg_id,
 
   FrameHeader hdr;
   hdr.ver = FRAME_VERSION_AEAD;
-  hdr.msg_id = msg_id;
-  hdr.frag_idx = 0;
+  hdr.msg_id = static_cast<uint16_t>(msg_id);
+  hdr.setFragIdx(0);
   hdr.frag_cnt = 1;
-  hdr.payload_len = static_cast<uint16_t>(cipher.size());
-  hdr.flags = base_flags;
+  hdr.setPayloadLen(static_cast<uint16_t>(cipher.size()));
+  hdr.setFlags(base_flags);
   uint8_t hdr_buf[FrameHeader::SIZE];
   if (!hdr.encode(hdr_buf, sizeof(hdr_buf), cipher.data(), cipher.size())) {
     return false;
@@ -212,28 +212,27 @@ bool parseFrame(const uint8_t* frame, size_t len,
                              buf.size() - FrameHeader::SIZE, hdr);
   }
   if (!ok) return false;
-  if (hdr.frag_cnt != 1 || hdr.frag_idx != 0) return false;
+  if (hdr.frag_cnt != 1 || hdr.getFragIdx() != 0) return false;
   if (hdr.ver != 1 && hdr.ver < FRAME_VERSION_AEAD) return false;
 
   const uint8_t* payload_p = buf.data() + FrameHeader::SIZE * 2;
   size_t payload_len = buf.size() - FrameHeader::SIZE * 2;
   std::vector<uint8_t> payload_bytes;
   removePilots(payload_p, payload_len, payload_bytes);
-  if (payload_bytes.size() != hdr.payload_len) return false;
-  if (!hdr.checkFrameCrc(payload_bytes.data(), payload_bytes.size())) return false;
+  if (payload_bytes.size() != hdr.getPayloadLen()) return false;
   size_t tag_len = (hdr.ver >= FRAME_VERSION_AEAD) ? TAG_LEN : TAG_LEN_V1;
   if (payload_bytes.size() < tag_len) return false;
 
   size_t cipher_len = payload_bytes.size() - tag_len;
   const uint8_t* tag = payload_bytes.data() + cipher_len;
-  auto nonce = makeNonce(hdr.msg_id, hdr.frag_idx);
+  auto nonce = makeNonce(hdr.msg_id, hdr.getFragIdx());
   std::vector<uint8_t> plain;
   if (hdr.ver >= FRAME_VERSION_AEAD) {
     auto aad = makeAad(hdr.ver,
-                       static_cast<uint8_t>(hdr.flags &
+                       static_cast<uint8_t>(hdr.getFlags() &
                                             (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED)),
                        hdr.msg_id,
-                       hdr.frag_idx);
+                       hdr.getFragIdx());
     if (!crypto::chacha20poly1305::decrypt(rootKey().data(), rootKey().size(),
                                            nonce.data(), nonce.size(),
                                            aad.data(), aad.size(),

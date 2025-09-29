@@ -1,14 +1,34 @@
 #include "frame_header.h"
-#include <cstring>
-#include <vector>
+uint8_t FrameHeader::getFlags() const {
+  return static_cast<uint8_t>((packed & FLAGS_MASK) >> FLAGS_SHIFT);
+}
 
-// Подсчёт CRC16 (полином x^16 + x^12 + x^5 + 1)
+void FrameHeader::setFlags(uint8_t value) {
+  packed = (packed & ~FLAGS_MASK) | (static_cast<uint32_t>(value & 0xFF) << FLAGS_SHIFT);
+}
+
+uint16_t FrameHeader::getFragIdx() const {
+  return static_cast<uint16_t>((packed & FRAG_MASK) >> FRAG_SHIFT);
+}
+
+void FrameHeader::setFragIdx(uint16_t value) {
+  packed = (packed & ~FRAG_MASK) | ((static_cast<uint32_t>(value) & 0x0FFF) << FRAG_SHIFT);
+}
+
+uint16_t FrameHeader::getPayloadLen() const {
+  return static_cast<uint16_t>(packed & LEN_MASK);
+}
+
+void FrameHeader::setPayloadLen(uint16_t value) {
+  packed = (packed & ~LEN_MASK) | (static_cast<uint32_t>(value) & LEN_MASK);
+}
+
 uint16_t FrameHeader::crc16(const uint8_t* data, size_t len) {
   uint16_t crc = 0xFFFF;
   for (size_t i = 0; i < len; ++i) {
     crc ^= static_cast<uint16_t>(data[i]) << 8;
-    for (int b = 0; b < 8; ++b) {
-      crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : (crc << 1);
+    for (int bit = 0; bit < 8; ++bit) {
+      crc = (crc & 0x8000) ? static_cast<uint16_t>((crc << 1) ^ 0x1021) : static_cast<uint16_t>(crc << 1);
     }
   }
   return crc;
@@ -18,82 +38,46 @@ uint16_t FrameHeader::crc16(const uint8_t* data, size_t len) {
 bool FrameHeader::encode(uint8_t* out, size_t out_len, const uint8_t* payload, size_t payload_len) {
   if (!out || out_len < SIZE) return false;
   if (!payload && payload_len) return false;
+  if (payload_len > LEN_MASK) return false; // длина не должна превышать 12-битовый диапазон
 
+  uint32_t packed_local = packed;
+  packed_local &= ~LEN_MASK;
+  packed_local |= static_cast<uint32_t>(payload_len) & LEN_MASK;
+  packed = packed_local;
+
+  /*
+   * Формат заголовка (big-endian):
+   * [0]   - версия протокола
+   * [1-2] - идентификатор сообщения (uint16_t)
+   * [3-4] - количество фрагментов (uint16_t)
+   * [5-8] - упакованное поле: биты [31:24] флаги, [23:12] индекс фрагмента,
+   *         [11:0] длина полезной нагрузки
+   * [9-11] - зарезервировано (нули для выравнивания под AEAD-тег)
+   */
   out[0] = ver;
-  out[1] = flags;
-  out[2] = static_cast<uint8_t>(msg_id >> 24);
-  out[3] = static_cast<uint8_t>(msg_id >> 16);
-  out[4] = static_cast<uint8_t>(msg_id >> 8);
-  out[5] = static_cast<uint8_t>(msg_id);
-  out[6] = static_cast<uint8_t>(frag_idx >> 8);
-  out[7] = static_cast<uint8_t>(frag_idx);
-  out[8] = static_cast<uint8_t>(frag_cnt >> 8);
-  out[9] = static_cast<uint8_t>(frag_cnt);
-  out[10] = static_cast<uint8_t>(payload_len >> 8);
-  out[11] = static_cast<uint8_t>(payload_len);
-  out[12] = static_cast<uint8_t>(ack_mask >> 24);
-  out[13] = static_cast<uint8_t>(ack_mask >> 16);
-  out[14] = static_cast<uint8_t>(ack_mask >> 8);
-  out[15] = static_cast<uint8_t>(ack_mask);
-
-  hdr_crc = crc16(out, 16);
-  out[16] = static_cast<uint8_t>(hdr_crc >> 8);
-  out[17] = static_cast<uint8_t>(hdr_crc);
-
-  std::vector<uint8_t> tmp(out, out + 18);
-  if (payload && payload_len) tmp.insert(tmp.end(), payload, payload + payload_len);
-  frame_crc = crc16(tmp.data(), tmp.size());
-  out[18] = static_cast<uint8_t>(frame_crc >> 8);
-  out[19] = static_cast<uint8_t>(frame_crc);
+  out[1] = static_cast<uint8_t>(msg_id >> 8);
+  out[2] = static_cast<uint8_t>(msg_id);
+  out[3] = static_cast<uint8_t>(frag_cnt >> 8);
+  out[4] = static_cast<uint8_t>(frag_cnt);
+  out[5] = static_cast<uint8_t>(packed_local >> 24);
+  out[6] = static_cast<uint8_t>(packed_local >> 16);
+  out[7] = static_cast<uint8_t>(packed_local >> 8);
+  out[8] = static_cast<uint8_t>(packed_local);
+  out[9] = 0;
+  out[10] = 0;
+  out[11] = 0;
   return true;
-}
-
-// Проверка контрольной суммы кадра
-bool FrameHeader::checkFrameCrc(const uint8_t* payload, size_t payload_len) const {
-  uint8_t hdr[18];
-  hdr[0] = ver;
-  hdr[1] = flags;
-  hdr[2] = static_cast<uint8_t>(msg_id >> 24);
-  hdr[3] = static_cast<uint8_t>(msg_id >> 16);
-  hdr[4] = static_cast<uint8_t>(msg_id >> 8);
-  hdr[5] = static_cast<uint8_t>(msg_id);
-  hdr[6] = static_cast<uint8_t>(frag_idx >> 8);
-  hdr[7] = static_cast<uint8_t>(frag_idx);
-  hdr[8] = static_cast<uint8_t>(frag_cnt >> 8);
-  hdr[9] = static_cast<uint8_t>(frag_cnt);
-  hdr[10] = static_cast<uint8_t>(payload_len >> 8);
-  hdr[11] = static_cast<uint8_t>(payload_len);
-  hdr[12] = static_cast<uint8_t>(ack_mask >> 24);
-  hdr[13] = static_cast<uint8_t>(ack_mask >> 16);
-  hdr[14] = static_cast<uint8_t>(ack_mask >> 8);
-  hdr[15] = static_cast<uint8_t>(ack_mask);
-  uint16_t hc = crc16(hdr, 16);
-  hdr[16] = static_cast<uint8_t>(hc >> 8);
-  hdr[17] = static_cast<uint8_t>(hc);
-  std::vector<uint8_t> tmp(hdr, hdr + 18);
-  if (payload && payload_len) tmp.insert(tmp.end(), payload, payload + payload_len);
-  return crc16(tmp.data(), tmp.size()) == frame_crc;
 }
 
 // Декодирование заголовка
 bool FrameHeader::decode(const uint8_t* data, size_t len, FrameHeader& out) {
   if (!data || len < SIZE) return false;
   out.ver = data[0];
-  out.flags = data[1];
-  out.msg_id = (static_cast<uint32_t>(data[2]) << 24) |
-               (static_cast<uint32_t>(data[3]) << 16) |
-               (static_cast<uint32_t>(data[4]) << 8)  |
-               static_cast<uint32_t>(data[5]);
-  out.frag_idx = (static_cast<uint16_t>(data[6]) << 8) | data[7];
-  out.frag_cnt = (static_cast<uint16_t>(data[8]) << 8) | data[9];
-  out.payload_len = (static_cast<uint16_t>(data[10]) << 8) | data[11];
-  out.ack_mask = (static_cast<uint32_t>(data[12]) << 24) |
-                 (static_cast<uint32_t>(data[13]) << 16) |
-                 (static_cast<uint32_t>(data[14]) << 8) |
-                 static_cast<uint32_t>(data[15]);
-  out.hdr_crc = (static_cast<uint16_t>(data[16]) << 8) | data[17];
-  out.frame_crc = (static_cast<uint16_t>(data[18]) << 8) | data[19];
-
-  uint16_t calc = crc16(data, 16);
-  return calc == out.hdr_crc;
+  out.msg_id = static_cast<uint16_t>(data[1] << 8 | data[2]);
+  out.frag_cnt = static_cast<uint16_t>(data[3] << 8 | data[4]);
+  out.packed = (static_cast<uint32_t>(data[5]) << 24) |
+               (static_cast<uint32_t>(data[6]) << 16) |
+               (static_cast<uint32_t>(data[7]) << 8) |
+               static_cast<uint32_t>(data[8]);
+  return true;
 }

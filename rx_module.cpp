@@ -232,11 +232,10 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   FrameHeader hdr = primary_ok ? primary_hdr : secondary_hdr;
   if (primary_ok && secondary_ok) {
     bool headers_match = (primary_hdr.msg_id == secondary_hdr.msg_id) &&
-                         (primary_hdr.frag_idx == secondary_hdr.frag_idx) &&
+                         (primary_hdr.getFragIdx() == secondary_hdr.getFragIdx()) &&
                          (primary_hdr.frag_cnt == secondary_hdr.frag_cnt) &&
-                         (primary_hdr.flags == secondary_hdr.flags) &&
-                         (primary_hdr.payload_len == secondary_hdr.payload_len) &&
-                         (primary_hdr.ack_mask == secondary_hdr.ack_mask);
+                         (primary_hdr.getFlags() == secondary_hdr.getFlags()) &&
+                         (primary_hdr.getPayloadLen() == secondary_hdr.getPayloadLen());
     if (!headers_match) {
       LOG_WARN("RxModule: дублированные заголовки расходятся");
       forward_raw(data, len);                            // фиксируем испорченный кадр
@@ -250,18 +249,14 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   size_t payload_len = frame_buf_.size() - FrameHeader::SIZE * 2;
   removePilots(payload_p, payload_len, payload_buf_);       // убираем пилоты без выделений
   profile_scope.mark(&ProfilingSnapshot::payload_extract);
-  if (payload_buf_.size() != hdr.payload_len) {
+  if (payload_buf_.size() != hdr.getPayloadLen()) {
     profile_scope.markDrop("несовпадение длины payload");
     return;
   }
-  if (!hdr.checkFrameCrc(payload_buf_.data(), payload_buf_.size())) {
-    profile_scope.markDrop("CRC payload");
-    return;
-  }
-
-  const bool ack_no_flags = (hdr.flags &
+  const uint8_t hdr_flags = hdr.getFlags();
+  const bool ack_no_flags = (hdr_flags &
                              (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0;
-  const bool ack_single_fragment = hdr.frag_cnt == 1 && hdr.frag_idx == 0;
+  const bool ack_single_fragment = hdr.frag_cnt == 1 && hdr.getFragIdx() == 0;
   const bool ack_marker_only = payload_buf_.size() == 1 && payload_buf_.front() == protocol::ack::MARKER;
   if (ack_no_flags && ack_single_fragment && ack_marker_only) {
     profile_scope.noteConv(false);                         // подтверждение приходит без кодирования
@@ -288,7 +283,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     expected_frag_cnt_ = hdr.frag_cnt;
     next_frag_idx_ = 0;
   }
-  if (hdr.frag_idx == 0) {                                 // явный старт новой последовательности
+  if (hdr.getFragIdx() == 0) {                             // явный старт новой последовательности
     if (next_frag_idx_ != 0) {
       inflight_prefix_.erase(active_msg_id_);
       gatherer_.reset();
@@ -296,8 +291,8 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     expected_frag_cnt_ = hdr.frag_cnt;
     next_frag_idx_ = 0;
   }
-  if (hdr.frag_idx != next_frag_idx_) {                    // пришёл неожиданный индекс
-    if (hdr.frag_idx != 0) {
+  if (hdr.getFragIdx() != next_frag_idx_) {                // пришёл неожиданный индекс
+    if (hdr.getFragIdx() != 0) {
       inflight_prefix_.erase(active_msg_id_);
       gatherer_.reset();
       assembling_ = false;
@@ -313,15 +308,15 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   result_buf_.clear();
   work_buf_.clear();
   size_t result_len = 0;
-  const bool conv_flag = (hdr.flags & FrameHeader::FLAG_CONV_ENCODED) != 0;
+  const bool conv_flag = (hdr_flags & FrameHeader::FLAG_CONV_ENCODED) != 0;
   profile_scope.noteConv(conv_flag);
   size_t cipher_len_hint = 0;
   if (conv_flag) {
-    if (hdr.payload_len < CONV_TAIL_BYTES * 2 || (hdr.payload_len % 2) != 0) {
+    if (hdr.getPayloadLen() < CONV_TAIL_BYTES * 2 || (hdr.getPayloadLen() % 2) != 0) {
       profile_scope.markDrop("некорректная длина свёрточного блока");
       return;
     }
-    cipher_len_hint = static_cast<size_t>(hdr.payload_len / 2);
+    cipher_len_hint = static_cast<size_t>(hdr.getPayloadLen() / 2);
     if (cipher_len_hint < CONV_TAIL_BYTES) {
       profile_scope.markDrop("слишком короткий свёрточный блок");
       return;
@@ -333,7 +328,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
 
   if (conv_flag) {
     size_t expected_conv_len = cipher_len_hint ? static_cast<size_t>(cipher_len_hint + CONV_TAIL_BYTES) * 2 : 0;
-    const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | hdr.frag_idx;
+    const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | hdr.getFragIdx();
     if (expected_conv_len && payload_buf_.size() < expected_conv_len) {
       auto [it, inserted] = pending_conv_.try_emplace(conv_key);
       auto& slot = it->second;
@@ -378,7 +373,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
       }
     }
   } else {
-    const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | hdr.frag_idx;
+    const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | hdr.getFragIdx();
     pending_conv_.erase(conv_key);                    // очищаем возможные остатки при смене режима
   }
 
@@ -457,18 +452,18 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   const uint8_t* cipher = result_buf_.data();
   size_t cipher_len = result_len - tag_len;
   const uint8_t* tag = result_buf_.data() + cipher_len;
-  bool encrypted = (hdr.flags & FrameHeader::FLAG_ENCRYPTED) != 0;
+  bool encrypted = (hdr_flags & FrameHeader::FLAG_ENCRYPTED) != 0;
   bool should_decrypt = encrypted || encryption_forced_;
   bool decrypt_ok = false;
   if (should_decrypt) {
-    uint16_t nonce_idx = hdr.frag_idx;                // индекс части задаёт уникальный нонс
+    uint16_t nonce_idx = hdr.getFragIdx();            // индекс части задаёт уникальный нонс
     nonce_ = KeyLoader::makeNonce(hdr.msg_id, nonce_idx);
     if (hdr.ver >= FRAME_VERSION_AEAD) {
       auto aad = makeAad(hdr.ver,
-                         static_cast<uint8_t>(hdr.flags &
+                         static_cast<uint8_t>(hdr_flags &
                                               (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED)),
                          hdr.msg_id,
-                         hdr.frag_idx);
+                         hdr.getFragIdx());
       decrypt_ok = crypto::chacha20poly1305::decrypt(key_.data(), key_.size(),
                                                      nonce_.data(), nonce_.size(),
                                                      aad.data(), aad.size(),
@@ -514,7 +509,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   profile_scope.mark(&ProfilingSnapshot::assemble);
 
   ++next_frag_idx_;                                     // ожидаем следующий индекс фрагмента
-  if (hdr.frag_idx + 1 == hdr.frag_cnt) {              // последний фрагмент
+  if (hdr.getFragIdx() + 1 == hdr.frag_cnt) {          // последний фрагмент
     const auto& full = gatherer_.get();
     auto split_result = handleSplitPart(split_info, full, hdr.msg_id);
     if (!split_result.deliver) {
