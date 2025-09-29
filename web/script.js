@@ -78,12 +78,78 @@ const POINTING_COMPASS_OFFSET_DEG = 180; // отображаем юг в вер�
 const CHAT_UNREAD_STORAGE_KEY = "chatUnread"; // ключ хранения количества непрочитанных сообщений
 const CHAT_UNREAD_MAX = 999; // максимальное значение счётчика, отображаемое в бейдже
 
+const PAGE_LOCATION = (typeof window !== "undefined" && window.location) ? window.location : null;
+const DEFAULT_ENDPOINT_PROTOCOL = (() => {
+  if (!PAGE_LOCATION || !PAGE_LOCATION.protocol) return "https:";
+  if (PAGE_LOCATION.protocol === "http:" || PAGE_LOCATION.protocol === "https:") {
+    return PAGE_LOCATION.protocol;
+  }
+  return "https:";
+})();
+const PAGE_ORIGIN = (() => {
+  if (!PAGE_LOCATION) return "";
+  const origin = typeof PAGE_LOCATION.origin === "string" ? PAGE_LOCATION.origin : "";
+  if (origin && origin !== "null") return origin;
+  if (PAGE_LOCATION.host) return (PAGE_LOCATION.protocol || DEFAULT_ENDPOINT_PROTOCOL) + "//" + PAGE_LOCATION.host;
+  return "";
+})();
+const DEVICE_HTTP_FALLBACK_ENDPOINT = "http://192.168.4.1";
+const HTTP_FALLBACK_ALLOWED = PAGE_LOCATION ? PAGE_LOCATION.protocol === "http:" : false;
+
+// Аккуратно парсим строку как URL, не выбрасывая исключение наружу
+function safeParseUrl(value) {
+  if (!value) return null;
+  try {
+    return new URL(value);
+  } catch (err) {
+    return null;
+  }
+}
+
+// Возвращаем origin текущей страницы или стандартный fallback для HTTP-сценария
+function getAutoEndpoint() {
+  if (PAGE_ORIGIN) return PAGE_ORIGIN;
+  if (HTTP_FALLBACK_ALLOWED) return DEVICE_HTTP_FALLBACK_ENDPOINT;
+  return "";
+}
+
+// Нормализуем ввод пользователя так, чтобы endpoint всегда содержал схему
+function normalizeEndpointInput(raw) {
+  if (raw == null) return "";
+  let value = String(raw).trim();
+  if (!value) return "";
+  let parsed = safeParseUrl(value);
+  if (parsed) return parsed.toString();
+  if (value.startsWith("//")) {
+    value = (DEFAULT_ENDPOINT_PROTOCOL || "https:") + value;
+    parsed = safeParseUrl(value);
+    if (parsed) return parsed.toString();
+  }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:(?!\/\/)/.test(value)) {
+    value = value.replace(/^([a-zA-Z][a-zA-Z0-9+.-]*:)/, "$1//");
+    parsed = safeParseUrl(value);
+    if (parsed) return parsed.toString();
+  }
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)) {
+    value = (DEFAULT_ENDPOINT_PROTOCOL || "https:") + "//" + value;
+    parsed = safeParseUrl(value);
+    if (parsed) return parsed.toString();
+  }
+  console.warn("[endpoint] не удалось нормализовать значение:", raw);
+  return value;
+}
+
 /* Состояние интерфейса */
 const UI = {
   tabs: ["chat", "channels", "pointing", "settings", "security", "debug"],
   els: {},
   cfg: {
-    endpoint: storage.get("endpoint") || "http://192.168.4.1",
+    endpoint: (() => {
+      const stored = storage.get("endpoint");
+      const normalized = normalizeEndpointInput(stored);
+      if (normalized && normalized !== stored) storage.set("endpoint", normalized);
+      return normalized || getAutoEndpoint();
+    })(),
     theme: storage.get("theme") || detectPreferredTheme(),
     accent: (storage.get("accent") === "red") ? "red" : "default",
     autoNight: storage.get("autoNight") !== "0",
@@ -692,9 +758,13 @@ async function init() {
   if (UI.els.endpoint) {
     UI.els.endpoint.value = UI.cfg.endpoint;
     UI.els.endpoint.addEventListener("change", () => {
-      const value = UI.els.endpoint.value.trim() || "http://192.168.4.1";
-      UI.cfg.endpoint = value;
-      storage.set("endpoint", UI.cfg.endpoint);
+      const raw = UI.els.endpoint.value.trim();
+      const normalized = normalizeEndpointInput(raw);
+      const fallback = getAutoEndpoint();
+      UI.cfg.endpoint = normalized || fallback;
+      UI.els.endpoint.value = UI.cfg.endpoint;
+      if (UI.cfg.endpoint) storage.set("endpoint", UI.cfg.endpoint);
+      else storage.remove("endpoint");
       note("Endpoint: " + UI.cfg.endpoint);
       resyncAfterEndpointChange().catch((err) => console.warn("[endpoint] resync", err));
     });
@@ -2040,18 +2110,42 @@ function parseSlashCommand(raw) {
 }
 
 /* Команды устройства */
+// Получаем актуальный base-URL для запросов к устройству
+function getEffectiveEndpointBase() {
+  const raw = UI && UI.cfg && typeof UI.cfg.endpoint === "string" ? UI.cfg.endpoint.trim() : "";
+  if (raw) {
+    const parsedDirect = safeParseUrl(raw);
+    if (parsedDirect) return parsedDirect;
+    const normalized = normalizeEndpointInput(raw);
+    if (normalized && normalized !== raw) {
+      const parsedNormalized = safeParseUrl(normalized);
+      if (parsedNormalized) return parsedNormalized;
+    }
+  }
+  const auto = getAutoEndpoint();
+  return safeParseUrl(auto);
+}
+
+// Собираем полный URL с учётом настроенного endpoint либо возвращаем относительный путь
+function buildRequestUrl(path, base) {
+  const effectiveBase = base || getEffectiveEndpointBase();
+  if (effectiveBase) {
+    try {
+      return new URL(path, effectiveBase).toString();
+    } catch (err) {
+      console.warn("[endpoint] не удалось сформировать URL:", err);
+    }
+  }
+  return typeof path === "string" ? path : String(path);
+}
+
 async function deviceFetch(cmd, params, timeoutMs) {
   const timeout = timeoutMs || 4000;
-  let base;
-  try {
-    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
-  } catch (e) {
-    base = new URL("http://192.168.4.1");
-  }
+  const base = getEffectiveEndpointBase();
   const candidates = [
-    new URL("/cmd", base),
-    new URL("/api/cmd", base),
-    new URL("/", base),
+    { path: "/cmd", param: "c" },
+    { path: "/api/cmd", param: "cmd" },
+    { path: "/", param: "c" },
   ];
   const extras = new URLSearchParams();
   if (params) {
@@ -2063,15 +2157,9 @@ async function deviceFetch(cmd, params, timeoutMs) {
     }
   }
   let lastErr = null;
-  for (const url of candidates) {
-    let requestUrl = url.toString();
-    if (cmd) {
-      if (url.pathname.endsWith("/api/cmd")) {
-        requestUrl += (requestUrl.indexOf("?") >= 0 ? "&" : "?") + "cmd=" + encodeURIComponent(cmd);
-      } else {
-        requestUrl += (requestUrl.indexOf("?") >= 0 ? "&" : "?") + "c=" + encodeURIComponent(cmd);
-      }
-    }
+  for (const candidate of candidates) {
+    let requestUrl = buildRequestUrl(candidate.path, base);
+    if (cmd) requestUrl += (requestUrl.indexOf("?") >= 0 ? "&" : "?") + candidate.param + "=" + encodeURIComponent(cmd);
     const extra = extras.toString();
     if (extra) requestUrl += (requestUrl.indexOf("?") >= 0 ? "&" : "?") + extra;
     const ctrl = new AbortController();
@@ -2148,17 +2236,12 @@ async function sendCommand(cmd, params, opts) {
 }
 async function postTx(text, timeoutMs) {
   const timeout = timeoutMs || 5000;
-  let base;
-  try {
-    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
-  } catch (e) {
-    base = new URL("http://192.168.4.1");
-  }
-  const url = new URL("/api/tx", base);
+  const base = getEffectiveEndpointBase();
+  const url = buildRequestUrl("/api/tx", base);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url.toString(), {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: text,
@@ -2181,18 +2264,13 @@ async function postTx(text, timeoutMs) {
 
 async function postImage(blob, meta, timeoutMs) {
   const timeout = timeoutMs || 8000;
-  let base;
-  try {
-    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
-  } catch (e) {
-    base = new URL("http://192.168.4.1");
-  }
-  const url = new URL("/api/tx-image", base);
+  const base = getEffectiveEndpointBase();
+  const url = buildRequestUrl("/api/tx-image", base);
   const headers = buildImageHeaders(meta);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url.toString(), {
+    const res = await fetch(url, {
       method: "POST",
       headers,
       body: blob,
@@ -3678,13 +3756,8 @@ function openReceivedPushChannel() {
     return;
   }
   closeReceivedPushChannel({ silent: true });
-  let url;
-  try {
-    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
-    url = new URL("/events", base).toString();
-  } catch (err) {
-    url = "http://192.168.4.1/events";
-  }
+  const base = getEffectiveEndpointBase();
+  const url = buildRequestUrl("/events", base);
   try {
     const source = new EventSource(url);
     push.source = source;
@@ -9067,25 +9140,25 @@ async function loadVersion() {
 
   const initialVersion = UI.state.version;
   const targets = [];
+  const seen = new Set();
+  const addTarget = (value) => {
+    if (!value) return;
+    const key = value.toString();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    targets.push(key);
+  };
   try {
-    targets.push(new URL("/ver", window.location.href));
+    addTarget(new URL("/ver", window.location.href).toString());
   } catch (err) {
     // окно может не иметь корректного href (например, file://)
   }
-  try {
-    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
-    targets.push(new URL("/ver", base));
-  } catch (err) {
-    targets.push(new URL("/ver", "http://192.168.4.1"));
-  }
-  const seen = new Set();
+  const base = getEffectiveEndpointBase();
+  addTarget(buildRequestUrl("/ver", base));
   let lastError = null;
   for (const url of targets) {
-    const key = url.toString();
-    if (seen.has(key)) continue;
-    seen.add(key);
     try {
-      const res = await fetch(key, { cache: "no-store" });
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const raw = await res.text();
       applyVersion(raw, { clear: true });
