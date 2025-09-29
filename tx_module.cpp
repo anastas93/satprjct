@@ -160,6 +160,7 @@ uint32_t TxModule::queuePlain(const uint8_t* data, size_t len, uint8_t qos) {
   uint32_t res = buffers_[qos].enqueue(data, len);
   if (res) {
     DEBUG_LOG_VAL("TxModule: plain сообщение id=", res);
+    plain_messages_.insert(res);               // помечаем идентификатор как «сырой»
   } else {
     DEBUG_LOG("TxModule: очередь переполнена при plain постановке");
   }
@@ -255,10 +256,18 @@ bool TxModule::loop() {
     out.data = std::move(msg);
     out.qos = qos_idx;
     out.attempts_left = ack_retry_limit_;
-    out.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(out.data);
-    out.packet_tag = extractPacketTag(out.data);
-    out.status_prefix = extractStatusPrefix(out.data);
-    if (!ack_enabled_) out.expect_ack = false;
+    out.is_plain = plain_messages_.erase(id) > 0; // проверяем, требуется ли «сырой» режим
+    bool wants_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(out.data);
+    out.expect_ack = out.is_plain ? false : wants_ack;
+    if (out.is_plain) {
+      out.attempts_left = 0;                     // повторы не нужны при прямой отправке
+      out.packet_tag.clear();                    // теги и статусы не применяются
+      out.status_prefix.clear();
+    } else {
+      out.packet_tag = extractPacketTag(out.data);
+      out.status_prefix = extractStatusPrefix(out.data);
+      if (!ack_enabled_) out.expect_ack = false;
+    }
     return true;
   };
 
@@ -358,10 +367,18 @@ void TxModule::setAckTimeout(uint32_t timeout_ms) {
       last_attempt_ = now - std::chrono::milliseconds(timeout_ms);
     }
     if (inflight_) {
-      inflight_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(inflight_->data);
+      if (inflight_->is_plain) {
+        inflight_->expect_ack = false;
+      } else {
+        inflight_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(inflight_->data);
+      }
     }
     if (delayed_) {
-      delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(delayed_->data);
+      if (delayed_->is_plain) {
+        delayed_->expect_ack = false;
+      } else {
+        delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(delayed_->data);
+      }
     }
   }
 }
@@ -390,8 +407,18 @@ bool TxModule::transmit(const PendingMessage& message) {
   const bool is_ack_frame = message.is_ack;
 
   std::string prefix = message.status_prefix;
-  if (prefix.empty() && !is_ack_frame) {
+  if (prefix.empty() && !is_ack_frame && !message.is_plain) {
     prefix = extractStatusPrefix(msg);
+  }
+
+  if (message.is_plain) {
+    waitForPauseWindow();
+    radio_.send(msg.data(), msg.size());        // отправляем «сырые» байты напрямую
+    last_send_ = std::chrono::steady_clock::now();
+    if (!prefix.empty() && (!ack_enabled_ || !message.expect_ack)) {
+      SimpleLogger::logStatus(prefix + " GO");  // фиксируем успешную отправку для журналирования
+    }
+    return true;
   }
 
   struct PreparedFragment {
@@ -611,10 +638,18 @@ void TxModule::archiveFollowingParts(uint8_t qos, const std::string& tag) {
     archived.id = id;
     archived.data = std::move(data);
     archived.qos = qos;
-    archived.attempts_left = ack_retry_limit_;
-    archived.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(archived.data);
-    archived.packet_tag = tag;
-    archived.status_prefix = extractStatusPrefix(archived.data);
+    archived.is_plain = plain_messages_.erase(id) > 0;
+    if (archived.is_plain) {
+      archived.attempts_left = 0;                      // «сырые» пакеты не требуют повторов
+      archived.expect_ack = false;
+      archived.packet_tag.clear();
+      archived.status_prefix.clear();
+    } else {
+      archived.attempts_left = ack_retry_limit_;
+      archived.expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(archived.data);
+      archived.packet_tag = tag;
+      archived.status_prefix = extractStatusPrefix(archived.data);
+    }
     archive_.push_back(std::move(archived));
     DEBUG_LOG("TxModule: часть пакета перенесена в архив");
   }
@@ -624,9 +659,14 @@ void TxModule::scheduleFromArchive() {
   if (delayed_ || archive_.empty()) return;
   delayed_.emplace(std::move(archive_.front()));
   archive_.pop_front();
-  delayed_->attempts_left = ack_retry_limit_;
-  delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(delayed_->data);
-  if (!ack_enabled_) delayed_->expect_ack = false;
+  if (delayed_->is_plain) {
+    delayed_->attempts_left = 0;
+    delayed_->expect_ack = false;
+  } else {
+    delayed_->attempts_left = ack_retry_limit_;
+    delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(delayed_->data);
+    if (!ack_enabled_) delayed_->expect_ack = false;
+  }
   DEBUG_LOG("TxModule: восстановлен пакет из архива");
 }
 
@@ -698,12 +738,22 @@ void TxModule::setAckEnabled(bool enabled) {
 void TxModule::setAckRetryLimit(uint8_t retries) {
   ack_retry_limit_ = retries;
   if (inflight_) {
-    inflight_->attempts_left = std::min(inflight_->attempts_left, ack_retry_limit_);
-    if (ack_retry_limit_ == 0) inflight_->expect_ack = false;
+    if (inflight_->is_plain) {
+      inflight_->attempts_left = 0;
+      inflight_->expect_ack = false;
+    } else {
+      inflight_->attempts_left = std::min(inflight_->attempts_left, ack_retry_limit_);
+      if (ack_retry_limit_ == 0) inflight_->expect_ack = false;
+    }
   }
   if (delayed_) {
-    delayed_->attempts_left = ack_retry_limit_;
-    delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(delayed_->data);
+    if (delayed_->is_plain) {
+      delayed_->attempts_left = 0;
+      delayed_->expect_ack = false;
+    } else {
+      delayed_->attempts_left = ack_retry_limit_;
+      delayed_->expect_ack = ack_enabled_ && ack_retry_limit_ != 0 && ack_timeout_ms_ != 0 && !isAckPayload(delayed_->data);
+    }
   }
   if (ack_retry_limit_ == 0 && waiting_ack_) {
     // При обнулении лимита считаем пакет доставленным и не ждём ACK
