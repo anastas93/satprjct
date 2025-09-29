@@ -309,7 +309,7 @@ bool RadioSX1262::resetToDefaults() {
   int state = radio_.begin(
       fRX_bank_[static_cast<int>(bank_)][channel_],
       BW_[bw_preset_], SF_[sf_preset_], CR_[cr_preset_],
-      0x18, Pwr_[pw_preset_], 10, tcxo_, false);
+      0x18, Pwr_[pw_preset_], DefaultSettings::PREAMBLE_LENGTH, tcxo_, false);
   if (state != RADIOLIB_ERR_NONE) {
     return false;                                         // ошибка инициализации
   }
