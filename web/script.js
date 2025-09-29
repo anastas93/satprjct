@@ -166,6 +166,8 @@ const UI = {
     ack: null,
     ackRetry: null,
     ackBusy: false,
+    ackDelay: null,
+    ackDelayBusy: false,
     lightPack: null,
     lightPackBusy: false,
     rxBoostedGain: null,
@@ -215,6 +217,8 @@ const UI = {
       polling: false,
       lastName: null,
     },
+    testMode: null,
+    testModeBusy: false,
     received: {
       timer: null,
       running: false,
@@ -453,6 +457,8 @@ const PAUSE_MIN_MS = 0;
 const PAUSE_MAX_MS = 60000;
 const ACK_TIMEOUT_MIN_MS = 0;
 const ACK_TIMEOUT_MAX_MS = 60000;
+const ACK_DELAY_MIN_MS = 0;
+const ACK_DELAY_MAX_MS = 5000;
 
 /* Определяем предпочитаемую тему только при наличии поддержки matchMedia */
 function detectPreferredTheme() {
@@ -537,10 +543,15 @@ async function init() {
   UI.els.pauseHint = $("#pauseHint");
   UI.els.ackTimeout = $("#ACKT");
   UI.els.ackTimeoutHint = $("#ackTimeoutHint");
+  UI.els.ackDelay = $("#ACKD");
+  UI.els.ackDelayHint = $("#ackDelayHint");
   UI.els.rxBoostedGain = $("#RXBG");
   UI.els.rxBoostedGainHint = $("#rxBoostedGainHint");
   UI.els.testRxmMessage = $("#TESTRXMMSG");
   UI.els.testRxmMessageHint = $("#testRxmMessageHint");
+  UI.els.testMode = $("#TESTMODE");
+  UI.els.testModeHint = $("#testModeHint");
+  UI.els.testModeControl = $("#testModeControl");
   UI.els.channelSelect = $("#CH");
   UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
@@ -848,12 +859,18 @@ async function init() {
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
   if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
+  if (UI.els.ackDelay) {
+    UI.els.ackDelay.addEventListener("change", () => { void onAckDelayInputChange(); });
+  }
   if (UI.els.rxBoostedGain) {
     UI.els.rxBoostedGain.addEventListener("change", () => {
       UI.els.rxBoostedGain.indeterminate = false;
       UI.state.rxBoostedGain = UI.els.rxBoostedGain.checked;
       updateRxBoostedGainUi();
     });
+  }
+  if (UI.els.testMode) {
+    UI.els.testMode.addEventListener("change", (event) => { void onTestModeToggle(event); });
   }
   if (UI.els.testRxmMessage) {
     UI.els.testRxmMessage.addEventListener("input", updateTestRxmMessageHint);
@@ -885,6 +902,8 @@ async function init() {
   updateTestRxmMessageHint();
   updatePauseUi();
   updateAckTimeoutUi();
+  updateAckDelayUi();
+  updateTestModeUi();
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels({ forceBank: true }));
   if (UI.els.channelSelect) UI.els.channelSelect.addEventListener("change", onChannelSelectChange);
   updateChannelSelectHint();
@@ -904,6 +923,8 @@ async function init() {
   await syncSettingsFromDevice();
   await refreshAckState();
   await refreshAckRetry();
+  await refreshAckDelay();
+  await refreshTestModeState();
   await refreshLightPackState();
   await refreshEncryptionState();
 
@@ -2436,6 +2457,14 @@ function handleCommandSideEffects(cmd, text) {
       updateAckTimeoutUi();
       updateAckRetryUi();
     }
+  } else if (upper === "ACKD") {
+    const value = parseAckDelayResponse(text);
+    if (value !== null) {
+      UI.state.ackDelay = value;
+      storage.set("set.ACKD", String(value));
+      updateAckDelayUi();
+      updateAckRetryUi();
+    }
   } else if (upper === "ENC") {
     const state = parseEncResponse(text);
     if (state !== null) {
@@ -2448,6 +2477,13 @@ function handleCommandSideEffects(cmd, text) {
       UI.state.rxBoostedGain = state;
       storage.set("set.RXBG", state ? "1" : "0");
       updateRxBoostedGainUi();
+    }
+  } else if (upper === "TESTMODE") {
+    const state = parseTestModeResponse(text);
+    if (state !== null) {
+      UI.state.testMode = state;
+      storage.set("set.TESTMODE", state ? "1" : "0");
+      updateTestModeUi();
     }
   } else if (upper === "CH") {
     const value = parseInt(text, 10);
@@ -6530,6 +6566,13 @@ function clampAckTimeoutMs(value) {
   if (num > ACK_TIMEOUT_MAX_MS) return ACK_TIMEOUT_MAX_MS;
   return Math.round(num);
 }
+function clampAckDelayMs(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return ACK_DELAY_MIN_MS;
+  if (num < ACK_DELAY_MIN_MS) return ACK_DELAY_MIN_MS;
+  if (num > ACK_DELAY_MAX_MS) return ACK_DELAY_MAX_MS;
+  return Math.round(num);
+}
 function clampTestRxmMessage(value) {
   const text = value == null ? "" : String(value);
   if (text.length > TEST_RXM_MESSAGE_MAX) {
@@ -6554,6 +6597,15 @@ function parseAckTimeoutResponse(text) {
   const token = extractNumericToken(text);
   if (token == null) return null;
   return clampAckTimeoutMs(Number(token));
+}
+function parseAckDelayResponse(text) {
+  if (!text) return null;
+  const token = extractNumericToken(text);
+  if (token == null) return null;
+  return clampAckDelayMs(Number(token));
+}
+function parseTestModeResponse(text) {
+  return parseBinaryResponse(text, ["testmode", "test"]);
 }
 function parseRxBoostedGainResponse(text) {
   if (!text) return null;
@@ -6605,7 +6657,8 @@ function updateAckRetryUi() {
       const attempts = state != null ? state : "—";
       const timeout = UI.state.ackTimeout != null ? UI.state.ackTimeout + " мс" : "—";
       const pause = UI.state.pauseMs != null ? UI.state.pauseMs + " мс" : "—";
-      hint.textContent = "Повторные отправки: " + attempts + " раз. Пауза: " + pause + ". Ожидание ACK: " + timeout + ".";
+      const delay = UI.state.ackDelay != null ? UI.state.ackDelay + " мс" : "—";
+      hint.textContent = "Повторные отправки: " + attempts + " раз. Пауза: " + pause + ". Ожидание ACK: " + timeout + ". Задержка ответа: " + delay + ".";
     } else {
       hint.textContent = "Доступно после включения ACK.";
     }
@@ -6635,6 +6688,31 @@ function updateAckTimeoutUi() {
     hint.textContent = value != null ? ("Время ожидания ACK: " + value + " мс.") : "Время ожидания ACK не загружено.";
   }
 }
+function updateAckDelayUi() {
+  const input = UI.els.ackDelay;
+  const value = UI.state.ackDelay;
+  if (input) {
+    if (value != null && document.activeElement !== input) {
+      input.value = String(value);
+    }
+    input.disabled = UI.state.ackDelayBusy === true;
+  }
+  const hint = UI.els.ackDelayHint;
+  if (hint) {
+    if (value == null) {
+      hint.textContent = UI.state.ackDelayBusy ? "Получаем задержку ACK с устройства..." : "Задержка отправки ACK не загружена.";
+    } else {
+      let text = "Задержка перед отправкой подтверждения: " + value + " мс.";
+      if (UI.state.ack !== true) {
+        text += " Параметр вступит в силу после включения ACK.";
+      }
+      if (UI.state.ackDelayBusy) {
+        text += " Синхронизация...";
+      }
+      hint.textContent = text;
+    }
+  }
+}
 function updateAckUi() {
   const chip = UI.els.ackChip;
   const text = UI.els.ackText;
@@ -6661,6 +6739,7 @@ function updateAckUi() {
     }
   }
   updateAckRetryUi();
+  updateAckDelayUi();
 }
 function onPauseInputChange() {
   if (!UI.els.pauseInput) return;
@@ -6680,6 +6759,17 @@ function onAckTimeoutInputChange() {
   storage.set("set.ACKT", String(num));
   updateAckTimeoutUi();
   updateAckRetryUi();
+}
+async function onAckDelayInputChange() {
+  if (!UI.els.ackDelay) return;
+  const raw = UI.els.ackDelay.value;
+  const num = clampAckDelayMs(parseInt(raw, 10));
+  UI.els.ackDelay.value = String(num);
+  UI.state.ackDelay = num;
+  storage.set("set.ACKD", String(num));
+  updateAckDelayUi();
+  updateAckRetryUi();
+  await setAckDelay(num);
 }
 async function setAck(value) {
   const response = await sendCommand("ACK", { v: value ? "1" : "0" });
@@ -6709,6 +6799,29 @@ async function setAckRetry(count) {
     return await refreshAckRetry();
   });
   return response;
+}
+async function setAckDelay(value) {
+  const clamped = clampAckDelayMs(value);
+  if (UI.state.ackDelayBusy) return UI.state.ackDelay;
+  UI.state.ackDelayBusy = true;
+  updateAckDelayUi();
+  try {
+    const res = await sendCommand("ACKD", { v: String(clamped) });
+    if (typeof res === "string") {
+      const parsed = parseAckDelayResponse(res);
+      if (parsed !== null) {
+        UI.state.ackDelay = parsed;
+        storage.set("set.ACKD", String(parsed));
+        updateAckDelayUi();
+        updateAckRetryUi();
+        return parsed;
+      }
+    }
+    return await refreshAckDelay();
+  } finally {
+    UI.state.ackDelayBusy = false;
+    updateAckDelayUi();
+  }
 }
 async function toggleAck() {
   const response = await sendCommand("ACK", { toggle: "1" });
@@ -6840,6 +6953,112 @@ async function refreshAckRetry() {
   updateAckRetryUi();
   return null;
 }
+async function refreshAckDelay() {
+  const alreadyBusy = UI.state.ackDelayBusy === true;
+  if (!alreadyBusy) {
+    UI.state.ackDelayBusy = true;
+    updateAckDelayUi();
+  }
+  try {
+    const res = await deviceFetch("ACKD", {}, 2000);
+    if (res.ok) {
+      const parsed = parseAckDelayResponse(res.text);
+      if (parsed !== null) {
+        UI.state.ackDelay = parsed;
+        storage.set("set.ACKD", String(parsed));
+        updateAckDelayUi();
+        updateAckRetryUi();
+        return parsed;
+      }
+    }
+    UI.state.ackDelay = null;
+    updateAckDelayUi();
+    updateAckRetryUi();
+    return null;
+  } finally {
+    if (!alreadyBusy) {
+      UI.state.ackDelayBusy = false;
+      updateAckDelayUi();
+    }
+  }
+}
+function updateTestModeUi() {
+  const input = UI.els.testMode;
+  const state = UI.state.testMode;
+  if (input) {
+    if (state === null) {
+      input.indeterminate = true;
+      input.checked = false;
+    } else {
+      input.indeterminate = false;
+      input.checked = state;
+    }
+    input.disabled = UI.state.testModeBusy === true;
+  }
+  const hint = UI.els.testModeHint;
+  if (hint) {
+    if (UI.state.testModeBusy) {
+      hint.textContent = "Синхронизируем состояние тестового режима...";
+    } else if (state === true) {
+      hint.textContent = "Тестовый режим включён: сообщения обрабатываются без радиоканала.";
+    } else if (state === false) {
+      hint.textContent = "Тестовый режим выключен: используются реальные передачи.";
+    } else {
+      hint.textContent = "Состояние тестового режима не загружено.";
+    }
+  }
+  const control = UI.els.testModeControl;
+  if (control) control.classList.toggle("loading", UI.state.testModeBusy === true);
+}
+async function refreshTestModeState() {
+  const alreadyBusy = UI.state.testModeBusy === true;
+  if (!alreadyBusy) {
+    UI.state.testModeBusy = true;
+    updateTestModeUi();
+  }
+  try {
+    const res = await deviceFetch("TESTMODE", {}, 2000);
+    if (res.ok) {
+      const parsed = parseTestModeResponse(res.text);
+      if (parsed !== null) {
+        UI.state.testMode = parsed;
+        storage.set("set.TESTMODE", parsed ? "1" : "0");
+        updateTestModeUi();
+        return parsed;
+      }
+    }
+    UI.state.testMode = null;
+    updateTestModeUi();
+    return null;
+  } finally {
+    if (!alreadyBusy) {
+      UI.state.testModeBusy = false;
+      updateTestModeUi();
+    }
+  }
+}
+async function setTestMode(value) {
+  const desired = !!value;
+  if (UI.state.testModeBusy) return UI.state.testMode;
+  UI.state.testModeBusy = true;
+  updateTestModeUi();
+  try {
+    const res = await sendCommand("TESTMODE", { v: desired ? "1" : "0" });
+    if (typeof res === "string") {
+      const parsed = parseTestModeResponse(res);
+      if (parsed !== null) {
+        UI.state.testMode = parsed;
+        storage.set("set.TESTMODE", parsed ? "1" : "0");
+        updateTestModeUi();
+        return parsed;
+      }
+    }
+    return await refreshTestModeState();
+  } finally {
+    UI.state.testModeBusy = false;
+    updateTestModeUi();
+  }
+}
 async function refreshRxBoostedGain() {
   const res = await deviceFetch("RXBG", {}, 2000);
   if (res.ok) {
@@ -6866,6 +7085,19 @@ async function onAckRetryInput() {
     return;
   }
   await setAckRetry(clamped);
+}
+async function onTestModeToggle(event) {
+  if (!UI.els.testMode) return;
+  if (UI.state.testModeBusy) {
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    updateTestModeUi();
+    return;
+  }
+  const enabled = UI.els.testMode.checked;
+  storage.set("set.TESTMODE", enabled ? "1" : "0");
+  UI.state.testMode = enabled;
+  updateTestModeUi();
+  await setTestMode(enabled);
 }
 function onTestRxmMessageChange() {
   if (!UI.els.testRxmMessage) return;
@@ -7065,7 +7297,7 @@ async function refreshEncryptionState() {
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","TESTRXMMSG"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","ACKD","TESTMODE","TESTRXMMSG"];
 function normalizePowerPreset(raw) {
   if (raw == null) return null;
   const str = String(raw).trim();
@@ -7123,6 +7355,20 @@ function loadSettings() {
       if (UI.els.ackTimeout) UI.els.ackTimeout.value = String(num);
       UI.state.ackTimeout = num;
       updateAckTimeoutUi();
+    } else if (key === "ACKD") {
+      const num = clampAckDelayMs(parseInt(v, 10));
+      if (UI.els.ackDelay) UI.els.ackDelay.value = String(num);
+      UI.state.ackDelay = num;
+      updateAckDelayUi();
+      updateAckRetryUi();
+    } else if (key === "TESTMODE") {
+      const enabled = v === "1" || v === 1 || v === true || String(v).toLowerCase() === "true";
+      if (el.type === "checkbox") {
+        el.checked = enabled;
+        if (typeof el.indeterminate === "boolean") el.indeterminate = false;
+      }
+      UI.state.testMode = enabled;
+      updateTestModeUi();
     } else if (key === "TESTRXMMSG") {
       const text = clampTestRxmMessage(v);
       if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = text;
@@ -7161,6 +7407,8 @@ function saveSettingsLocal() {
       v = String(clampPauseMs(parseInt(v, 10)));
     } else if (key === "ACKT") {
       v = String(clampAckTimeoutMs(parseInt(v, 10)));
+    } else if (key === "ACKD") {
+      v = String(clampAckDelayMs(parseInt(v, 10)));
     } else if (key === "TESTRXMMSG") {
       v = clampTestRxmMessage(v);
       if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = v;
@@ -7170,6 +7418,14 @@ function saveSettingsLocal() {
     if (key === "RXBG") {
       UI.state.rxBoostedGain = (v === "1");
       updateRxBoostedGainUi();
+    } else if (key === "ACKD") {
+      UI.state.ackDelay = clampAckDelayMs(parseInt(v, 10));
+      updateAckDelayUi();
+      updateAckRetryUi();
+    } else if (key === "TESTMODE") {
+      const enabled = v === "1";
+      UI.state.testMode = enabled;
+      updateTestModeUi();
     }
   }
   note("Сохранено локально.");
@@ -7238,6 +7494,20 @@ async function applySettingsToDevice() {
         updateAckRetryUi();
         storage.set("set.ACKT", String(effective));
       }
+    } else if (key === "ACKD") {
+      const parsed = clampAckDelayMs(parseInt(value, 10));
+      const resp = await sendCommand("ACKD", { v: String(parsed) });
+      if (resp !== null) {
+        const applied = parseAckDelayResponse(resp);
+        const effective = applied != null ? applied : parsed;
+        UI.state.ackDelay = effective;
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(effective);
+        updateAckDelayUi();
+        updateAckRetryUi();
+        storage.set("set.ACKD", String(effective));
+      }
+    } else if (key === "TESTMODE") {
+      await setTestMode(value === "1");
     } else {
       const resp = await sendCommand(key, { v: value });
       if (resp !== null) storage.set("set." + key, value);
@@ -7246,9 +7516,13 @@ async function applySettingsToDevice() {
   note("Применение завершено.");
   await refreshChannels().catch(() => {});
   await refreshAckState();
+  await refreshAckDelay();
+  await refreshAckRetry();
+  await refreshTestModeState();
   await refreshLightPackState();
   await refreshRxBoostedGain();
 }
+
 function exportSettings() {
   const obj = {};
   for (let i = 0; i < SETTINGS_KEYS.length; i++) {
@@ -7264,6 +7538,8 @@ function exportSettings() {
       obj[key] = String(clampPauseMs(parseInt(el.value, 10)));
     } else if (key === "ACKT") {
       obj[key] = String(clampAckTimeoutMs(parseInt(el.value, 10)));
+    } else if (key === "ACKD") {
+      obj[key] = String(clampAckDelayMs(parseInt(el.value, 10)));
     } else if (key === "TESTRXMMSG") {
       obj[key] = clampTestRxmMessage(el.value || "");
     } else {
@@ -7333,11 +7609,31 @@ function importSettings() {
         storage.set("set.ACKT", String(num));
         continue;
       }
+      if (key === "ACKD") {
+        const num = clampAckDelayMs(parseInt(obj[key], 10));
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(num);
+        UI.state.ackDelay = num;
+        updateAckDelayUi();
+        updateAckRetryUi();
+        storage.set("set.ACKD", String(num));
+        continue;
+      }
       if (key === "TESTRXMMSG") {
         const text = clampTestRxmMessage(String(obj[key] || ""));
         if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = text;
         storage.set("set.TESTRXMMSG", text);
         updateTestRxmMessageHint();
+        continue;
+      }
+      if (key === "TESTMODE") {
+        const enabled = obj[key] === "1" || obj[key] === 1 || obj[key] === true || String(obj[key]).toLowerCase() === "true";
+        if (el.type === "checkbox") {
+          el.checked = enabled;
+          if (typeof el.indeterminate === "boolean") el.indeterminate = false;
+        }
+        UI.state.testMode = enabled;
+        storage.set("set.TESTMODE", enabled ? "1" : "0");
+        updateTestModeUi();
         continue;
       }
       if (el.type === "checkbox") {
@@ -7490,6 +7786,38 @@ async function syncSettingsFromDevice() {
     }
   } catch (err) {
     console.warn("[settings] ACKT", err);
+  }
+  try {
+    const ackDRes = await deviceFetch("ACKD", {}, 2000);
+    if (ackDRes.ok) {
+      const parsed = parseAckDelayResponse(ackDRes.text);
+      if (parsed !== null) {
+        UI.state.ackDelay = parsed;
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(parsed);
+        storage.set("set.ACKD", String(parsed));
+        updateAckDelayUi();
+        updateAckRetryUi();
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] ACKD", err);
+  }
+  try {
+    const testModeRes = await deviceFetch("TESTMODE", {}, 2000);
+    if (testModeRes.ok) {
+      const parsed = parseTestModeResponse(testModeRes.text);
+      if (parsed !== null) {
+        UI.state.testMode = parsed;
+        if (UI.els.testMode) {
+          UI.els.testMode.checked = parsed;
+          UI.els.testMode.indeterminate = false;
+        }
+        storage.set("set.TESTMODE", parsed ? "1" : "0");
+        updateTestModeUi();
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] TESTMODE", err);
   }
 
   updateChannelSelect();
