@@ -42,7 +42,6 @@ namespace DefaultSettings {
   // Уровни журналирования для фильтрации сообщений
   enum class LogLevel : uint8_t { ERROR = 0, WARN = 1, INFO = 2, DEBUG = 3 };
   constexpr LogLevel LOG_LEVEL = LogLevel::DEBUG;   // Текущий уровень вывода
-  constexpr uint16_t PREAMBLE_LENGTH = 16;          // Длина преамбулы LoRa (символы)
   // Ключ шифрования по умолчанию (16 байт)
   constexpr std::array<uint8_t, 16> DEFAULT_KEY{
       0x00, 0x01, 0x02, 0x03,
