@@ -73,7 +73,14 @@ private:
   // Непосредственная установка частоты
   bool setFrequency(float freq);
 
-  SX1262 radio_;                         // экземпляр радиомодуля
+  // Вспомогательный класс для открытия доступа к защищённым методам SX1262
+  class PublicSX1262 : public SX1262 {
+  public:
+    using SX1262::SX1262;                // наследуем конструктор без изменений
+    using SX1262::clearIrqStatus;        // делаем очистку IRQ публичной
+  };
+
+  PublicSX1262 radio_;                   // экземпляр радиомодуля
   RxCallback rx_cb_;                     // пользовательский колбэк
   static RadioSX1262* instance_;         // указатель на текущий объект
   volatile bool packetReady_ = false;    // флаг готовности пакета
