@@ -4,6 +4,7 @@
 #include <cmath>
 #include <array>
 #include <cstring>
+#include <string>
 
 RadioSX1262* RadioSX1262::instance_ = nullptr; // инициализация статического указателя
 
@@ -332,7 +333,57 @@ void RadioSX1262::onDio1Static() {
 
 void RadioSX1262::handleDio1() {
   packetReady_ = true;                     // устанавливаем флаг готовности пакета
+
+  uint16_t irqStatus = 0;                  // текущее состояние IRQ
+  int16_t irqState = radio_.getIrqStatus(&irqStatus); // запрашиваем флаги IRQ у модуля
+  if (irqState != RADIOLIB_ERR_NONE) {     // проверяем успешность чтения
+    LOG_WARN_VAL("RadioSX1262: не удалось получить IRQ статус, код=", irqState);
+    DEBUG_LOG("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
+    return;                                // выходим, чтобы не продолжать анализ битов
+  }
+
+  struct FlagInfo {                        // описание интересующих флагов
+    uint16_t mask;
+    const char* name;
+  };
+
+  static constexpr FlagInfo kFlags[] = {
+      {RADIOLIB_SX126X_IRQ_TX_DONE, "TX_DONE"},
+      {RADIOLIB_SX126X_IRQ_RX_DONE, "RX_DONE"},
+      {RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED, "PREAMBLE_DETECTED"},
+      {RADIOLIB_SX126X_IRQ_SYNC_WORD_VALID, "SYNCWORD_VALID"},
+      {RADIOLIB_SX126X_IRQ_HEADER_VALID, "HEADER_VALID"},
+      {RADIOLIB_SX126X_IRQ_HEADER_ERR, "HEADER_ERR"},
+      {RADIOLIB_SX126X_IRQ_CRC_ERR, "CRC_ERR"},
+      {RADIOLIB_SX126X_IRQ_TIMEOUT, "RX_TX_TIMEOUT"},
+      {RADIOLIB_SX126X_IRQ_CAD_DONE, "CAD_DONE"},
+      {RADIOLIB_SX126X_IRQ_CAD_DETECTED, "CAD_DETECTED"},
+  };
+
+  std::string humanReadable;               // собираем список установленных битов
+  uint16_t clearMask = 0;                  // маска для очистки флагов
+  for (const auto& info : kFlags) {        // перебираем флаги и проверяем установленные биты
+    if ((irqStatus & info.mask) == 0) {
+      continue;                            // пропускаем отсутствующие флаги
+    }
+    if (!humanReadable.empty()) {
+      humanReadable += ", ";              // разделяем перечисление
+    }
+    humanReadable += info.name;            // добавляем название флага
+    clearMask |= info.mask;                // копим маску для очистки
+  }
+
+  if (humanReadable.empty()) {             // если интересующие флаги не выставлены
+    humanReadable = "нет интересующих флагов";
+  }
+
+  DEBUG_LOG("RadioSX1262: IRQ статус DIO1 = 0x%04X (%s)", irqStatus,
+            humanReadable.c_str());        // выводим полный статус IRQ
   DEBUG_LOG("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
+
+  if (clearMask != 0) {                    // очищаем только прочитанные флаги
+    radio_.clearIrqStatus(clearMask);
+  }
 }
 
 // Проверка флага готовности и чтение данных
