@@ -3109,6 +3109,7 @@ async function init() {
 
   loadChatHistory();
   startReceivedMonitor({ immediate: true });
+  openReceivedPushChannel();
 
   // Управление ACK и тестами
   if (UI.els.ackChip) UI.els.ackChip.addEventListener("click", onAckChipToggle);
@@ -5627,6 +5628,26 @@ function getReceivedMonitorState() {
       runningSince: null,
     };
   }
+  if (!state.push || typeof state.push !== "object") {
+    state.push = {
+      supported: typeof EventSource !== "undefined",
+      connected: false,
+      connecting: false,
+      source: null,
+      mode: "poll",
+      lastEventAt: null,
+      lastOpenAt: null,
+      lastErrorAt: null,
+      retryCount: 0,
+      pendingRefresh: false,
+      refreshScheduled: false,
+      lastHint: null,
+      lastDebugAt: null,
+      lastDebugId: null,
+    };
+  } else if (typeof EventSource === "undefined") {
+    state.push.supported = false;
+  }
   let limit = Number(state.limit);
   if (!Number.isFinite(limit) || limit <= 0) {
     const storedRaw = storage.get("recvLimit");
@@ -5676,9 +5697,17 @@ function updateReceivedMonitorDiagnostics() {
   const metrics = state.metrics || {};
   const statusEl = els.status;
   const now = Date.now();
+  const push = state.push || {};
   let statusText = "Ожидание запуска";
   let statusClass = "";
-  if (state.running) {
+  if (push.connected) {
+    const last = push.lastEventAt ? formatRelativeTime(push.lastEventAt) : "недавно";
+    statusText = "Push подписка активна · " + last;
+    statusClass = "";
+  } else if (push.connecting) {
+    statusText = "Подключение к push-каналу…";
+    statusClass = "";
+  } else if (state.running) {
     statusText = "Выполняется запрос";
     statusClass = "warn";
   } else if (metrics.consecutiveErrors >= 3) {
@@ -5698,6 +5727,19 @@ function updateReceivedMonitorDiagnostics() {
     statusEl.textContent = statusText;
     statusEl.classList.remove("warn", "error");
     if (statusClass) statusEl.classList.add(statusClass);
+  }
+  if (els.mode) {
+    let modeText = "Push-канал не активен";
+    if (push.supported === false) {
+      modeText = "Push недоступен в этом браузере, используется опрос";
+    } else if (push.connected) {
+      modeText = "Push активен, резервный опрос каждые 30 с";
+    } else if (push.connecting) {
+      modeText = "Push: ожидаем подключение, работает стандартный опрос";
+    } else {
+      modeText = "Используется опрос каждые 5 с";
+    }
+    els.mode.textContent = modeText;
   }
   const intervalMs = Number(metrics.configuredIntervalMs);
   if (els.interval) {
@@ -5793,15 +5835,175 @@ function handleReceivedSnapshot(items) {
   const prev = state.known;
   const next = new Set();
   const list = Array.isArray(items) ? items : [];
+  const firstLoad = !state.snapshotReady;
   for (let i = 0; i < list.length; i += 1) {
     const entry = list[i];
     const name = entry && entry.name ? String(entry.name).trim() : "";
     if (name) next.add(name);
-    const isNew = !!(name && !prev.has(name));
+    const isNew = !firstLoad && !!(name && !prev.has(name));
     logReceivedMessage(entry, { isNew });
   }
   state.known = next;
+  state.snapshotReady = true;
   updateChatReceivingIndicatorFromRsts(list);
+}
+
+function scheduleReceivedRefreshFromPush(hint) {
+  const state = getReceivedMonitorState();
+  const push = state.push;
+  if (!push) return;
+  push.lastHint = hint || null;
+  if (push.refreshScheduled) return;
+  push.refreshScheduled = true;
+  Promise.resolve().then(() => {
+    push.refreshScheduled = false;
+    if (state.running) {
+      push.pendingRefresh = true;
+      return;
+    }
+    pollReceivedMessages({ silentError: true }).catch((err) => {
+      console.warn("[push] ошибка обновления списка сообщений:", err);
+    });
+  });
+}
+
+// Обработка события "debug" из SSE: разбираем JSON и выводим строку
+function handleDebugPushMessage(event) {
+  const state = getReceivedMonitorState();
+  const push = state.push || (state.push = {});
+  const now = Date.now();
+  if (push) {
+    push.lastEventAt = now;
+    push.lastDebugAt = now;
+  }
+  if (!event || typeof event.data !== "string") return;
+  let payload = null;
+  try {
+    payload = JSON.parse(event.data);
+  } catch (err) {
+    payload = null;
+  }
+  let text = event.data;
+  const meta = { timestamp: new Date(now) };
+  if (payload && typeof payload === "object") {
+    if (payload.text != null) text = String(payload.text);
+    if (payload.level != null) meta.level = payload.level;
+    const ts = Number(payload.ts);
+    if (Number.isFinite(ts) && ts >= 0) meta.deviceTimestamp = ts;
+    const id = Number(payload.id);
+    if (push && Number.isFinite(id)) {
+      if (Number.isFinite(push.lastDebugId) && id <= push.lastDebugId) return;
+      push.lastDebugId = id;
+    }
+  }
+  if (!text) return;
+  debugLog(text, meta);
+  updateReceivedMonitorDiagnostics();
+}
+
+function handleReceivedPushMessage(event) {
+  const state = getReceivedMonitorState();
+  const push = state.push;
+  if (!push) return;
+  const raw = event && typeof event.data === "string" ? event.data : "";
+  let payload = null;
+  if (raw) {
+    try {
+      payload = JSON.parse(raw);
+    } catch (err) {
+      push.lastHint = raw;
+    }
+  }
+  if (payload && payload.kind) {
+    const kind = String(payload.kind).toLowerCase();
+    if (kind === "split") {
+      state.awaiting = true;
+      setChatReceivingIndicatorState(true);
+    } else if (kind === "ready") {
+      state.awaiting = false;
+    }
+  }
+  scheduleReceivedRefreshFromPush(payload);
+}
+
+function closeReceivedPushChannel(opts) {
+  const options = opts || {};
+  const state = getReceivedMonitorState();
+  const push = state.push;
+  if (!push) return;
+  if (push.source && typeof push.source.close === "function") {
+    try {
+      push.source.close();
+    } catch (err) {
+      if (!options.silent) console.warn("[push] ошибка закрытия EventSource:", err);
+    }
+  }
+  push.source = null;
+  push.connected = false;
+  push.connecting = false;
+  push.mode = "poll";
+}
+
+function openReceivedPushChannel() {
+  const state = getReceivedMonitorState();
+  const push = state.push;
+  if (!push || push.supported === false || typeof EventSource === "undefined") {
+    if (push) push.mode = "poll";
+    startReceivedMonitor({ intervalMs: 5000, immediate: false });
+    updateReceivedMonitorDiagnostics();
+    return;
+  }
+  closeReceivedPushChannel({ silent: true });
+  let url;
+  try {
+    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+    url = new URL("/events", base).toString();
+  } catch (err) {
+    url = "http://192.168.4.1/events";
+  }
+  try {
+    const source = new EventSource(url);
+    push.source = source;
+    push.connecting = true;
+    push.retryCount = 0;
+    push.mode = "push";
+    updateReceivedMonitorDiagnostics();
+    source.addEventListener("open", () => {
+      push.connected = true;
+      push.connecting = false;
+      push.lastOpenAt = Date.now();
+      push.lastErrorAt = null;
+      push.retryCount = 0;
+      push.mode = "push";
+      startReceivedMonitor({ intervalMs: 30000, immediate: false });
+      updateReceivedMonitorDiagnostics();
+    });
+    source.addEventListener("received", (event) => {
+      push.connected = true;
+      push.lastEventAt = Date.now();
+      handleReceivedPushMessage(event);
+      updateReceivedMonitorDiagnostics();
+    });
+    source.addEventListener("debug", (event) => {
+      handleDebugPushMessage(event);
+    });
+    source.addEventListener("error", () => {
+      push.connected = false;
+      push.connecting = true;
+      push.lastErrorAt = Date.now();
+      push.retryCount = (push.retryCount || 0) + 1;
+      if (push.retryCount >= 3) {
+        push.mode = "poll";
+        startReceivedMonitor({ intervalMs: 5000, immediate: false });
+      }
+      updateReceivedMonitorDiagnostics();
+    });
+  } catch (err) {
+    console.warn("[push] не удалось открыть EventSource:", err);
+    push.supported = false;
+    push.mode = "poll";
+    updateReceivedMonitorDiagnostics();
+  }
 }
 
 // Фоновый запрос RSTS использует тот же базовый тайм-аут, что и sendCommand,
@@ -5874,6 +6076,10 @@ async function pollReceivedMessages(opts) {
     metrics.runningSince = null;
     updateReceivedMonitorDiagnostics();
     state.running = false;
+    if (state.push && state.push.pendingRefresh) {
+      state.push.pendingRefresh = false;
+      scheduleReceivedRefreshFromPush(state.push.lastHint);
+    }
   }
 }
 
@@ -10831,15 +11037,66 @@ function classifyDebugMessage(text) {
   if (trimmed.startsWith("→") || low.startsWith("tx") || low.startsWith("cmd") || low.startsWith("send")) return "action";
   return "info";
 }
-function debugLog(text) {
+
+// Определяем оформление строки по уровню, который прошивка передала через SSE
+function mapDebugLevel(level) {
+  if (!level) return null;
+  const normalized = String(level).toLowerCase();
+  if (normalized === "error") return "error";
+  if (normalized === "warn" || normalized === "warning") return "warn";
+  if (normalized === "debug" || normalized === "info") return "info";
+  return null;
+}
+
+// Преобразуем millis() устройства в человеко-понятную строку
+function formatDeviceUptime(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value < 0) return null;
+  if (value < 1000) return `t=${Math.round(value)} мс`;
+  if (value < 60000) {
+    const seconds = value / 1000;
+    return `t=${seconds.toFixed(seconds >= 10 ? 1 : 2)} с`;
+  }
+  if (value < 3600000) {
+    const minutes = Math.floor(value / 60000);
+    const seconds = Math.round((value - minutes * 60000) / 1000);
+    return `t=${minutes} мин ${seconds} с`;
+  }
+  const hours = Math.floor(value / 3600000);
+  const minutes = Math.round((value - hours * 3600000) / 60000);
+  return `t=${hours} ч ${minutes} мин`;
+}
+
+// Рисуем строку отладочного лога с учётом опций
+function renderDebugLine(text, options) {
   const log = UI.els.debugLog;
   if (!log) return;
+  const opts = options || {};
   const line = document.createElement("div");
-  const type = classifyDebugMessage(text);
+  const levelType = mapDebugLevel(opts.level);
+  const type = levelType || classifyDebugMessage(text);
   line.className = "debug-line debug-line--" + type;
-  line.textContent = "[" + new Date().toLocaleTimeString() + "] " + text;
+  const deviceTs = formatDeviceUptime(opts.deviceTimestamp);
+  const timeMark = deviceTs || (opts.timestamp instanceof Date ? opts.timestamp.toLocaleTimeString() : new Date().toLocaleTimeString());
+  line.textContent = `[${timeMark}] ${text}`;
   log.appendChild(line);
+  while (log.childNodes.length > 400) {
+    log.removeChild(log.firstChild);
+  }
   log.scrollTop = log.scrollHeight;
+}
+
+// Унифицированный вывод в debug-панель для строк и многострочных сообщений
+function debugLog(text, metadata) {
+  const raw = text != null ? String(text) : "";
+  if (!raw) return;
+  const opts = metadata || {};
+  const parts = raw.split(/\r?\n/);
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i];
+    if (!part) continue;
+    renderDebugLine(part, opts);
+  }
 }
 
 async function loadVersion() {
@@ -10957,6 +11214,7 @@ async function resyncAfterEndpointChange() {
     const monitor = getReceivedMonitorState();
     if (monitor && monitor.known) monitor.known = new Set();
     await pollReceivedMessages({ silentError: true });
+    openReceivedPushChannel();
   } catch (err) {
     console.warn("[endpoint] resync error", err);
   }
