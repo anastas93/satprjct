@@ -32,7 +32,7 @@ int main() {
   });
 
   const std::vector<uint8_t> payload = {'T','E','S','T'}; // тестовое сообщение
-  uint32_t id = tx.queue(payload.data(), payload.size());
+  uint16_t id = tx.queue(payload.data(), payload.size());
   assert(id == 1);                                 // ожидаем первый идентификатор
   bool sent = tx.loop();
   assert(sent);                                    // кадр должен быть отправлен

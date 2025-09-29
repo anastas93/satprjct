@@ -41,10 +41,10 @@ int main() {
   TxModule tx(radio, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
   tx.setAckResponseDelay(0);
   const char* msg = "HELLO";
-  uint32_t id = tx.queue(reinterpret_cast<const uint8_t*>(msg), 5);
+  uint16_t id = tx.queue(reinterpret_cast<const uint8_t*>(msg), 5);
   assert(id==1);                          // ожидаемый ID
   tx.loop();                              // формируем кадр
-  const size_t minFrame = FrameHeader::SIZE*2 + 22;
+  const size_t minFrame = FrameHeader::SIZE + 22;
   assert(radio.last.size() >= minFrame);
   assert(radio.last.size() <= 245);
   auto frameCopy = radio.last;
@@ -141,8 +141,8 @@ int main() {
   assert(FrameHeader::decode(ackDecoded.data(), ackDecoded.size(), ackHdr));
   assert((ackHdr.getFlags() & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0);
   assert(ackHdr.getPayloadLen() == 1);
-  assert(ackFrame.size() == FrameHeader::SIZE * 2 + ackHdr.getPayloadLen());
-  const uint8_t* ackPayloadPtr = ackDecoded.data() + FrameHeader::SIZE * 2;
+  assert(ackFrame.size() == FrameHeader::SIZE + ackHdr.getPayloadLen());
+  const uint8_t* ackPayloadPtr = ackDecoded.data() + FrameHeader::SIZE;
   assert(*ackPayloadPtr == protocol::ack::MARKER);
   RxModule rxAck;
   std::vector<uint8_t> ackPlain;

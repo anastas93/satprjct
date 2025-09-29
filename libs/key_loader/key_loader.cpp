@@ -1099,22 +1099,22 @@ std::array<uint8_t,32> getPublicKey() {
   return snapshot.current.root_public;
 }
 
-std::array<uint8_t,12> makeNonce(uint32_t msg_id, uint16_t frag_idx) {
+std::array<uint8_t,12> makeNonce(uint32_t packed_meta, uint16_t msg_id) {
   StorageSnapshot& snapshot = ensureSnapshot();
   std::array<uint8_t,12> nonce{};
-  nonce[0] = static_cast<uint8_t>(msg_id & 0xFF);
-  nonce[1] = static_cast<uint8_t>((msg_id >> 8) & 0xFF);
-  nonce[2] = static_cast<uint8_t>((msg_id >> 16) & 0xFF);
-  nonce[3] = static_cast<uint8_t>((msg_id >> 24) & 0xFF);
-  nonce[4] = static_cast<uint8_t>(frag_idx & 0xFF);
-  nonce[5] = static_cast<uint8_t>((frag_idx >> 8) & 0xFF);
+  nonce[0] = static_cast<uint8_t>(packed_meta & 0xFF);
+  nonce[1] = static_cast<uint8_t>((packed_meta >> 8) & 0xFF);
+  nonce[2] = static_cast<uint8_t>((packed_meta >> 16) & 0xFF);
+  nonce[3] = static_cast<uint8_t>((packed_meta >> 24) & 0xFF);
+  nonce[4] = static_cast<uint8_t>(msg_id & 0xFF);
+  nonce[5] = static_cast<uint8_t>((msg_id >> 8) & 0xFF);
   uint32_t salt = snapshot.current.nonce_salt;
   nonce[6] = static_cast<uint8_t>(salt & 0xFF);
   nonce[7] = static_cast<uint8_t>((salt >> 8) & 0xFF);
   nonce[8] = static_cast<uint8_t>((salt >> 16) & 0xFF);
   nonce[9] = static_cast<uint8_t>((salt >> 24) & 0xFF);
-  nonce[10] = static_cast<uint8_t>(((salt >> 16) & 0xFF) ^ (msg_id & 0xFF));
-  nonce[11] = static_cast<uint8_t>(((salt >> 24) & 0xFF) ^ ((msg_id >> 8) & 0xFF));
+  nonce[10] = static_cast<uint8_t>(((salt >> 16) & 0xFF) ^ (packed_meta & 0xFF));
+  nonce[11] = static_cast<uint8_t>(((salt >> 24) & 0xFF) ^ (msg_id & 0xFF));
   return nonce;
 }
 

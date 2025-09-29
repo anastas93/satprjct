@@ -81,7 +81,7 @@ KeyState getState();
 std::array<uint8_t,32> getPublicKey();
 
 // Генерация нонса для AES-CCM на основе идентификатора сообщения и индекса фрагмента.
-std::array<uint8_t,12> makeNonce(uint32_t msg_id, uint16_t frag_idx);
+std::array<uint8_t,12> makeNonce(uint32_t packed_meta, uint16_t msg_id);
 
 // 4-байтовый идентификатор ключа (первые байты SHA-256 от симметричного ключа).
 std::array<uint8_t,4> keyId(const std::array<uint8_t,16>& key);

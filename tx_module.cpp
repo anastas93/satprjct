@@ -40,7 +40,7 @@ static_assert(PILOT_PREFIX_LEN == 5, "Ожидается пятибайтовы�
 
 // Допустимая длина полезной нагрузки одного кадра с учётом заголовков и пилотов
 static constexpr size_t MAX_FRAGMENT_LEN =
-    MAX_FRAME_SIZE - FrameHeader::SIZE * 2 - (MAX_FRAME_SIZE / PILOT_INTERVAL) * PILOT_MARKER.size();
+    MAX_FRAME_SIZE - FrameHeader::SIZE - (MAX_FRAME_SIZE / PILOT_INTERVAL) * PILOT_MARKER.size();
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
 static constexpr uint8_t FRAME_VERSION_AEAD = 2;  // версия кадра с новым AEAD
 static constexpr size_t TAG_LEN = crypto::chacha20poly1305::TAG_SIZE; // новый тег Poly1305
@@ -79,21 +79,23 @@ static size_t insertPilots(const uint8_t* in, size_t len, uint8_t* out, size_t o
   return written;
 }
 
-static std::array<uint8_t,8> makeAad(uint8_t version,
-                                     uint8_t flags,
-                                     uint32_t msg_id,
-                                     uint16_t frag_idx) {
+static std::array<uint8_t,8> makeAad(uint8_t version, uint16_t msg_id, uint32_t packed_meta) {
   std::array<uint8_t,8> aad{};
   aad[0] = version;
-  aad[1] = static_cast<uint8_t>(flags &
-                                 (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED));
-  aad[2] = static_cast<uint8_t>(msg_id >> 24);
-  aad[3] = static_cast<uint8_t>(msg_id >> 16);
-  aad[4] = static_cast<uint8_t>(msg_id >> 8);
-  aad[5] = static_cast<uint8_t>(msg_id);
-  aad[6] = static_cast<uint8_t>(frag_idx >> 8);
-  aad[7] = static_cast<uint8_t>(frag_idx);
+  aad[1] = static_cast<uint8_t>(msg_id >> 8);
+  aad[2] = static_cast<uint8_t>(msg_id);
+  aad[3] = static_cast<uint8_t>(packed_meta >> 24);
+  aad[4] = static_cast<uint8_t>(packed_meta >> 16);
+  aad[5] = static_cast<uint8_t>(packed_meta >> 8);
+  aad[6] = static_cast<uint8_t>(packed_meta);
+  // aad[7] оставляем нулевым для будущих расширений
   return aad;
+}
+
+static uint32_t packMetadata(uint8_t flags, uint16_t frag_idx, uint16_t payload_len) {
+  return (static_cast<uint32_t>(flags) << FrameHeader::FLAGS_SHIFT) |
+         ((static_cast<uint32_t>(frag_idx) & 0x0FFF) << FrameHeader::FRAG_SHIFT) |
+         (static_cast<uint32_t>(payload_len) & FrameHeader::LEN_MASK);
 }
 
 // Инициализация модуля передачи с классами QoS
@@ -111,7 +113,7 @@ TxModule::TxModule(IRadio& radio, const std::array<size_t,4>& capacities, Payloa
 void TxModule::setPayloadMode(PayloadMode mode) { splitter_.setMode(mode); }
 
 // Помещаем сообщение в очередь согласно классу QoS
-uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos, bool with_prefix) {
+uint16_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos, bool with_prefix) {
   if (!data || len == 0) {                        // проверка указателя
     DEBUG_LOG("TxModule: пустой ввод");
     return 0;
@@ -120,8 +122,9 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos, bool with
   bool is_ack_marker = protocol::ack::isAckPayload(data, len);
   if (is_ack_marker) {
     PendingMessage ack_msg;                       // формируем отдельную запись для ACK
-    ack_msg.id = next_ack_id_++;                  // выделяем идентификатор вне общей очереди
-    if (next_ack_id_ < 0x80000000u) next_ack_id_ = 0x80000000u; // не даём переполнению уйти в «обычный» диапазон
+    ack_msg.id = next_ack_id_;                    // выделяем идентификатор вне общей очереди
+    ++next_ack_id_;
+    if (next_ack_id_ < 0x8000) next_ack_id_ = 0x8000; // удерживаемся в верхнем диапазоне
     ack_msg.data.assign(1, protocol::ack::MARKER); // всегда отправляем минимальный ACK
     ack_msg.qos = qos;                            // запоминаем исходный класс
     ack_msg.attempts_left = 0;                    // повторы не нужны
@@ -138,7 +141,7 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos, bool with
     return ack_queue_.back().id;
   }
   DEBUG_LOG_VAL("TxModule: постановка длины=", len);
-  uint32_t res = splitter_.splitAndEnqueue(buffers_[qos], data, len, with_prefix);
+  uint16_t res = splitter_.splitAndEnqueue(buffers_[qos], data, len, with_prefix);
   if (res) {
     DEBUG_LOG_VAL("TxModule: сообщение id=", res);
   } else {
@@ -147,7 +150,7 @@ uint32_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos, bool with
   return res;
 }
 
-uint32_t TxModule::queuePlain(const uint8_t* data, size_t len, uint8_t qos) {
+uint16_t TxModule::queuePlain(const uint8_t* data, size_t len, uint8_t qos) {
   if (!data || len == 0) {
     DEBUG_LOG("TxModule: пустой ввод для plain");
     return 0;
@@ -157,7 +160,7 @@ uint32_t TxModule::queuePlain(const uint8_t* data, size_t len, uint8_t qos) {
     DEBUG_LOG("TxModule: plain сообщение не помещается в слот");
     return 0;
   }
-  uint32_t res = buffers_[qos].enqueue(data, len);
+  uint16_t res = buffers_[qos].enqueue(data, len);
   if (res) {
     DEBUG_LOG_VAL("TxModule: plain сообщение id=", res);
     plain_messages_.insert(res);               // помечаем идентификатор как «сырой»
@@ -247,7 +250,7 @@ bool TxModule::loop() {
       return false;
     }
     std::vector<uint8_t> msg;
-    uint32_t id = 0;
+    uint16_t id = 0;
     if (!buf->pop(id, msg)) {
       DEBUG_LOG("TxModule: ошибка извлечения");
       return false;
@@ -428,7 +431,8 @@ bool TxModule::transmit(const PendingMessage& message) {
     uint16_t cipher_len = 0;                        // длина шифртекста вместе с тегом
     uint16_t plain_len = 0;                         // длина исходных данных до шифрования
     uint16_t chunk_idx = 0;                         // номер блока внутри сообщения для нонса
-    uint8_t base_flags = 0;                         // флаги для AAD без служебных битов
+    uint8_t header_flags = 0;                       // итоговые флаги кадра
+    uint32_t packed_meta = 0;                       // упакованные метаданные (флаги, индекс, длина)
   };
 
   std::vector<PreparedFragment> fragments;
@@ -446,7 +450,9 @@ bool TxModule::transmit(const PendingMessage& message) {
     if (!msg.empty()) {
       std::memcpy(frag.payload.data(), msg.data(), msg.size());
     }
-    frag.base_flags = 0;                               // подтверждение всегда отправляется открытым текстом
+    frag.chunk_idx = 0;
+    frag.header_flags = 0;                             // подтверждение всегда отправляется открытым текстом
+    frag.packed_meta = packMetadata(frag.header_flags, frag.chunk_idx, frag.payload_size);
     fragments.push_back(frag);
   } else {
     PacketSplitter rs_splitter(PayloadMode::SMALL, EFFECTIVE_DATA_CHUNK);
@@ -466,19 +472,54 @@ bool TxModule::transmit(const PendingMessage& message) {
 
     while (tmp.hasPending()) {
       part.clear();
-      uint32_t dummy = 0;
+      uint16_t dummy = 0;
       if (!tmp.pop(dummy, part)) break;
 
       enc.clear();
       tag.clear();
       const size_t plain_len = part.size();
       uint16_t current_idx = static_cast<uint16_t>(fragments.size());
-      auto nonce = KeyLoader::makeNonce(message.id, current_idx);
       uint8_t base_flags = 0;
       if (encryption_enabled_) base_flags |= FrameHeader::FLAG_ENCRYPTED;
       if (message.expect_ack) base_flags |= FrameHeader::FLAG_ACK_REQUIRED;
+      size_t cipher_len_guess = plain_len + TAG_LEN;
+      if (cipher_len_guess > MAX_CIPHER_CHUNK) {
+        LOG_WARN_VAL("TxModule: ожидаемый шифртекст превышает лимит=", cipher_len_guess);
+        continue;
+      }
+
+      bool conv_expected = false;
+      size_t payload_guess = cipher_len_guess;
+      if (cipher_len_guess > 0) {
+        if (USE_RS && cipher_len_guess == RS_DATA_LEN) {
+          size_t conv_input_len = RS_ENC_LEN + CONV_TAIL_BYTES;
+          size_t conv_payload_len = conv_input_len * 2;
+          if (conv_payload_len <= MAX_FRAGMENT_LEN) {
+            conv_expected = true;
+            payload_guess = conv_payload_len;
+          }
+        } else {
+          size_t conv_input_len = cipher_len_guess + CONV_TAIL_BYTES;
+          size_t conv_payload_len = conv_input_len * 2;
+          if (conv_payload_len <= MAX_FRAGMENT_LEN) {
+            conv_expected = true;
+            payload_guess = conv_payload_len;
+          }
+        }
+      }
+
+      if (payload_guess > FrameHeader::LEN_MASK) {
+        LOG_WARN_VAL("TxModule: длина полезной нагрузки вне 12-битного диапазона=", payload_guess);
+        continue;
+      }
+
+      uint8_t planned_flags = base_flags;
+      if (conv_expected) planned_flags |= FrameHeader::FLAG_CONV_ENCODED;
+      uint32_t packed_meta = packMetadata(planned_flags, current_idx, static_cast<uint16_t>(payload_guess));
+
+      auto nonce = KeyLoader::makeNonce(packed_meta, message.id);
       if (encryption_enabled_) {
-        auto aad = makeAad(FRAME_VERSION_AEAD, base_flags, message.id, current_idx);
+        auto aad = makeAad(FRAME_VERSION_AEAD, message.id, packed_meta);
         if (!crypto::chacha20poly1305::encrypt(key_.data(), key_.size(),
                                                nonce.data(), nonce.size(),
                                                aad.data(), aad.size(),
@@ -500,23 +541,22 @@ bool TxModule::transmit(const PendingMessage& message) {
       }
 
       bool conv_applied = false;
-      if (USE_RS && cipher_len == RS_DATA_LEN) {
-        uint8_t rs_buf[RS_ENC_LEN];
-        rs255223::encode(enc.data(), rs_buf);
-        byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
-        conv_input.assign(rs_buf, rs_buf + RS_ENC_LEN);
-        conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00);
-        conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
-        conv_applied = true;
-        if (USE_BIT_INTERLEAVER && !conv.empty()) {
-          bit_interleaver::interleave(conv.data(), conv.size());
+      if (conv_expected) {
+        if (USE_RS && cipher_len == RS_DATA_LEN) {
+          uint8_t rs_buf[RS_ENC_LEN];
+          rs255223::encode(enc.data(), rs_buf);
+          byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
+          conv_input.assign(rs_buf, rs_buf + RS_ENC_LEN);
+          conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00);
+          conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
+          conv_applied = true;
+        } else if (!enc.empty()) {
+          conv_input.assign(enc.begin(), enc.end());
+          conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00); // добавляем «хвост» для сброса регистра
+          conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
+          conv_applied = true;
         }
-      } else if (!enc.empty()) {
-        conv_input.assign(enc.begin(), enc.end());
-        conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00); // добавляем «хвост» для сброса регистра
-        conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
-        conv_applied = true;
-        if (USE_BIT_INTERLEAVER && !conv.empty()) {
+        if (conv_applied && USE_BIT_INTERLEAVER && !conv.empty()) {
           bit_interleaver::interleave(conv.data(), conv.size());
         }
       }
@@ -540,13 +580,21 @@ bool TxModule::transmit(const PendingMessage& message) {
       if (!conv.empty()) {
         std::memcpy(frag.payload.data(), conv.data(), conv.size());
       }
-      if (conv_applied) {
-        frag.conv_encoded = true;
-        frag.cipher_len = static_cast<uint16_t>(cipher_len);
-        frag.plain_len = static_cast<uint16_t>(plain_len);
+
+      uint8_t final_flags = base_flags;
+      if (conv_applied) final_flags |= FrameHeader::FLAG_CONV_ENCODED;
+      uint32_t final_meta = packMetadata(final_flags, current_idx, frag.payload_size);
+      if (final_meta != packed_meta) {
+        LOG_ERROR("TxModule: рассогласование метаданных AEAD и заголовка");
+        continue;
       }
+
+      frag.conv_encoded = conv_applied;
+      frag.cipher_len = static_cast<uint16_t>(cipher_len);
+      frag.plain_len = static_cast<uint16_t>(plain_len);
       frag.chunk_idx = current_idx;
-      frag.base_flags = base_flags;
+      frag.header_flags = final_flags;
+      frag.packed_meta = final_meta;
       fragments.push_back(frag);
     }
   }
@@ -555,16 +603,22 @@ bool TxModule::transmit(const PendingMessage& message) {
   std::array<uint8_t, MAX_FRAME_SIZE> frame_buf{};      // общий буфер кадра
   for (size_t idx = 0; idx < fragments.size(); ++idx) {
     auto& frag = fragments[idx];
+    if (frag.chunk_idx != idx) {
+      LOG_ERROR("TxModule: индекс фрагмента не совпадает с сохранённым значением");
+      continue;
+    }
+    uint32_t header_meta = packMetadata(frag.header_flags, static_cast<uint16_t>(frag.chunk_idx), frag.payload_size);
+    if (header_meta != frag.packed_meta) {
+      LOG_ERROR("TxModule: несоответствие упакованных метаданных при сборке кадра");
+      continue;
+    }
     FrameHeader hdr;
     hdr.ver = FRAME_VERSION_AEAD;
     hdr.msg_id = static_cast<uint16_t>(message.id);
-    hdr.setFragIdx(static_cast<uint16_t>(idx));
     hdr.frag_cnt = frag_cnt;
+    hdr.setFlags(frag.header_flags);
+    hdr.setFragIdx(static_cast<uint16_t>(frag.chunk_idx));
     hdr.setPayloadLen(frag.payload_size);
-    hdr.setFlags(frag.base_flags);
-    if (frag.conv_encoded) {
-      hdr.setFlags(hdr.getFlags() | FrameHeader::FLAG_CONV_ENCODED);
-    }
 
     uint8_t hdr_buf[FrameHeader::SIZE];
     if (!hdr.encode(hdr_buf, sizeof(hdr_buf), frag.payload.data(), frag.payload_size)) {
@@ -573,8 +627,6 @@ bool TxModule::transmit(const PendingMessage& message) {
     }
 
     size_t frame_size = 0;
-    std::memcpy(frame_buf.data() + frame_size, hdr_buf, FrameHeader::SIZE);
-    frame_size += FrameHeader::SIZE;
     std::memcpy(frame_buf.data() + frame_size, hdr_buf, FrameHeader::SIZE);
     frame_size += FrameHeader::SIZE;
     size_t payload_bytes = insertPilots(frag.payload.data(), frag.payload_size,
@@ -626,11 +678,11 @@ void TxModule::archiveFollowingParts(uint8_t qos, const std::string& tag) {
   if (tag.empty() || qos >= buffers_.size()) return;    // нет смысла обрабатывать пустой тег
   auto& buf = buffers_[qos];
   while (true) {
-    uint32_t peek_id = 0;
+    uint16_t peek_id = 0;
     const std::vector<uint8_t>* next = buf.peek(peek_id);
     if (!next) break;                                   // очередь пуста
     if (extractPacketTag(*next) != tag) break;          // следующий элемент принадлежит другому пакету
-    uint32_t id = 0;
+    uint16_t id = 0;
     std::vector<uint8_t> data;
     if (!buf.pop(id, data)) break;                      // защита от расхождений между peek и pop
     PendingMessage archived;
@@ -697,7 +749,7 @@ bool TxModule::processImmediateAck() {
   }
   PendingMessage ack = std::move(ack_queue_.front());
   ack_queue_.pop_front();
-  const uint32_t ack_id = ack.id;
+  const uint16_t ack_id = ack.id;
   const uint8_t ack_qos = ack.qos;
   bool sent = transmit(ack);                      // отправляем ACK отдельной веткой
   if (!sent) {                                    // не удалось — возвращаем в начало очереди
@@ -774,7 +826,7 @@ void TxModule::onAckReceived() {
     return;
   }
   const bool had_inflight = static_cast<bool>(inflight_);
-  uint32_t inflight_id = had_inflight ? inflight_->id : 0;
+  uint16_t inflight_id = had_inflight ? inflight_->id : 0;
   uint8_t inflight_qos = had_inflight ? inflight_->qos : 0;
   std::string status_prefix = had_inflight ? inflight_->status_prefix : std::string();
   waiting_ack_ = false;

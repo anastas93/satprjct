@@ -22,7 +22,7 @@ constexpr uint16_t PILOT_MARKER_CRC = 0x9FD6;                // CRC16(prefix)
   return FrameHeader::crc16(PILOT_MARKER.data(), PILOT_PREFIX_LEN) == PILOT_MARKER_CRC;
 }();
 constexpr size_t MAX_FRAGMENT_LEN =
-    MAX_FRAME_SIZE - FrameHeader::SIZE * 2 - (MAX_FRAME_SIZE / PILOT_INTERVAL) * PILOT_MARKER.size();
+    MAX_FRAME_SIZE - FrameHeader::SIZE - (MAX_FRAME_SIZE / PILOT_INTERVAL) * PILOT_MARKER.size();
 constexpr uint32_t NONCE_SALT = 0x4B54524E;              // "KTRN" — соль нонса
 constexpr uint8_t CERT_MAGIC[4] = {'K','T','C','F'};     // сигнатура сообщения сертификата
 
@@ -85,37 +85,38 @@ bool LOCAL_CERTIFICATE_SET = false;
 
 const std::array<uint8_t,16>& rootKey() { return ROOT_KEY; }
 
-std::array<uint8_t,12> makeNonce(uint32_t msg_id, uint16_t frag_idx) {
+static uint32_t packMetadata(uint8_t flags, uint16_t frag_idx, uint16_t payload_len) {
+  return (static_cast<uint32_t>(flags) << FrameHeader::FLAGS_SHIFT) |
+         ((static_cast<uint32_t>(frag_idx) & 0x0FFF) << FrameHeader::FRAG_SHIFT) |
+         (static_cast<uint32_t>(payload_len) & FrameHeader::LEN_MASK);
+}
+
+std::array<uint8_t,12> makeNonce(uint32_t packed_meta, uint16_t msg_id) {
   std::array<uint8_t,12> nonce{};
-  nonce[0] = static_cast<uint8_t>(msg_id & 0xFF);
-  nonce[1] = static_cast<uint8_t>((msg_id >> 8) & 0xFF);
-  nonce[2] = static_cast<uint8_t>((msg_id >> 16) & 0xFF);
-  nonce[3] = static_cast<uint8_t>((msg_id >> 24) & 0xFF);
-  nonce[4] = static_cast<uint8_t>(frag_idx & 0xFF);
-  nonce[5] = static_cast<uint8_t>((frag_idx >> 8) & 0xFF);
+  nonce[0] = static_cast<uint8_t>(packed_meta & 0xFF);
+  nonce[1] = static_cast<uint8_t>((packed_meta >> 8) & 0xFF);
+  nonce[2] = static_cast<uint8_t>((packed_meta >> 16) & 0xFF);
+  nonce[3] = static_cast<uint8_t>((packed_meta >> 24) & 0xFF);
+  nonce[4] = static_cast<uint8_t>(msg_id & 0xFF);
+  nonce[5] = static_cast<uint8_t>((msg_id >> 8) & 0xFF);
   nonce[6] = static_cast<uint8_t>(NONCE_SALT & 0xFF);
   nonce[7] = static_cast<uint8_t>((NONCE_SALT >> 8) & 0xFF);
   nonce[8] = static_cast<uint8_t>((NONCE_SALT >> 16) & 0xFF);
   nonce[9] = static_cast<uint8_t>((NONCE_SALT >> 24) & 0xFF);
-  nonce[10] = static_cast<uint8_t>(((NONCE_SALT >> 16) & 0xFF) ^ (msg_id & 0xFF));
-  nonce[11] = static_cast<uint8_t>(((NONCE_SALT >> 24) & 0xFF) ^ ((msg_id >> 8) & 0xFF));
+  nonce[10] = static_cast<uint8_t>(((NONCE_SALT >> 16) & 0xFF) ^ (packed_meta & 0xFF));
+  nonce[11] = static_cast<uint8_t>(((NONCE_SALT >> 24) & 0xFF) ^ (msg_id & 0xFF));
   return nonce;
 }
 
-std::array<uint8_t,8> makeAad(uint8_t version,
-                              uint8_t flags,
-                              uint32_t msg_id,
-                              uint16_t frag_idx) {
+std::array<uint8_t,8> makeAad(uint8_t version, uint16_t msg_id, uint32_t packed_meta) {
   std::array<uint8_t,8> aad{};
   aad[0] = version;
-  aad[1] = static_cast<uint8_t>(flags &
-                                 (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED));
-  aad[2] = static_cast<uint8_t>(msg_id >> 24);
-  aad[3] = static_cast<uint8_t>(msg_id >> 16);
-  aad[4] = static_cast<uint8_t>(msg_id >> 8);
-  aad[5] = static_cast<uint8_t>(msg_id);
-  aad[6] = static_cast<uint8_t>(frag_idx >> 8);
-  aad[7] = static_cast<uint8_t>(frag_idx);
+  aad[1] = static_cast<uint8_t>(msg_id >> 8);
+  aad[2] = static_cast<uint8_t>(msg_id);
+  aad[3] = static_cast<uint8_t>(packed_meta >> 24);
+  aad[4] = static_cast<uint8_t>(packed_meta >> 16);
+  aad[5] = static_cast<uint8_t>(packed_meta >> 8);
+  aad[6] = static_cast<uint8_t>(packed_meta);
   return aad;
 }
 
@@ -163,11 +164,17 @@ bool buildFrame(uint32_t msg_id,
     }
   }
 
-  auto nonce = makeNonce(msg_id, 0);
+  size_t cipher_len_guess = plain.size() + TAG_LEN;
+  if (cipher_len_guess > FrameHeader::LEN_MASK) {
+    return false; // сообщение слишком длинное для одного кадра
+  }
+  uint8_t header_flags = FrameHeader::FLAG_ENCRYPTED;
+  uint32_t packed_meta = packMetadata(header_flags, 0, static_cast<uint16_t>(cipher_len_guess));
+
+  auto nonce = makeNonce(packed_meta, static_cast<uint16_t>(msg_id));
   std::vector<uint8_t> cipher;
   std::vector<uint8_t> tag;
-  uint8_t base_flags = FrameHeader::FLAG_ENCRYPTED;
-  auto aad = makeAad(FRAME_VERSION_AEAD, base_flags, msg_id, 0);
+  auto aad = makeAad(FRAME_VERSION_AEAD, static_cast<uint16_t>(msg_id), packed_meta);
   if (!crypto::chacha20poly1305::encrypt(rootKey().data(), rootKey().size(),
                                          nonce.data(), nonce.size(),
                                          aad.data(), aad.size(),
@@ -176,6 +183,9 @@ bool buildFrame(uint32_t msg_id,
     return false;
   }
   cipher.insert(cipher.end(), tag.begin(), tag.end());
+  if (cipher.size() != cipher_len_guess) {
+    return false;
+  }
   if (cipher.size() > MAX_FRAGMENT_LEN) return false;
 
   FrameHeader hdr;
@@ -184,14 +194,13 @@ bool buildFrame(uint32_t msg_id,
   hdr.setFragIdx(0);
   hdr.frag_cnt = 1;
   hdr.setPayloadLen(static_cast<uint16_t>(cipher.size()));
-  hdr.setFlags(base_flags);
+  hdr.setFlags(header_flags);
   uint8_t hdr_buf[FrameHeader::SIZE];
   if (!hdr.encode(hdr_buf, sizeof(hdr_buf), cipher.data(), cipher.size())) {
     return false;
   }
 
-  frame_out.reserve(FrameHeader::SIZE * 2 + cipher.size() + cipher.size() / 32);
-  frame_out.insert(frame_out.end(), hdr_buf, hdr_buf + FrameHeader::SIZE);
+  frame_out.reserve(FrameHeader::SIZE + cipher.size() + cipher.size() / 32);
   frame_out.insert(frame_out.end(), hdr_buf, hdr_buf + FrameHeader::SIZE);
   auto payload = insertPilots(cipher);
   frame_out.insert(frame_out.end(), payload.begin(), payload.end());
@@ -202,21 +211,27 @@ bool buildFrame(uint32_t msg_id,
 bool parseFrame(const uint8_t* frame, size_t len,
                 FramePayload& payload,
                 uint32_t& msg_id_out) {
-  if (!frame || len < FrameHeader::SIZE * 2) return false;
+  if (!frame || len < FrameHeader::SIZE) return false;
   std::vector<uint8_t> buf(frame, frame + len);
   scrambler::descramble(buf.data(), buf.size());
   FrameHeader hdr;
+  size_t header_offset = 0;
   bool ok = FrameHeader::decode(buf.data(), buf.size(), hdr);
   if (!ok) {
-    ok = FrameHeader::decode(buf.data() + FrameHeader::SIZE,
-                             buf.size() - FrameHeader::SIZE, hdr);
+    if (buf.size() > FrameHeader::SIZE) {
+      ok = FrameHeader::decode(buf.data() + FrameHeader::SIZE,
+                               buf.size() - FrameHeader::SIZE, hdr);
+      if (ok) header_offset = FrameHeader::SIZE;
+    }
   }
   if (!ok) return false;
   if (hdr.frag_cnt != 1 || hdr.getFragIdx() != 0) return false;
   if (hdr.ver != 1 && hdr.ver < FRAME_VERSION_AEAD) return false;
 
-  const uint8_t* payload_p = buf.data() + FrameHeader::SIZE * 2;
-  size_t payload_len = buf.size() - FrameHeader::SIZE * 2;
+  size_t payload_offset = header_offset + FrameHeader::SIZE;
+  if (buf.size() < payload_offset) return false;
+  const uint8_t* payload_p = buf.data() + payload_offset;
+  size_t payload_len = buf.size() - payload_offset;
   std::vector<uint8_t> payload_bytes;
   removePilots(payload_p, payload_len, payload_bytes);
   if (payload_bytes.size() != hdr.getPayloadLen()) return false;
@@ -225,14 +240,10 @@ bool parseFrame(const uint8_t* frame, size_t len,
 
   size_t cipher_len = payload_bytes.size() - tag_len;
   const uint8_t* tag = payload_bytes.data() + cipher_len;
-  auto nonce = makeNonce(hdr.msg_id, hdr.getFragIdx());
+  auto nonce = makeNonce(hdr.packed, hdr.msg_id);
   std::vector<uint8_t> plain;
   if (hdr.ver >= FRAME_VERSION_AEAD) {
-    auto aad = makeAad(hdr.ver,
-                       static_cast<uint8_t>(hdr.getFlags() &
-                                            (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED)),
-                       hdr.msg_id,
-                       hdr.getFragIdx());
+    auto aad = makeAad(hdr.ver, hdr.msg_id, hdr.packed);
     if (!crypto::chacha20poly1305::decrypt(rootKey().data(), rootKey().size(),
                                            nonce.data(), nonce.size(),
                                            aad.data(), aad.size(),

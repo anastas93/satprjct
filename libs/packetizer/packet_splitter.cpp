@@ -71,7 +71,7 @@ size_t PacketSplitter::payloadSize() const {
 }
 
 // Разделение данных и помещение в буфер
-uint32_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data, size_t len, bool with_id) const {
+uint16_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data, size_t len, bool with_id) const {
   if (!data || len == 0) {                              // проверка входных данных
     DEBUG_LOG("PacketSplitter: пустой ввод");
     return 0;
@@ -84,7 +84,7 @@ uint32_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data
   }
   DEBUG_LOG_VAL("PacketSplitter: частей=", parts);
   size_t offset = 0;
-  uint32_t first_id = 0;
+  uint16_t first_id = 0;
   size_t added = 0;                                     // количество успешно добавленных частей
   uint32_t tag = 0;
   std::string base;
@@ -128,7 +128,7 @@ uint32_t PacketSplitter::splitAndEnqueue(MessageBuffer& buf, const uint8_t* data
       return 0;
     }
     scratch.insert(scratch.end(), data + offset, data + offset + part);
-    uint32_t id = buf.enqueue(scratch.data(), scratch.size());
+    uint16_t id = buf.enqueue(scratch.data(), scratch.size());
     if (id == 0) {                                      // ошибка добавления
       if (with_id) SimpleLogger::logStatus(prefix + " ERR");
       DEBUG_LOG("PacketSplitter: ошибка добавления, откат");
