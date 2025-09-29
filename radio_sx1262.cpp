@@ -129,6 +129,7 @@ void RadioSX1262::send(const uint8_t* data, size_t len) {
   }
   radio_.setFrequency(freq_rx);              // возвращаем частоту приёма
   radio_.startReceive();                     // и продолжаем слушать эфир
+  DEBUG_LOG("RadioSX1262: запуск приёма после завершения передачи");
   DEBUG_LOG("RadioSX1262: передача завершена");
 }
 
@@ -161,22 +162,32 @@ bool RadioSX1262::ping(const uint8_t* data, size_t len,
 
   packetReady_ = false;                                   // очищаем флаг готовности
   radio_.startReceive();                                  // слушаем эфир
+  DEBUG_LOG("RadioSX1262: запуск ожидания ответа после пинга");
+  DEBUG_LOG_VAL("RadioSX1262: таймаут ожидания, мкс=", timeoutUs);
   uint32_t start = micros();                              // стартовое время ожидания
   std::array<uint8_t, 256> buf{};                         // временный буфер
+  bool waitingLogged = false;                             // отметка первого ожидания
 
   while ((micros() - start) < timeoutUs) {                // ждём ответ с таймаутом
     if (!packetReady_) {                                  // пакета пока нет
+      if (!waitingLogged) {                               // фиксируем начало ожидания
+        DEBUG_LOG("RadioSX1262: ожидание готовности пакета");
+        waitingLogged = true;
+      }
       delay(1);
       continue;
     }
     packetReady_ = false;                                 // сбрасываем флаг
+    waitingLogged = false;                                // разрешаем повторный лог
     size_t pktLen = radio_.getPacketLength();             // длина принятого пакета
     if (pktLen == 0 || pktLen > buf.size()) {             // защита от мусора
       radio_.startReceive();
+      DEBUG_LOG("RadioSX1262: перезапуск приёма после некорректной длины пакета");
       continue;
     }
     int readState = radio_.readData(buf.data(), pktLen);  // читаем данные
     radio_.startReceive();                                // сразу возобновляем приём
+    DEBUG_LOG("RadioSX1262: перезапуск приёма после чтения пакета");
     if (readState != RADIOLIB_ERR_NONE) {                 // не удалось прочитать
       continue;
     }
@@ -206,6 +217,8 @@ void RadioSX1262::ensureReceiveMode() {
   const float freq_rx = fRX_bank_[static_cast<int>(bank_)][channel_];
   radio_.setFrequency(freq_rx);
   radio_.startReceive();
+  DEBUG_LOG("RadioSX1262: принудительный переход в режим приёма на частоте %.3f МГц",
+            static_cast<double>(freq_rx));
 }
 
 // Получить SNR последнего принятого пакета
@@ -306,6 +319,8 @@ bool RadioSX1262::resetToDefaults() {
     LOG_WARN("RadioSX1262: не удалось установить RX boosted gain");
   }
   radio_.startReceive();                                  // начинаем приём
+  DEBUG_LOG("RadioSX1262: запуск приёма после применения настроек по умолчанию на частоте %.3f МГц",
+            static_cast<double>(fRX_bank_[static_cast<int>(bank_)][channel_]));
   return true;
 }
 
@@ -317,6 +332,7 @@ void RadioSX1262::onDio1Static() {
 
 void RadioSX1262::handleDio1() {
   packetReady_ = true;                     // устанавливаем флаг готовности пакета
+  DEBUG_LOG("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
 }
 
 // Проверка флага готовности и чтение данных
@@ -330,6 +346,7 @@ void RadioSX1262::loop() {
   if (len == 0 || len > 256) {
     packetReady_ = false;                   // сбрасываем флаг
     radio_.startReceive();                  // возобновляем приём
+    DEBUG_LOG("RadioSX1262: перезапуск приёма после мусорной длины пакета в loop");
     return;
   }
   std::array<uint8_t, 256> buf;            // статический буфер на стеке
@@ -343,6 +360,7 @@ void RadioSX1262::loop() {
   }
   packetReady_ = false;                     // пакет обработан
   radio_.startReceive();                    // снова слушаем эфир
+  DEBUG_LOG("RadioSX1262: перезапуск приёма после обработки пакета в loop");
 }
 
 void RadioSX1262::sendBeacon() {
