@@ -54,6 +54,19 @@ namespace DefaultSettings {
 #if !defined(LOG_MSG)
 // Вспомогательные функции фильтрации повторяющихся сообщений
 namespace LogDetail {
+  // Колбэк позволяет перенаправлять подготовленные строки в другие подсистемы (например, SSE)
+  using LogCallback = void(*)(DefaultSettings::LogLevel, const char*);
+  inline LogCallback& logCallbackSlot() {
+    static LogCallback cb = nullptr;
+    return cb;
+  }
+  inline void setLogCallback(LogCallback cb) {
+    logCallbackSlot() = cb;
+  }
+  inline void dispatch(DefaultSettings::LogLevel level, const char* msg) {
+    LogCallback cb = logCallbackSlot();
+    if (cb) cb(level, msg);
+  }
 #ifdef ARDUINO
   // Проверка необходимости вывода сообщения (Arduino)
   inline bool shouldPrint(DefaultSettings::LogLevel level, const String& msg) {
@@ -69,6 +82,7 @@ namespace LogDetail {
     if (!shouldPrint(level, String(msg))) return;
     Serial.println(msg);
     Serial.flush();
+    dispatch(level, msg);
   }
 
   // Вывод строки с значением и фильтрацией дублей
@@ -78,6 +92,7 @@ namespace LogDetail {
     if (!shouldPrint(level, full)) return;
     Serial.print(prefix); Serial.println(val);
     Serial.flush();
+    dispatch(level, full.c_str());
   }
 
   // Форматированный вывод в стиле printf с фильтрацией дублей
@@ -112,6 +127,7 @@ namespace LogDetail {
     std::string s(msg);
     if (!shouldPrint(level, s)) return;
     std::cout << msg << std::endl;
+    dispatch(level, s.c_str());
   }
 
   // Вывод строки с значением в стандартный поток
@@ -122,6 +138,7 @@ namespace LogDetail {
     std::string s = oss.str();
     if (!shouldPrint(level, s)) return;
     std::cout << s << std::endl;
+    dispatch(level, s.c_str());
   }
 
   // Форматированный вывод в стиле printf с фильтрацией дублей
