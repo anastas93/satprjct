@@ -376,7 +376,7 @@ void RadioSX1262::handleDio1() {
   DEBUG_LOG("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
 
   if (clearMask != 0) {                    // очищаем только прочитанные флаги
-    int16_t clearState = radio_.clearIrqFlags(clearMask); // сбрасываем обработанные флаги
+    int16_t clearState = radio_.clearIrqStatus(clearMask); // сбрасываем обработанные флаги
     if (clearState != RADIOLIB_ERR_NONE) { // логируем возможную ошибку очистки
       LOG_WARN_VAL("RadioSX1262: не удалось очистить IRQ флаги, код=", clearState);
     }
