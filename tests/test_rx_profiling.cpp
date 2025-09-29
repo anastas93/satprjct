@@ -55,6 +55,11 @@ int main() {
   assert(drop_profile.dropped);
   assert(drop_profile.raw_len == broken_raw.size());
   assert(!drop_profile.drop_stage.empty());
+  auto short_stats = rx.dropStats();
+  assert(short_stats.total >= 1);
+  auto it_short = short_stats.by_stage.find("короткий кадр без заголовка");
+  assert(it_short != short_stats.by_stage.end());
+  assert(it_short->second >= 1);
 
   // Проверяем отбрасывание кадра с несовпадающими копиями заголовка
   FrameHeader primary_hdr;
@@ -105,6 +110,16 @@ int main() {
   assert(mismatch_profile.valid);
   assert(mismatch_profile.dropped);
   assert(mismatch_profile.drop_stage == "заголовки расходятся");
+  auto mismatch_stats = rx.dropStats();
+  assert(mismatch_stats.total >= 2);
+  auto it_mismatch = mismatch_stats.by_stage.find("заголовки расходятся");
+  assert(it_mismatch != mismatch_stats.by_stage.end());
+  assert(it_mismatch->second >= 1);
+
+  rx.resetDropStats();
+  auto cleared_stats = rx.dropStats();
+  assert(cleared_stats.total == 0);
+  assert(cleared_stats.by_stage.empty());
 
   return 0;
 }
