@@ -334,7 +334,13 @@ void RadioSX1262::onDio1Static() {
 void RadioSX1262::handleDio1() {
   packetReady_ = true;                     // устанавливаем флаг готовности пакета
 
-  uint16_t irqStatus = radio_.getIrqStatus(); // текущее состояние IRQ без кода возврата
+  uint16_t irqStatus = 0;                     // текущее состояние IRQ
+  int16_t irqState = radio_.getIrqStatus(&irqStatus);
+  if (irqState != RADIOLIB_ERR_NONE) {        // проверяем результат чтения маски
+    LOG_WARN_VAL("RadioSX1262: не удалось прочитать IRQ статус, код=", irqState);
+    DEBUG_LOG("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
+    return;                                   // при ошибке сохраняем прежнее поведение
+  }
 
   struct FlagInfo {                        // описание интересующих флагов
     uint16_t mask;
@@ -355,7 +361,6 @@ void RadioSX1262::handleDio1() {
   };
 
   std::string humanReadable;               // собираем список установленных битов
-  uint16_t clearMask = 0;                  // маска для очистки флагов
   for (const auto& info : kFlags) {        // перебираем флаги и проверяем установленные биты
     if ((irqStatus & info.mask) == 0) {
       continue;                            // пропускаем отсутствующие флаги
@@ -364,19 +369,18 @@ void RadioSX1262::handleDio1() {
       humanReadable += ", ";              // разделяем перечисление
     }
     humanReadable += info.name;            // добавляем название флага
-    clearMask |= info.mask;                // копим маску для очистки
   }
 
   if (humanReadable.empty()) {             // если интересующие флаги не выставлены
-    humanReadable = "нет интересующих флагов";
+    humanReadable = "нет отслеживаемых флагов";
   }
 
-  DEBUG_LOG("RadioSX1262: IRQ статус DIO1 = 0x%04X (%s)", irqStatus,
+  DEBUG_LOG("RadioSX1262: активные IRQ флаги DIO1 (маска 0x%04X): %s", irqStatus,
             humanReadable.c_str());        // выводим полный статус IRQ
   DEBUG_LOG("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
 
-  if (clearMask != 0) {                    // очищаем только прочитанные флаги
-    int16_t clearState = radio_.clearIrqStatus(clearMask); // сбрасываем обработанные флаги
+  if (irqStatus != 0) {                    // очищаем только прочитанные флаги
+    int16_t clearState = radio_.clearIrqStatus(irqStatus); // сбрасываем обработанные флаги
     if (clearState != RADIOLIB_ERR_NONE) { // логируем возможную ошибку очистки
       LOG_WARN_VAL("RadioSX1262: не удалось очистить IRQ флаги, код=", clearState);
     }
