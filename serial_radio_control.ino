@@ -1697,7 +1697,7 @@ String cmdBcn() {
 // Команда ENCT повторяет тест шифрования и возвращает подробности
 String cmdEnct() {
   const uint8_t key[16]   = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
-  auto nonce = KeyLoader::makeNonce(0, 0);
+  auto nonce = KeyLoader::makeNonce(0, 0, 0, 0);
   const char* text = "Test ENCT";
   size_t len = strlen(text);
   std::vector<uint8_t> cipher, tag, plain;

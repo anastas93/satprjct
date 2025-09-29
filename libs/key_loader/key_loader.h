@@ -80,8 +80,11 @@ KeyState getState();
 // Публичный корневой ключ устройства.
 std::array<uint8_t,32> getPublicKey();
 
-// Генерация нонса для AES-CCM на основе идентификатора сообщения и индекса фрагмента.
-std::array<uint8_t,12> makeNonce(uint32_t packed_meta, uint16_t msg_id);
+// Генерация нонса для AEAD по компактному заголовку и 16-битному идентификатору сообщения.
+std::array<uint8_t,12> makeNonce(uint8_t version,
+                                 uint16_t frag_cnt,
+                                 uint32_t packed_meta,
+                                 uint16_t msg_id);
 
 // 4-байтовый идентификатор ключа (первые байты SHA-256 от симметричного ключа).
 std::array<uint8_t,4> keyId(const std::array<uint8_t,16>& key);

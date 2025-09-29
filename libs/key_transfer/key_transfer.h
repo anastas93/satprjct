@@ -44,7 +44,10 @@ struct FramePayload {
 const std::array<uint8_t,16>& rootKey();
 
 // Формирование нонса для обмена ключами (по упакованным метаданным и msg_id)
-std::array<uint8_t,12> makeNonce(uint32_t packed_meta, uint16_t msg_id);
+std::array<uint8_t,12> makeNonce(uint8_t version,
+                                 uint16_t frag_cnt,
+                                 uint32_t packed_meta,
+                                 uint16_t msg_id);
 
 // Подготовка кадра с публичным ключом: на выходе полный LoRa-кадр
 bool buildFrame(uint32_t msg_id,

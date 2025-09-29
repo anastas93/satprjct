@@ -80,15 +80,31 @@ static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& 
   }
 }
 
-static std::array<uint8_t,8> makeAad(uint8_t version, uint16_t msg_id, uint32_t packed_meta) {
-  std::array<uint8_t,8> aad{};
-  aad[0] = version;
-  aad[1] = static_cast<uint8_t>(msg_id >> 8);
-  aad[2] = static_cast<uint8_t>(msg_id);
-  aad[3] = static_cast<uint8_t>(packed_meta >> 24);
-  aad[4] = static_cast<uint8_t>(packed_meta >> 16);
-  aad[5] = static_cast<uint8_t>(packed_meta >> 8);
-  aad[6] = static_cast<uint8_t>(packed_meta);
+static constexpr size_t COMPACT_HEADER_SIZE = 7; // версия, frag_cnt и packed
+
+static std::array<uint8_t,COMPACT_HEADER_SIZE> makeCompactHeader(uint8_t version,
+                                                                 uint16_t frag_cnt,
+                                                                 uint32_t packed_meta) {
+  std::array<uint8_t,COMPACT_HEADER_SIZE> compact{};
+  compact[0] = version;
+  compact[1] = static_cast<uint8_t>(frag_cnt >> 8);
+  compact[2] = static_cast<uint8_t>(frag_cnt);
+  compact[3] = static_cast<uint8_t>(packed_meta >> 24);
+  compact[4] = static_cast<uint8_t>(packed_meta >> 16);
+  compact[5] = static_cast<uint8_t>(packed_meta >> 8);
+  compact[6] = static_cast<uint8_t>(packed_meta);
+  return compact;
+}
+
+static std::array<uint8_t,COMPACT_HEADER_SIZE + 2> makeAad(uint8_t version,
+                                                           uint16_t frag_cnt,
+                                                           uint32_t packed_meta,
+                                                           uint16_t msg_id) {
+  auto compact = makeCompactHeader(version, frag_cnt, packed_meta);
+  std::array<uint8_t,COMPACT_HEADER_SIZE + 2> aad{};
+  std::copy(compact.begin(), compact.end(), aad.begin());
+  aad[COMPACT_HEADER_SIZE] = static_cast<uint8_t>(msg_id >> 8);
+  aad[COMPACT_HEADER_SIZE + 1] = static_cast<uint8_t>(msg_id);
   return aad;
 }
 
@@ -225,7 +241,8 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   FrameHeader hdr = primary_ok ? primary_hdr : secondary_hdr;
   bool headers_match = false;
   if (primary_ok && secondary_ok) {
-    headers_match = (primary_hdr.msg_id == secondary_hdr.msg_id) &&
+    headers_match = (primary_hdr.ver == secondary_hdr.ver) &&
+                    (primary_hdr.msg_id == secondary_hdr.msg_id) &&
                     (primary_hdr.getFragIdx() == secondary_hdr.getFragIdx()) &&
                     (primary_hdr.frag_cnt == secondary_hdr.frag_cnt) &&
                     (primary_hdr.getFlags() == secondary_hdr.getFlags()) &&
@@ -459,9 +476,9 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   bool should_decrypt = encrypted || encryption_forced_;
   bool decrypt_ok = false;
   if (should_decrypt) {
-    nonce_ = KeyLoader::makeNonce(hdr.packed, hdr.msg_id); // packed содержит флаги, индекс и длину
+    nonce_ = KeyLoader::makeNonce(hdr.ver, hdr.frag_cnt, hdr.packed, hdr.msg_id); // packed содержит флаги, индекс и длину
     if (hdr.ver >= FRAME_VERSION_AEAD) {
-      auto aad = makeAad(hdr.ver, hdr.msg_id, hdr.packed);
+      auto aad = makeAad(hdr.ver, hdr.frag_cnt, hdr.packed, hdr.msg_id);
       decrypt_ok = crypto::chacha20poly1305::decrypt(key_.data(), key_.size(),
                                                      nonce_.data(), nonce_.size(),
                                                      aad.data(), aad.size(),
