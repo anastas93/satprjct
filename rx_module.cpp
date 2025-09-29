@@ -226,8 +226,15 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   FrameHeader primary_hdr;
   FrameHeader secondary_hdr;
   bool primary_ok = FrameHeader::decode(frame_buf_.data(), frame_buf_.size(), primary_hdr);
+  const bool has_second_header = frame_buf_.size() >= FrameHeader::SIZE * 2;
+  bool duplicate_confirmed = false;
+  if (has_second_header) {
+    duplicate_confirmed = std::equal(frame_buf_.begin(), frame_buf_.begin() + FrameHeader::SIZE,
+                                     frame_buf_.begin() + FrameHeader::SIZE);
+  }
+  bool legacy_frame = primary_ok && primary_hdr.ver < FRAME_VERSION_AEAD;
   bool secondary_ok = false;
-  if (frame_buf_.size() >= FrameHeader::SIZE * 2) {
+  if (has_second_header && (duplicate_confirmed || legacy_frame)) {
     secondary_ok = FrameHeader::decode(frame_buf_.data() + FrameHeader::SIZE,
                                        frame_buf_.size() - FrameHeader::SIZE, secondary_hdr);
   }
@@ -247,7 +254,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
                     (primary_hdr.frag_cnt == secondary_hdr.frag_cnt) &&
                     (primary_hdr.getFlags() == secondary_hdr.getFlags()) &&
                     (primary_hdr.getPayloadLen() == secondary_hdr.getPayloadLen());
-    if (!headers_match) {
+    if (!headers_match && duplicate_confirmed) {
       LOG_WARN("RxModule: обнаружено расхождение копий заголовка");
     }
   }
