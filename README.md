@@ -677,8 +677,7 @@ g++ -I. tests/test_key_transfer.cpp \
   текущего партнёра без изменения снимка.
 - `KeyState getState()` — текущее состояние ключа (тип, идентификатор, публичные ключи, резервная
   копия).
-- `std::array<uint8_t,12> makeNonce(uint32_t packed_meta, uint16_t msg_id)` — сформировать nonce для
-  AEAD (ChaCha20-Poly1305 и совместимого режима AES-CCM).
+- `std::array<uint8_t,12> makeNonce(uint8_t version, uint16_t frag_cnt, uint32_t packed_meta, uint16_t msg_id)` — сформировать нонс для AEAD (ChaCha20-Poly1305 и совместимого режима AES-CCM).
 - `bool startEphemeralSession(std::array<uint8_t,32>& public_out, bool force_new = true)` — подготовить
   эпемерную пару X25519 и вернуть публичный ключ для включения в кадр обмена.
 - `bool hasEphemeralSession()` — проверить, активна ли временная пара для текущего сеанса.

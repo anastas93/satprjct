@@ -85,38 +85,51 @@ bool LOCAL_CERTIFICATE_SET = false;
 
 const std::array<uint8_t,16>& rootKey() { return ROOT_KEY; }
 
-static uint32_t packMetadata(uint8_t flags, uint16_t frag_idx, uint16_t payload_len) {
-  return (static_cast<uint32_t>(flags) << FrameHeader::FLAGS_SHIFT) |
-         ((static_cast<uint32_t>(frag_idx) & 0x0FFF) << FrameHeader::FRAG_SHIFT) |
-         (static_cast<uint32_t>(payload_len) & FrameHeader::LEN_MASK);
+static constexpr size_t COMPACT_HEADER_SIZE = 7; // версия, frag_cnt и packed
+
+static std::array<uint8_t,COMPACT_HEADER_SIZE> makeCompactHeader(uint8_t version,
+                                                                 uint16_t frag_cnt,
+                                                                 uint32_t packed_meta) {
+  std::array<uint8_t,COMPACT_HEADER_SIZE> compact{};
+  compact[0] = version;
+  compact[1] = static_cast<uint8_t>(frag_cnt >> 8);
+  compact[2] = static_cast<uint8_t>(frag_cnt);
+  compact[3] = static_cast<uint8_t>(packed_meta >> 24);
+  compact[4] = static_cast<uint8_t>(packed_meta >> 16);
+  compact[5] = static_cast<uint8_t>(packed_meta >> 8);
+  compact[6] = static_cast<uint8_t>(packed_meta);
+  return compact;
 }
 
-std::array<uint8_t,12> makeNonce(uint32_t packed_meta, uint16_t msg_id) {
+std::array<uint8_t,12> makeNonce(uint8_t version,
+                                 uint16_t frag_cnt,
+                                 uint32_t packed_meta,
+                                 uint16_t msg_id) {
+  auto compact = makeCompactHeader(version, frag_cnt, packed_meta);
   std::array<uint8_t,12> nonce{};
-  nonce[0] = static_cast<uint8_t>(packed_meta & 0xFF);
-  nonce[1] = static_cast<uint8_t>((packed_meta >> 8) & 0xFF);
-  nonce[2] = static_cast<uint8_t>((packed_meta >> 16) & 0xFF);
-  nonce[3] = static_cast<uint8_t>((packed_meta >> 24) & 0xFF);
-  nonce[4] = static_cast<uint8_t>(msg_id & 0xFF);
-  nonce[5] = static_cast<uint8_t>((msg_id >> 8) & 0xFF);
-  nonce[6] = static_cast<uint8_t>(NONCE_SALT & 0xFF);
-  nonce[7] = static_cast<uint8_t>((NONCE_SALT >> 8) & 0xFF);
-  nonce[8] = static_cast<uint8_t>((NONCE_SALT >> 16) & 0xFF);
-  nonce[9] = static_cast<uint8_t>((NONCE_SALT >> 24) & 0xFF);
-  nonce[10] = static_cast<uint8_t>(((NONCE_SALT >> 16) & 0xFF) ^ (packed_meta & 0xFF));
-  nonce[11] = static_cast<uint8_t>(((NONCE_SALT >> 24) & 0xFF) ^ (msg_id & 0xFF));
+  std::copy(compact.begin(), compact.end(), nonce.begin());
+  nonce[COMPACT_HEADER_SIZE] = static_cast<uint8_t>(msg_id >> 8);
+  nonce[COMPACT_HEADER_SIZE + 1] = static_cast<uint8_t>(msg_id);
+  uint8_t salt0 = static_cast<uint8_t>(NONCE_SALT);
+  uint8_t salt1 = static_cast<uint8_t>(NONCE_SALT >> 8);
+  uint8_t salt2 = static_cast<uint8_t>(NONCE_SALT >> 16);
+  uint8_t salt3 = static_cast<uint8_t>(NONCE_SALT >> 24);
+  nonce[0] ^= salt3; // связываем версию кадра со старшим байтом соли
+  nonce[COMPACT_HEADER_SIZE + 2] = static_cast<uint8_t>(salt0 ^ compact.back());
+  nonce[COMPACT_HEADER_SIZE + 3] = static_cast<uint8_t>(salt1 ^ nonce[COMPACT_HEADER_SIZE + 1]);
+  nonce[COMPACT_HEADER_SIZE + 4] = static_cast<uint8_t>((salt2 ^ salt3) ^ nonce[COMPACT_HEADER_SIZE]);
   return nonce;
 }
 
-std::array<uint8_t,8> makeAad(uint8_t version, uint16_t msg_id, uint32_t packed_meta) {
-  std::array<uint8_t,8> aad{};
-  aad[0] = version;
-  aad[1] = static_cast<uint8_t>(msg_id >> 8);
-  aad[2] = static_cast<uint8_t>(msg_id);
-  aad[3] = static_cast<uint8_t>(packed_meta >> 24);
-  aad[4] = static_cast<uint8_t>(packed_meta >> 16);
-  aad[5] = static_cast<uint8_t>(packed_meta >> 8);
-  aad[6] = static_cast<uint8_t>(packed_meta);
+std::array<uint8_t,COMPACT_HEADER_SIZE + 2> makeAad(uint8_t version,
+                                                    uint16_t frag_cnt,
+                                                    uint32_t packed_meta,
+                                                    uint16_t msg_id) {
+  auto compact = makeCompactHeader(version, frag_cnt, packed_meta);
+  std::array<uint8_t,COMPACT_HEADER_SIZE + 2> aad{};
+  std::copy(compact.begin(), compact.end(), aad.begin());
+  aad[COMPACT_HEADER_SIZE] = static_cast<uint8_t>(msg_id >> 8);
+  aad[COMPACT_HEADER_SIZE + 1] = static_cast<uint8_t>(msg_id);
   return aad;
 }
 
@@ -169,12 +182,19 @@ bool buildFrame(uint32_t msg_id,
     return false; // сообщение слишком длинное для одного кадра
   }
   uint8_t header_flags = FrameHeader::FLAG_ENCRYPTED;
-  uint32_t packed_meta = packMetadata(header_flags, 0, static_cast<uint16_t>(cipher_len_guess));
+  FrameHeader hdr;
+  hdr.ver = FRAME_VERSION_AEAD;
+  hdr.msg_id = static_cast<uint16_t>(msg_id);
+  hdr.frag_cnt = 1;
+  hdr.setFlags(header_flags);
+  hdr.setFragIdx(0);
+  hdr.setPayloadLen(static_cast<uint16_t>(cipher_len_guess));
+  uint32_t packed_meta = hdr.packed;
 
-  auto nonce = makeNonce(packed_meta, static_cast<uint16_t>(msg_id));
+  auto nonce = makeNonce(hdr.ver, hdr.frag_cnt, packed_meta, hdr.msg_id);
   std::vector<uint8_t> cipher;
   std::vector<uint8_t> tag;
-  auto aad = makeAad(FRAME_VERSION_AEAD, static_cast<uint16_t>(msg_id), packed_meta);
+  auto aad = makeAad(hdr.ver, hdr.frag_cnt, packed_meta, hdr.msg_id);
   if (!crypto::chacha20poly1305::encrypt(rootKey().data(), rootKey().size(),
                                          nonce.data(), nonce.size(),
                                          aad.data(), aad.size(),
@@ -188,11 +208,6 @@ bool buildFrame(uint32_t msg_id,
   }
   if (cipher.size() > MAX_FRAGMENT_LEN) return false;
 
-  FrameHeader hdr;
-  hdr.ver = FRAME_VERSION_AEAD;
-  hdr.msg_id = static_cast<uint16_t>(msg_id);
-  hdr.setFragIdx(0);
-  hdr.frag_cnt = 1;
   hdr.setPayloadLen(static_cast<uint16_t>(cipher.size()));
   hdr.setFlags(header_flags);
   uint8_t hdr_buf[FrameHeader::SIZE];
@@ -240,10 +255,10 @@ bool parseFrame(const uint8_t* frame, size_t len,
 
   size_t cipher_len = payload_bytes.size() - tag_len;
   const uint8_t* tag = payload_bytes.data() + cipher_len;
-  auto nonce = makeNonce(hdr.packed, hdr.msg_id);
+  auto nonce = makeNonce(hdr.ver, hdr.frag_cnt, hdr.packed, hdr.msg_id);
   std::vector<uint8_t> plain;
   if (hdr.ver >= FRAME_VERSION_AEAD) {
-    auto aad = makeAad(hdr.ver, hdr.msg_id, hdr.packed);
+    auto aad = makeAad(hdr.ver, hdr.frag_cnt, hdr.packed, hdr.msg_id);
     if (!crypto::chacha20poly1305::decrypt(rootKey().data(), rootKey().size(),
                                            nonce.data(), nonce.size(),
                                            aad.data(), aad.size(),

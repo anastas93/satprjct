@@ -79,16 +79,31 @@ static size_t insertPilots(const uint8_t* in, size_t len, uint8_t* out, size_t o
   return written;
 }
 
-static std::array<uint8_t,8> makeAad(uint8_t version, uint16_t msg_id, uint32_t packed_meta) {
-  std::array<uint8_t,8> aad{};
-  aad[0] = version;
-  aad[1] = static_cast<uint8_t>(msg_id >> 8);
-  aad[2] = static_cast<uint8_t>(msg_id);
-  aad[3] = static_cast<uint8_t>(packed_meta >> 24);
-  aad[4] = static_cast<uint8_t>(packed_meta >> 16);
-  aad[5] = static_cast<uint8_t>(packed_meta >> 8);
-  aad[6] = static_cast<uint8_t>(packed_meta);
-  // aad[7] оставляем нулевым для будущих расширений
+static constexpr size_t COMPACT_HEADER_SIZE = 7; // версия, frag_cnt и packed
+
+static std::array<uint8_t,COMPACT_HEADER_SIZE> makeCompactHeader(uint8_t version,
+                                                                 uint16_t frag_cnt,
+                                                                 uint32_t packed_meta) {
+  std::array<uint8_t,COMPACT_HEADER_SIZE> compact{};
+  compact[0] = version;
+  compact[1] = static_cast<uint8_t>(frag_cnt >> 8);
+  compact[2] = static_cast<uint8_t>(frag_cnt);
+  compact[3] = static_cast<uint8_t>(packed_meta >> 24);
+  compact[4] = static_cast<uint8_t>(packed_meta >> 16);
+  compact[5] = static_cast<uint8_t>(packed_meta >> 8);
+  compact[6] = static_cast<uint8_t>(packed_meta);
+  return compact;
+}
+
+static std::array<uint8_t,COMPACT_HEADER_SIZE + 2> makeAad(uint8_t version,
+                                                           uint16_t frag_cnt,
+                                                           uint32_t packed_meta,
+                                                           uint16_t msg_id) {
+  auto compact = makeCompactHeader(version, frag_cnt, packed_meta);
+  std::array<uint8_t,COMPACT_HEADER_SIZE + 2> aad{};
+  std::copy(compact.begin(), compact.end(), aad.begin());
+  aad[COMPACT_HEADER_SIZE] = static_cast<uint8_t>(msg_id >> 8);
+  aad[COMPACT_HEADER_SIZE + 1] = static_cast<uint8_t>(msg_id);
   return aad;
 }
 
@@ -470,15 +485,21 @@ bool TxModule::transmit(const PendingMessage& message) {
     std::vector<uint8_t> conv_input;
     conv_input.reserve(RS_ENC_LEN + CONV_TAIL_BYTES);
 
+    std::vector<std::vector<uint8_t>> plain_parts;
     while (tmp.hasPending()) {
       part.clear();
       uint16_t dummy = 0;
       if (!tmp.pop(dummy, part)) break;
+      plain_parts.push_back(part);
+    }
 
+    uint16_t total_fragments = static_cast<uint16_t>(plain_parts.size());
+    for (size_t part_idx = 0; part_idx < plain_parts.size(); ++part_idx) {
+      const auto& stored_part = plain_parts[part_idx];
       enc.clear();
       tag.clear();
-      const size_t plain_len = part.size();
-      uint16_t current_idx = static_cast<uint16_t>(fragments.size());
+      const size_t plain_len = stored_part.size();
+      uint16_t current_idx = static_cast<uint16_t>(part_idx);
       uint8_t base_flags = 0;
       if (encryption_enabled_) base_flags |= FrameHeader::FLAG_ENCRYPTED;
       if (message.expect_ack) base_flags |= FrameHeader::FLAG_ACK_REQUIRED;
@@ -517,20 +538,22 @@ bool TxModule::transmit(const PendingMessage& message) {
       if (conv_expected) planned_flags |= FrameHeader::FLAG_CONV_ENCODED;
       uint32_t packed_meta = packMetadata(planned_flags, current_idx, static_cast<uint16_t>(payload_guess));
 
-      auto nonce = KeyLoader::makeNonce(packed_meta, message.id);
+      auto nonce = KeyLoader::makeNonce(FRAME_VERSION_AEAD, total_fragments, packed_meta,
+                                        static_cast<uint16_t>(message.id));
       if (encryption_enabled_) {
-        auto aad = makeAad(FRAME_VERSION_AEAD, message.id, packed_meta);
+        auto aad = makeAad(FRAME_VERSION_AEAD, total_fragments, packed_meta,
+                           static_cast<uint16_t>(message.id));
         if (!crypto::chacha20poly1305::encrypt(key_.data(), key_.size(),
                                                nonce.data(), nonce.size(),
                                                aad.data(), aad.size(),
-                                               part.data(), part.size(),
+                                               stored_part.data(), stored_part.size(),
                                                enc, tag)) {
           LOG_ERROR("TxModule: ошибка шифрования");
           continue;
         }
         enc.insert(enc.end(), tag.begin(), tag.end());
       } else {
-        enc.assign(part.begin(), part.end());
+        enc.assign(stored_part.begin(), stored_part.end());
         enc.insert(enc.end(), TAG_LEN, 0x00);              // добавляем пустой тег для выравнивания
       }
 

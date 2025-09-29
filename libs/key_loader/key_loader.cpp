@@ -1099,22 +1099,41 @@ std::array<uint8_t,32> getPublicKey() {
   return snapshot.current.root_public;
 }
 
-std::array<uint8_t,12> makeNonce(uint32_t packed_meta, uint16_t msg_id) {
+static constexpr size_t COMPACT_HEADER_SIZE = 7; // версия, frag_cnt и packed
+
+static std::array<uint8_t,COMPACT_HEADER_SIZE> compactHeaderBytes(uint8_t version,
+                                                                  uint16_t frag_cnt,
+                                                                  uint32_t packed_meta) {
+  std::array<uint8_t,COMPACT_HEADER_SIZE> result{};
+  result[0] = version;
+  result[1] = static_cast<uint8_t>(frag_cnt >> 8);
+  result[2] = static_cast<uint8_t>(frag_cnt);
+  result[3] = static_cast<uint8_t>(packed_meta >> 24);
+  result[4] = static_cast<uint8_t>(packed_meta >> 16);
+  result[5] = static_cast<uint8_t>(packed_meta >> 8);
+  result[6] = static_cast<uint8_t>(packed_meta);
+  return result;
+}
+
+std::array<uint8_t,12> makeNonce(uint8_t version,
+                                 uint16_t frag_cnt,
+                                 uint32_t packed_meta,
+                                 uint16_t msg_id) {
   StorageSnapshot& snapshot = ensureSnapshot();
   std::array<uint8_t,12> nonce{};
-  nonce[0] = static_cast<uint8_t>(packed_meta & 0xFF);
-  nonce[1] = static_cast<uint8_t>((packed_meta >> 8) & 0xFF);
-  nonce[2] = static_cast<uint8_t>((packed_meta >> 16) & 0xFF);
-  nonce[3] = static_cast<uint8_t>((packed_meta >> 24) & 0xFF);
-  nonce[4] = static_cast<uint8_t>(msg_id & 0xFF);
-  nonce[5] = static_cast<uint8_t>((msg_id >> 8) & 0xFF);
+  auto compact = compactHeaderBytes(version, frag_cnt, packed_meta);
+  std::copy(compact.begin(), compact.end(), nonce.begin());
+  nonce[COMPACT_HEADER_SIZE] = static_cast<uint8_t>(msg_id >> 8);
+  nonce[COMPACT_HEADER_SIZE + 1] = static_cast<uint8_t>(msg_id);
   uint32_t salt = snapshot.current.nonce_salt;
-  nonce[6] = static_cast<uint8_t>(salt & 0xFF);
-  nonce[7] = static_cast<uint8_t>((salt >> 8) & 0xFF);
-  nonce[8] = static_cast<uint8_t>((salt >> 16) & 0xFF);
-  nonce[9] = static_cast<uint8_t>((salt >> 24) & 0xFF);
-  nonce[10] = static_cast<uint8_t>(((salt >> 16) & 0xFF) ^ (packed_meta & 0xFF));
-  nonce[11] = static_cast<uint8_t>(((salt >> 24) & 0xFF) ^ (msg_id & 0xFF));
+  uint8_t salt0 = static_cast<uint8_t>(salt);
+  uint8_t salt1 = static_cast<uint8_t>(salt >> 8);
+  uint8_t salt2 = static_cast<uint8_t>(salt >> 16);
+  uint8_t salt3 = static_cast<uint8_t>(salt >> 24);
+  nonce[0] ^= salt3; // смешиваем старший байт соли с версией кадра
+  nonce[COMPACT_HEADER_SIZE + 2] = static_cast<uint8_t>(salt0 ^ compact.back());
+  nonce[COMPACT_HEADER_SIZE + 3] = static_cast<uint8_t>(salt1 ^ nonce[COMPACT_HEADER_SIZE + 1]);
+  nonce[COMPACT_HEADER_SIZE + 4] = static_cast<uint8_t>((salt2 ^ salt3) ^ nonce[COMPACT_HEADER_SIZE]);
   return nonce;
 }
 
