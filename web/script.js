@@ -3365,6 +3365,8 @@ function getReceivedMonitorState() {
       pendingRefresh: false,
       refreshScheduled: false,
       lastHint: null,
+      lastDebugAt: null,
+      lastDebugId: null,
     };
   } else if (typeof EventSource === "undefined") {
     state.push.supported = false;
@@ -3588,6 +3590,40 @@ function scheduleReceivedRefreshFromPush(hint) {
   });
 }
 
+// Обработка события "debug" из SSE: разбираем JSON и выводим строку
+function handleDebugPushMessage(event) {
+  const state = getReceivedMonitorState();
+  const push = state.push || (state.push = {});
+  const now = Date.now();
+  if (push) {
+    push.lastEventAt = now;
+    push.lastDebugAt = now;
+  }
+  if (!event || typeof event.data !== "string") return;
+  let payload = null;
+  try {
+    payload = JSON.parse(event.data);
+  } catch (err) {
+    payload = null;
+  }
+  let text = event.data;
+  const meta = { timestamp: new Date(now) };
+  if (payload && typeof payload === "object") {
+    if (payload.text != null) text = String(payload.text);
+    if (payload.level != null) meta.level = payload.level;
+    const ts = Number(payload.ts);
+    if (Number.isFinite(ts) && ts >= 0) meta.deviceTimestamp = ts;
+    const id = Number(payload.id);
+    if (push && Number.isFinite(id)) {
+      if (Number.isFinite(push.lastDebugId) && id <= push.lastDebugId) return;
+      push.lastDebugId = id;
+    }
+  }
+  if (!text) return;
+  debugLog(text, meta);
+  updateReceivedMonitorDiagnostics();
+}
+
 function handleReceivedPushMessage(event) {
   const state = getReceivedMonitorState();
   const push = state.push;
@@ -3670,6 +3706,9 @@ function openReceivedPushChannel() {
       push.lastEventAt = Date.now();
       handleReceivedPushMessage(event);
       updateReceivedMonitorDiagnostics();
+    });
+    source.addEventListener("debug", (event) => {
+      handleDebugPushMessage(event);
     });
     source.addEventListener("error", () => {
       push.connected = false;
@@ -8786,15 +8825,66 @@ function classifyDebugMessage(text) {
   if (trimmed.startsWith("→") || low.startsWith("tx") || low.startsWith("cmd") || low.startsWith("send")) return "action";
   return "info";
 }
-function debugLog(text) {
+
+// Определяем оформление строки по уровню, который прошивка передала через SSE
+function mapDebugLevel(level) {
+  if (!level) return null;
+  const normalized = String(level).toLowerCase();
+  if (normalized === "error") return "error";
+  if (normalized === "warn" || normalized === "warning") return "warn";
+  if (normalized === "debug" || normalized === "info") return "info";
+  return null;
+}
+
+// Преобразуем millis() устройства в человеко-понятную строку
+function formatDeviceUptime(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value < 0) return null;
+  if (value < 1000) return `t=${Math.round(value)} мс`;
+  if (value < 60000) {
+    const seconds = value / 1000;
+    return `t=${seconds.toFixed(seconds >= 10 ? 1 : 2)} с`;
+  }
+  if (value < 3600000) {
+    const minutes = Math.floor(value / 60000);
+    const seconds = Math.round((value - minutes * 60000) / 1000);
+    return `t=${minutes} мин ${seconds} с`;
+  }
+  const hours = Math.floor(value / 3600000);
+  const minutes = Math.round((value - hours * 3600000) / 60000);
+  return `t=${hours} ч ${minutes} мин`;
+}
+
+// Рисуем строку отладочного лога с учётом опций
+function renderDebugLine(text, options) {
   const log = UI.els.debugLog;
   if (!log) return;
+  const opts = options || {};
   const line = document.createElement("div");
-  const type = classifyDebugMessage(text);
+  const levelType = mapDebugLevel(opts.level);
+  const type = levelType || classifyDebugMessage(text);
   line.className = "debug-line debug-line--" + type;
-  line.textContent = "[" + new Date().toLocaleTimeString() + "] " + text;
+  const deviceTs = formatDeviceUptime(opts.deviceTimestamp);
+  const timeMark = deviceTs || (opts.timestamp instanceof Date ? opts.timestamp.toLocaleTimeString() : new Date().toLocaleTimeString());
+  line.textContent = `[${timeMark}] ${text}`;
   log.appendChild(line);
+  while (log.childNodes.length > 400) {
+    log.removeChild(log.firstChild);
+  }
   log.scrollTop = log.scrollHeight;
+}
+
+// Унифицированный вывод в debug-панель для строк и многострочных сообщений
+function debugLog(text, metadata) {
+  const raw = text != null ? String(text) : "";
+  if (!raw) return;
+  const opts = metadata || {};
+  const parts = raw.split(/\r?\n/);
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i];
+    if (!part) continue;
+    renderDebugLine(part, opts);
+  }
 }
 
 async function loadVersion() {
