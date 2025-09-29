@@ -4451,7 +4451,7 @@ async function postTx(text, timeoutMs) {
   try {
     const res = await fetch(url.toString(), {
       method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      headers: { "Content-Type": "text/plain" },
       body: text,
       signal: ctrl.signal,
     });
