@@ -29,7 +29,7 @@ int main() {
     data[i] = static_cast<uint8_t>((i * 7) & 0xFF);
   }
 
-  uint32_t id = tx.queue(data.data(), data.size());
+  uint16_t id = tx.queue(data.data(), data.size());
   assert(id != 0);
   while (tx.loop()) {}
   for (auto& frame : radio.sent) {

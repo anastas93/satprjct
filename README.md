@@ -499,7 +499,7 @@ g++ -I. tests/test_key_transfer.cpp \
 - `PacketSplitter(PayloadMode mode, size_t custom = 0)` — создать делитель с нужным режимом или
   произвольным размером блока.
 - `void setMode(PayloadMode mode)` и `void setCustomSize(size_t custom)` — сменить режим и размер.
-- `uint32_t splitAndEnqueue(MessageBuffer& buf, const uint8_t* data, size_t len)` — разбить данные на
+- `uint16_t splitAndEnqueue(MessageBuffer& buf, const uint8_t* data, size_t len)` — разбить данные на
   части с проверкой свободных слотов и откатом при ошибке.
 - Для многочастных сообщений в начало каждого сегмента добавляется префикс `[ABCDE|1/5]`: общее имя,
   номер текущей части и общее количество фрагментов. Идентификатор `ABCDE` теперь выдаётся монотонным
@@ -540,7 +540,7 @@ g++ -I. tests/test_key_transfer.cpp \
 - `TxModule(IRadio& radio, const std::array<size_t,4>& capacities, PayloadMode mode)` — инициализация
   с четырьмя очередями QoS.
 - `void setPayloadMode(PayloadMode mode)` — сменить размер пакета.
-- `uint32_t queue(const uint8_t* data, size_t len, uint8_t qos = 0)` — добавить сообщение в очередь.
+- `uint16_t queue(const uint8_t* data, size_t len, uint8_t qos = 0)` — добавить сообщение в очередь.
 - `void loop()` — отправить первое сообщение, если готово.
 - `void setSendPause(uint32_t pause_ms)` и `uint32_t getSendPause() const` — пауза между отправками.
 - `void setAckTimeout(uint32_t timeout_ms)` и `uint32_t getAckTimeout() const` — управление тайм-аутом
@@ -677,7 +677,7 @@ g++ -I. tests/test_key_transfer.cpp \
   текущего партнёра без изменения снимка.
 - `KeyState getState()` — текущее состояние ключа (тип, идентификатор, публичные ключи, резервная
   копия).
-- `std::array<uint8_t,12> makeNonce(uint32_t msg_id, uint16_t frag_idx)` — сформировать nonce для
+- `std::array<uint8_t,12> makeNonce(uint32_t packed_meta, uint16_t msg_id)` — сформировать nonce для
   AEAD (ChaCha20-Poly1305 и совместимого режима AES-CCM).
 - `bool startEphemeralSession(std::array<uint8_t,32>& public_out, bool force_new = true)` — подготовить
   эпемерную пару X25519 и вернуть публичный ключ для включения в кадр обмена.

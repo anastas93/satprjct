@@ -37,7 +37,7 @@ int main() {
   payload[64] = 0x55;
   payload[65] = 0x2D;
 
-  uint32_t id = tx.queue(payload.data(), payload.size());
+  uint16_t id = tx.queue(payload.data(), payload.size());
   assert(id != 0);
   while (tx.loop()) {
     // крутим до опустошения очереди
@@ -50,8 +50,8 @@ int main() {
   for (const auto& frame : radio.history) {
     auto frame_copy = frame;
     scrambler::descramble(frame_copy.data(), frame_copy.size());
-    const uint8_t* payload_ptr = frame_copy.data() + FrameHeader::SIZE * 2;
-    size_t payload_len = frame_copy.size() - FrameHeader::SIZE * 2;
+    const uint8_t* payload_ptr = frame_copy.data() + FrameHeader::SIZE;
+    size_t payload_len = frame_copy.size() - FrameHeader::SIZE;
     for (size_t i = 0; i + marker.size() <= payload_len; ++i) {
       if (std::equal(marker.begin(), marker.end(), payload_ptr + i)) {
         marker_found = true;
@@ -76,7 +76,7 @@ int main() {
   // Дополнительно убеждаемся, что компактный ACK формируется без заголовка
   size_t before_ack = radio.history.size();
   const uint8_t ack_marker = protocol::ack::MARKER;
-  uint32_t ack_id = tx.queue(&ack_marker, 1);
+  uint16_t ack_id = tx.queue(&ack_marker, 1);
   assert(ack_id != 0);
   while (tx.loop()) {
     // дожидаемся отправки ACK
@@ -89,8 +89,8 @@ int main() {
   assert(FrameHeader::decode(ack_descrambled.data(), ack_descrambled.size(), ack_hdr));
   assert((ack_hdr.getFlags() & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0);
   assert(ack_hdr.getPayloadLen() == 1);
-  assert(ack_frame.size() == FrameHeader::SIZE * 2 + ack_hdr.getPayloadLen());
-  const uint8_t* ack_payload = ack_descrambled.data() + FrameHeader::SIZE * 2;
+  assert(ack_frame.size() == FrameHeader::SIZE + ack_hdr.getPayloadLen());
+  const uint8_t* ack_payload = ack_descrambled.data() + FrameHeader::SIZE;
   assert(*ack_payload == protocol::ack::MARKER);
 
   std::cout << "OK" << std::endl;

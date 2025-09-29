@@ -12,7 +12,7 @@ int main() {
   std::vector<uint8_t> data(5000, 0xAA);                // тестовые данные
   const size_t parts = (5000 + 127) / 128;              // частей в одном сообщении
   for (int i = 0; i < 3; ++i) {
-    uint32_t id = splitter.splitAndEnqueue(buf, data.data(), data.size());
+    uint16_t id = splitter.splitAndEnqueue(buf, data.data(), data.size());
     assert(id != 0);                                   // каждое сообщение добавлено
   }
   // после трёх сообщений должно остаться место ещё под одно

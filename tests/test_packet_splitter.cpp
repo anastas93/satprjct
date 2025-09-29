@@ -13,9 +13,9 @@ int main() {
   PacketSplitter splitter(PayloadMode::SMALL);
   std::vector<uint8_t> data(100);
   for (int i=0;i<100;++i) data[i]=i;     // заполняем тестовыми данными
-  uint32_t first = splitter.splitAndEnqueue(buf, data.data(), data.size());
+  uint16_t first = splitter.splitAndEnqueue(buf, data.data(), data.size());
   assert(first==1);                       // первый ID
-  size_t parts=0; uint32_t id; std::vector<uint8_t> out;
+  size_t parts=0; uint16_t id; std::vector<uint8_t> out;
   while(buf.pop(id,out)) { parts++; }
   assert(parts==4);                       // 100 байт -> 4 части
 
@@ -26,9 +26,9 @@ int main() {
     std::vector<uint8_t> payload(10, 0xAA);
     std::set<std::string> seen;
     for (int i = 0; i < 3; ++i) {
-      uint32_t first_id = tag_splitter.splitAndEnqueue(tag_buf, payload.data(), payload.size(), true);
+      uint16_t first_id = tag_splitter.splitAndEnqueue(tag_buf, payload.data(), payload.size(), true);
       assert(first_id != 0);              // тег добавлен в буфер
-      uint32_t part_id = 0;
+      uint16_t part_id = 0;
       std::vector<uint8_t> part;
       bool ok = tag_buf.pop(part_id, part);
       assert(ok);

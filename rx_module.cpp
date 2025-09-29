@@ -80,20 +80,15 @@ static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& 
   }
 }
 
-static std::array<uint8_t,8> makeAad(uint8_t version,
-                                     uint8_t flags,
-                                     uint32_t msg_id,
-                                     uint16_t frag_idx) {
+static std::array<uint8_t,8> makeAad(uint8_t version, uint16_t msg_id, uint32_t packed_meta) {
   std::array<uint8_t,8> aad{};
   aad[0] = version;
-  aad[1] = static_cast<uint8_t>(flags &
-                                 (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED));
-  aad[2] = static_cast<uint8_t>(msg_id >> 24);
-  aad[3] = static_cast<uint8_t>(msg_id >> 16);
-  aad[4] = static_cast<uint8_t>(msg_id >> 8);
-  aad[5] = static_cast<uint8_t>(msg_id);
-  aad[6] = static_cast<uint8_t>(frag_idx >> 8);
-  aad[7] = static_cast<uint8_t>(frag_idx);
+  aad[1] = static_cast<uint8_t>(msg_id >> 8);
+  aad[2] = static_cast<uint8_t>(msg_id);
+  aad[3] = static_cast<uint8_t>(packed_meta >> 24);
+  aad[4] = static_cast<uint8_t>(packed_meta >> 16);
+  aad[5] = static_cast<uint8_t>(packed_meta >> 8);
+  aad[6] = static_cast<uint8_t>(packed_meta);
   return aad;
 }
 
@@ -197,7 +192,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     profile_scope.mark(&ProfilingSnapshot::deliver);   // фиксируем передачу наружу
   };
 
-  if (len < FrameHeader::SIZE * 2) {                   // недостаточно данных для заголовков
+  if (len < FrameHeader::SIZE) {                        // недостаточно данных для заголовка
     forward_raw(data, len);
     profile_scope.markDrop("короткий кадр без заголовка");
     return;
@@ -215,39 +210,47 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   FrameHeader primary_hdr;
   FrameHeader secondary_hdr;
   bool primary_ok = FrameHeader::decode(frame_buf_.data(), frame_buf_.size(), primary_hdr);
-  bool secondary_ok =
-      FrameHeader::decode(frame_buf_.data() + FrameHeader::SIZE,
-                          frame_buf_.size() - FrameHeader::SIZE, secondary_hdr);
+  bool secondary_ok = false;
+  if (frame_buf_.size() >= FrameHeader::SIZE * 2) {
+    secondary_ok = FrameHeader::decode(frame_buf_.data() + FrameHeader::SIZE,
+                                       frame_buf_.size() - FrameHeader::SIZE, secondary_hdr);
+  }
   profile_scope.mark(&ProfilingSnapshot::header);
-  if (!primary_ok && !secondary_ok) {                   // оба заголовка повреждены
+  if (!primary_ok && !secondary_ok) {                   // заголовок не распознан
     forward_raw(data, len);
     profile_scope.markDrop("заголовок повреждён");
     return;
   }
 
-  if (primary_ok != secondary_ok) {
-    LOG_WARN("RxModule: обнаружено расхождение валидности копий заголовка"); // фиксируем частичный сбой
-    // В текущей реализации отдельный счётчик доверия не ведётся, поэтому дополнительных действий не требуется.
-  }
   FrameHeader hdr = primary_ok ? primary_hdr : secondary_hdr;
+  bool headers_match = false;
   if (primary_ok && secondary_ok) {
-    bool headers_match = (primary_hdr.msg_id == secondary_hdr.msg_id) &&
-                         (primary_hdr.getFragIdx() == secondary_hdr.getFragIdx()) &&
-                         (primary_hdr.frag_cnt == secondary_hdr.frag_cnt) &&
-                         (primary_hdr.getFlags() == secondary_hdr.getFlags()) &&
-                         (primary_hdr.getPayloadLen() == secondary_hdr.getPayloadLen());
+    headers_match = (primary_hdr.msg_id == secondary_hdr.msg_id) &&
+                    (primary_hdr.getFragIdx() == secondary_hdr.getFragIdx()) &&
+                    (primary_hdr.frag_cnt == secondary_hdr.frag_cnt) &&
+                    (primary_hdr.getFlags() == secondary_hdr.getFlags()) &&
+                    (primary_hdr.getPayloadLen() == secondary_hdr.getPayloadLen());
     if (!headers_match) {
-      LOG_WARN("RxModule: дублированные заголовки расходятся");
-      forward_raw(data, len);                            // фиксируем испорченный кадр
-      profile_scope.markDrop("заголовки расходятся");
-      return;                                            // не продолжаем обработку полезной нагрузки
+      LOG_WARN("RxModule: обнаружено расхождение копий заголовка");
     }
-    hdr = primary_hdr;                                   // обе копии одинаковые
   }
 
-  const uint8_t* payload_p = frame_buf_.data() + FrameHeader::SIZE * 2;
-  size_t payload_len = frame_buf_.size() - FrameHeader::SIZE * 2;
-  removePilots(payload_p, payload_len, payload_buf_);       // убираем пилоты без выделений
+  size_t payload_offset = FrameHeader::SIZE;
+  if (!primary_ok && secondary_ok) {
+    payload_offset = FrameHeader::SIZE * 2;                // принимаем старый формат с дублированным заголовком
+  }
+
+  auto extract_payload = [&](size_t offset) {
+    const uint8_t* payload_p = frame_buf_.data() + offset;
+    size_t payload_len = frame_buf_.size() - offset;
+    removePilots(payload_p, payload_len, payload_buf_);
+  };
+
+  extract_payload(payload_offset);
+  if (payload_buf_.size() != hdr.getPayloadLen() && headers_match && frame_buf_.size() >= FrameHeader::SIZE * 2) {
+    payload_offset = FrameHeader::SIZE * 2;               // пробуем интерпретацию старого формата
+    extract_payload(payload_offset);
+  }
   profile_scope.mark(&ProfilingSnapshot::payload_extract);
   if (payload_buf_.size() != hdr.getPayloadLen()) {
     profile_scope.markDrop("несовпадение длины payload");
@@ -456,14 +459,9 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   bool should_decrypt = encrypted || encryption_forced_;
   bool decrypt_ok = false;
   if (should_decrypt) {
-    uint16_t nonce_idx = hdr.getFragIdx();            // индекс части задаёт уникальный нонс
-    nonce_ = KeyLoader::makeNonce(hdr.msg_id, nonce_idx);
+    nonce_ = KeyLoader::makeNonce(hdr.packed, hdr.msg_id); // packed содержит флаги, индекс и длину
     if (hdr.ver >= FRAME_VERSION_AEAD) {
-      auto aad = makeAad(hdr.ver,
-                         static_cast<uint8_t>(hdr_flags &
-                                              (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_ACK_REQUIRED)),
-                         hdr.msg_id,
-                         hdr.getFragIdx());
+      auto aad = makeAad(hdr.ver, hdr.msg_id, hdr.packed);
       decrypt_ok = crypto::chacha20poly1305::decrypt(key_.data(), key_.size(),
                                                      nonce_.data(), nonce_.size(),
                                                      aad.data(), aad.size(),

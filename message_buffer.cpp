@@ -19,7 +19,7 @@ MessageBuffer::MessageBuffer(size_t capacity, size_t slot_size) {
 }
 
 // Добавление сообщения в буфер
-uint32_t MessageBuffer::enqueue(const uint8_t* data, size_t len) {
+uint16_t MessageBuffer::enqueue(const uint8_t* data, size_t len) {
   if (!data || len == 0) {                     // проверка входных данных
     DEBUG_LOG("MessageBuffer: пустой ввод");
     return 0;
@@ -32,7 +32,11 @@ uint32_t MessageBuffer::enqueue(const uint8_t* data, size_t len) {
     DEBUG_LOG("MessageBuffer: переполнение");
     return 0;
   }
-  uint32_t id = next_id_++;                    // текущий идентификатор
+  uint16_t id = next_id_;                      // текущий идентификатор
+  ++next_id_;
+  if (next_id_ == 0 || next_id_ >= 0x8000) {   // избегаем нулевого и ACK-диапазона
+    next_id_ = 1;
+  }
   Slot& slot = slots_[tail_];
   slot.id = id;
   slot.data.assign(data, data + len);          // наполняем предварительно выделенный буфер
@@ -72,7 +76,7 @@ bool MessageBuffer::hasPending() const {
 }
 
 // Извлечение сообщения
-bool MessageBuffer::pop(uint32_t& id, std::vector<uint8_t>& out) {
+bool MessageBuffer::pop(uint16_t& id, std::vector<uint8_t>& out) {
   if (size_ == 0) {                            // очередь пуста
     DEBUG_LOG("MessageBuffer: извлечение из пустой очереди");
     return false;
@@ -88,7 +92,7 @@ bool MessageBuffer::pop(uint32_t& id, std::vector<uint8_t>& out) {
   return true;
 }
 
-const std::vector<uint8_t>* MessageBuffer::peek(uint32_t& id) const {
+const std::vector<uint8_t>* MessageBuffer::peek(uint16_t& id) const {
   if (size_ == 0) {                              // очередь пуста
     DEBUG_LOG("MessageBuffer: просмотр пустой очереди");
     return nullptr;

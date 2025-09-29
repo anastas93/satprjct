@@ -21,9 +21,9 @@ public:
   void setPayloadMode(PayloadMode mode);
   // Добавляет сообщение в очередь на отправку с указанием класса QoS (0..3)
   // with_prefix=false используется в режиме Light pack для отправки чистого текста без служебных тегов
-  uint32_t queue(const uint8_t* data, size_t len, uint8_t qos = 0, bool with_prefix = true);
+  uint16_t queue(const uint8_t* data, size_t len, uint8_t qos = 0, bool with_prefix = true);
   // Постановка сообщения без префикса и без дополнительного разбиения на части
-  uint32_t queuePlain(const uint8_t* data, size_t len, uint8_t qos = 0);
+  uint16_t queuePlain(const uint8_t* data, size_t len, uint8_t qos = 0);
   // Отправляет первое доступное сообщение (если есть)
   // Возвращает true при успешной передаче
   bool loop();
@@ -50,7 +50,7 @@ public:
   void completeExternalSend();
 private:
   struct PendingMessage {
-    uint32_t id = 0;                         // идентификатор сообщения
+    uint16_t id = 0;                         // идентификатор сообщения
     std::vector<uint8_t> data;               // данные сообщения с префиксом
     uint8_t qos = 0;                         // очередь QoS
     uint8_t attempts_left = 0;               // оставшиеся повторы
@@ -87,9 +87,9 @@ private:
   std::optional<PendingMessage> delayed_;           // пакет из архива, готовый к отправке
   std::deque<PendingMessage> archive_;              // архив сообщений без ACK
   std::deque<PendingMessage> ack_queue_;            // очередь мгновенных ACK-сообщений
-  uint32_t next_ack_id_ = 0x80000000u;              // идентификаторы ACK вне общей очереди
+  uint16_t next_ack_id_ = 0x8000;                   // идентификаторы ACK вне общей очереди
   std::chrono::steady_clock::time_point next_ack_send_time_; // момент, когда ACK можно отправить
   bool encryption_enabled_ = DefaultSettings::USE_ENCRYPTION; // текущий режим шифрования
-  std::unordered_set<uint32_t> plain_messages_;     // учёт идентификаторов «сырых» пакетов
+  std::unordered_set<uint16_t> plain_messages_;     // учёт идентификаторов «сырых» пакетов
 };
 
