@@ -334,13 +334,7 @@ void RadioSX1262::onDio1Static() {
 void RadioSX1262::handleDio1() {
   packetReady_ = true;                     // устанавливаем флаг готовности пакета
 
-  uint16_t irqStatus = 0;                     // текущее состояние IRQ
-  int16_t irqState = radio_.getIrqStatus(&irqStatus);
-  if (irqState != RADIOLIB_ERR_NONE) {        // проверяем результат чтения маски
-    LOG_WARN_VAL("RadioSX1262: не удалось прочитать IRQ статус, код=", irqState);
-    DEBUG_LOG("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
-    return;                                   // при ошибке сохраняем прежнее поведение
-  }
+  uint16_t irqStatus = radio_.getIrqStatus(); // текущее состояние IRQ
 
   struct FlagInfo {                        // описание интересующих флагов
     uint16_t mask;
