@@ -466,6 +466,19 @@ struct PushClientSession {
 static std::vector<PushClientSession> gPushSessions;  // список подписчиков SSE
 static uint32_t gPushNextEventId = 1;                 // глобальный счётчик событий
 
+// Буфер последних отладочных сообщений для повторной отправки новым подписчикам
+struct DebugLogEntry {
+  uint32_t id = 0;                                    // глобальный идентификатор записи
+  uint32_t timestampMs = 0;                          // время фиксации сообщения
+  DefaultSettings::LogLevel level = DefaultSettings::LogLevel::INFO; // уровень важности
+  String text;                                       // текст сообщения
+};
+static constexpr size_t kDebugLogCapacity = 96;      // глубина буфера отладочного лога
+static std::array<DebugLogEntry, kDebugLogCapacity> gDebugLogBuffer; // кольцевой буфер
+static size_t gDebugLogSize = 0;                     // текущее число записей
+static size_t gDebugLogHead = 0;                     // индекс старейшей записи
+static uint32_t gDebugLogCounter = 0;                // счётчик всех записей
+
 // Формируем JSON-представление для уведомления о новом элементе буфера
 String buildReceivedPushPayload(ReceivedBuffer::Kind kind, const ReceivedBuffer::Item& item) {
   String payload = "{";
@@ -545,6 +558,108 @@ void maintainPushSessions(bool forceKeepAlive = false) {
   }
 }
 
+// Преобразуем уровень логирования в короткую текстовую метку
+const char* debugLevelToString(DefaultSettings::LogLevel level) {
+  switch (level) {
+    case DefaultSettings::LogLevel::ERROR: return "error";
+    case DefaultSettings::LogLevel::WARN:  return "warn";
+    case DefaultSettings::LogLevel::INFO:  return "info";
+    case DefaultSettings::LogLevel::DEBUG: return "debug";
+  }
+  return "info";
+}
+
+// Формируем JSON-представление отладочного сообщения для SSE
+String buildDebugLogPayload(const DebugLogEntry& entry) {
+  String payload = F("{\"id\":");
+  payload += String(static_cast<unsigned long>(entry.id));
+  payload += F(",\"level\":\"");
+  payload += debugLevelToString(entry.level);
+  payload += F("\",\"text\":\"");
+  payload += jsonEscape(entry.text);
+  payload += F("\",\"ts\":");
+  payload += String(static_cast<unsigned long>(entry.timestampMs));
+  payload += '}';
+  return payload;
+}
+
+// Отправляем одно отладочное сообщение всем подписчикам SSE
+void broadcastDebugLog(const DebugLogEntry& entry) {
+  if (gPushSessions.empty() || entry.text.length() == 0) return;
+  maintainPushSessions();
+  String payload = buildDebugLogPayload(entry);
+  String eventName = F("debug");
+  uint32_t eventId = gPushNextEventId++;
+  for (auto it = gPushSessions.begin(); it != gPushSessions.end(); ) {
+    if (!sendSseFrame(*it, eventName, payload, eventId)) {
+      it->client.stop();
+      it = gPushSessions.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+// Передаём накопленные сообщения новому подписчику
+void sendDebugBacklog(PushClientSession& session) {
+  if (gDebugLogSize == 0) return;
+  String eventName = F("debug");
+  for (size_t i = 0; i < gDebugLogSize; ++i) {
+    size_t idx = (gDebugLogHead + i) % gDebugLogBuffer.size();
+    const DebugLogEntry& entry = gDebugLogBuffer[idx];
+    String payload = buildDebugLogPayload(entry);
+    if (!sendSseFrame(session, eventName, payload, gPushNextEventId++)) {
+      session.client.stop();
+      return;
+    }
+  }
+}
+
+// Сохраняем сообщение в буфере и оповещаем подписчиков
+void pushDebugLog(DefaultSettings::LogLevel level, const char* msg) {
+  if (!msg || *msg == '\0') return;
+  DebugLogEntry entry;
+  entry.id = ++gDebugLogCounter;
+  entry.level = level;
+  entry.text = String(msg);
+  entry.timestampMs = millis();
+  size_t index;
+  if (gDebugLogSize < gDebugLogBuffer.size()) {
+    index = (gDebugLogHead + gDebugLogSize) % gDebugLogBuffer.size();
+    ++gDebugLogSize;
+  } else {
+    index = gDebugLogHead;
+    gDebugLogHead = (gDebugLogHead + 1) % gDebugLogBuffer.size();
+  }
+  gDebugLogBuffer[index] = entry;
+  broadcastDebugLog(gDebugLogBuffer[index]);
+}
+
+// Колбэк для системы логирования: сохраняем и ретранслируем сообщение
+void srDebugLogHook(DefaultSettings::LogLevel level, const char* msg) {
+  pushDebugLog(level, msg);
+}
+
+// Возвращаем текущий идентификатор последней записи журнала
+uint32_t currentDebugLogId() {
+  return gDebugLogCounter;
+}
+
+// Собираем новые сообщения, появившиеся после указанного идентификатора
+String collectDebugLogsSince(uint32_t sinceId) {
+  if (gDebugLogSize == 0) return String();
+  String out;
+  for (size_t i = 0; i < gDebugLogSize; ++i) {
+    size_t idx = (gDebugLogHead + i) % gDebugLogBuffer.size();
+    const DebugLogEntry& entry = gDebugLogBuffer[idx];
+    if (entry.id <= sinceId) continue;
+    if (entry.text.length() == 0) continue;
+    if (out.length() > 0) out += '\n';
+    out += entry.text;
+  }
+  return out;
+}
+
 // Рассылка уведомления всем подключённым клиентам
 void broadcastReceivedPush(ReceivedBuffer::Kind kind, const ReceivedBuffer::Item& item) {
   if (gPushSessions.empty()) return;
@@ -604,6 +719,12 @@ void handleSseConnect() {
   String helloPayload = F("{\"status\":\"ready\"}");
   if (!sendSseFrame(stored, helloEvent, helloPayload, gPushNextEventId++)) {
     stored.client.stop();
+    gPushSessions.pop_back();
+    return;
+  }
+  // Отправляем новому клиенту последние отладочные записи, чтобы не терять контекст
+  sendDebugBacklog(stored);
+  if (!stored.client.connected()) {
     gPushSessions.pop_back();
     return;
   }
@@ -1820,6 +1941,7 @@ void handleCmdHttp() {
   }
   String resp;
   String contentType = "text/plain";
+  uint32_t logCheckpoint = currentDebugLogId();
   if (cmd == "PI") {
     resp = cmdPing();
   } else if (cmd == "SEAR") {
@@ -2072,6 +2194,15 @@ void handleCmdHttp() {
   } else {
     resp = "UNKNOWN";
   }
+  if (contentType == "text/plain") {
+    String extraLogs = collectDebugLogsSince(logCheckpoint);
+    if (extraLogs.length() > 0) {
+      if (resp.length() > 0 && resp.charAt(resp.length() - 1) != '\n') {
+        resp += '\n';
+      }
+      resp += extraLogs;
+    }
+  }
   server.send(200, contentType, resp);
 }
 
@@ -2142,6 +2273,7 @@ void setupWifi() {
 void setup() {
   Serial.begin(115200);
   while (!Serial) {}
+  LogDetail::setLogCallback(srDebugLogHook);          // подключаем зеркалирование DEBUG_LOG в SSE
 #if SR_HAS_ESP_COREDUMP
   gCoreDumpClearPending = true;
   gCoreDumpClearAfterMs = millis() + 500;  // ждём старта фоновых задач
