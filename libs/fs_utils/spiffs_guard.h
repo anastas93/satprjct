@@ -4,6 +4,7 @@
 // Все комментарии намеренно оставлены на русском языке.
 
 #include <cstdint>
+#include "default_settings.h"
 
 #ifdef ARDUINO
 #include <Arduino.h>
@@ -75,7 +76,7 @@ inline SpiffsMountResult ensureSpiffsMounted(bool allowFormat = true) {
     return result;
   }
 
-  Serial.println(F("SPIFFS: первичное монтирование не удалось"));
+  LOG_ERROR("SPIFFS: первичное монтирование не удалось");
   if (!allowFormat) {
     result.status = SpiffsMountStatus::kMountFailed;
     return result;
@@ -84,7 +85,7 @@ inline SpiffsMountResult ensureSpiffsMounted(bool allowFormat = true) {
   bool shouldRetryFormat = !formatAttempted;
   if (shouldRetryFormat) {
     formatAttempted = true;
-    Serial.println(F("SPIFFS: требуется форматирование, пробуем очистить раздел"));
+    LOG_WARN("SPIFFS: требуется форматирование, пробуем очистить раздел");
     bool formatted = false;
     bool formatPerformed = false;
 #if FS_UTILS_HAS_ESP_IPC
@@ -107,12 +108,12 @@ inline SpiffsMountResult ensureSpiffsMounted(bool allowFormat = true) {
           },
           "spiffs_fmt", kStackSizeWords, &ctx, kPriority, &formatTaskHandle, 0);
       if (createResult != pdPASS) {
-        Serial.println(F("SPIFFS: не удалось создать задачу форматирования, пробуем прямой вызов"));
+        LOG_ERROR("SPIFFS: не удалось создать задачу форматирования, пробуем прямой вызов");
         return false;
       }
       uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
       if (notified == 0) {
-        Serial.println(F("SPIFFS: форматирование не завершилось за отведённое время"));
+        LOG_ERROR("SPIFFS: форматирование не завершилось за отведённое время");
         vTaskDelete(formatTaskHandle);
         return false;
       }
@@ -122,7 +123,7 @@ inline SpiffsMountResult ensureSpiffsMounted(bool allowFormat = true) {
 
     formatPerformed = formatOnCpu0();
     if (!formatPerformed) {
-      Serial.println(F("SPIFFS: выполняем форматирование напрямую (без IPC)"));
+      LOG_WARN("SPIFFS: выполняем форматирование напрямую (без IPC)");
       formatted = SPIFFS.format();
       formatPerformed = true;
     }
@@ -133,25 +134,25 @@ inline SpiffsMountResult ensureSpiffsMounted(bool allowFormat = true) {
 
     if (formatted) {
       if (SPIFFS.begin(false)) {
-        Serial.println(F("SPIFFS: раздел успешно отформатирован"));
+        LOG_INFO("SPIFFS: раздел успешно отформатирован");
         mounted = true;
         result.mounted = true;
         result.status = SpiffsMountStatus::kSuccess;
         return result;
       }
-      Serial.println(F("SPIFFS: монтирование после форматирования не удалось"));
+      LOG_ERROR("SPIFFS: монтирование после форматирования не удалось");
       result.status = SpiffsMountStatus::kPostFormatMountFailed;
       formatAttempted = false;  // разрешаем повторное форматирование при следующем вызове
     } else {
-      Serial.println(F("SPIFFS: форматирование не удалось"));
+      LOG_ERROR("SPIFFS: форматирование не удалось");
       result.status = SpiffsMountStatus::kFormatFailed;
       formatAttempted = false;  // даём шанс повторить попытку форматирования
     }
   }
 
-  Serial.println(F("SPIFFS: пробуем монтировать с автоформатированием (begin(true))"));
+  LOG_WARN("SPIFFS: пробуем монтировать с автоформатированием (begin(true))");
   if (SPIFFS.begin(true)) {
-    Serial.println(F("SPIFFS: begin(true) успешно смонтировал раздел"));
+    LOG_INFO("SPIFFS: begin(true) успешно смонтировал раздел");
     mounted = true;
     formatAttempted = true;
     result.mounted = true;
@@ -159,7 +160,7 @@ inline SpiffsMountResult ensureSpiffsMounted(bool allowFormat = true) {
     return result;
   }
 
-  Serial.println(F("SPIFFS: begin(true) тоже не смог смонтировать раздел"));
+  LOG_ERROR("SPIFFS: begin(true) тоже не смог смонтировать раздел");
   result.status = SpiffsMountStatus::kBeginTrueFailed;
   return result;
 }

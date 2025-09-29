@@ -293,22 +293,20 @@ bool clearCorruptedCoreDumpConfig() {
   // исправную конфигурацию при каждом запуске.
   esp_err_t checkErr = esp_core_dump_image_check();
   if (checkErr == ESP_OK) {
-    Serial.println("Core dump: конфигурация корректна, очистка не требуется");
+    LOG_INFO("Core dump: конфигурация корректна, очистка не требуется");
     return true;
   }
   if (checkErr == ESP_ERR_NOT_FOUND) {
-    Serial.println("Core dump: данные отсутствуют, конфигурация считается чистой");
+    LOG_INFO("Core dump: данные отсутствуют, конфигурация считается чистой");
     return true;
   }
   if (checkErr != ESP_ERR_INVALID_CRC && checkErr != ESP_ERR_INVALID_SIZE) {
-    Serial.print("Core dump: image_check вернул код=");
-    Serial.println(static_cast<int>(checkErr));
+    LOG_WARN("Core dump: image_check вернул код=%d", static_cast<int>(checkErr));
     gCoreDumpClearAfterMs = millis() + 1000;
     return false;
   }
-  Serial.print("Core dump: image_check сообщает о повреждении (код=");
-  Serial.print(static_cast<int>(checkErr));
-  Serial.println(") — выполняем очистку");
+  LOG_WARN("Core dump: image_check сообщает о повреждении (код=%d) — выполняем очистку",
+           static_cast<int>(checkErr));
 #endif
   TaskHandle_t idle0 = SR_IDLE_TASK_HANDLE_FOR_CORE(0);
 #if (portNUM_PROCESSORS > 1)
@@ -317,7 +315,7 @@ bool clearCorruptedCoreDumpConfig() {
   TaskHandle_t idle1 = idle0;
 #endif
   if (idle0 == nullptr || idle1 == nullptr) {
-    Serial.println("Core dump: Idle-задачи ещё не запущены, повторим позже");
+    LOG_WARN("Core dump: Idle-задачи ещё не запущены, повторим позже");
     gCoreDumpClearAfterMs = millis() + 500;
     return false;
   }
@@ -327,7 +325,7 @@ bool clearCorruptedCoreDumpConfig() {
   const esp_partition_t* part = esp_partition_find_first(
       ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
   if (!part) {
-    Serial.println("Core dump: раздел не найден");
+    LOG_ERROR("Core dump: раздел не найден");
     return true;
   }
   // Сначала читаем начало раздела и проверяем, не сброшена ли конфигурация уже
@@ -335,8 +333,7 @@ bool clearCorruptedCoreDumpConfig() {
   uint8_t probe[kProbeSize];
   esp_err_t err = esp_partition_read(part, 0, probe, sizeof(probe));
   if (err != ESP_OK) {
-    Serial.print("Core dump: ошибка чтения, код=");
-    Serial.println(static_cast<int>(err));
+    LOG_ERROR("Core dump: ошибка чтения, код=%d", static_cast<int>(err));
     // Дадим флешу и подсистеме core dump возможность освободить ресурсы и попробуем позже.
     gCoreDumpClearAfterMs = millis() + 1000;
     return false;
@@ -348,7 +345,7 @@ bool clearCorruptedCoreDumpConfig() {
     }
   }
   if (allZero) {
-    Serial.println("Core dump: конфигурация уже чистая");
+    LOG_INFO("Core dump: конфигурация уже чистая");
     return true;
   }
   // После стирания флеш содержит 0xFF, а esp_core_dump ожидает нули в конфигурации,
@@ -364,23 +361,20 @@ bool clearCorruptedCoreDumpConfig() {
   coreDumpClearIpc(&ctx);
 #endif
   if (ipcErr != ESP_OK) {
-    Serial.print("Core dump: IPC-вызов завершился ошибкой, код=");
-    Serial.println(static_cast<int>(ipcErr));
+    LOG_ERROR("Core dump: IPC-вызов завершился ошибкой, код=%d", static_cast<int>(ipcErr));
     gCoreDumpClearAfterMs = millis() + 1000;
     return false;
   }
   if (ctx.eraseErr != ESP_OK) {
-    Serial.print("Core dump: ошибка стирания, код=");
-    Serial.println(static_cast<int>(ctx.eraseErr));
+    LOG_ERROR("Core dump: ошибка стирания, код=%d", static_cast<int>(ctx.eraseErr));
     gCoreDumpClearAfterMs = millis() + 1000;
     return false;
   }
   if (ctx.writeErr == ESP_OK) {
-    Serial.println("Core dump: конфигурация сброшена");
+    LOG_INFO("Core dump: конфигурация сброшена");
     return true;
   }
-  Serial.print("Core dump: ошибка записи, код=");
-  Serial.println(static_cast<int>(ctx.writeErr));
+  LOG_ERROR("Core dump: ошибка записи, код=%d", static_cast<int>(ctx.writeErr));
   gCoreDumpClearAfterMs = millis() + 1000;
   return false;
 }
@@ -732,7 +726,7 @@ void handleSseConnect() {
     gPushSessions.pop_back();
     return;
   }
-  Serial.println(F("HTTP push: новое подключение"));
+  LOG_INFO("HTTP push: новое подключение");
 }
 
 // Выдача нового идентификатора для тестовых сообщений
@@ -875,8 +869,7 @@ bool testModeProcessMessage(const String& payload, uint32_t& outId, String& err)
   log += " len=";
   log += String(static_cast<unsigned int>(packet.length));
   SimpleLogger::logStatus(std::string(log.c_str()));
-  Serial.print("TESTMODE RX: ");
-  Serial.println(display);
+  LOG_INFO("TESTMODE RX: %s", display.c_str());
   return true;
 }
 
@@ -1103,12 +1096,11 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
       keyTransferRuntime.waiting = false;
       keyTransferRuntime.completed = false;
       SimpleLogger::logStatus("KEYTRANSFER CERT ERR");
-      Serial.print("KEYTRANSFER: ошибка проверки сертификата: ");
-      Serial.println(cert_error.c_str());
+      LOG_ERROR("KEYTRANSFER: ошибка проверки сертификата: %s", cert_error.c_str());
       return true;
     }
   } else if (KeyTransfer::hasTrustedRoot()) {
-    Serial.println("KEYTRANSFER: предупреждение — нет сертификата при наличии доверенного корня");
+    LOG_WARN("KEYTRANSFER: предупреждение — нет сертификата при наличии доверенного корня");
   }
 
   KeyLoader::KeyRecord previous_snapshot;          // сохраняем снимок до применения удалённого ключа
@@ -1119,7 +1111,7 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
     keyTransferRuntime.waiting = false;
     keyTransferRuntime.completed = false;
     SimpleLogger::logStatus("KEYTRANSFER ERR");
-    Serial.println("KEYTRANSFER: ошибка применения удалённого ключа");
+    LOG_ERROR("KEYTRANSFER: ошибка применения удалённого ключа");
     return true;
   }
   bool skip_remote_check = (payload.version == KeyTransfer::VERSION_EPHEMERAL) ||
@@ -1148,12 +1140,13 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
       log += "/";
       log += toHex(payload.key_id).c_str();
       SimpleLogger::logStatus(log);
-      Serial.print("KEYTRANSFER: несовпадение идентификаторов (local=");
-      Serial.print(toHex(local_id));
-      Serial.print(", remote=");
-      Serial.print(toHex(payload.key_id));
-      Serial.println(")");
-      Serial.println("KEYTRANSFER: откатываемся на предыдущий ключ");
+      String mismatch = F("KEYTRANSFER: несовпадение идентификаторов (local=");
+      mismatch += toHex(local_id).c_str();
+      mismatch += F(", remote=");
+      mismatch += toHex(payload.key_id).c_str();
+      mismatch += F(")");
+      LOG_ERROR("%s", mismatch.c_str());
+      LOG_WARN("KEYTRANSFER: откатываемся на предыдущий ключ");
       return true;
     }
   }
@@ -1162,7 +1155,7 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
   keyTransferRuntime.waiting = false;
   keyTransferRuntime.error = String();
   SimpleLogger::logStatus("KEYTRANSFER OK");
-  Serial.println("KEYTRANSFER: получен корневой ключ по LoRa");
+  LOG_INFO("KEYTRANSFER: получен корневой ключ по LoRa");
   return true;
 }
 
@@ -1262,7 +1255,7 @@ String cmdKeyTransferSendLora() {
     if (has_peer) {
       if (!KeyLoader::previewPeerKeyId(key_id)) {
         SimpleLogger::logStatus("KEYTRANSFER ERR PREVIEW");
-        Serial.println("KEYTRANSFER: ошибка расчёта идентификатора ключа");
+        LOG_ERROR("KEYTRANSFER: ошибка расчёта идентификатора ключа");
         return String("{\"error\":\"peer\"}");
       }
     } else {
@@ -1272,7 +1265,7 @@ String cmdKeyTransferSendLora() {
     // Для нового обмена формируем эпемерную пару X25519
     if (!KeyLoader::startEphemeralSession(ephemeral_public, true)) {
       SimpleLogger::logStatus("KEYTRANSFER ERR EPHEM");
-      Serial.println("KEYTRANSFER: не удалось подготовить эпемерный ключ");
+      LOG_ERROR("KEYTRANSFER: не удалось подготовить эпемерный ключ");
       return String("{\"error\":\"ephemeral\"}");
     }
     key_id.fill(0);  // удалённая сторона проверяет результат после применения кадра
@@ -1292,7 +1285,7 @@ String cmdKeyTransferSendLora() {
   tx.completeExternalSend();
   keyTransferRuntime.last_msg_id = msg_id;
   SimpleLogger::logStatus("KEYTRANSFER SEND");
-  Serial.println("KEYTRANSFER: отправлен публичный корневой ключ");
+  LOG_INFO("KEYTRANSFER: отправлен публичный корневой ключ");
   return makeKeyStateJson();
 }
 
@@ -1803,8 +1796,7 @@ String cmdTestMode(const String& arg) {
   if (changed) {
     testModeLocalCounter = 0;                                  // сбрасываем локальный счётчик
     SimpleLogger::logStatus(testModeEnabled ? "TESTMODE ON" : "TESTMODE OFF");
-    Serial.print("TESTMODE: ");
-    Serial.println(testModeEnabled ? "включён" : "выключен");
+    LOG_INFO("TESTMODE: %s", testModeEnabled ? "включён" : "выключен");
   }
   String resp = "TESTMODE:";
   resp += testModeEnabled ? "1" : "0";
@@ -2270,8 +2262,8 @@ void setupWifi() {
   server.on("/cmd", handleCmdHttp);                                  // обработка команд
   server.on("/api/cmd", handleCmdHttp);                              // совместимый эндпоинт
   server.begin();                                                      // старт сервера
-  Serial.print("AP IP: ");
-  Serial.println(WiFi.softAPIP());                                     // выводим адрес
+  String apIp = WiFi.softAPIP().toString();                            // формируем строку IP
+  LOG_INFO("AP IP: %s", apIp.c_str());                                // сообщаем адрес через журнал
 }
 
 void setup() {
@@ -2283,8 +2275,7 @@ void setup() {
   gCoreDumpClearAfterMs = millis() + 500;  // ждём старта фоновых задач
 #endif
   KeyLoader::ensureStorage();
-  Serial.print("Хранилище ключей: ");
-  Serial.println(KeyLoader::backendName(KeyLoader::getBackend()));
+  LOG_INFO("Хранилище ключей: %s", KeyLoader::backendName(KeyLoader::getBackend()));
   setupWifi();                                       // запускаем точку доступа
   radio.begin();
   tx.setAckEnabled(ackEnabled);
@@ -2302,16 +2293,21 @@ void setup() {
   });
   // обработка входящих данных с учётом ACK
   rx.setAckCallback([&]() {
-    Serial.println("ACK: получен");
+    LOG_INFO("ACK: получен");
     tx.onAckReceived();
   });
   rx.setCallback([&](const uint8_t* d, size_t l){
     if (protocol::ack::isAckPayload(d, l)) {              // ACK уже обработан отдельным колбэком
       return;
     }
-    Serial.print("RX: ");
-    for (size_t i = 0; i < l; ++i) Serial.write(d[i]);
-    Serial.println();
+    String rxLine = F("RX:");                            // готовим строку с полезной нагрузкой
+    rxLine.reserve(4 + l * 3);
+    for (size_t i = 0; i < l; ++i) {
+      char buf[4];
+      std::snprintf(buf, sizeof(buf), " %02X", d[i]);
+      rxLine += buf;
+    }
+    LOG_INFO("%s", rxLine.c_str());
     if (ackEnabled) {                                     // отправляем подтверждение
       const uint8_t ack_msg[1] = {protocol::ack::MARKER};
       tx.queue(ack_msg, sizeof(ack_msg));
@@ -2322,7 +2318,7 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], LIGHT [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ACKD <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
+  LOG_INFO("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], LIGHT [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ACKD <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
 }
 
 void loop() {
@@ -2344,63 +2340,62 @@ void loop() {
       line.trim();
       if (line.startsWith("BF ") || line.startsWith("BW ")) {
         float bw = line.substring(3).toFloat();
-        if (radio.setBandwidth(bw)) {
-          Serial.println("Полоса установлена");
-        } else {
-          Serial.println("Ошибка установки BW");
-        }
+      if (radio.setBandwidth(bw)) {
+        LOG_INFO("Полоса установлена");
+      } else {
+        LOG_ERROR("Ошибка установки BW");
+      }
       } else if (line.startsWith("SF ")) {
         int sf = line.substring(3).toInt();
-        if (radio.setSpreadingFactor(sf)) {
-          Serial.println("SF установлен");
-        } else {
-          Serial.println("Ошибка установки SF");
-        }
+      if (radio.setSpreadingFactor(sf)) {
+        LOG_INFO("SF установлен");
+      } else {
+        LOG_ERROR("Ошибка установки SF");
+      }
       } else if (line.startsWith("CR ")) {
         int cr = line.substring(3).toInt();
-        if (radio.setCodingRate(cr)) {
-          Serial.println("CR установлен");
-        } else {
-          Serial.println("Ошибка установки CR");
-        }
+      if (radio.setCodingRate(cr)) {
+        LOG_INFO("CR установлен");
+      } else {
+        LOG_ERROR("Ошибка установки CR");
+      }
       } else if (line.startsWith("BANK ")) {
         char b = line.charAt(5);
         if (b == 'e' || b == 'E') {
           radio.setBank(ChannelBank::EAST);
-          Serial.println("Банк Восток");
+          LOG_INFO("Банк Восток");
         } else if (b == 'w' || b == 'W') {
           radio.setBank(ChannelBank::WEST);
-          Serial.println("Банк Запад");
+          LOG_INFO("Банк Запад");
         } else if (b == 't' || b == 'T') {
           radio.setBank(ChannelBank::TEST);
-          Serial.println("Банк Тест");
+          LOG_INFO("Банк Тест");
         } else if (b == 'a' || b == 'A') {
           radio.setBank(ChannelBank::ALL);
-          Serial.println("Банк All");
+          LOG_INFO("Банк All");
         } else if (b == 'h' || b == 'H') {
           radio.setBank(ChannelBank::HOME);
-          Serial.println("Банк Home");
+          LOG_INFO("Банк Home");
         }
       } else if (line.startsWith("CH ")) {
         int ch = line.substring(3).toInt();
         if (radio.setChannel(ch)) {
-          Serial.print("Канал ");
-          Serial.println(ch);
+          LOG_INFO("Канал %d", ch);
         } else {
-          Serial.println("Ошибка выбора канала");
+          LOG_ERROR("Ошибка выбора канала");
         }
       } else if (line.startsWith("PW ")) {
         int pw = line.substring(3).toInt();
         if (radio.setPower(pw)) {
-          Serial.println("Мощность установлена");
+          LOG_INFO("Мощность установлена");
       } else {
-        Serial.println("Ошибка установки мощности");
+        LOG_ERROR("Ошибка установки мощности");
       }
       // управление режимом повышенного усиления приёмника
     } else if (line.startsWith("RXBG")) {
       if (line.length() <= 4) {
-        Serial.print("RXBG: ");
-        Serial.println(radio.isRxBoostedGainEnabled() ? "включён" : "выключен");
+        const char* state = radio.isRxBoostedGainEnabled() ? "включён" : "выключен";
+        LOG_INFO("RXBG: %s", state);
       } else {
         String arg = line.substring(4);
         arg.trim();
@@ -2419,46 +2414,58 @@ void loop() {
           parsed = true;
         }
         if (!parsed) {
-          Serial.println("RXBG: используйте RXBG <0|1|toggle>");
+          LOG_WARN("RXBG: используйте RXBG <0|1|toggle>");
         } else if (radio.setRxBoostedGainMode(desired)) {
-          Serial.print("RXBG: ");
-          Serial.println(radio.isRxBoostedGainEnabled() ? "включён" : "выключен");
+          const char* state = radio.isRxBoostedGainEnabled() ? "включён" : "выключен";
+          LOG_INFO("RXBG: %s", state);
         } else {
-          Serial.println("RXBG: ошибка установки режима");
+          LOG_ERROR("RXBG: ошибка установки режима");
         }
       }
     } else if (line.equalsIgnoreCase("BCN")) {
       tx.prepareExternalSend();
       radio.sendBeacon();
       tx.completeExternalSend();
-      Serial.println("Маяк отправлен");
+      LOG_INFO("Маяк отправлен");
       } else if (line.equalsIgnoreCase("INFO")) {
         // выводим текущие настройки радиомодуля
-        Serial.print("Банк: ");
+        String info = F("INFO:\nБанк: ");
         switch (radio.getBank()) {
-          case ChannelBank::EAST: Serial.println("Восток"); break;
-          case ChannelBank::WEST: Serial.println("Запад"); break;
-          case ChannelBank::TEST: Serial.println("Тест"); break;
-          case ChannelBank::ALL: Serial.println("All"); break;
-          case ChannelBank::HOME: Serial.println("Home"); break;
+          case ChannelBank::EAST: info += F("Восток\n"); break;
+          case ChannelBank::WEST: info += F("Запад\n"); break;
+          case ChannelBank::TEST: info += F("Тест\n"); break;
+          case ChannelBank::ALL: info += F("All\n"); break;
+          case ChannelBank::HOME: info += F("Home\n"); break;
         }
-        Serial.print("Канал: "); Serial.println(radio.getChannel());
-        Serial.print("RX: "); Serial.print(radio.getRxFrequency(), 3); Serial.println(" MHz");
-        Serial.print("TX: "); Serial.print(radio.getTxFrequency(), 3); Serial.println(" MHz");
-        Serial.print("BW: "); Serial.print(radio.getBandwidth(), 2); Serial.println(" kHz");
-        Serial.print("SF: "); Serial.println(radio.getSpreadingFactor());
-        Serial.print("CR: "); Serial.println(radio.getCodingRate());
-        Serial.print("Power: "); Serial.print(radio.getPower()); Serial.println(" dBm");
-        Serial.print("Pause: "); Serial.print(tx.getSendPause()); Serial.println(" ms");
-        Serial.print("ACK timeout: "); Serial.print(tx.getAckTimeout()); Serial.println(" ms");
-        Serial.print("ACK delay: "); Serial.print(ackResponseDelayMs); Serial.println(" ms");
-        Serial.print("ACK: "); Serial.println(ackEnabled ? "включён" : "выключен");
+        info += F("Канал: ");
+        info += String(radio.getChannel());
+        info += F("\nRX: ");
+        info += String(radio.getRxFrequency(), 3);
+        info += F(" MHz\nTX: ");
+        info += String(radio.getTxFrequency(), 3);
+        info += F(" MHz\nBW: ");
+        info += String(radio.getBandwidth(), 2);
+        info += F(" kHz\nSF: ");
+        info += String(radio.getSpreadingFactor());
+        info += F("\nCR: ");
+        info += String(radio.getCodingRate());
+        info += F("\nPower: ");
+        info += String(radio.getPower());
+        info += F(" dBm\nPause: ");
+        info += String(tx.getSendPause());
+        info += F(" ms\nACK timeout: ");
+        info += String(tx.getAckTimeout());
+        info += F(" ms\nACK delay: ");
+        info += String(ackResponseDelayMs);
+        info += F(" ms\nACK: ");
+        info += ackEnabled ? F("включён") : F("выключен");
+        LOG_INFO("%s", info.c_str());
       } else if (line.startsWith("STS")) {
         int cnt = line.length() > 3 ? line.substring(4).toInt() : 10;
         if (cnt <= 0) cnt = 10;                       // значение по умолчанию
         auto logs = SimpleLogger::getLast(cnt);
         for (const auto& s : logs) {
-          Serial.println(s.c_str());
+          LOG_INFO("%s", s.c_str());
         }
       } else if (line.startsWith("RSTS")) {
         String args = line.substring(4);                              // выделяем аргументы команды
@@ -2485,11 +2492,11 @@ void loop() {
         if (cnt <= 0) cnt = 10;                                       // защита от некорректных значений
         if (wantJson) {
           String json = cmdRstsJson(cnt);                             // сериализуем полный снимок
-          Serial.println(json);                                       // отправляем JSON для проверки данных
+          LOG_INFO("%s", json.c_str());                               // отдаём JSON через журнал
         } else {
           auto names = recvBuf.list(cnt);                             // стандартный список имён
           for (const auto& n : names) {
-            Serial.println(n.c_str());
+            LOG_INFO("%s", n.c_str());
           }
         }
       } else if (line.startsWith("TX ")) {
@@ -2506,20 +2513,16 @@ void loop() {
         String err;                                         // ошибка постановки в очередь
         if (enqueueTextMessage(msg, id, err)) {
           DEBUG_LOG_VAL("RC: сообщение поставлено id=", static_cast<int>(id));
-          Serial.print("Пакет отправлен, id=");
-          Serial.println(id);
+          LOG_INFO("Пакет отправлен, id=%lu", static_cast<unsigned long>(id));
         } else {
-          Serial.print("Ошибка постановки пакета: ");
-          Serial.println(err);
+          LOG_ERROR("Ошибка постановки пакета: %s", err.c_str());
         }
 
         if (testModeEnabled) {                              // выводим статус тестового режима
           if (simulated) {
-            Serial.print("TESTMODE: сообщение сохранено id=");
-            Serial.println(testId);
+            LOG_INFO("TESTMODE: сообщение сохранено id=%u", static_cast<unsigned>(testId));
           } else {
-            Serial.print("TESTMODE: ошибка — ");
-            Serial.println(testErr);
+            LOG_ERROR("TESTMODE: ошибка — %s", testErr.c_str());
           }
         }
       } else if (line.startsWith("TXL ")) {
@@ -2535,18 +2538,18 @@ void loop() {
           tx.setPayloadMode(PayloadMode::SMALL);          // возвращаем режим по умолчанию
           if (id != 0) {
             tx.loop();                                   // отправляем сформированные фрагменты
-            Serial.println("Большой пакет отправлен");
+            LOG_INFO("Большой пакет отправлен");
           } else {
-            Serial.println("Ошибка постановки большого пакета");
+            LOG_ERROR("Ошибка постановки большого пакета");
           }
         } else {
-          Serial.println("Неверный размер");
+          LOG_WARN("Неверный размер");
         }
       } else if (line.startsWith("TESTMODE")) {
         String arg = line.length() > 8 ? line.substring(8) : String();
         arg.trim();
         String response = cmdTestMode(arg);
-        Serial.println(response);
+        LOG_INFO("%s", response.c_str());
       } else if (line.equalsIgnoreCase("ENCT")) {
         // тест шифрования: создаём сообщение, шифруем и расшифровываем
         const uint8_t key[16]   = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
@@ -2568,35 +2571,33 @@ void loop() {
         if (enc && dec && plain.size() == len &&
             std::equal(plain.begin(), plain.end(),
                        reinterpret_cast<const uint8_t*>(text))) {
-          Serial.println("ENCT: успех");
+          LOG_INFO("ENCT: успех");
         } else {
-          Serial.println("ENCT: ошибка");
+          LOG_ERROR("ENCT: ошибка");
         }
       } else if (line.startsWith("TESTRXM ")) {
         String overrideText = line.substring(8);
-        Serial.println(cmdTestRxm(&overrideText));
+        LOG_INFO("%s", cmdTestRxm(&overrideText).c_str());
       } else if (line.equalsIgnoreCase("TESTRXM")) {
-        Serial.println(cmdTestRxm());
+        LOG_INFO("%s", cmdTestRxm().c_str());
       } else if (line.equalsIgnoreCase("KEYTRANSFER SEND")) {
-        Serial.println(cmdKeyTransferSendLora());
+        LOG_INFO("%s", cmdKeyTransferSendLora().c_str());
       } else if (line.equalsIgnoreCase("KEYTRANSFER RECEIVE")) {
-        Serial.println(cmdKeyTransferReceiveLora());
+        LOG_INFO("%s", cmdKeyTransferReceiveLora().c_str());
       } else if (line.startsWith("KEYSTORE")) {
         String arg = line.length() > 8 ? line.substring(8) : String();
         arg.trim();
-        Serial.println(cmdKeyStorage(arg));
+        LOG_INFO("%s", cmdKeyStorage(arg).c_str());
       } else if (line.startsWith("ENC ")) {
         encryptionEnabled = line.substring(4).toInt() != 0;
         tx.setEncryptionEnabled(encryptionEnabled);
         rx.setEncryptionEnabled(encryptionEnabled);
-        Serial.print("ENC: ");
-        Serial.println(encryptionEnabled ? "включено" : "выключено");
+        LOG_INFO("ENC: %s", encryptionEnabled ? "включено" : "выключено");
       } else if (line.equalsIgnoreCase("ENC")) {
         encryptionEnabled = !encryptionEnabled;
         tx.setEncryptionEnabled(encryptionEnabled);
         rx.setEncryptionEnabled(encryptionEnabled);
-        Serial.print("ENC: ");
-        Serial.println(encryptionEnabled ? "включено" : "выключено");
+        LOG_INFO("ENC: %s", encryptionEnabled ? "включено" : "выключено");
       } else if (line.startsWith("ACKR")) {
         int value = ackRetryLimit;
         if (line.length() > 4) value = line.substring(5).toInt();
@@ -2604,17 +2605,14 @@ void loop() {
         if (value > 10) value = 10;
         ackRetryLimit = static_cast<uint8_t>(value);
         tx.setAckRetryLimit(ackRetryLimit);
-        Serial.print("ACKR: ");
-        Serial.println(ackRetryLimit);
+        LOG_INFO("ACKR: %d", static_cast<int>(ackRetryLimit));
       } else if (line.startsWith("PAUSE")) {
         long value = tx.getSendPause();
         if (line.length() > 5) value = line.substring(6).toInt();
         if (value < 0) value = 0;
         if (value > 60000) value = 60000;
         tx.setSendPause(static_cast<uint32_t>(value));
-        Serial.print("PAUSE: ");
-        Serial.print(value);
-        Serial.println(" ms");
+        LOG_INFO("PAUSE: %ld ms", value);
       } else if (line.startsWith("ACKT")) {
         long value = tx.getAckTimeout();
         if (line.length() > 4) value = line.substring(5).toInt();
@@ -2622,12 +2620,11 @@ void loop() {
         if (value > 60000) value = 60000;
         tx.setAckTimeout(static_cast<uint32_t>(value));
         uint32_t applied = tx.getAckTimeout();
-        Serial.print("ACKT: ");
-        Serial.print(applied);
         if (applied == 0) {
-          Serial.println(" ms (ожидание подтверждений выключено, очередь работает без тайм-аута)");  // подчёркиваем особый режим ожидания
+          LOG_INFO("ACKT: %lu ms (ожидание подтверждений выключено, очередь работает без тайм-аута)",
+                   static_cast<unsigned long>(applied));
         } else {
-          Serial.println(" ms");
+          LOG_INFO("ACKT: %lu ms", static_cast<unsigned long>(applied));
         }
       } else if (line.startsWith("ACKD")) {
         long value = static_cast<long>(ackResponseDelayMs);
@@ -2636,9 +2633,7 @@ void loop() {
         if (value > static_cast<long>(kAckDelayMaxMs)) value = static_cast<long>(kAckDelayMaxMs);
         ackResponseDelayMs = static_cast<uint32_t>(value);
         tx.setAckResponseDelay(ackResponseDelayMs);
-        Serial.print("ACKD: ");
-        Serial.print(ackResponseDelayMs);
-        Serial.println(" ms");
+        LOG_INFO("ACKD: %lu ms", static_cast<unsigned long>(ackResponseDelayMs));
       } else if (line.startsWith("ACK")) {
         if (line.length() > 3) {                          // установка явного значения
           ackEnabled = line.substring(4).toInt() != 0;
@@ -2646,16 +2641,14 @@ void loop() {
           ackEnabled = !ackEnabled;                       // переключение
         }
         tx.setAckEnabled(ackEnabled);
-        Serial.print("ACK: ");
-        Serial.println(ackEnabled ? "включён" : "выключен");
+        LOG_INFO("ACK: %s", ackEnabled ? "включён" : "выключен");
       } else if (line.startsWith("LIGHT")) {
         if (line.length() > 5) {                          // обработка явного значения
           lightPackMode = line.substring(6).toInt() != 0;
         } else {
           lightPackMode = !lightPackMode;                 // простое переключение
         }
-        Serial.print("LIGHT: ");
-        Serial.println(lightPackMode ? "включён" : "выключен");
+        LOG_INFO("LIGHT: %s", lightPackMode ? "включён" : "выключен");
       } else if (line.equalsIgnoreCase("PI")) {
         // очистка буфера от прежних пакетов
         ReceivedBuffer::Item dump;
@@ -2695,26 +2688,23 @@ void loop() {
           uint32_t t_end = micros() - t_start;               // время прохождения
           float dist_km =
               ((t_end * 0.000001f) * 299792458.0f / 2.0f) / 1000.0f; // оценка дистанции
-          Serial.print("Ping: RSSI ");
-          Serial.print(radio.getLastRssi());
-          Serial.print(" dBm SNR ");
-          Serial.print(radio.getLastSnr());
-          Serial.print(" dB distance:~");
-          Serial.print(dist_km);
-          Serial.print("km time:");
-          Serial.print(t_end * 0.001f);
-          Serial.println("ms");
+          char buf[160];
+          std::snprintf(buf, sizeof(buf),
+                        "Ping: RSSI %.1f dBm SNR %.1f dB distance:~%.2fkm time:%.3fms",
+                        static_cast<double>(radio.getLastRssi()),
+                        static_cast<double>(radio.getLastSnr()),
+                        static_cast<double>(dist_km),
+                        static_cast<double>(t_end * 0.001f));
+          LOG_INFO("%s", buf);
         } else {
-          Serial.println("Пинг: тайм-аут");
+          LOG_WARN("Пинг: тайм-аут");
         }
       } else if (line.equalsIgnoreCase("SEAR")) {
         // перебор каналов с пингом и возвратом исходного канала
         uint8_t prevCh = radio.getChannel();         // сохраняем текущий канал
         for (int ch = 0; ch < radio.getBankSize(); ++ch) {
           if (!radio.setChannel(ch)) {               // переключаемся
-            Serial.print("CH ");
-            Serial.print(ch);
-            Serial.println(": ошибка");
+            LOG_ERROR("CH %d: ошибка", ch);
             continue;
           }
           // очищаем буфер перед новым запросом
@@ -2746,16 +2736,15 @@ void loop() {
             delay(1);
           }
           if (ok_ch) {
-            Serial.print("CH ");
-            Serial.print(ch);
-            Serial.print(": RSSI ");
-            Serial.print(radio.getLastRssi());
-            Serial.print(" SNR ");
-            Serial.println(radio.getLastSnr());
+            char buf[128];
+            std::snprintf(buf, sizeof(buf),
+                          "CH %d: RSSI %.1f SNR %.1f",
+                          ch,
+                          static_cast<double>(radio.getLastRssi()),
+                          static_cast<double>(radio.getLastSnr()));
+            LOG_INFO("%s", buf);
           } else {
-            Serial.print("CH ");
-            Serial.print(ch);
-            Serial.println(": тайм-аут");
+            LOG_WARN("CH %d: тайм-аут", ch);
           }
         }
         radio.setChannel(prevCh);                    // возвращаем исходный канал

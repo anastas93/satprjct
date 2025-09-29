@@ -645,7 +645,7 @@ bool ensureFlashEncryptionEnabled() {
   static bool warned = false;
   if (!enabled && !warned) {
     warned = true;
-    Serial.println(F("KeyLoader: Flash Encryption выключена, доступ к NVS запрещён"));
+    LOG_WARN("KeyLoader: Flash Encryption выключена, доступ к NVS запрещён");
   }
   return enabled;
 }
@@ -658,7 +658,7 @@ bool ensurePrefs() {
     }
     Preferences& prefs = prefsInstance();
     if (!prefs.begin("key_store", false)) {
-      Serial.println(F("KeyLoader: не удалось открыть раздел NVS"));
+      LOG_ERROR("KeyLoader: не удалось открыть раздел NVS");
       return false;
     }
     opened = true;
@@ -799,7 +799,7 @@ bool writeSnapshot(const StorageSnapshot& snapshot) {
   std::vector<uint8_t> blob = serializeSnapshot(snapshot);
   if (blob.empty()) {
 #ifdef ARDUINO
-    Serial.println(F("KeyLoader: ошибка сериализации snapshot"));
+    LOG_ERROR("KeyLoader: ошибка сериализации snapshot");
 #else
     std::cerr << "[KeyLoader] не удалось сериализовать snapshot" << std::endl;
 #endif
@@ -1155,11 +1155,11 @@ bool setPreferredBackend(StorageBackend backend) {
     g_preferred_backend = backend;
     return true;
   }
-  Serial.println(F("KeyLoader: доступен только бэкенд NVS"));
+  LOG_WARN("KeyLoader: доступен только бэкенд NVS");
   return false;
 #else
   (void)backend;
-  Serial.println(F("KeyLoader: на этой платформе нет доступного хранилища"));
+  LOG_ERROR("KeyLoader: на этой платформе нет доступного хранилища");
   return false;
 #endif
 #else
