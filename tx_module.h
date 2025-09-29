@@ -6,6 +6,7 @@
 #include <optional>
 #include <vector>
 #include <string>
+#include <unordered_set>
 #include "radio_interface.h"
 #include "message_buffer.h"
 #include "libs/packetizer/packet_splitter.h" // подключаем разделитель пакетов из каталога libs
@@ -55,6 +56,7 @@ private:
     uint8_t attempts_left = 0;               // оставшиеся повторы
     bool expect_ack = false;                 // требуется ли подтверждение
     bool is_ack = false;                     // флаг компактного ACK
+    bool is_plain = false;                   // признак «сырых» пакетов без заголовка
     std::string packet_tag;                  // идентификатор пакета для группировки частей
     std::string status_prefix;               // префикс для журнала статусов
   };
@@ -88,5 +90,6 @@ private:
   uint32_t next_ack_id_ = 0x80000000u;              // идентификаторы ACK вне общей очереди
   std::chrono::steady_clock::time_point next_ack_send_time_; // момент, когда ACK можно отправить
   bool encryption_enabled_ = DefaultSettings::USE_ENCRYPTION; // текущий режим шифрования
+  std::unordered_set<uint32_t> plain_messages_;     // учёт идентификаторов «сырых» пакетов
 };
 
