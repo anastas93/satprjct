@@ -13,13 +13,13 @@ bool collecting = false;
 void resetBuffer() {
   programBuffer = "";
   collecting = true;
-  Serial.println("Начат сбор программы");
+  LOG_INFO("Начат сбор программы");
 }
 
 // Добавление строки в общий буфер
 bool appendToBuffer(const String &line) {
   if (programBuffer.length() + line.length() + 1 > DefaultSettings::SERIAL_BUFFER_LIMIT) {
-    Serial.println("Буфер переполнен, приём остановлен");
+    LOG_ERROR("Буфер переполнен, приём остановлен");
     collecting = false;
     return false;
   }
