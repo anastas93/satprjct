@@ -1,6 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include <vector>
+#include <algorithm>
 #include <array>
 #include <thread>
 #include <chrono>
@@ -11,9 +12,10 @@
 #undef private
 #undef protected
 #include "rx_module.h"
-#include "../libs/frame/frame_header.h" // заголовок кадра
-#include "../libs/scrambler/scrambler.h" // дескремблирование кадра
-#include "../libs/crypto/aes_ccm.h"      // расшифровка
+#include "../libs/frame/frame_header.h"        // заголовок кадра
+#include "../libs/scrambler/scrambler.h"       // дескремблирование кадра
+#include "../libs/crypto/aes_ccm.h"            // расшифровка
+#include "../libs/crypto/chacha20_poly1305.h"  // параметры нового AEAD
 #include "../libs/key_loader/key_loader.h" // загрузка ключа
 #include "../libs/protocol/ack_utils.h"   // маркер ACK
 
@@ -28,6 +30,73 @@ public:
   }
   void setReceiveCallback(RxCallback) override {}
 };
+
+namespace {
+
+// Новые параметры пилотного маркера, применяемые без CRC-проверки
+constexpr size_t PILOT_INTERVAL = 64;                                      // период вставки пилотов
+constexpr std::array<uint8_t,7> PILOT_MARKER{{0x7E,'S','A','T','P',0xD6,0x9F}}; // сигнатура пилота
+constexpr size_t PILOT_PREFIX_LEN = PILOT_MARKER.size() - 2;               // длина префикса без CRC
+
+// Удаляем пилоты из полезной нагрузки, повторяя поведение RxModule
+void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
+  out.clear();
+  if (!data || len == 0) return;                                          // защита от пустых буферов
+  out.reserve(len);
+  size_t count = 0;
+  size_t i = 0;
+  while (i < len) {
+    if (count && count % PILOT_INTERVAL == 0) {
+      size_t remaining = len - i;
+      if (remaining >= PILOT_MARKER.size() &&
+          std::equal(PILOT_MARKER.begin(), PILOT_MARKER.begin() + PILOT_PREFIX_LEN, data + i)) {
+        uint16_t crc = static_cast<uint16_t>(data[i + PILOT_PREFIX_LEN]) |
+                       (static_cast<uint16_t>(data[i + PILOT_PREFIX_LEN + 1]) << 8);
+        if (crc == 0x9FD6 && FrameHeader::crc16(data + i, PILOT_PREFIX_LEN) == crc) {
+          i += PILOT_MARKER.size();
+          continue;                                                       // пропускаем всю сигнатуру
+        }
+      }
+    }
+    out.push_back(data[i]);
+    ++count;
+    ++i;
+  }
+}
+
+// Декодируем кадр без CRC, учитывая возможное дублирование заголовка
+bool decodeFrameNoCrc(const std::vector<uint8_t>& raw,
+                      FrameHeader& hdr,
+                      std::vector<uint8_t>& payload,
+                      size_t& header_bytes) {
+  if (raw.size() < FrameHeader::SIZE) return false;                       // слишком короткий буфер
+  std::vector<uint8_t> descrambled(raw);
+  scrambler::descramble(descrambled.data(), descrambled.size());
+  FrameHeader primary;
+  FrameHeader secondary;
+  bool primary_ok = FrameHeader::decode(descrambled.data(), descrambled.size(), primary);
+  bool secondary_ok = false;
+  if (descrambled.size() >= FrameHeader::SIZE * 2) {
+    secondary_ok = FrameHeader::decode(descrambled.data() + FrameHeader::SIZE,
+                                       descrambled.size() - FrameHeader::SIZE,
+                                       secondary);
+  }
+  if (!primary_ok && !secondary_ok) return false;                         // обе копии не прочитались
+  hdr = primary_ok ? primary : secondary;                                 // по умолчанию берём первую
+  header_bytes = FrameHeader::SIZE;
+  if (!primary_ok && secondary_ok) {
+    header_bytes = FrameHeader::SIZE * 2;                                 // первая копия недоступна
+  }
+  payload.clear();
+  std::vector<uint8_t> cleaned;
+  removePilots(descrambled.data() + header_bytes,
+               descrambled.size() - header_bytes,
+               cleaned);
+  payload = std::move(cleaned);
+  return true;
+}
+
+} // namespace
 
 // Проверка формирования кадра и вызова send
 int main() {
@@ -44,14 +113,24 @@ int main() {
   uint16_t id = tx.queue(reinterpret_cast<const uint8_t*>(msg), 5);
   assert(id==1);                          // ожидаемый ID
   tx.loop();                              // формируем кадр
-  const size_t minFrame = FrameHeader::SIZE + 22;
-  assert(radio.last.size() >= minFrame);
-  assert(radio.last.size() <= 245);
-  auto frameCopy = radio.last;
-  scrambler::descramble(frameCopy.data(), frameCopy.size());
   FrameHeader hdr;
-  assert(FrameHeader::decode(frameCopy.data(), frameCopy.size(), hdr));
+  std::vector<uint8_t> payload_clean;
+  size_t header_bytes = 0;
+  assert(decodeFrameNoCrc(radio.last, hdr, payload_clean, header_bytes));
   assert(hdr.msg_id==1);
+  assert(hdr.frag_cnt == 1);
+  // 5 байт полезной нагрузки + 12-символьный префикс split -> 17 байт открытого текста
+  const size_t plain_len = 5 + 12;
+  const size_t cipher_len = plain_len + crypto::chacha20poly1305::TAG_SIZE; // +16 байт тега
+  const size_t conv_input = cipher_len + 1;                                 // добавочный байт хвоста
+  const size_t expected_payload_len = conv_input * 2;                       // свёртка увеличивает размер вдвое
+  const size_t expected_pilot_count = expected_payload_len / PILOT_INTERVAL;
+  const size_t expected_frame_len = FrameHeader::SIZE + expected_payload_len +
+                                    expected_pilot_count * PILOT_MARKER.size();
+  assert(hdr.getPayloadLen() == expected_payload_len);
+  assert(radio.last.size() == expected_frame_len);
+  const size_t actual_pilot_bytes = (radio.last.size() - header_bytes) - payload_clean.size();
+  assert(actual_pilot_bytes == expected_pilot_count * PILOT_MARKER.size());
   RxModule rx;
   std::vector<uint8_t> decoded;
   rx.setCallback([&](const uint8_t* data, size_t len) {
@@ -135,15 +214,16 @@ int main() {
   txPriority.loop();                           // первый кадр обязан быть ACK
   assert(radioPriority.history.size() == 1);
   auto ackFrame = radioPriority.history.front();
-  auto ackDecoded = ackFrame;
-  scrambler::descramble(ackDecoded.data(), ackDecoded.size());
   FrameHeader ackHdr;
-  assert(FrameHeader::decode(ackDecoded.data(), ackDecoded.size(), ackHdr));
+  std::vector<uint8_t> ackPayload;
+  size_t ackHeaderBytes = 0;
+  assert(decodeFrameNoCrc(ackFrame, ackHdr, ackPayload, ackHeaderBytes));
+  assert(ackHeaderBytes == FrameHeader::SIZE);
   assert((ackHdr.getFlags() & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0);
   assert(ackHdr.getPayloadLen() == 1);
   assert(ackFrame.size() == FrameHeader::SIZE + ackHdr.getPayloadLen());
-  const uint8_t* ackPayloadPtr = ackDecoded.data() + FrameHeader::SIZE;
-  assert(*ackPayloadPtr == protocol::ack::MARKER);
+  assert(ackPayload.size() == 1);
+  assert(ackPayload.front() == protocol::ack::MARKER);
   RxModule rxAck;
   std::vector<uint8_t> ackPlain;
   bool ackNotified = false;

@@ -97,7 +97,7 @@ int main() {
   auto log_text = log_capture.str();
   assert(received.size() == expected_plain.size());        // проверяем длину полезной нагрузки
   assert(std::equal(received.begin(), received.end(), expected_plain.begin())); // убеждаемся, что байты совпадают
-  assert(log_text.find("RxModule: обнаружено расхождение валидности копий заголовка") != std::string::npos);
+  assert(log_text.find("RxModule: обнаружено расхождение копий заголовка") != std::string::npos);
 
   std::vector<uint8_t> mismatched_frame;
   mismatched_frame.insert(mismatched_frame.end(), hdr_buf1.begin(), hdr_buf1.end());
@@ -106,16 +106,15 @@ int main() {
   scrambler::scramble(mismatched_frame.data(), mismatched_frame.size()); // имитируем передачу
   received.clear();
   rx.onReceive(mismatched_frame.data(), mismatched_frame.size());
-  assert(received == mismatched_frame);                    // получаем сырой кадр без обработки
+  assert(received.size() == expected_plain.size());
+  assert(std::equal(received.begin(), received.end(), expected_plain.begin()));
   auto mismatch_profile = rx.lastProfiling();
   assert(mismatch_profile.valid);
-  assert(mismatch_profile.dropped);
-  assert(mismatch_profile.drop_stage == "заголовки расходятся");
+  assert(!mismatch_profile.dropped);
   auto mismatch_stats = rx.dropStats();
-  assert(mismatch_stats.total >= 2);
+  assert(mismatch_stats.total == short_stats.total);       // новых дропов не появилось
   auto it_mismatch = mismatch_stats.by_stage.find("заголовки расходятся");
-  assert(it_mismatch != mismatch_stats.by_stage.end());
-  assert(it_mismatch->second >= 1);
+  assert(it_mismatch == mismatch_stats.by_stage.end());
 
   rx.resetDropStats();
   auto cleared_stats = rx.dropStats();
