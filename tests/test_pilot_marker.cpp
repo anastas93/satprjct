@@ -23,6 +23,69 @@ public:
   void setReceiveCallback(RxCallback) override {}
 };
 
+namespace {
+
+// Параметры нового пилотного маркера без проверки CRC заголовка
+constexpr size_t PILOT_INTERVAL = 64;                                      // период вставки пилотов
+constexpr std::array<uint8_t,7> PILOT_MARKER{{0x7E,'S','A','T','P',0xD6,0x9F}}; // сигнатура пилота
+constexpr size_t PILOT_PREFIX_LEN = PILOT_MARKER.size() - 2;               // префикс без CRC
+
+// Удаление пилотов из полезной нагрузки
+void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
+  out.clear();
+  if (!data || len == 0) return;                                          // защита от пустых буферов
+  out.reserve(len);
+  size_t count = 0;
+  size_t i = 0;
+  while (i < len) {
+    if (count && count % PILOT_INTERVAL == 0) {
+      size_t remaining = len - i;
+      if (remaining >= PILOT_MARKER.size() &&
+          std::equal(PILOT_MARKER.begin(), PILOT_MARKER.begin() + PILOT_PREFIX_LEN, data + i)) {
+        uint16_t crc = static_cast<uint16_t>(data[i + PILOT_PREFIX_LEN]) |
+                       (static_cast<uint16_t>(data[i + PILOT_PREFIX_LEN + 1]) << 8);
+        if (crc == 0x9FD6 && FrameHeader::crc16(data + i, PILOT_PREFIX_LEN) == crc) {
+          i += PILOT_MARKER.size();
+          continue;                                                       // полностью пропускаем маркер
+        }
+      }
+    }
+    out.push_back(data[i]);
+    ++count;
+    ++i;
+  }
+}
+
+// Декодирование кадра без CRC с учётом возможного дублированного заголовка
+bool decodeFrameNoCrc(const std::vector<uint8_t>& frame,
+                      FrameHeader& hdr,
+                      std::vector<uint8_t>& payload,
+                      size_t& header_bytes) {
+  if (frame.size() < FrameHeader::SIZE) return false;                      // короткий кадр без заголовка
+  std::vector<uint8_t> descrambled(frame);
+  scrambler::descramble(descrambled.data(), descrambled.size());
+  FrameHeader primary;
+  FrameHeader secondary;
+  bool primary_ok = FrameHeader::decode(descrambled.data(), descrambled.size(), primary);
+  bool secondary_ok = false;
+  if (descrambled.size() >= FrameHeader::SIZE * 2) {
+    secondary_ok = FrameHeader::decode(descrambled.data() + FrameHeader::SIZE,
+                                       descrambled.size() - FrameHeader::SIZE,
+                                       secondary);
+  }
+  if (!primary_ok && !secondary_ok) return false;                          // нет ни одной валидной копии
+  hdr = primary_ok ? primary : secondary;
+  header_bytes = primary_ok ? FrameHeader::SIZE : FrameHeader::SIZE * 2;
+  std::vector<uint8_t> cleaned;
+  removePilots(descrambled.data() + header_bytes,
+               descrambled.size() - header_bytes,
+               cleaned);
+  payload = std::move(cleaned);
+  return true;
+}
+
+} // namespace
+
 int main() {
   CaptureRadio radio;
   TxModule tx(radio, std::array<size_t,4>{256,256,256,256}, PayloadMode::SMALL);
@@ -83,15 +146,16 @@ int main() {
   }
   assert(radio.history.size() == before_ack + 1);
   const auto& ack_frame = radio.history.back();
-  auto ack_descrambled = ack_frame;
-  scrambler::descramble(ack_descrambled.data(), ack_descrambled.size());
   FrameHeader ack_hdr;
-  assert(FrameHeader::decode(ack_descrambled.data(), ack_descrambled.size(), ack_hdr));
+  std::vector<uint8_t> ack_payload;
+  size_t ack_header_bytes = 0;
+  assert(decodeFrameNoCrc(ack_frame, ack_hdr, ack_payload, ack_header_bytes));
+  assert(ack_header_bytes == FrameHeader::SIZE);
   assert((ack_hdr.getFlags() & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0);
   assert(ack_hdr.getPayloadLen() == 1);
   assert(ack_frame.size() == FrameHeader::SIZE + ack_hdr.getPayloadLen());
-  const uint8_t* ack_payload = ack_descrambled.data() + FrameHeader::SIZE;
-  assert(*ack_payload == protocol::ack::MARKER);
+  assert(ack_payload.size() == 1);
+  assert(ack_payload.front() == protocol::ack::MARKER);
 
   std::cout << "OK" << std::endl;
   return 0;
