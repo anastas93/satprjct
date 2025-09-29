@@ -103,6 +103,7 @@ struct RxModule::RxProfilingScope {
   bool enabled = false;                                   // активна ли диагностика
   std::chrono::steady_clock::time_point start{};          // начало обработки
   std::chrono::steady_clock::time_point stage_start{};    // отметка последнего этапа
+  bool drop_recorded = false;                             // зарегистрирована ли причина дропа
 
   explicit RxProfilingScope(RxModule& module, size_t raw_len)
       : owner(module), enabled(module.profiling_enabled_) {
@@ -136,6 +137,10 @@ struct RxModule::RxProfilingScope {
   }
 
   void markDrop(const char* stage) {
+    if (!drop_recorded) {
+      owner.registerDrop(stage ? stage : "");           // фиксируем причину независимо от профилирования
+      drop_recorded = true;
+    }
     if (!enabled) return;
     if (!snapshot.dropped) {
       snapshot.dropped = true;
@@ -599,6 +604,10 @@ void RxModule::tickCleanup() {
   cleanupPendingSplits(now);
 }
 
+void RxModule::resetDropStats() {
+  drop_stats_ = DropStats{};                              // обнуляем счётчики причин дропа
+}
+
 RxModule::SplitPrefixInfo RxModule::parseSplitPrefix(const std::vector<uint8_t>& data, size_t& prefix_len) const {
   SplitPrefixInfo info;
   prefix_len = 0;
@@ -672,6 +681,12 @@ RxModule::SplitProcessResult RxModule::handleSplitPart(const SplitPrefixInfo& in
   res.data = std::move(slot.data);
   pending_split_.erase(info.tag);
   return res;
+}
+
+void RxModule::registerDrop(const std::string& stage) {
+  std::string key = stage.empty() ? std::string("не указано") : stage; // подставляем понятный ярлык
+  ++drop_stats_.total;                                                  // суммарный счётчик
+  ++drop_stats_.by_stage[key];                                          // накопление по причинам
 }
 
 void RxModule::enableProfiling(bool enable) {

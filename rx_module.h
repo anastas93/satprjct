@@ -40,6 +40,12 @@ public:
     std::chrono::microseconds deliver{};                   // передача в буфер/колбэк
   };
   ProfilingSnapshot lastProfiling() const { return last_profile_; }
+  struct DropStats {
+    uint64_t total = 0;                                     // общее число отброшенных кадров
+    std::unordered_map<std::string, uint64_t> by_stage;     // статистика по причинам
+  };
+  DropStats dropStats() const { return drop_stats_; }
+  void resetDropStats();
   // Установка пользовательского колбэка
   void setCallback(Callback cb);
   // Установка колбэка для уведомления о получении ACK
@@ -101,6 +107,7 @@ private:
   };
   std::unordered_map<uint32_t, SplitPrefixInfo> inflight_prefix_; // префиксы, ожидающие завершения
   ProfilingSnapshot last_profile_;   // последний снимок профилирования
+  DropStats drop_stats_;             // накопитель причин отброса кадров
   struct RxProfilingScope;           // внутренняя структура для RAII-профилирования
   friend struct RxProfilingScope;
   void cleanupPendingConv(std::chrono::steady_clock::time_point now);
@@ -110,4 +117,5 @@ private:
   SplitPrefixInfo parseSplitPrefix(const std::vector<uint8_t>& data, size_t& prefix_len) const;
   SplitProcessResult handleSplitPart(const SplitPrefixInfo& info, const std::vector<uint8_t>& chunk,
                                      uint32_t msg_id);
+  void registerDrop(const std::string& stage);
 };
