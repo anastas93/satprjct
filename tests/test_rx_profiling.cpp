@@ -64,27 +64,28 @@ int main() {
   // Проверяем отбрасывание кадра с несовпадающими копиями заголовка
   FrameHeader primary_hdr;
   primary_hdr.msg_id = 7;
-  primary_hdr.frag_idx = 0;
+  primary_hdr.setFragIdx(0);
   primary_hdr.frag_cnt = 1;
+  primary_hdr.setFlags(0);
   std::array<uint8_t, FrameHeader::SIZE> hdr_buf1{};
   std::array<uint8_t, FrameHeader::SIZE> hdr_buf2{};
   std::array<uint8_t, 4> expected_plain{0x10, 0x20, 0x30, 0x40};
   std::array<uint8_t, 12> fake_payload{0x10, 0x20, 0x30, 0x40,
                                        0xA0, 0xA1, 0xA2, 0xA3,
                                        0xA4, 0xA5, 0xA6, 0xA7};
-  primary_hdr.payload_len = static_cast<uint16_t>(fake_payload.size());
+  primary_hdr.setPayloadLen(static_cast<uint16_t>(fake_payload.size()));
   bool encoded_primary = primary_hdr.encode(hdr_buf1.data(), hdr_buf1.size(),
                                             fake_payload.data(), fake_payload.size());
   assert(encoded_primary);
   FrameHeader secondary_hdr = primary_hdr;
-  secondary_hdr.flags = FrameHeader::FLAG_ENCRYPTED;       // создаём расхождение ключевых полей
+  secondary_hdr.setFlags(FrameHeader::FLAG_ENCRYPTED);     // создаём расхождение ключевых полей
   bool encoded_secondary = secondary_hdr.encode(hdr_buf2.data(), hdr_buf2.size(),
                                                 fake_payload.data(), fake_payload.size());
   assert(encoded_secondary);
   std::vector<uint8_t> single_header_frame;
   single_header_frame.insert(single_header_frame.end(), hdr_buf1.begin(), hdr_buf1.end());
   auto corrupted_hdr = hdr_buf1;
-  corrupted_hdr[16] ^= 0xFF;                                // повреждаем CRC заголовка
+  corrupted_hdr[1] ^= 0xFF;                                // повреждаем идентификатор в копии
   single_header_frame.insert(single_header_frame.end(), corrupted_hdr.begin(), corrupted_hdr.end());
   single_header_frame.insert(single_header_frame.end(), fake_payload.begin(), fake_payload.end());
   scrambler::scramble(single_header_frame.data(), single_header_frame.size()); // имитируем передачу

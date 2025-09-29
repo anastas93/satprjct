@@ -87,9 +87,9 @@ int main() {
   scrambler::descramble(ack_descrambled.data(), ack_descrambled.size());
   FrameHeader ack_hdr;
   assert(FrameHeader::decode(ack_descrambled.data(), ack_descrambled.size(), ack_hdr));
-  assert((ack_hdr.flags & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0);
-  assert(ack_hdr.payload_len == 1);
-  assert(ack_frame.size() == FrameHeader::SIZE * 2 + ack_hdr.payload_len);
+  assert((ack_hdr.getFlags() & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0);
+  assert(ack_hdr.getPayloadLen() == 1);
+  assert(ack_frame.size() == FrameHeader::SIZE * 2 + ack_hdr.getPayloadLen());
   const uint8_t* ack_payload = ack_descrambled.data() + FrameHeader::SIZE * 2;
   assert(*ack_payload == protocol::ack::MARKER);
 

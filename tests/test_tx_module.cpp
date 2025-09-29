@@ -139,9 +139,9 @@ int main() {
   scrambler::descramble(ackDecoded.data(), ackDecoded.size());
   FrameHeader ackHdr;
   assert(FrameHeader::decode(ackDecoded.data(), ackDecoded.size(), ackHdr));
-  assert((ackHdr.flags & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0);
-  assert(ackHdr.payload_len == 1);
-  assert(ackFrame.size() == FrameHeader::SIZE * 2 + ackHdr.payload_len);
+  assert((ackHdr.getFlags() & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0);
+  assert(ackHdr.getPayloadLen() == 1);
+  assert(ackFrame.size() == FrameHeader::SIZE * 2 + ackHdr.getPayloadLen());
   const uint8_t* ackPayloadPtr = ackDecoded.data() + FrameHeader::SIZE * 2;
   assert(*ackPayloadPtr == protocol::ack::MARKER);
   RxModule rxAck;

@@ -557,15 +557,14 @@ bool TxModule::transmit(const PendingMessage& message) {
     auto& frag = fragments[idx];
     FrameHeader hdr;
     hdr.ver = FRAME_VERSION_AEAD;
-    hdr.msg_id = message.id;
-    hdr.frag_idx = static_cast<uint16_t>(idx);
+    hdr.msg_id = static_cast<uint16_t>(message.id);
+    hdr.setFragIdx(static_cast<uint16_t>(idx));
     hdr.frag_cnt = frag_cnt;
-    hdr.payload_len = frag.payload_size;
-    hdr.flags = frag.base_flags;
+    hdr.setPayloadLen(frag.payload_size);
+    hdr.setFlags(frag.base_flags);
     if (frag.conv_encoded) {
-      hdr.flags |= FrameHeader::FLAG_CONV_ENCODED;
+      hdr.setFlags(hdr.getFlags() | FrameHeader::FLAG_CONV_ENCODED);
     }
-    hdr.ack_mask = 0;                               // поле свободно для реальных масок подтверждений
 
     uint8_t hdr_buf[FrameHeader::SIZE];
     if (!hdr.encode(hdr_buf, sizeof(hdr_buf), frag.payload.data(), frag.payload_size)) {
