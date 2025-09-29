@@ -6277,12 +6277,163 @@ async function onAckChipToggle() {
     }
   });
 }
-function parseAckResponse(text) {
-  if (!text) return null;
-  const low = text.toLowerCase();
-  if (low.indexOf("ack:1") >= 0 || /\b1\b/.test(low) || low.indexOf("on") >= 0 || low.indexOf("включ") >= 0) return true;
-  if (low.indexOf("ack:0") >= 0 || /\b0\b/.test(low) || low.indexOf("off") >= 0 || low.indexOf("выключ") >= 0) return false;
+// Универсальная проверка булевых флагов в ответах устройства
+function parseBooleanFlag(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const normalized = raw
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/["'`]/g, "")
+    .replace(/[.,;]+$/g, "");
+  if (!normalized) return null;
+  if (
+    normalized === "1"
+    || normalized === "true"
+    || normalized === "yes"
+    || normalized === "y"
+    || normalized === "да"
+    || normalized === "д"
+    || normalized === "on"
+    || normalized === "enabled"
+    || normalized === "enable"
+    || normalized.startsWith("вкл")
+    || normalized.startsWith("включ")
+    || normalized.startsWith("enable")
+  ) {
+    return true;
+  }
+  if (
+    normalized === "0"
+    || normalized === "false"
+    || normalized === "no"
+    || normalized === "n"
+    || normalized === "нет"
+    || normalized === "н"
+    || normalized === "off"
+    || normalized === "disabled"
+    || normalized === "disable"
+    || normalized.startsWith("выкл")
+    || normalized.startsWith("выключ")
+    || normalized.startsWith("disable")
+  ) {
+    return false;
+  }
   return null;
+}
+
+// Экранируем строку для регулярного выражения
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Унифицированный парсер ответов формата «включено/выключено»
+function parseBinaryResponse(text, keys) {
+  if (!text) return null;
+  const raw = String(text);
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const normalizedKeys = Array.isArray(keys) && keys.length
+    ? keys.map((key) => String(key).toLowerCase())
+    : [];
+
+  // Пытаемся прочитать JSON как есть или через щадящий парсер
+  if (/^[{\[]/.test(trimmed)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (err) {
+      parsed = parseJsonLenient(trimmed);
+    }
+    if (parsed != null) {
+      const asFlag = parseBooleanFlag(parsed);
+      if (asFlag !== null) return asFlag;
+      const stack = [parsed];
+      while (stack.length) {
+        const current = stack.pop();
+        if (current == null) continue;
+        if (typeof current === "boolean" || typeof current === "number" || typeof current === "string") {
+          const flag = parseBooleanFlag(current);
+          if (flag !== null) return flag;
+          continue;
+        }
+        if (Array.isArray(current)) {
+          for (let i = current.length - 1; i >= 0; i--) stack.push(current[i]);
+          continue;
+        }
+        if (typeof current === "object") {
+          for (const key of Object.keys(current)) {
+            const value = current[key];
+            const lowered = key.toLowerCase();
+            if (!normalizedKeys.length || normalizedKeys.includes(lowered)) {
+              const flag = parseBooleanFlag(value);
+              if (flag !== null) return flag;
+            }
+            if (value && (typeof value === "object" || Array.isArray(value))) stack.push(value);
+          }
+        }
+      }
+    }
+  }
+
+  const immediateFlag = parseBooleanFlag(trimmed);
+  if (immediateFlag !== null) return immediateFlag;
+
+  const parts = trimmed.split(/[\n,;]+/);
+  for (let i = 0; i < parts.length; i++) {
+    const segment = parts[i].trim();
+    if (!segment) continue;
+    const colonMatch = segment.match(/^"?([A-Za-zА-Яа-я0-9_]+)"?\s*[:=]\s*(.+)$/);
+    if (colonMatch) {
+      const key = colonMatch[1].toLowerCase();
+      if (!normalizedKeys.length || normalizedKeys.includes(key)) {
+        const flag = parseBooleanFlag(colonMatch[2]);
+        if (flag !== null) return flag;
+      }
+    }
+  }
+
+  if (normalizedKeys.length) {
+    const tokens = trimmed.split(/\s+/);
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (!token) continue;
+      const pair = token.split(/[:=]/);
+      if (pair.length === 2) {
+        const key = pair[0].replace(/^["']|["']$/g, "").toLowerCase();
+        if (!normalizedKeys.length || normalizedKeys.includes(key)) {
+          const flag = parseBooleanFlag(pair[1]);
+          if (flag !== null) return flag;
+        }
+      }
+      const normalized = token.replace(/^["']|["']$/g, "").toLowerCase();
+      if (normalizedKeys.includes(normalized) && tokens[i + 1]) {
+        const next = tokens[i + 1].replace(/^["']|["']$/g, "");
+        const flag = parseBooleanFlag(next);
+        if (flag !== null) return flag;
+      }
+    }
+    for (const key of normalizedKeys) {
+      const regex = new RegExp(`${escapeRegex(key)}\s*(?:[:=]|\s)\s*(on|off|true|false|yes|no|1|0|да|нет|вкл(?:[а-я]*)?|выкл(?:[а-я]*)?)`, "i");
+      const match = trimmed.match(regex);
+      if (match) {
+        const flag = parseBooleanFlag(match[1]);
+        if (flag !== null) return flag;
+      }
+    }
+  }
+
+  return null;
+}
+
+function parseAckResponse(text) {
+  return parseBinaryResponse(text, ["ack"]);
 }
 function clampAckRetry(value) {
   const num = Number(value);
@@ -6784,11 +6935,7 @@ async function withEncLock(task) {
   }
 }
 function parseEncResponse(text) {
-  if (!text) return null;
-  const low = text.toLowerCase();
-  if (low.indexOf("enc:1") >= 0 || /\b1\b/.test(low) || low.indexOf("on") >= 0 || low.indexOf("включ") >= 0) return true;
-  if (low.indexOf("enc:0") >= 0 || /\b0\b/.test(low) || low.indexOf("off") >= 0 || low.indexOf("выключ") >= 0) return false;
-  return null;
+  return parseBinaryResponse(text, ["enc", "encryption"]);
 }
 function updateEncryptionUi() {
   const chip = UI.els.encChip;
