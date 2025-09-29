@@ -2436,12 +2436,82 @@ const TWO_PI = Math.PI * 2;
 const POINTING_DEFAULT_MIN_ELEVATION = 10; // минимальный угол возвышения по умолчанию
 const POINTING_COMPASS_OFFSET_DEG = 180; // отображаем юг в верхней части компаса
 
+// Константы хранилища счётчика непрочитанных сообщений
+const CHAT_UNREAD_STORAGE_KEY = "chatUnread"; // ключ хранения количества непрочитанных сообщений
+const CHAT_UNREAD_MAX = 999; // максимальное значение счётчика, отображаемое в бейдже
+
+const PAGE_LOCATION = (typeof window !== "undefined" && window.location) ? window.location : null;
+const DEFAULT_ENDPOINT_PROTOCOL = (() => {
+  if (!PAGE_LOCATION || !PAGE_LOCATION.protocol) return "https:";
+  if (PAGE_LOCATION.protocol === "http:" || PAGE_LOCATION.protocol === "https:") {
+    return PAGE_LOCATION.protocol;
+  }
+  return "https:";
+})();
+const PAGE_ORIGIN = (() => {
+  if (!PAGE_LOCATION) return "";
+  const origin = typeof PAGE_LOCATION.origin === "string" ? PAGE_LOCATION.origin : "";
+  if (origin && origin !== "null") return origin;
+  if (PAGE_LOCATION.host) return (PAGE_LOCATION.protocol || DEFAULT_ENDPOINT_PROTOCOL) + "//" + PAGE_LOCATION.host;
+  return "";
+})();
+const DEVICE_HTTP_FALLBACK_ENDPOINT = "http://192.168.4.1";
+const HTTP_FALLBACK_ALLOWED = PAGE_LOCATION ? PAGE_LOCATION.protocol === "http:" : false;
+
+// Аккуратно парсим строку как URL, не выбрасывая исключение наружу
+function safeParseUrl(value) {
+  if (!value) return null;
+  try {
+    return new URL(value);
+  } catch (err) {
+    return null;
+  }
+}
+
+// Возвращаем origin текущей страницы или стандартный fallback для HTTP-сценария
+function getAutoEndpoint() {
+  if (PAGE_ORIGIN) return PAGE_ORIGIN;
+  if (HTTP_FALLBACK_ALLOWED) return DEVICE_HTTP_FALLBACK_ENDPOINT;
+  return "";
+}
+
+// Нормализуем ввод пользователя так, чтобы endpoint всегда содержал схему
+function normalizeEndpointInput(raw) {
+  if (raw == null) return "";
+  let value = String(raw).trim();
+  if (!value) return "";
+  let parsed = safeParseUrl(value);
+  if (parsed) return parsed.toString();
+  if (value.startsWith("//")) {
+    value = (DEFAULT_ENDPOINT_PROTOCOL || "https:") + value;
+    parsed = safeParseUrl(value);
+    if (parsed) return parsed.toString();
+  }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:(?!\/\/)/.test(value)) {
+    value = value.replace(/^([a-zA-Z][a-zA-Z0-9+.-]*:)/, "$1//");
+    parsed = safeParseUrl(value);
+    if (parsed) return parsed.toString();
+  }
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)) {
+    value = (DEFAULT_ENDPOINT_PROTOCOL || "https:") + "//" + value;
+    parsed = safeParseUrl(value);
+    if (parsed) return parsed.toString();
+  }
+  console.warn("[endpoint] не удалось нормализовать значение:", raw);
+  return value;
+}
+
 /* Состояние интерфейса */
 const UI = {
   tabs: ["chat", "channels", "pointing", "settings", "security", "debug"],
   els: {},
   cfg: {
-    endpoint: storage.get("endpoint") || "http://192.168.4.1",
+    endpoint: (() => {
+      const stored = storage.get("endpoint");
+      const normalized = normalizeEndpointInput(stored);
+      if (normalized && normalized !== stored) storage.set("endpoint", normalized);
+      return normalized || getAutoEndpoint();
+    })(),
     theme: storage.get("theme") || detectPreferredTheme(),
     accent: (storage.get("accent") === "red") ? "red" : "default",
     autoNight: storage.get("autoNight") !== "0",
@@ -2452,11 +2522,16 @@ const UI = {
     lastMessage: "",
   },
   state: {
+    activeTab: null,
     bank: null,
     channel: null,
     ack: null,
     ackRetry: null,
     ackBusy: false,
+    ackDelay: null,
+    ackDelayBusy: false,
+    lightPack: null,
+    lightPackBusy: false,
     rxBoostedGain: null,
     encBusy: false,
     encryption: null,
@@ -2491,6 +2566,12 @@ const UI = {
     chatHistory: [],
     chatHydrating: false,
     chatScrollPinned: true,
+    chatUnread: (() => {
+      const raw = storage.get(CHAT_UNREAD_STORAGE_KEY);
+      const parsed = raw != null ? parseInt(raw, 10) : NaN;
+      if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+      return Math.min(Math.max(parsed, 0), CHAT_UNREAD_MAX);
+    })(),
     chatSoundCtx: null,
     chatSoundLast: 0,
     chatImages: null,
@@ -2498,6 +2579,8 @@ const UI = {
       polling: false,
       lastName: null,
     },
+    testMode: null,
+    testModeBusy: false,
     received: {
       timer: null,
       running: false,
@@ -2509,7 +2592,6 @@ const UI = {
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
-    ackDelay: null,
     encTest: null,
     autoNightTimer: null,
     autoNightActive: false,
@@ -2778,6 +2860,7 @@ async function init() {
   UI.els.receivedDiag = {
     root: $("#recvDiag"),
     status: $("#recvDiagStatus"),
+    mode: $("#recvDiagMode"),
     interval: $("#recvDiagInterval"),
     lastStart: $("#recvDiagLastStart"),
     lastFinish: $("#recvDiagLastFinish"),
@@ -2815,6 +2898,9 @@ async function init() {
   UI.els.ackSettingHint = $("#ackSettingHint");
   UI.els.ackRetry = $("#ACKR");
   UI.els.ackRetryHint = $("#ackRetryHint");
+  UI.els.lightPack = $("#LIGHTPACK");
+  UI.els.lightPackHint = $("#lightPackHint");
+  UI.els.lightPackControl = $("#lightPackControl");
   UI.els.pauseInput = $("#PAUSE");
   UI.els.pauseHint = $("#pauseHint");
   UI.els.ackTimeout = $("#ACKT");
@@ -2825,6 +2911,9 @@ async function init() {
   UI.els.rxBoostedGainHint = $("#rxBoostedGainHint");
   UI.els.testRxmMessage = $("#TESTRXMMSG");
   UI.els.testRxmMessageHint = $("#testRxmMessageHint");
+  UI.els.testMode = $("#TESTMODE");
+  UI.els.testModeHint = $("#testModeHint");
+  UI.els.testModeControl = $("#testModeControl");
   UI.els.channelSelect = $("#CH");
   UI.els.channelSelectHint = $("#channelSelectHint");
   UI.els.txlInput = $("#txlSize");
@@ -2994,6 +3083,7 @@ async function init() {
   // Навигация по вкладкам
   const hash = location.hash ? location.hash.slice(1) : "";
   const initialTab = UI.tabs.includes(hash) ? hash : (storage.get("activeTab") || "chat");
+  UI.state.activeTab = initialTab;
   for (const tab of UI.tabs) {
     const link = UI.els.nav ? UI.els.nav.querySelector('[data-tab="' + tab + '"]') : null;
     if (link) {
@@ -3004,6 +3094,7 @@ async function init() {
       });
     }
   }
+  updateChatUnreadBadge();
   setTab(initialTab);
   initPointingTab();
 
@@ -3040,9 +3131,13 @@ async function init() {
   if (UI.els.endpoint) {
     UI.els.endpoint.value = UI.cfg.endpoint;
     UI.els.endpoint.addEventListener("change", () => {
-      const value = UI.els.endpoint.value.trim() || "http://192.168.4.1";
-      UI.cfg.endpoint = value;
-      storage.set("endpoint", UI.cfg.endpoint);
+      const raw = UI.els.endpoint.value.trim();
+      const normalized = normalizeEndpointInput(raw);
+      const fallback = getAutoEndpoint();
+      UI.cfg.endpoint = normalized || fallback;
+      UI.els.endpoint.value = UI.cfg.endpoint;
+      if (UI.cfg.endpoint) storage.set("endpoint", UI.cfg.endpoint);
+      else storage.remove("endpoint");
       note("Endpoint: " + UI.cfg.endpoint);
       resyncAfterEndpointChange().catch((err) => console.warn("[endpoint] resync", err));
     });
@@ -3120,16 +3215,24 @@ async function init() {
       void withAckLock(() => setAck(UI.els.ackSetting.checked));
     });
   }
+  if (UI.els.lightPack) {
+    UI.els.lightPack.addEventListener("change", onLightPackToggle);
+  }
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
   if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
-  if (UI.els.ackDelay) UI.els.ackDelay.addEventListener("change", onAckDelayInputChange);
+  if (UI.els.ackDelay) {
+    UI.els.ackDelay.addEventListener("change", () => { void onAckDelayInputChange(); });
+  }
   if (UI.els.rxBoostedGain) {
     UI.els.rxBoostedGain.addEventListener("change", () => {
       UI.els.rxBoostedGain.indeterminate = false;
       UI.state.rxBoostedGain = UI.els.rxBoostedGain.checked;
       updateRxBoostedGainUi();
     });
+  }
+  if (UI.els.testMode) {
+    UI.els.testMode.addEventListener("change", (event) => { void onTestModeToggle(event); });
   }
   if (UI.els.testRxmMessage) {
     UI.els.testRxmMessage.addEventListener("input", updateTestRxmMessageHint);
@@ -3161,12 +3264,19 @@ async function init() {
   updateTestRxmMessageHint();
   updatePauseUi();
   updateAckTimeoutUi();
+  updateAckDelayUi();
+  updateTestModeUi();
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels({ forceBank: true }));
   if (UI.els.channelSelect) UI.els.channelSelect.addEventListener("change", onChannelSelectChange);
   updateChannelSelectHint();
 
   // Безопасность
   const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", () => requestKeyGen());
+  const btnKeyGenPeer = $("#btnKeyGenPeer");
+  if (btnKeyGenPeer) {
+    UI.els.keyGenPeerBtn = btnKeyGenPeer;
+    btnKeyGenPeer.addEventListener("click", () => requestKeyGenPeer());
+  }
   const btnKeyRestore = $("#btnKeyRestore"); if (btnKeyRestore) btnKeyRestore.addEventListener("click", () => requestKeyRestore());
   const btnKeySend = $("#btnKeySend"); if (btnKeySend) btnKeySend.addEventListener("click", () => requestKeySend());
   const btnKeyRecv = $("#btnKeyRecv"); if (btnKeyRecv) btnKeyRecv.addEventListener("click", () => requestKeyReceive());
@@ -3175,6 +3285,9 @@ async function init() {
   await syncSettingsFromDevice();
   await refreshAckState();
   await refreshAckRetry();
+  await refreshAckDelay();
+  await refreshTestModeState();
+  await refreshLightPackState();
   await refreshEncryptionState();
 
   await loadVersion().catch(() => {});
@@ -3194,8 +3307,48 @@ function setMenuOpen(open) {
   document.body.classList.toggle("nav-open", open);
 }
 
+/* Обновляем бейдж непрочитанных сообщений в меню */
+function updateChatUnreadBadge(opts) {
+  const options = opts || {};
+  const nav = UI.els.nav || $("#siteNav");
+  const link = nav ? nav.querySelector('[data-tab="chat"]') : $(".nav [data-tab=\"chat\"]");
+  if (!link) return;
+  const badge = link.querySelector(".nav-badge");
+  if (!badge) return;
+  if (!badge.dataset.listener) {
+    badge.addEventListener("animationend", () => {
+      badge.classList.remove("nav-badge-pop");
+    });
+    badge.dataset.listener = "1";
+  }
+  const unreadRaw = Number(UI.state.chatUnread || 0);
+  const unread = Math.max(0, Math.min(unreadRaw, CHAT_UNREAD_MAX));
+  if (unread <= 0) {
+    badge.hidden = true;
+    badge.textContent = "";
+    badge.setAttribute("aria-live", "off");
+    badge.setAttribute("aria-label", "Непрочитанных сообщений нет");
+    badge.classList.remove("nav-badge-pop");
+    badge.dataset.count = "0";
+    return;
+  }
+  const text = unread > 99 ? "99+" : String(unread);
+  badge.hidden = false;
+  badge.textContent = text;
+  badge.setAttribute("aria-live", "polite");
+  badge.setAttribute("aria-label", `Непрочитанные сообщения: ${text}`);
+  badge.dataset.count = String(unread);
+  if (options.animate) {
+    badge.classList.remove("nav-badge-pop");
+    // Перезапуск анимации появления бейджа
+    void badge.offsetWidth;
+    badge.classList.add("nav-badge-pop");
+  }
+}
+
 /* Вкладки */
 function setTab(tab) {
+  UI.state.activeTab = tab;
   for (const t of UI.tabs) {
     const panel = $("#tab-" + t);
     const link = UI.els.nav ? UI.els.nav.querySelector('[data-tab="' + t + '"]') : null;
@@ -3208,7 +3361,16 @@ function setTab(tab) {
   }
   storage.set("activeTab", tab);
   if (tab !== "channels") hideChannelInfo();
-  if (tab === "chat") updateChatScrollButton();
+  if (tab === "chat") {
+    if (UI.state.chatUnread !== 0) {
+      UI.state.chatUnread = 0;
+    }
+    storage.set(CHAT_UNREAD_STORAGE_KEY, "0");
+    updateChatUnreadBadge();
+    updateChatScrollButton();
+  } else {
+    updateChatUnreadBadge();
+  }
 }
 
 /* Тема */
@@ -4331,18 +4493,42 @@ function parseSlashCommand(raw) {
 }
 
 /* Команды устройства */
+// Получаем актуальный base-URL для запросов к устройству
+function getEffectiveEndpointBase() {
+  const raw = UI && UI.cfg && typeof UI.cfg.endpoint === "string" ? UI.cfg.endpoint.trim() : "";
+  if (raw) {
+    const parsedDirect = safeParseUrl(raw);
+    if (parsedDirect) return parsedDirect;
+    const normalized = normalizeEndpointInput(raw);
+    if (normalized && normalized !== raw) {
+      const parsedNormalized = safeParseUrl(normalized);
+      if (parsedNormalized) return parsedNormalized;
+    }
+  }
+  const auto = getAutoEndpoint();
+  return safeParseUrl(auto);
+}
+
+// Собираем полный URL с учётом настроенного endpoint либо возвращаем относительный путь
+function buildRequestUrl(path, base) {
+  const effectiveBase = base || getEffectiveEndpointBase();
+  if (effectiveBase) {
+    try {
+      return new URL(path, effectiveBase).toString();
+    } catch (err) {
+      console.warn("[endpoint] не удалось сформировать URL:", err);
+    }
+  }
+  return typeof path === "string" ? path : String(path);
+}
+
 async function deviceFetch(cmd, params, timeoutMs) {
   const timeout = timeoutMs || 4000;
-  let base;
-  try {
-    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
-  } catch (e) {
-    base = new URL("http://192.168.4.1");
-  }
+  const base = getEffectiveEndpointBase();
   const candidates = [
-    new URL("/cmd", base),
-    new URL("/api/cmd", base),
-    new URL("/", base),
+    { path: "/cmd", param: "c" },
+    { path: "/api/cmd", param: "cmd" },
+    { path: "/", param: "c" },
   ];
   const extras = new URLSearchParams();
   if (params) {
@@ -4354,15 +4540,9 @@ async function deviceFetch(cmd, params, timeoutMs) {
     }
   }
   let lastErr = null;
-  for (const url of candidates) {
-    let requestUrl = url.toString();
-    if (cmd) {
-      if (url.pathname.endsWith("/api/cmd")) {
-        requestUrl += (requestUrl.indexOf("?") >= 0 ? "&" : "?") + "cmd=" + encodeURIComponent(cmd);
-      } else {
-        requestUrl += (requestUrl.indexOf("?") >= 0 ? "&" : "?") + "c=" + encodeURIComponent(cmd);
-      }
-    }
+  for (const candidate of candidates) {
+    let requestUrl = buildRequestUrl(candidate.path, base);
+    if (cmd) requestUrl += (requestUrl.indexOf("?") >= 0 ? "&" : "?") + candidate.param + "=" + encodeURIComponent(cmd);
     const extra = extras.toString();
     if (extra) requestUrl += (requestUrl.indexOf("?") >= 0 ? "&" : "?") + extra;
     const ctrl = new AbortController();
@@ -4439,17 +4619,12 @@ async function sendCommand(cmd, params, opts) {
 }
 async function postTx(text, timeoutMs) {
   const timeout = timeoutMs || 5000;
-  let base;
-  try {
-    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
-  } catch (e) {
-    base = new URL("http://192.168.4.1");
-  }
-  const url = new URL("/api/tx", base);
+  const base = getEffectiveEndpointBase();
+  const url = buildRequestUrl("/api/tx", base);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url.toString(), {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: text,
@@ -4472,18 +4647,13 @@ async function postTx(text, timeoutMs) {
 
 async function postImage(blob, meta, timeoutMs) {
   const timeout = timeoutMs || 8000;
-  let base;
-  try {
-    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
-  } catch (e) {
-    base = new URL("http://192.168.4.1");
-  }
-  const url = new URL("/api/tx-image", base);
+  const base = getEffectiveEndpointBase();
+  const url = buildRequestUrl("/api/tx-image", base);
   const headers = buildImageHeaders(meta);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url.toString(), {
+    const res = await fetch(url, {
       method: "POST",
       headers,
       body: blob,
@@ -4649,6 +4819,14 @@ function handleCommandSideEffects(cmd, text) {
       updateAckTimeoutUi();
       updateAckRetryUi();
     }
+  } else if (upper === "ACKD") {
+    const value = parseAckDelayResponse(text);
+    if (value !== null) {
+      UI.state.ackDelay = value;
+      storage.set("set.ACKD", String(value));
+      updateAckDelayUi();
+      updateAckRetryUi();
+    }
   } else if (upper === "ENC") {
     const state = parseEncResponse(text);
     if (state !== null) {
@@ -4661,6 +4839,13 @@ function handleCommandSideEffects(cmd, text) {
       UI.state.rxBoostedGain = state;
       storage.set("set.RXBG", state ? "1" : "0");
       updateRxBoostedGainUi();
+    }
+  } else if (upper === "TESTMODE") {
+    const state = parseTestModeResponse(text);
+    if (state !== null) {
+      UI.state.testMode = state;
+      storage.set("set.TESTMODE", state ? "1" : "0");
+      updateTestModeUi();
     }
   } else if (upper === "CH") {
     const value = parseInt(text, 10);
@@ -5444,6 +5629,21 @@ function logReceivedMessage(entry, opts) {
     // В чат попадают только элементы со статусом ready; без имени их сложно отслеживать.
     return;
   }
+  if (options.isNew && UI.state.activeTab !== "chat") {
+    const current = Math.max(0, Number(UI.state.chatUnread) || 0);
+    const next = Math.min(current + 1, CHAT_UNREAD_MAX);
+    if (next !== current) {
+      UI.state.chatUnread = next;
+      storage.set(CHAT_UNREAD_STORAGE_KEY, String(next));
+    }
+    updateChatUnreadBadge({ animate: true });
+  } else if (options.isNew && UI.state.activeTab === "chat") {
+    if (UI.state.chatUnread !== 0) {
+      UI.state.chatUnread = 0;
+      storage.set(CHAT_UNREAD_STORAGE_KEY, "0");
+    }
+    updateChatUnreadBadge();
+  }
   const bytes = entry && entry._hexBytes instanceof Uint8Array ? entry._hexBytes : hexToBytes(entry.hex);
   const isImage = entryType === "ready" && bytes && bytes.length >= 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
   const textValue = resolveReceivedText(entry);
@@ -5954,13 +6154,8 @@ function openReceivedPushChannel() {
     return;
   }
   closeReceivedPushChannel({ silent: true });
-  let url;
-  try {
-    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
-    url = new URL("/events", base).toString();
-  } catch (err) {
-    url = "http://192.168.4.1/events";
-  }
+  const base = getEffectiveEndpointBase();
+  const url = buildRequestUrl("/events", base);
   try {
     const source = new EventSource(url);
     push.source = source;
@@ -8273,31 +8468,106 @@ async function refreshChannels(options) {
   updateChannelSelect();
 }
 function parseChannels(text) {
+  if (!text) return [];
   const out = [];
-  const lines = text.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line || /ch\s*,/i.test(line)) continue;
-    const parts = line.split(/\s*[,;|\t]\s*/);
-    if (parts.length < 3) continue;
-    let ch, tx, rx, rssi, snr, st, scan;
-    if (parts.length >= 10) {
-      ch = parts[0]; tx = parts[1]; rx = parts[2]; rssi = parts[7]; snr = parts[8]; st = parts[9]; scan = parts[10];
-    } else if (parts.length >= 7) {
-      [ch, tx, rx, rssi, snr, st, scan] = parts;
-    } else {
-      ch = parts[0]; tx = parts[1]; rx = parts[1]; rssi = parts[2]; snr = parts[3]; st = parts[4]; scan = "";
-    }
+  const raw = String(text).trim();
+  if (!raw) return out;
+
+  const tryPush = (entry) => {
+    if (!entry) return;
+    const num = Number(entry.ch);
+    const tx = Number(entry.tx);
+    const rx = Number(entry.rx);
+    const rssi = Number(entry.rssi);
+    const snr = Number(entry.snr);
     out.push({
-      ch: Number(ch),
-      tx: Number(tx),
-      rx: Number(rx),
-      rssi: Number(rssi || 0),
-      snr: Number(snr || 0),
-      st: st || "",
-      scan: scan || "",
+      ch: Number.isFinite(num) ? num : 0,
+      tx: Number.isFinite(tx) ? tx : (Number.isFinite(rx) ? rx : 0),
+      rx: Number.isFinite(rx) ? rx : (Number.isFinite(tx) ? tx : 0),
+      rssi: Number.isFinite(rssi) ? rssi : 0,
+      snr: Number.isFinite(snr) ? snr : 0,
+      st: entry.st ? String(entry.st) : "",
+      scan: entry.scan ? String(entry.scan) : "",
       scanState: null,
     });
+  };
+
+  if (/^[{\[]/.test(raw)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      parsed = parseJsonLenient(raw);
+    }
+    const items = Array.isArray(parsed)
+      ? parsed
+      : parsed && Array.isArray(parsed.channels)
+        ? parsed.channels
+        : parsed && Array.isArray(parsed.data)
+          ? parsed.data
+          : [];
+    if (items.length) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (!item || typeof item !== "object") continue;
+        const entry = {
+          ch: item.ch ?? item.channel ?? item.id ?? i,
+          tx: item.tx ?? item.tx_mhz ?? item.txMHz ?? item.freq_tx ?? item.freq,
+          rx: item.rx ?? item.rx_mhz ?? item.rxMHz ?? item.freq_rx ?? item.freq,
+          rssi: item.rssi,
+          snr: item.snr,
+          st: item.st ?? item.status,
+          scan: item.scan ?? item.info ?? "",
+        };
+        tryPush(entry);
+      }
+      return out;
+    }
+  }
+
+  const lines = raw.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    if (/^ch\s*[:=,]/i.test(line)) continue;
+
+    const normalizedLine = line.replace(/[;|]/g, ",");
+    let parts = normalizedLine.split(/\s*,\s*/);
+    parts = parts.filter((part, idx) => part.length || idx < parts.length - 1);
+    let handled = false;
+    if (parts.length >= 3) {
+      let ch, tx, rx, rssi, snr, st, scan;
+      if (parts.length >= 10) {
+        ch = parts[0]; tx = parts[1]; rx = parts[2]; rssi = parts[7]; snr = parts[8]; st = parts[9]; scan = parts[10];
+      } else if (parts.length >= 7) {
+        [ch, tx, rx, rssi, snr, st, scan] = parts;
+      } else {
+        ch = parts[0]; tx = parts[1]; rx = parts[1]; rssi = parts[2]; snr = parts[3]; st = parts[4]; scan = parts[5];
+      }
+      tryPush({ ch, tx, rx, rssi, snr, st, scan });
+      handled = true;
+    }
+
+    if (handled) continue;
+    const entry = { ch: null, tx: null, rx: null, rssi: null, snr: null, st: "", scan: "" };
+    const pairs = normalizedLine.split(/\s+/);
+    for (let j = 0; j < pairs.length; j++) {
+      const token = pairs[j];
+      const match = token.match(/^(ch(?:annel)?|tx|rx|rssi|snr|st|status|scan)\s*[:=]\s*(.+)$/i);
+      if (!match) continue;
+      const key = match[1].toLowerCase();
+      const value = match[2];
+      if (key === "ch" || key === "channel") entry.ch = value;
+      else if (key === "tx") entry.tx = value;
+      else if (key === "rx") entry.rx = value;
+      else if (key === "rssi") entry.rssi = value;
+      else if (key === "snr") entry.snr = value;
+      else if (key === "st" || key === "status") entry.st = value;
+      else if (key === "scan") entry.scan = value;
+    }
+    if (entry.ch != null || entry.tx != null || entry.rx != null) {
+      tryPush(entry);
+    }
   }
   return out;
 }
@@ -8554,12 +8824,188 @@ async function onAckChipToggle() {
     }
   });
 }
-function parseAckResponse(text) {
-  if (!text) return null;
-  const low = text.toLowerCase();
-  if (low.indexOf("ack:1") >= 0 || /\b1\b/.test(low) || low.indexOf("on") >= 0 || low.indexOf("включ") >= 0) return true;
-  if (low.indexOf("ack:0") >= 0 || /\b0\b/.test(low) || low.indexOf("off") >= 0 || low.indexOf("выключ") >= 0) return false;
+// Универсальная проверка булевых флагов в ответах устройства
+function parseBooleanFlag(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const normalized = raw
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/["'`]/g, "")
+    .replace(/[.,;]+$/g, "");
+  if (!normalized) return null;
+  if (
+    normalized === "1"
+    || normalized === "true"
+    || normalized === "yes"
+    || normalized === "y"
+    || normalized === "да"
+    || normalized === "д"
+    || normalized === "on"
+    || normalized === "enabled"
+    || normalized === "enable"
+    || normalized.startsWith("вкл")
+    || normalized.startsWith("включ")
+    || normalized.startsWith("enable")
+  ) {
+    return true;
+  }
+  if (
+    normalized === "0"
+    || normalized === "false"
+    || normalized === "no"
+    || normalized === "n"
+    || normalized === "нет"
+    || normalized === "н"
+    || normalized === "off"
+    || normalized === "disabled"
+    || normalized === "disable"
+    || normalized.startsWith("выкл")
+    || normalized.startsWith("выключ")
+    || normalized.startsWith("disable")
+  ) {
+    return false;
+  }
   return null;
+}
+
+// Экранируем строку для регулярного выражения
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Унифицированный парсер ответов формата «включено/выключено»
+function parseBinaryResponse(text, keys) {
+  if (!text) return null;
+  const raw = String(text);
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const normalizedKeys = Array.isArray(keys) && keys.length
+    ? keys.map((key) => String(key).toLowerCase())
+    : [];
+
+  // Пытаемся прочитать JSON как есть или через щадящий парсер
+  if (/^[{\[]/.test(trimmed)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (err) {
+      parsed = parseJsonLenient(trimmed);
+    }
+    if (parsed != null) {
+      const asFlag = parseBooleanFlag(parsed);
+      if (asFlag !== null) return asFlag;
+      const stack = [parsed];
+      while (stack.length) {
+        const current = stack.pop();
+        if (current == null) continue;
+        if (typeof current === "boolean" || typeof current === "number" || typeof current === "string") {
+          const flag = parseBooleanFlag(current);
+          if (flag !== null) return flag;
+          continue;
+        }
+        if (Array.isArray(current)) {
+          for (let i = current.length - 1; i >= 0; i--) stack.push(current[i]);
+          continue;
+        }
+        if (typeof current === "object") {
+          for (const key of Object.keys(current)) {
+            const value = current[key];
+            const lowered = key.toLowerCase();
+            if (!normalizedKeys.length || normalizedKeys.includes(lowered)) {
+              const flag = parseBooleanFlag(value);
+              if (flag !== null) return flag;
+            }
+            if (value && (typeof value === "object" || Array.isArray(value))) stack.push(value);
+          }
+        }
+      }
+    }
+  }
+
+  const immediateFlag = parseBooleanFlag(trimmed);
+  if (immediateFlag !== null) return immediateFlag;
+
+  const parts = trimmed.split(/[\n,;]+/);
+  for (let i = 0; i < parts.length; i++) {
+    const segment = parts[i].trim();
+    if (!segment) continue;
+    const colonMatch = segment.match(/^"?([A-Za-zА-Яа-я0-9_]+)"?\s*[:=]\s*(.+)$/);
+    if (colonMatch) {
+      const key = colonMatch[1].toLowerCase();
+      if (!normalizedKeys.length || normalizedKeys.includes(key)) {
+        const flag = parseBooleanFlag(colonMatch[2]);
+        if (flag !== null) return flag;
+      }
+    }
+  }
+
+  if (normalizedKeys.length) {
+    const tokens = trimmed.split(/\s+/);
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (!token) continue;
+      const pair = token.split(/[:=]/);
+      if (pair.length === 2) {
+        const key = pair[0].replace(/^["']|["']$/g, "").toLowerCase();
+        if (!normalizedKeys.length || normalizedKeys.includes(key)) {
+          const flag = parseBooleanFlag(pair[1]);
+          if (flag !== null) return flag;
+        }
+      }
+      const normalized = token.replace(/^["']|["']$/g, "").toLowerCase();
+      if (normalizedKeys.includes(normalized) && tokens[i + 1]) {
+        const next = tokens[i + 1].replace(/^["']|["']$/g, "");
+        const flag = parseBooleanFlag(next);
+        if (flag !== null) return flag;
+      }
+    }
+    for (const key of normalizedKeys) {
+      const regex = new RegExp(`${escapeRegex(key)}\s*(?:[:=]|\s)\s*(on|off|true|false|yes|no|1|0|да|нет|вкл(?:[а-я]*)?|выкл(?:[а-я]*)?)`, "i");
+      const match = trimmed.match(regex);
+      if (match) {
+        const flag = parseBooleanFlag(match[1]);
+        if (flag !== null) return flag;
+      }
+    }
+  }
+
+  if (normalizedKeys.length) {
+    const lowered = trimmed.toLowerCase();
+    for (let i = 0; i < normalizedKeys.length; i++) {
+      const key = normalizedKeys[i];
+      const idx = lowered.indexOf(key);
+      if (idx < 0) continue;
+      const tail = trimmed.slice(idx + key.length);
+      const tailFlag = parseBooleanFlag(tail.trim());
+      if (tailFlag !== null) return tailFlag;
+      const numMatch = tail.match(/-?\d+(?:\.\d+)?/);
+      if (numMatch) {
+        const num = Number(numMatch[0]);
+        if (Number.isFinite(num)) {
+          if (num === 0) return false;
+          return true;
+        }
+      }
+      const wordMatch = tail.match(/\b(on|off|true|false|yes|no|да|нет|вкл[a-я]*|выкл[a-я]*)\b/i);
+      if (wordMatch) {
+        const flag = parseBooleanFlag(wordMatch[1]);
+        if (flag !== null) return flag;
+      }
+    }
+  }
+
+  return null;
+}
+
+function parseAckResponse(text) {
+  return parseBinaryResponse(text, ["ack"]);
 }
 function clampAckRetry(value) {
   const num = Number(value);
@@ -8619,6 +9065,9 @@ function parseAckDelayResponse(text) {
   const token = extractNumericToken(text);
   if (token == null) return null;
   return clampAckDelayMs(Number(token));
+}
+function parseTestModeResponse(text) {
+  return parseBinaryResponse(text, ["testmode", "test"]);
 }
 function parseRxBoostedGainResponse(text) {
   if (!text) return null;
@@ -8704,17 +9153,23 @@ function updateAckTimeoutUi() {
 function updateAckDelayUi() {
   const input = UI.els.ackDelay;
   const value = UI.state.ackDelay;
-  if (input && document.activeElement !== input && value != null) {
-    input.value = String(value);
+  if (input) {
+    if (value != null && document.activeElement !== input) {
+      input.value = String(value);
+    }
+    input.disabled = UI.state.ackDelayBusy === true;
   }
   const hint = UI.els.ackDelayHint;
   if (hint) {
     if (value == null) {
-      hint.textContent = "Задержка отправки ACK не загружена.";
+      hint.textContent = UI.state.ackDelayBusy ? "Получаем задержку ACK с устройства..." : "Задержка отправки ACK не загружена.";
     } else {
       let text = "Задержка перед отправкой подтверждения: " + value + " мс.";
       if (UI.state.ack !== true) {
         text += " Параметр вступит в силу после включения ACK.";
+      }
+      if (UI.state.ackDelayBusy) {
+        text += " Синхронизация...";
       }
       hint.textContent = text;
     }
@@ -8767,7 +9222,7 @@ function onAckTimeoutInputChange() {
   updateAckTimeoutUi();
   updateAckRetryUi();
 }
-function onAckDelayInputChange() {
+async function onAckDelayInputChange() {
   if (!UI.els.ackDelay) return;
   const raw = UI.els.ackDelay.value;
   const num = clampAckDelayMs(parseInt(raw, 10));
@@ -8776,6 +9231,7 @@ function onAckDelayInputChange() {
   storage.set("set.ACKD", String(num));
   updateAckDelayUi();
   updateAckRetryUi();
+  await setAckDelay(num);
 }
 async function setAck(value) {
   const response = await sendCommand("ACK", { v: value ? "1" : "0" });
@@ -8806,6 +9262,29 @@ async function setAckRetry(count) {
   });
   return response;
 }
+async function setAckDelay(value) {
+  const clamped = clampAckDelayMs(value);
+  if (UI.state.ackDelayBusy) return UI.state.ackDelay;
+  UI.state.ackDelayBusy = true;
+  updateAckDelayUi();
+  try {
+    const res = await sendCommand("ACKD", { v: String(clamped) });
+    if (typeof res === "string") {
+      const parsed = parseAckDelayResponse(res);
+      if (parsed !== null) {
+        UI.state.ackDelay = parsed;
+        storage.set("set.ACKD", String(parsed));
+        updateAckDelayUi();
+        updateAckRetryUi();
+        return parsed;
+      }
+    }
+    return await refreshAckDelay();
+  } finally {
+    UI.state.ackDelayBusy = false;
+    updateAckDelayUi();
+  }
+}
 async function toggleAck() {
   const response = await sendCommand("ACK", { toggle: "1" });
   if (typeof response === "string") {
@@ -8832,6 +9311,95 @@ async function refreshAckState() {
   updateAckUi();
   return null;
 }
+function parseLightPackResponse(text) {
+  if (!text) return null;
+  const trimmed = String(text).trim();
+  if (!trimmed) return null;
+  const token = extractNumericToken(trimmed);
+  if (token === "1") return true;
+  if (token === "0") return false;
+  const low = trimmed.toLowerCase();
+  if (low.indexOf("light:1") >= 0) return true;
+  if (low.indexOf("light:0") >= 0) return false;
+  if (low.indexOf("on") >= 0 || low.indexOf("включ") >= 0) return true;
+  if (low.indexOf("off") >= 0 || low.indexOf("выключ") >= 0) return false;
+  return null;
+}
+function updateLightPackUi() {
+  const input = UI.els.lightPack;
+  const hint = UI.els.lightPackHint;
+  const wrap = UI.els.lightPackControl;
+  const state = UI.state.lightPack;
+  const busy = UI.state.lightPackBusy;
+  if (wrap) {
+    wrap.classList.toggle("waiting", busy);
+    if (busy) wrap.setAttribute("aria-busy", "true");
+    else wrap.removeAttribute("aria-busy");
+  }
+  if (input) {
+    input.disabled = busy;
+    if (state === null) {
+      input.indeterminate = true;
+    } else {
+      input.indeterminate = false;
+      input.checked = state;
+    }
+  }
+  if (hint) {
+    if (state === true) {
+      hint.textContent = "Light pack активен: текст передаётся без служебного префикса.";
+    } else if (state === false) {
+      hint.textContent = "Light pack выключен: используется стандартный префикс для пакетов.";
+    } else {
+      hint.textContent = "Состояние Light pack ещё не получено.";
+    }
+  }
+}
+async function refreshLightPackState() {
+  const res = await deviceFetch("LIGHT", {}, 2000);
+  if (res.ok) {
+    const state = parseLightPackResponse(res.text);
+    if (state !== null) {
+      UI.state.lightPack = state;
+      storage.set("set.LIGHTPACK", state ? "1" : "0");
+      updateLightPackUi();
+      return state;
+    }
+  }
+  UI.state.lightPack = null;
+  updateLightPackUi();
+  return null;
+}
+async function setLightPack(value) {
+  if (UI.state.lightPackBusy) return UI.state.lightPack;
+  UI.state.lightPackBusy = true;
+  updateLightPackUi();
+  try {
+    const response = await sendCommand("LIGHT", { v: value ? "1" : "0" });
+    if (typeof response === "string") {
+      const parsed = parseLightPackResponse(response);
+      if (parsed !== null) {
+        UI.state.lightPack = parsed;
+        storage.set("set.LIGHTPACK", parsed ? "1" : "0");
+        updateLightPackUi();
+        return parsed;
+      }
+    }
+    return await refreshLightPackState();
+  } finally {
+    UI.state.lightPackBusy = false;
+    updateLightPackUi();
+  }
+}
+async function onLightPackToggle(event) {
+  if (!UI.els.lightPack) return;
+  if (UI.state.lightPackBusy) {
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    updateLightPackUi();
+    return;
+  }
+  await setLightPack(UI.els.lightPack.checked);
+}
 async function refreshAckRetry() {
   const res = await deviceFetch("ACKR", {}, 2000);
   if (res.ok) {
@@ -8848,21 +9416,110 @@ async function refreshAckRetry() {
   return null;
 }
 async function refreshAckDelay() {
-  const res = await deviceFetch("ACKD", {}, 2000);
-  if (res.ok) {
-    const parsed = parseAckDelayResponse(res.text);
-    if (parsed !== null) {
-      UI.state.ackDelay = parsed;
-      storage.set("set.ACKD", String(parsed));
+  const alreadyBusy = UI.state.ackDelayBusy === true;
+  if (!alreadyBusy) {
+    UI.state.ackDelayBusy = true;
+    updateAckDelayUi();
+  }
+  try {
+    const res = await deviceFetch("ACKD", {}, 2000);
+    if (res.ok) {
+      const parsed = parseAckDelayResponse(res.text);
+      if (parsed !== null) {
+        UI.state.ackDelay = parsed;
+        storage.set("set.ACKD", String(parsed));
+        updateAckDelayUi();
+        updateAckRetryUi();
+        return parsed;
+      }
+    }
+    UI.state.ackDelay = null;
+    updateAckDelayUi();
+    updateAckRetryUi();
+    return null;
+  } finally {
+    if (!alreadyBusy) {
+      UI.state.ackDelayBusy = false;
       updateAckDelayUi();
-      updateAckRetryUi();
-      return parsed;
     }
   }
-  UI.state.ackDelay = null;
-  updateAckDelayUi();
-  updateAckRetryUi();
-  return null;
+}
+function updateTestModeUi() {
+  const input = UI.els.testMode;
+  const state = UI.state.testMode;
+  if (input) {
+    if (state === null) {
+      input.indeterminate = true;
+      input.checked = false;
+    } else {
+      input.indeterminate = false;
+      input.checked = state;
+    }
+    input.disabled = UI.state.testModeBusy === true;
+  }
+  const hint = UI.els.testModeHint;
+  if (hint) {
+    if (UI.state.testModeBusy) {
+      hint.textContent = "Синхронизируем состояние тестового режима...";
+    } else if (state === true) {
+      hint.textContent = "Тестовый режим включён: сообщения обрабатываются без радиоканала.";
+    } else if (state === false) {
+      hint.textContent = "Тестовый режим выключен: используются реальные передачи.";
+    } else {
+      hint.textContent = "Состояние тестового режима не загружено.";
+    }
+  }
+  const control = UI.els.testModeControl;
+  if (control) control.classList.toggle("loading", UI.state.testModeBusy === true);
+}
+async function refreshTestModeState() {
+  const alreadyBusy = UI.state.testModeBusy === true;
+  if (!alreadyBusy) {
+    UI.state.testModeBusy = true;
+    updateTestModeUi();
+  }
+  try {
+    const res = await deviceFetch("TESTMODE", {}, 2000);
+    if (res.ok) {
+      const parsed = parseTestModeResponse(res.text);
+      if (parsed !== null) {
+        UI.state.testMode = parsed;
+        storage.set("set.TESTMODE", parsed ? "1" : "0");
+        updateTestModeUi();
+        return parsed;
+      }
+    }
+    UI.state.testMode = null;
+    updateTestModeUi();
+    return null;
+  } finally {
+    if (!alreadyBusy) {
+      UI.state.testModeBusy = false;
+      updateTestModeUi();
+    }
+  }
+}
+async function setTestMode(value) {
+  const desired = !!value;
+  if (UI.state.testModeBusy) return UI.state.testMode;
+  UI.state.testModeBusy = true;
+  updateTestModeUi();
+  try {
+    const res = await sendCommand("TESTMODE", { v: desired ? "1" : "0" });
+    if (typeof res === "string") {
+      const parsed = parseTestModeResponse(res);
+      if (parsed !== null) {
+        UI.state.testMode = parsed;
+        storage.set("set.TESTMODE", parsed ? "1" : "0");
+        updateTestModeUi();
+        return parsed;
+      }
+    }
+    return await refreshTestModeState();
+  } finally {
+    UI.state.testModeBusy = false;
+    updateTestModeUi();
+  }
 }
 async function refreshRxBoostedGain() {
   const res = await deviceFetch("RXBG", {}, 2000);
@@ -8890,6 +9547,19 @@ async function onAckRetryInput() {
     return;
   }
   await setAckRetry(clamped);
+}
+async function onTestModeToggle(event) {
+  if (!UI.els.testMode) return;
+  if (UI.state.testModeBusy) {
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    updateTestModeUi();
+    return;
+  }
+  const enabled = UI.els.testMode.checked;
+  storage.set("set.TESTMODE", enabled ? "1" : "0");
+  UI.state.testMode = enabled;
+  updateTestModeUi();
+  await setTestMode(enabled);
 }
 function onTestRxmMessageChange() {
   if (!UI.els.testRxmMessage) return;
@@ -9033,11 +9703,7 @@ async function withEncLock(task) {
   }
 }
 function parseEncResponse(text) {
-  if (!text) return null;
-  const low = text.toLowerCase();
-  if (low.indexOf("enc:1") >= 0 || /\b1\b/.test(low) || low.indexOf("on") >= 0 || low.indexOf("включ") >= 0) return true;
-  if (low.indexOf("enc:0") >= 0 || /\b0\b/.test(low) || low.indexOf("off") >= 0 || low.indexOf("выключ") >= 0) return false;
-  return null;
+  return parseBinaryResponse(text, ["enc", "encryption"]);
 }
 function updateEncryptionUi() {
   const chip = UI.els.encChip;
@@ -9093,7 +9759,7 @@ async function refreshEncryptionState() {
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","ACKD","TESTRXMMSG"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","ACKD","TESTMODE","TESTRXMMSG"];
 function normalizePowerPreset(raw) {
   if (raw == null) return null;
   const str = String(raw).trim();
@@ -9157,6 +9823,14 @@ function loadSettings() {
       UI.state.ackDelay = num;
       updateAckDelayUi();
       updateAckRetryUi();
+    } else if (key === "TESTMODE") {
+      const enabled = v === "1" || v === 1 || v === true || String(v).toLowerCase() === "true";
+      if (el.type === "checkbox") {
+        el.checked = enabled;
+        if (typeof el.indeterminate === "boolean") el.indeterminate = false;
+      }
+      UI.state.testMode = enabled;
+      updateTestModeUi();
     } else if (key === "TESTRXMMSG") {
       const text = clampTestRxmMessage(v);
       if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = text;
@@ -9169,6 +9843,15 @@ function loadSettings() {
     }
   }
   updateRxBoostedGainUi();
+  if (UI.els.lightPack) {
+    const stored = storage.get("set.LIGHTPACK");
+    if (stored === "1" || stored === "0") {
+      UI.state.lightPack = stored === "1";
+    } else {
+      UI.state.lightPack = null;
+    }
+    updateLightPackUi();
+  }
 }
 function saveSettingsLocal() {
   for (let i = 0; i < SETTINGS_KEYS.length; i++) {
@@ -9197,6 +9880,14 @@ function saveSettingsLocal() {
     if (key === "RXBG") {
       UI.state.rxBoostedGain = (v === "1");
       updateRxBoostedGainUi();
+    } else if (key === "ACKD") {
+      UI.state.ackDelay = clampAckDelayMs(parseInt(v, 10));
+      updateAckDelayUi();
+      updateAckRetryUi();
+    } else if (key === "TESTMODE") {
+      const enabled = v === "1";
+      UI.state.testMode = enabled;
+      updateTestModeUi();
     }
   }
   note("Сохранено локально.");
@@ -9274,8 +9965,11 @@ async function applySettingsToDevice() {
         UI.state.ackDelay = effective;
         if (UI.els.ackDelay) UI.els.ackDelay.value = String(effective);
         updateAckDelayUi();
+        updateAckRetryUi();
         storage.set("set.ACKD", String(effective));
       }
+    } else if (key === "TESTMODE") {
+      await setTestMode(value === "1");
     } else {
       const resp = await sendCommand(key, { v: value });
       if (resp !== null) storage.set("set." + key, value);
@@ -9285,8 +9979,12 @@ async function applySettingsToDevice() {
   await refreshChannels().catch(() => {});
   await refreshAckState();
   await refreshAckDelay();
+  await refreshAckRetry();
+  await refreshTestModeState();
+  await refreshLightPackState();
   await refreshRxBoostedGain();
 }
+
 function exportSettings() {
   const obj = {};
   for (let i = 0; i < SETTINGS_KEYS.length; i++) {
@@ -9387,6 +10085,17 @@ function importSettings() {
         if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = text;
         storage.set("set.TESTRXMMSG", text);
         updateTestRxmMessageHint();
+        continue;
+      }
+      if (key === "TESTMODE") {
+        const enabled = obj[key] === "1" || obj[key] === 1 || obj[key] === true || String(obj[key]).toLowerCase() === "true";
+        if (el.type === "checkbox") {
+          el.checked = enabled;
+          if (typeof el.indeterminate === "boolean") el.indeterminate = false;
+        }
+        UI.state.testMode = enabled;
+        storage.set("set.TESTMODE", enabled ? "1" : "0");
+        updateTestModeUi();
         continue;
       }
       if (el.type === "checkbox") {
@@ -9555,6 +10264,23 @@ async function syncSettingsFromDevice() {
   } catch (err) {
     console.warn("[settings] ACKD", err);
   }
+  try {
+    const testModeRes = await deviceFetch("TESTMODE", {}, 2000);
+    if (testModeRes.ok) {
+      const parsed = parseTestModeResponse(testModeRes.text);
+      if (parsed !== null) {
+        UI.state.testMode = parsed;
+        if (UI.els.testMode) {
+          UI.els.testMode.checked = parsed;
+          UI.els.testMode.indeterminate = false;
+        }
+        storage.set("set.TESTMODE", parsed ? "1" : "0");
+        updateTestModeUi();
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] TESTMODE", err);
+  }
 
   updateChannelSelect();
   updateChannelSelectHint();
@@ -9569,12 +10295,14 @@ function renderKeyState(state) {
   const peerEl = $("#keyPeer");
   const backupEl = $("#keyBackup");
   const messageEl = $("#keyMessage");
+  const peerBtn = UI.els.keyGenPeerBtn || $("#btnKeyGenPeer");
   if (!data || typeof data !== "object") {
     if (stateEl) stateEl.textContent = "—";
     if (idEl) idEl.textContent = "";
     if (pubEl) pubEl.textContent = "";
     if (peerEl) peerEl.textContent = "";
     if (backupEl) backupEl.textContent = "";
+    if (peerBtn) peerBtn.disabled = true;
   } else {
     const type = data.type === "external" ? "EXTERNAL" : "LOCAL";
     if (stateEl) stateEl.textContent = type;
@@ -9590,6 +10318,11 @@ function renderKeyState(state) {
       }
     }
     if (backupEl) backupEl.textContent = data.hasBackup ? "Есть резерв" : "";
+    if (peerBtn) {
+      // Активируем кнопку KEYGEN PEER только когда известен удалённый ключ
+      const hasPeer = typeof data.peer === "string" && data.peer.trim().length > 0;
+      peerBtn.disabled = !hasPeer;
+    }
   }
   if (messageEl) messageEl.textContent = UI.key.lastMessage || "";
 }
@@ -9610,11 +10343,16 @@ async function refreshKeyState(options) {
       } catch (err) {
         // Всегда оставляем комментарии на русском
         console.warn("[key] не удалось разобрать JSON KEYSTATE:", err);
-        data = parseKeyStateFallback(rawText);
-        if (!data) parseFailed = true;
-        else {
-          // Резервный разбор сработал, предупреждаем в консоли
-          console.warn("[key] использован резервный парсер KEYSTATE");
+        data = parseJsonLenient(rawText);
+        if (data) {
+          console.warn("[key] JSON KEYSTATE очищен и разобран повторно");
+        } else {
+          data = parseKeyStateFallback(rawText);
+          if (!data) parseFailed = true;
+          else {
+            // Резервный разбор сработал, предупреждаем в консоли
+            console.warn("[key] использован резервный парсер KEYSTATE");
+          }
         }
       }
     }
@@ -9650,6 +10388,26 @@ async function refreshKeyState(options) {
     note("Ошибка KEYSTATE: " + res.error);
   }
   if (!res.ok) debugLog("KEYSTATE ✗ " + res.error);
+}
+
+// Аккуратно очищаем нестандартный JSON прежде чем отдавать его в JSON.parse
+function parseJsonLenient(rawText) {
+  const raw = rawText != null ? String(rawText).trim() : "";
+  if (!raw) return null;
+  let sanitized = raw.replace(/^\uFEFF/, "");
+  sanitized = sanitized
+    .replace(/\/\*[\s\S]*?\*\//g, "") // убираем блочные комментарии
+    .replace(/(^|[^:])\/\/.*$/gm, "$1"); // убираем построчные комментарии без трогания URL
+  sanitized = sanitized.replace(/,\s*([}\]])/g, "$1"); // отрезаем висячие запятые
+  sanitized = sanitized.replace(/([\{,]\s*)'([^'"\n]*)'\s*:/g, "$1\"$2\":"); // нормализуем ключи в кавычках
+  sanitized = sanitized.replace(/:\s*'([^'"\n]*)'/g, ': "$1"'); // заменяем одиночные кавычки в значениях
+  if (!sanitized.trim()) return null;
+  try {
+    return JSON.parse(sanitized);
+  } catch (err) {
+    console.warn("[key] повторная попытка JSON.parse не удалась:", err);
+    return null;
+  }
 }
 
 // Пытаемся восстановить объект состояния ключа из нестрогого JSON или пары ключ=значение
@@ -9750,43 +10508,56 @@ function parseKeygenPlainResponse(text) {
   };
 }
 
-async function requestKeyGen() {
-  status("→ KEYGEN");
-  debugLog("KEYGEN → запрос генерации");
-  const res = await deviceFetch("KEYGEN", {}, 6000);
+// Универсальный обработчик команд, которые обновляют ключи устройства
+async function handleKeyGenerationCommand(options) {
+  const command = options.command;
+  const label = options.label || command;
+  const params = options.params || {};
+  const requestLog = options.requestLog || "запрос";
+  const successMessage = options.successMessage || "Ключ обновлён";
+  const emptyResponseMessage = options.emptyResponseMessage || "устройство вернуло пустой ответ";
+  const timeoutMs = options.timeoutMs || 6000;
+  const refreshAfterPlain = options.refreshAfterPlain !== false;
+
+  status(`→ ${label}`);
+  debugLog(`${label} → ${requestLog}`);
+  const res = await deviceFetch(command, params, timeoutMs);
   if (!res.ok) {
-    debugLog("KEYGEN ✗ " + res.error);
-    status("✗ KEYGEN");
-    note("Ошибка KEYGEN: " + res.error);
-    return;
+    debugLog(`${label} ✗ ${res.error}`);
+    status(`✗ ${label}`);
+    note(`Ошибка ${label}: ${res.error}`);
+    return false;
   }
+
   const rawText = res.text != null ? String(res.text) : "";
-  debugLog("KEYGEN ← " + rawText);
+  debugLog(`${label} ← ${rawText}`);
   const trimmed = rawText.trim();
   if (!trimmed) {
-    status("✗ KEYGEN");
-    note("KEYGEN: устройство вернуло пустой ответ");
-    return;
+    status(`✗ ${label}`);
+    note(`${label}: ${emptyResponseMessage}`);
+    return false;
   }
+
   let data = null;
   try {
     data = JSON.parse(trimmed);
   } catch (err) {
-    console.warn("[key] не удалось разобрать ответ KEYGEN как JSON:", err);
+    console.warn(`[key] не удалось разобрать ответ ${label} как JSON:`, err);
   }
   if (data && data.error) {
-    note("KEYGEN: " + data.error);
-    status("✗ KEYGEN");
-    return;
+    note(`${label}: ${data.error}`);
+    status(`✗ ${label}`);
+    return false;
   }
   if (data) {
     UI.key.state = data;
-    UI.key.lastMessage = "Сгенерирован новый локальный ключ";
+    UI.key.lastMessage = successMessage;
     renderKeyState(data);
-    debugLog("KEYGEN ✓ ключ обновлён на устройстве");
-    status("✓ KEYGEN");
-    return;
+    debugLog(`${label} ✓ ключ обновлён на устройстве`);
+    status(`✓ ${label}`);
+    return true;
   }
+
   const plainInfo = parseKeygenPlainResponse(trimmed);
   if (plainInfo) {
     UI.key.lastMessage = plainInfo.message;
@@ -9797,25 +10568,53 @@ async function requestKeyGen() {
       UI.key.state = null;
       renderKeyState(null);
     }
-    note(plainInfo.note);
-    status("✓ KEYGEN");
-    await refreshKeyState({ silent: true }).catch((err) => {
-      console.warn("[key] не удалось обновить состояние после KEYGEN:", err);
-    });
-    return;
+    note(`${label}: ${plainInfo.message}`);
+    status(`✓ ${label}`);
+    debugLog(`${label} ✓ ${plainInfo.message}`);
+    if (refreshAfterPlain) {
+      await refreshKeyState({ silent: true }).catch((err) => {
+        console.warn(`[key] не удалось обновить состояние после ${label}:`, err);
+      });
+    }
+    return true;
   }
+
   const normalized = trimmed.toLowerCase();
   if (/(err|fail|ошиб|нет)/.test(normalized)) {
-    status("✗ KEYGEN");
-    note("KEYGEN: " + trimmed);
-    return;
+    status(`✗ ${label}`);
+    note(`${label}: ${trimmed}`);
+    debugLog(`${label} ✗ ${trimmed}`);
+    return false;
   }
-  UI.key.lastMessage = "Ключ обновлён";
+
+  UI.key.lastMessage = successMessage;
   renderKeyState(UI.key.state);
-  note("KEYGEN: " + trimmed);
-  status("✓ KEYGEN");
-  await refreshKeyState({ silent: true }).catch((err) => {
-    console.warn("[key] не удалось обновить состояние после KEYGEN:", err);
+  note(`${label}: ${trimmed}`);
+  status(`✓ ${label}`);
+  debugLog(`${label} ✓ ${trimmed}`);
+  if (refreshAfterPlain) {
+    await refreshKeyState({ silent: true }).catch((err) => {
+      console.warn(`[key] не удалось обновить состояние после ${label}:`, err);
+    });
+  }
+  return true;
+}
+
+async function requestKeyGen() {
+  await handleKeyGenerationCommand({
+    command: "KEYGEN",
+    label: "KEYGEN",
+    requestLog: "запрос генерации",
+    successMessage: "Сгенерирован новый локальный ключ",
+  });
+}
+
+async function requestKeyGenPeer() {
+  await handleKeyGenerationCommand({
+    command: "KEYGEN PEER",
+    label: "KEYGEN PEER",
+    requestLog: "запрос повторного применения удалённого ключа",
+    successMessage: "Обновлён симметричный ключ по сохранённому удалённому ключу",
   });
 }
 
@@ -11131,25 +11930,25 @@ async function loadVersion() {
 
   const initialVersion = UI.state.version;
   const targets = [];
+  const seen = new Set();
+  const addTarget = (value) => {
+    if (!value) return;
+    const key = value.toString();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    targets.push(key);
+  };
   try {
-    targets.push(new URL("/ver", window.location.href));
+    addTarget(new URL("/ver", window.location.href).toString());
   } catch (err) {
     // окно может не иметь корректного href (например, file://)
   }
-  try {
-    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
-    targets.push(new URL("/ver", base));
-  } catch (err) {
-    targets.push(new URL("/ver", "http://192.168.4.1"));
-  }
-  const seen = new Set();
+  const base = getEffectiveEndpointBase();
+  addTarget(buildRequestUrl("/ver", base));
   let lastError = null;
   for (const url of targets) {
-    const key = url.toString();
-    if (seen.has(key)) continue;
-    seen.add(key);
     try {
-      const res = await fetch(key, { cache: "no-store" });
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const raw = await res.text();
       applyVersion(raw, { clear: true });
@@ -11219,5 +12018,6 @@ async function resyncAfterEndpointChange() {
     console.warn("[endpoint] resync error", err);
   }
 }
+
 
 )~~~";

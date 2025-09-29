@@ -6106,31 +6106,106 @@ async function refreshChannels(options) {
   updateChannelSelect();
 }
 function parseChannels(text) {
+  if (!text) return [];
   const out = [];
-  const lines = text.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line || /ch\s*,/i.test(line)) continue;
-    const parts = line.split(/\s*[,;|\t]\s*/);
-    if (parts.length < 3) continue;
-    let ch, tx, rx, rssi, snr, st, scan;
-    if (parts.length >= 10) {
-      ch = parts[0]; tx = parts[1]; rx = parts[2]; rssi = parts[7]; snr = parts[8]; st = parts[9]; scan = parts[10];
-    } else if (parts.length >= 7) {
-      [ch, tx, rx, rssi, snr, st, scan] = parts;
-    } else {
-      ch = parts[0]; tx = parts[1]; rx = parts[1]; rssi = parts[2]; snr = parts[3]; st = parts[4]; scan = "";
-    }
+  const raw = String(text).trim();
+  if (!raw) return out;
+
+  const tryPush = (entry) => {
+    if (!entry) return;
+    const num = Number(entry.ch);
+    const tx = Number(entry.tx);
+    const rx = Number(entry.rx);
+    const rssi = Number(entry.rssi);
+    const snr = Number(entry.snr);
     out.push({
-      ch: Number(ch),
-      tx: Number(tx),
-      rx: Number(rx),
-      rssi: Number(rssi || 0),
-      snr: Number(snr || 0),
-      st: st || "",
-      scan: scan || "",
+      ch: Number.isFinite(num) ? num : 0,
+      tx: Number.isFinite(tx) ? tx : (Number.isFinite(rx) ? rx : 0),
+      rx: Number.isFinite(rx) ? rx : (Number.isFinite(tx) ? tx : 0),
+      rssi: Number.isFinite(rssi) ? rssi : 0,
+      snr: Number.isFinite(snr) ? snr : 0,
+      st: entry.st ? String(entry.st) : "",
+      scan: entry.scan ? String(entry.scan) : "",
       scanState: null,
     });
+  };
+
+  if (/^[{\[]/.test(raw)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      parsed = parseJsonLenient(raw);
+    }
+    const items = Array.isArray(parsed)
+      ? parsed
+      : parsed && Array.isArray(parsed.channels)
+        ? parsed.channels
+        : parsed && Array.isArray(parsed.data)
+          ? parsed.data
+          : [];
+    if (items.length) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (!item || typeof item !== "object") continue;
+        const entry = {
+          ch: item.ch ?? item.channel ?? item.id ?? i,
+          tx: item.tx ?? item.tx_mhz ?? item.txMHz ?? item.freq_tx ?? item.freq,
+          rx: item.rx ?? item.rx_mhz ?? item.rxMHz ?? item.freq_rx ?? item.freq,
+          rssi: item.rssi,
+          snr: item.snr,
+          st: item.st ?? item.status,
+          scan: item.scan ?? item.info ?? "",
+        };
+        tryPush(entry);
+      }
+      return out;
+    }
+  }
+
+  const lines = raw.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    if (/^ch\s*[:=,]/i.test(line)) continue;
+
+    const normalizedLine = line.replace(/[;|]/g, ",");
+    let parts = normalizedLine.split(/\s*,\s*/);
+    parts = parts.filter((part, idx) => part.length || idx < parts.length - 1);
+    let handled = false;
+    if (parts.length >= 3) {
+      let ch, tx, rx, rssi, snr, st, scan;
+      if (parts.length >= 10) {
+        ch = parts[0]; tx = parts[1]; rx = parts[2]; rssi = parts[7]; snr = parts[8]; st = parts[9]; scan = parts[10];
+      } else if (parts.length >= 7) {
+        [ch, tx, rx, rssi, snr, st, scan] = parts;
+      } else {
+        ch = parts[0]; tx = parts[1]; rx = parts[1]; rssi = parts[2]; snr = parts[3]; st = parts[4]; scan = parts[5];
+      }
+      tryPush({ ch, tx, rx, rssi, snr, st, scan });
+      handled = true;
+    }
+
+    if (handled) continue;
+    const entry = { ch: null, tx: null, rx: null, rssi: null, snr: null, st: "", scan: "" };
+    const pairs = normalizedLine.split(/\s+/);
+    for (let j = 0; j < pairs.length; j++) {
+      const token = pairs[j];
+      const match = token.match(/^(ch(?:annel)?|tx|rx|rssi|snr|st|status|scan)\s*[:=]\s*(.+)$/i);
+      if (!match) continue;
+      const key = match[1].toLowerCase();
+      const value = match[2];
+      if (key === "ch" || key === "channel") entry.ch = value;
+      else if (key === "tx") entry.tx = value;
+      else if (key === "rx") entry.rx = value;
+      else if (key === "rssi") entry.rssi = value;
+      else if (key === "snr") entry.snr = value;
+      else if (key === "st" || key === "status") entry.st = value;
+      else if (key === "scan") entry.scan = value;
+    }
+    if (entry.ch != null || entry.tx != null || entry.rx != null) {
+      tryPush(entry);
+    }
   }
   return out;
 }
@@ -6534,6 +6609,31 @@ function parseBinaryResponse(text, keys) {
       const match = trimmed.match(regex);
       if (match) {
         const flag = parseBooleanFlag(match[1]);
+        if (flag !== null) return flag;
+      }
+    }
+  }
+
+  if (normalizedKeys.length) {
+    const lowered = trimmed.toLowerCase();
+    for (let i = 0; i < normalizedKeys.length; i++) {
+      const key = normalizedKeys[i];
+      const idx = lowered.indexOf(key);
+      if (idx < 0) continue;
+      const tail = trimmed.slice(idx + key.length);
+      const tailFlag = parseBooleanFlag(tail.trim());
+      if (tailFlag !== null) return tailFlag;
+      const numMatch = tail.match(/-?\d+(?:\.\d+)?/);
+      if (numMatch) {
+        const num = Number(numMatch[0]);
+        if (Number.isFinite(num)) {
+          if (num === 0) return false;
+          return true;
+        }
+      }
+      const wordMatch = tail.match(/\b(on|off|true|false|yes|no|да|нет|вкл[a-я]*|выкл[a-я]*)\b/i);
+      if (wordMatch) {
+        const flag = parseBooleanFlag(wordMatch[1]);
         if (flag !== null) return flag;
       }
     }
