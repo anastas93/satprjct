@@ -90,7 +90,7 @@ namespace LogDetail {
   inline void logMsgVal(DefaultSettings::LogLevel level, const char* prefix, const T& val) {
     String full = String(prefix) + String(val);
     if (!shouldPrint(level, full)) return;
-    Serial.print(prefix); Serial.println(val);
+    Serial.println(full);
     Serial.flush();
     dispatch(level, full.c_str());
   }
