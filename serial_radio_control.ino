@@ -638,6 +638,14 @@ void srDebugLogHook(DefaultSettings::LogLevel level, const char* msg) {
   pushDebugLog(level, msg);
 }
 
+// Печать строки журнала в Serial и зеркалирование в SSE через srDebugLogHook
+void srLogPrinter(DefaultSettings::LogLevel level, const char* msg) {
+  (void)level;
+  Serial.println(msg);
+  Serial.flush();
+  srDebugLogHook(level, msg);
+}
+
 // Возвращаем текущий идентификатор последней записи журнала
 uint32_t currentDebugLogId() {
   return gDebugLogCounter;
@@ -2269,7 +2277,7 @@ void setupWifi() {
 void setup() {
   Serial.begin(115200);
   while (!Serial) {}
-  LogDetail::setLogCallback(srDebugLogHook);          // подключаем зеркалирование DEBUG_LOG в SSE
+  LogDetail::setLogPrinter(srLogPrinter);             // перенаправляем журнал в Serial и SSE
 #if SR_HAS_ESP_COREDUMP
   gCoreDumpClearPending = true;
   gCoreDumpClearAfterMs = millis() + 500;  // ждём старта фоновых задач
