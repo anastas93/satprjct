@@ -67,6 +67,14 @@ namespace LogDetail {
     LogCallback cb = logCallbackSlot();
     if (cb) cb(level, msg);
   }
+  using LogPrinter = void(*)(DefaultSettings::LogLevel, const char*);
+  inline LogPrinter& logPrinterSlot() {
+    static LogPrinter printer = nullptr;
+    return printer;
+  }
+  inline void setLogPrinter(LogPrinter printer) {
+    logPrinterSlot() = printer;
+  }
 #ifdef ARDUINO
   // Проверка необходимости вывода сообщения (Arduino)
   inline bool shouldPrint(DefaultSettings::LogLevel level, const String& msg) {
@@ -77,12 +85,23 @@ namespace LogDetail {
     return true;
   }
 
+  // Вывод строки с учётом пользовательского принтера и колбэка
+  inline void emitLog(DefaultSettings::LogLevel level, const String& msg) {
+    LogPrinter printer = logPrinterSlot();
+    if (printer) {
+      printer(level, msg.c_str());
+    } else {
+      Serial.println(msg);
+      Serial.flush();
+    }
+    dispatch(level, msg.c_str());
+  }
+
   // Вывод строки с фильтрацией дублей
   inline void logMsg(DefaultSettings::LogLevel level, const char* msg) {
-    if (!shouldPrint(level, String(msg))) return;
-    Serial.println(msg);
-    Serial.flush();
-    dispatch(level, msg);
+    String text(msg);
+    if (!shouldPrint(level, text)) return;
+    emitLog(level, text);
   }
 
   // Вывод строки с значением и фильтрацией дублей
@@ -90,9 +109,7 @@ namespace LogDetail {
   inline void logMsgVal(DefaultSettings::LogLevel level, const char* prefix, const T& val) {
     String full = String(prefix) + String(val);
     if (!shouldPrint(level, full)) return;
-    Serial.println(full);
-    Serial.flush();
-    dispatch(level, full.c_str());
+    emitLog(level, full);
   }
 
   // Форматированный вывод в стиле printf с фильтрацией дублей
@@ -110,7 +127,9 @@ namespace LogDetail {
     std::unique_ptr<char[]> buffer(new char[static_cast<size_t>(required) + 1]);
     vsnprintf(buffer.get(), static_cast<size_t>(required) + 1, fmt, args);
     va_end(args);
-    logMsg(level, buffer.get());
+    String formatted(buffer.get());
+    if (!shouldPrint(level, formatted)) return;
+    emitLog(level, formatted);
   }
 #else
   // Проверка необходимости вывода сообщения (стандартный вывод)
@@ -122,12 +141,22 @@ namespace LogDetail {
     return true;
   }
 
+  // Вывод строки через пользовательский принтер либо стандартный поток
+  inline void emitLog(DefaultSettings::LogLevel level, const std::string& msg) {
+    LogPrinter printer = logPrinterSlot();
+    if (printer) {
+      printer(level, msg.c_str());
+    } else {
+      std::cout << msg << std::endl;
+    }
+    dispatch(level, msg.c_str());
+  }
+
   // Вывод строки в стандартный поток
   inline void logMsg(DefaultSettings::LogLevel level, const char* msg) {
     std::string s(msg);
     if (!shouldPrint(level, s)) return;
-    std::cout << msg << std::endl;
-    dispatch(level, s.c_str());
+    emitLog(level, s);
   }
 
   // Вывод строки с значением в стандартный поток
@@ -137,8 +166,7 @@ namespace LogDetail {
     oss << prefix << val;
     std::string s = oss.str();
     if (!shouldPrint(level, s)) return;
-    std::cout << s << std::endl;
-    dispatch(level, s.c_str());
+    emitLog(level, s);
   }
 
   // Форматированный вывод в стиле printf с фильтрацией дублей
@@ -156,7 +184,9 @@ namespace LogDetail {
     std::unique_ptr<char[]> buffer(new char[static_cast<size_t>(required) + 1]);
     std::vsnprintf(buffer.get(), static_cast<size_t>(required) + 1, fmt, args);
     va_end(args);
-    logMsg(level, buffer.get());
+    std::string formatted(buffer.get());
+    if (!shouldPrint(level, formatted)) return;
+    emitLog(level, formatted);
   }
 #endif
 } // namespace LogDetail
