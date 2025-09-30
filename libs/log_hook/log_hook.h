@@ -1,4 +1,6 @@
 #pragma once
+#ifndef LOG_HOOK_LOG_H
+#define LOG_HOOK_LOG_H
 
 // Единый хук журналирования с буферизацией сообщений и нотификацией подписчиков
 // Все комментарии и документация на русском согласно требованиям пользователя
@@ -60,4 +62,5 @@ namespace LogHook {
 #endif
 
 } // namespace LogHook
+#endif // LOG_HOOK_LOG_H
 
