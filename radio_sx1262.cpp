@@ -7,10 +7,13 @@
 #include <type_traits>
 #include <utility>
 
-using radio_sx1262_detail::AlwaysFalse;
-using radio_sx1262_detail::HasIrqFlagsApi;
-using radio_sx1262_detail::HasPointerIrqStatusApi;
-using radio_sx1262_detail::HasZeroArgIrqStatusApi;
+#ifndef RADIOLIB_SX126X_IRQ_NONE
+#define RADIOLIB_SX126X_IRQ_NONE 0U
+#endif
+
+#ifndef RADIOLIB_SX126X_IRQ_ALL
+#define RADIOLIB_SX126X_IRQ_ALL 0xFFFFU
+#endif
 
 RadioSX1262* RadioSX1262::instance_ = nullptr; // инициализация статического указателя
 
@@ -363,43 +366,15 @@ void RadioSX1262::logIrqFlags(uint32_t flags) {
 }
 
 void RadioSX1262::handleDio1() {
-  using RadioType = std::decay_t<decltype(radio_)>;
-  uint32_t irqFlags = 0;                     // буфер для флагов IRQ
-  int16_t clearState = RADIOLIB_ERR_NONE;    // код очистки IRQ
-
-  if constexpr (HasIrqFlagsApi<RadioType>::value) { // новая API RadioLib
-    irqFlags = static_cast<uint32_t>(radio_.getIrqFlags());
-    if (irqFlags == RADIOLIB_SX126X_IRQ_NONE) {
-      DEBUG_LOG("RadioSX1262: событие DIO1 без активных флагов IRQ");
-    } else {
-      logIrqFlags(irqFlags);                 // выводим только активные флаги
-    }
-    clearState = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
-  } else if constexpr (HasZeroArgIrqStatusApi<RadioType>::value) { // API с getIrqStatus()
-    uint16_t status = radio_.getIrqStatus();
-    if (status == RADIOLIB_SX126X_IRQ_NONE) {
-      DEBUG_LOG("RadioSX1262: событие DIO1 без активных флагов IRQ (status)");
-    } else {
-      irqFlags = status;
-      logIrqFlags(irqFlags);
-    }
-    clearState = radio_.clearIrqStatus();
-  } else if constexpr (HasPointerIrqStatusApi<RadioType>::value) { // старая API RadioLib
-    uint16_t legacyFlags = 0;
-    int16_t readState = radio_.getIrqStatus(&legacyFlags);
-    if (readState != RADIOLIB_ERR_NONE) {
-      LOG_WARN_VAL("RadioSX1262: не удалось прочитать статус IRQ, код=", readState);
-    } else if (legacyFlags == 0) {
-      DEBUG_LOG("RadioSX1262: событие DIO1 без активных флагов IRQ (legacy)");
-    } else {
-      irqFlags = legacyFlags;
-      logIrqFlags(irqFlags);                 // выводим активные флаги для старой API
-    }
-    clearState = radio_.clearIrqStatus();
+  uint32_t irqFlags = radio_.getIrqFlags();  // универсальное чтение флагов IRQ
+  if (irqFlags == RADIOLIB_SX126X_IRQ_NONE) {
+    DEBUG_LOG("RadioSX1262: событие DIO1 без активных флагов IRQ");
   } else {
-    static_assert(AlwaysFalse<RadioType>::value,
-                  "RadioSX1262: неизвестный вариант API IRQ в RadioLib");
+    logIrqFlags(irqFlags);                   // выводим только активные флаги
   }
+
+  int16_t clearState =
+      radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL); // универсальная очистка IRQ
 
   if (clearState != RADIOLIB_ERR_NONE) {
     LOG_WARN_VAL("RadioSX1262: не удалось очистить статус IRQ, код=", clearState);
