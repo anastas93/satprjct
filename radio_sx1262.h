@@ -81,6 +81,26 @@ private:
     using SX1262::SX1262;
     using SX1262::clearIrqStatus;
     using SX1262::getIrqStatus;
+
+    // Совместим интерфейсы RadioLib: новые обёртки сводятся к универсальным вызовам
+    uint16_t getIrqFlags() {
+      // РадиоLib в новых версиях возвращает флаги через getIrqFlags(),
+      // поэтому пробрасываем их через доступный getIrqStatus().
+      return SX1262::getIrqStatus();
+    }
+
+    int16_t clearIrqFlags(uint16_t /*mask*/) {
+      // Библиотека очищает все флаги сразу, поэтому игнорируем маску.
+      return SX1262::clearIrqStatus();
+    }
+
+    int16_t getIrqStatus(uint16_t* dest) {
+      // Старый интерфейс ожидал указатель: наполняем его и сообщаем об успехе.
+      if (dest) {
+        *dest = SX1262::getIrqStatus();
+      }
+      return RADIOLIB_ERR_NONE;
+    }
   };
 
   PublicSX1262 radio_;                   // экземпляр радиомодуля

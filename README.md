@@ -639,6 +639,9 @@ g++ -I. tests/test_key_transfer.cpp \
 - `static void logIrqFlags(uint32_t flags)` — форматированный вывод активных IRQ-флагов радиочипа
   в журнал.
 - `bool resetToDefaults()` — возврат параметров к значениям по умолчанию.
+- Вспомогательная обёртка `PublicSX1262` добавляет совместимые методы `getIrqFlags()`,
+  `clearIrqFlags(...)` и `getIrqStatus(uint16_t*)`, чтобы прошивка одинаково собиралась с разными
+  версиями RadioLib.
 
 ### SerialProgramCollector
 - `void resetBuffer()` — очистить буфер.
