@@ -66,6 +66,9 @@ public:
   // Сброс параметров к значениям по умолчанию с перезапуском приёма
   bool resetToDefaults();
 
+  // Статический вывод активных флагов IRQ SX1262 в лог
+  static void logIrqFlags(uint16_t flags);
+
 private:
   static void onDio1Static();            // статический обработчик прерывания
   void handleDio1();                     // обработка приёма
