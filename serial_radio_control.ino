@@ -2164,14 +2164,41 @@ String makeAccessPointSsid() {
 
 // Настройка Wi-Fi точки доступа и запуск сервера
 void setupWifi() {
+  String ssid = makeAccessPointSsid();                   // формируем SSID с суффиксом устройства
 #if defined(ARDUINO)
   // Принудительно отключаем сохранение настроек и переводим модуль в режим точки доступа,
   // иначе после неудачных попыток подключения к STA интерфейс может так и не подняться.
   WiFi.persistent(false);
   WiFi.softAPdisconnect(true);
+#if defined(WIFI_MODE_NULL)
+  WiFi.mode(WIFI_MODE_NULL);                             // полный сброс подсистемы Wi-Fi
+  delay(20);
+#endif
   WiFi.mode(WIFI_AP);
   WiFi.setSleep(false);
+
+  // Запускаем точку доступа с несколькими повторными попытками на случай зависших настроек
+  constexpr uint8_t kMaxApAttempts = 3;
+  bool apStarted = false;
+  for (uint8_t attempt = 0; attempt < kMaxApAttempts && !apStarted; ++attempt) {
+    if (attempt > 0) {
+      LOG_WARN("Wi-Fi: повторный запуск точки доступа (попытка %u)", static_cast<unsigned>(attempt + 1));
+      WiFi.softAPdisconnect(true);
+      delay(100);
+#if defined(WIFI_MODE_NULL)
+      WiFi.mode(WIFI_MODE_NULL);
+      delay(20);
 #endif
+      WiFi.mode(WIFI_AP);
+      WiFi.setSleep(false);
+    }
+    apStarted = WiFi.softAP(ssid.c_str(), DefaultSettings::WIFI_PASS);
+  }
+  if (!apStarted) {                                      // создаём AP
+    LOG_ERROR("Wi-Fi: не удалось запустить точку доступа %s", ssid.c_str());
+    return;
+  }
+
   // Задаём статический IP 192.168.4.1 для точки доступа
   IPAddress local_ip(192, 168, 4, 1);
   IPAddress gateway(192, 168, 4, 1);
@@ -2179,11 +2206,9 @@ void setupWifi() {
   if (!WiFi.softAPConfig(local_ip, gateway, subnet)) {
     LOG_WARN("Wi-Fi: не удалось применить статический IP, используется конфигурация по умолчанию");
   }
-  String ssid = makeAccessPointSsid();                   // формируем SSID с суффиксом устройства
-  if (!WiFi.softAP(ssid.c_str(), DefaultSettings::WIFI_PASS)) { // создаём AP
-    LOG_ERROR("Wi-Fi: не удалось запустить точку доступа %s", ssid.c_str());
-    return;
-  }
+#else
+  // В хостовой сборке точка доступа не запускается — ограничиваемся инициализацией веб-сервера.
+#endif
   static const char* kImageHeaders[] = {
     "X-Image-Profile",
     "X-Image-Frame-Width",
@@ -2211,8 +2236,12 @@ void setupWifi() {
   server.on("/cmd", handleCmdHttp);                                  // обработка команд
   server.on("/api/cmd", handleCmdHttp);                              // совместимый эндпоинт
   server.begin();                                                      // старт сервера
+#if defined(ARDUINO)
   String ip = WiFi.softAPIP().toString();
   LOG_INFO("Wi-Fi: точка доступа %s запущена, IP %s", ssid.c_str(), ip.c_str());
+#else
+  LOG_INFO("Wi-Fi: веб-сервер запущен в тестовом режиме (SSID %s)", ssid.c_str());
+#endif
 }
 
 void setup() {
