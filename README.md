@@ -636,7 +636,7 @@ g++ -I. tests/test_key_transfer.cpp \
   режимом повышенного усиления приёмника.
 - `static uint16_t bankSize(ChannelBank bank)`, `static float bankRx(...)`, `static float bankTx(...)` —
   справочные методы.
-- `static void logIrqFlags(RadioLibIrqFlags_t flags)` — форматированный вывод активных IRQ-флагов радиочипа
+- `static void logIrqFlags(uint32_t flags)` — форматированный вывод активных IRQ-флагов радиочипа
   в журнал.
 - `bool resetToDefaults()` — возврат параметров к значениям по умолчанию.
 
