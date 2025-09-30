@@ -9,6 +9,7 @@
 #include <Arduino.h>
 #include <FS.h>
 #include <SPIFFS.h>
+#include "../serial_mirror/serial_mirror.h"  // зеркалируем Serial в веб-журнал
 #if defined(ESP32) && __has_include("freertos/FreeRTOS.h") && __has_include("freertos/task.h")
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>

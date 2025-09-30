@@ -12,6 +12,7 @@
 #include "libs/scrambler/scrambler.cpp"             // скремблер
 #include "libs/simple_logger/simple_logger.cpp"     // журнал статусов
 #include "libs/log_hook/log_hook.cpp"               // буфер и push-хук журнала
+#include "libs/serial_mirror/serial_mirror.cpp"     // зеркалирование вывода Serial в LogHook
 #include "libs/received_buffer/received_buffer.cpp" // буфер принятых сообщений
 #include "libs/key_loader/key_loader.cpp"           // загрузка и сохранение ключа
 #include "libs/key_transfer/key_transfer.cpp"       // передача корневого ключа по LoRa
