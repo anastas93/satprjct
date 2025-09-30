@@ -122,6 +122,8 @@ WebServer server(80);       // HTTP-сервер для веб-интерфей�
 // корректно обрабатывал пользовательские типы.
 struct PushClientSession;
 bool sendSseFrame(PushClientSession& session, const String& event, const String& data, uint32_t id);
+String buildLogPayload(const LogHook::Entry& entry);
+void broadcastLogEntry(const LogHook::Entry& entry);
 
 // Состояние генератора тестовых входящих сообщений
 struct TestRxmState {
@@ -485,6 +487,20 @@ String buildReceivedPushPayload(ReceivedBuffer::Kind kind, const ReceivedBuffer:
   return payload;
 }
 
+// Формируем JSON-представление строки журнала для SSE
+String buildLogPayload(const LogHook::Entry& entry) {
+  String payload = "{";
+  payload += "\"id\":";
+  payload += String(static_cast<unsigned long>(entry.id));
+  payload += ",\"uptime\":";
+  payload += String(static_cast<unsigned long>(entry.uptime_ms));
+  payload += ",\"text\":\"";
+  payload += jsonEscape(String(entry.text));
+  payload += "\"";
+  payload += "}";
+  return payload;
+}
+
 // Отправка одного SSE-сообщения; возвращает false, если запись не удалась
 bool sendSseFrame(PushClientSession& session, const String& event, const String& data, uint32_t id) {
   if (!session.client.connected()) {
@@ -562,6 +578,23 @@ void broadcastReceivedPush(ReceivedBuffer::Kind kind, const ReceivedBuffer::Item
   }
 }
 
+// Рассылка строки журнала всем подписчикам SSE
+void broadcastLogEntry(const LogHook::Entry& entry) {
+  if (gPushSessions.empty()) return;
+  maintainPushSessions();
+  String payload = buildLogPayload(entry);
+  String eventName = F("log");
+  uint32_t eventId = gPushNextEventId++;
+  for (auto it = gPushSessions.begin(); it != gPushSessions.end(); ) {
+    if (!sendSseFrame(*it, eventName, payload, eventId)) {
+      it->client.stop();
+      it = gPushSessions.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
 // Обработчик подключения SSE на /events
 void handleSseConnect() {
   NetworkClient& baseClient = server.client();
@@ -607,7 +640,7 @@ void handleSseConnect() {
     gPushSessions.pop_back();
     return;
   }
-  Serial.println(F("HTTP push: новое подключение"));
+  LOG_INFO("HTTP push: новое подключение");
 }
 
 // Выдача нового идентификатора для тестовых сообщений
@@ -2079,6 +2112,35 @@ void handleVer() {
   server.send(200, "text/plain", readVersionFile());
 }
 
+// Отдаём последние N строк журнала для вкладки Debug
+void handleLogHistory() {
+  size_t limit = 120;                                      // значение по умолчанию
+  if (server.hasArg("n")) {
+    String arg = server.arg("n");
+    arg.trim();
+    long requested = arg.toInt();
+    if (requested > 0) {
+      if (requested > 200) requested = 200;                // ограничиваем размерами буфера
+      limit = static_cast<size_t>(requested);
+    }
+  }
+  auto logs = LogHook::getRecent(limit);
+  String json = "{\"logs\":[";
+  for (size_t i = 0; i < logs.size(); ++i) {
+    if (i > 0) json += ',';
+    const auto& entry = logs[i];
+    json += "{\"id\":";
+    json += String(static_cast<unsigned long>(entry.id));
+    json += ",\"uptime\":";
+    json += String(static_cast<unsigned long>(entry.uptime_ms));
+    json += ",\"text\":\"";
+    json += jsonEscape(String(entry.text));
+    json += "\"}";
+  }
+  json += "]}";
+  server.send(200, "application/json", json);
+}
+
 // Формирование SSID точки доступа с коротким уникальным идентификатором устройства
 String makeAccessPointSsid() {
   String base = String(DefaultSettings::WIFI_SSID);
@@ -2130,13 +2192,14 @@ void setupWifi() {
   server.on("/libs/geostat_tle.js", handleGeostatTleJs);             // статический список спутников
   server.on("/ver", handleVer);                                      // версия приложения
   server.on("/events", HTTP_GET, handleSseConnect);                  // SSE-канал push-уведомлений
+  server.on("/api/logs", handleLogHistory);                          // выгрузка журнала Serial
   server.on("/api/tx", handleApiTx);                                 // отправка текста по радио
   server.on("/api/tx-image", handleApiTxImage);                      // отправка изображения по радио
   server.on("/cmd", handleCmdHttp);                                  // обработка команд
   server.on("/api/cmd", handleCmdHttp);                              // совместимый эндпоинт
   server.begin();                                                      // старт сервера
-  Serial.print("AP IP: ");
-  Serial.println(WiFi.softAPIP());                                     // выводим адрес
+  String ip = WiFi.softAPIP().toString();
+  LOG_INFO("Wi-Fi: точка доступа %s запущена, IP %s", ssid.c_str(), ip.c_str());
 }
 
 void setup() {
@@ -2147,8 +2210,11 @@ void setup() {
   gCoreDumpClearAfterMs = millis() + 500;  // ждём старта фоновых задач
 #endif
   KeyLoader::ensureStorage();
-  Serial.print("Хранилище ключей: ");
-  Serial.println(KeyLoader::backendName(KeyLoader::getBackend()));
+  LogHook::setDispatcher([](const LogHook::Entry& entry) {
+    broadcastLogEntry(entry);
+  });
+  String backendName = KeyLoader::backendName(KeyLoader::getBackend());
+  LOG_INFO("Хранилище ключей: %s", backendName.c_str());
   setupWifi();                                       // запускаем точку доступа
   radio.begin();
   tx.setAckEnabled(ackEnabled);
@@ -2166,7 +2232,7 @@ void setup() {
   });
   // обработка входящих данных с учётом ACK
   rx.setAckCallback([&]() {
-    Serial.println("ACK: получен");
+    LOG_INFO("ACK: получен");
     tx.onAckReceived();
   });
   rx.setCallback([&](const uint8_t* d, size_t l){
@@ -2176,6 +2242,7 @@ void setup() {
     Serial.print("RX: ");
     for (size_t i = 0; i < l; ++i) Serial.write(d[i]);
     Serial.println();
+    LOG_INFO("RX: пакет на %u байт", static_cast<unsigned>(l));
     if (ackEnabled) {                                     // отправляем подтверждение
       const uint8_t ack_msg[1] = {protocol::ack::MARKER};
       tx.queue(ack_msg, sizeof(ack_msg));
@@ -2186,7 +2253,7 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
-  Serial.println("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], LIGHT [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ACKD <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
+  LOG_INFO("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], LIGHT [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ACKD <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
 }
 
 void loop() {
