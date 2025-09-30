@@ -80,17 +80,21 @@ private:
   struct PublicSX1262 : public SX1262 {
     using SX1262::SX1262;
     using SX1262::clearIrqStatus;
+
+#if defined(RADIOLIB_VERSION_MAJOR) && (RADIOLIB_VERSION_MAJOR >= 7)
+    using SX1262::clearIrqFlags;
+    using SX1262::getIrqFlags;
+#else
     using SX1262::getIrqStatus;
 
-    // Совместим интерфейсы RadioLib: новые обёртки сводятся к универсальным вызовам
-    uint16_t getIrqFlags() {
-      // РадиоLib в новых версиях возвращает флаги через getIrqFlags(),
-      // поэтому пробрасываем их через доступный getIrqStatus().
+    // Совместимость с RadioLib <= 6.x, где отсутствует getIrqFlags().
+    uint32_t getIrqFlags() {
+      // Возвращаем 16-битный статус как 32-битное значение, чтобы унифицировать обработку IRQ.
       return SX1262::getIrqStatus();
     }
 
-    int16_t clearIrqFlags(uint16_t /*mask*/) {
-      // Библиотека очищает все флаги сразу, поэтому игнорируем маску.
+    int16_t clearIrqFlags(uint32_t /*mask*/) {
+      // Старый API игнорирует маску и очищает все флаги сразу.
       return SX1262::clearIrqStatus();
     }
 
@@ -101,6 +105,7 @@ private:
       }
       return RADIOLIB_ERR_NONE;
     }
+#endif
   };
 
   PublicSX1262 radio_;                   // экземпляр радиомодуля
