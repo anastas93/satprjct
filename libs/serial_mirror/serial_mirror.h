@@ -33,6 +33,9 @@ class SerialMirror : public Stream {
 
   HardwareSerial& base();
 
+  // Оператор приведения к bool для совместимости с конструкциями вида `while (!Serial)`.
+  explicit operator bool() const;
+
  private:
   HardwareSerial* serial_;
   String buffer_;
@@ -46,6 +49,9 @@ extern SerialMirror SerialDebug;
 #define SERIAL_MIRROR_ACTIVE 1
 
 #ifndef SERIAL_MIRROR_DISABLE_REMAP
+#ifdef Serial
+#undef Serial
+#endif
 #define Serial SerialDebug
 #endif
 
