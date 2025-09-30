@@ -2164,13 +2164,26 @@ String makeAccessPointSsid() {
 
 // Настройка Wi-Fi точки доступа и запуск сервера
 void setupWifi() {
+#if defined(ARDUINO)
+  // Принудительно отключаем сохранение настроек и переводим модуль в режим точки доступа,
+  // иначе после неудачных попыток подключения к STA интерфейс может так и не подняться.
+  WiFi.persistent(false);
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_AP);
+  WiFi.setSleep(false);
+#endif
   // Задаём статический IP 192.168.4.1 для точки доступа
   IPAddress local_ip(192, 168, 4, 1);
   IPAddress gateway(192, 168, 4, 1);
   IPAddress subnet(255, 255, 255, 0);
-  WiFi.softAPConfig(local_ip, gateway, subnet);
+  if (!WiFi.softAPConfig(local_ip, gateway, subnet)) {
+    LOG_WARN("Wi-Fi: не удалось применить статический IP, используется конфигурация по умолчанию");
+  }
   String ssid = makeAccessPointSsid();                   // формируем SSID с суффиксом устройства
-  WiFi.softAP(ssid.c_str(), DefaultSettings::WIFI_PASS); // создаём AP
+  if (!WiFi.softAP(ssid.c_str(), DefaultSettings::WIFI_PASS)) { // создаём AP
+    LOG_ERROR("Wi-Fi: не удалось запустить точку доступа %s", ssid.c_str());
+    return;
+  }
   static const char* kImageHeaders[] = {
     "X-Image-Profile",
     "X-Image-Frame-Width",
