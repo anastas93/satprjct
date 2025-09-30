@@ -130,6 +130,7 @@
 | `key_loader`, `crypto/aes_ccm`, `key_transfer` | Работа с ключами, AES-CCM и обмен корневым ключом. |
 | `crypto/hkdf` | HKDF-SHA256 для вывода симметричных ключей и вспомогательных параметров. |
 | `simple_logger`, `serial_program_collector`, `text_converter` | Логирование, сборка команд, преобразование текста. |
+| `serial_mirror` | Зеркалирует вывод базового `Serial` в `LogHook` и сохраняет совместимость с конструкциями вида `while (!Serial)`. |
 
 Файл `libs_includes.cpp` подключает реализации библиотек для Arduino-проекта и избавляет от
 неявных зависимостей.

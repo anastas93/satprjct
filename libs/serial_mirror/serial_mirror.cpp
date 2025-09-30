@@ -85,6 +85,13 @@ HardwareSerial& SerialMirror::base() {
   return *serial_;
 }
 
+SerialMirror::operator bool() const {
+  if (!serial_) {
+    return false;  // Нет базового Serial — считаем интерфейс неинициализированным.
+  }
+  return static_cast<bool>(*serial_);
+}
+
 void SerialMirror::mirrorChar(uint8_t ch) {
   if (ch == '\r') {
     return; // пропускаем возврат каретки
