@@ -41,6 +41,30 @@ struct HasPointerIrqStatusApi<
 template <typename T>
 struct AlwaysFalse : std::false_type {};
 
+// Вызов варианта getIrqStatus() без аргументов, если он доступен
+template <typename Radio>
+auto CallZeroArgGetIrqStatus(Radio& radio, int)
+    -> decltype(radio.getIrqStatus()) {
+  return radio.getIrqStatus();
+}
+
+template <typename Radio>
+uint16_t CallZeroArgGetIrqStatus(Radio&, long) {
+  return 0U;
+}
+
+// Вызов варианта getIrqStatus(uint16_t*), если он доступен
+template <typename Radio>
+auto CallPointerGetIrqStatus(Radio& radio, uint16_t* dest, int)
+    -> decltype(radio.getIrqStatus(dest)) {
+  return radio.getIrqStatus(dest);
+}
+
+template <typename Radio>
+int16_t CallPointerGetIrqStatus(Radio&, uint16_t*, long) {
+  return RADIOLIB_ERR_NONE;
+}
+
 } // namespace radio_sx1262_detail
 
 // Реализация радиоинтерфейса на базе SX1262
@@ -124,10 +148,13 @@ private:
       if constexpr (radio_sx1262_detail::HasIrqFlagsApi<SX1262>::value) {
         return SX1262::getIrqFlags();
       } else if constexpr (radio_sx1262_detail::HasZeroArgIrqStatusApi<SX1262>::value) {
-        return static_cast<uint32_t>(SX1262::getIrqStatus());
+        return static_cast<uint32_t>(
+            radio_sx1262_detail::CallZeroArgGetIrqStatus(
+                static_cast<SX1262&>(*this), 0));
       } else if constexpr (radio_sx1262_detail::HasPointerIrqStatusApi<SX1262>::value) {
         uint16_t legacyFlags = 0;
-        int16_t state = SX1262::getIrqStatus(&legacyFlags);
+        int16_t state = radio_sx1262_detail::CallPointerGetIrqStatus(
+            static_cast<SX1262&>(*this), &legacyFlags, 0);
         return (state == RADIOLIB_ERR_NONE) ? legacyFlags : 0U;
       } else {
         return 0U;
@@ -147,7 +174,8 @@ private:
     // Совместимость с API, ожидающим возвращение статуса без аргументов
     uint16_t getIrqStatus() {
       if constexpr (radio_sx1262_detail::HasZeroArgIrqStatusApi<SX1262>::value) {
-        return SX1262::getIrqStatus();
+        return radio_sx1262_detail::CallZeroArgGetIrqStatus(
+            static_cast<SX1262&>(*this), 0);
       } else {
         return static_cast<uint16_t>(getIrqFlags());
       }
@@ -156,7 +184,8 @@ private:
     // Совместимость с API, ожидающим указатель на буфер
     int16_t getIrqStatus(uint16_t* dest) {
       if constexpr (radio_sx1262_detail::HasPointerIrqStatusApi<SX1262>::value) {
-        return SX1262::getIrqStatus(dest);
+        return radio_sx1262_detail::CallPointerGetIrqStatus(
+            static_cast<SX1262&>(*this), dest, 0);
       } else {
         if (dest) {
           *dest = static_cast<uint16_t>(getIrqFlags());
