@@ -67,7 +67,7 @@ public:
   bool resetToDefaults();
 
   // Статический вывод активных флагов IRQ SX1262 в лог
-  static void logIrqFlags(uint16_t flags);
+  static void logIrqFlags(RadioLibIrqFlags_t flags);
 
 private:
   static void onDio1Static();            // статический обработчик прерывания

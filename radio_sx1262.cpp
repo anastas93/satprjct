@@ -330,22 +330,22 @@ void RadioSX1262::onDio1Static() {
   }
 }
 
-void RadioSX1262::logIrqFlags(uint16_t flags) {
+void RadioSX1262::logIrqFlags(RadioLibIrqFlags_t flags) {
   // Карта соответствия аппаратных флагов IRQ их человекочитаемым именам
   static constexpr struct {
-    uint16_t mask;
+    RadioLibIrqFlags_t mask;
     const char* name;
   } kIrqMap[] = {
-      {SX126X_IRQ_TX_DONE, "TX_DONE"},
-      {SX126X_IRQ_RX_DONE, "RX_DONE"},
-      {SX126X_IRQ_PREAMBLE_DETECTED, "PREAMBLE_DETECTED"},
-      {SX126X_IRQ_SYNC_WORD_VALID, "SYNCWORD_VALID"},
-      {SX126X_IRQ_HEADER_VALID, "HEADER_VALID"},
-      {SX126X_IRQ_HEADER_ERR, "HEADER_ERR"},
-      {SX126X_IRQ_CRC_ERR, "CRC_ERR"},
-      {SX126X_IRQ_TIMEOUT, "RX_TX_TIMEOUT"},
-      {SX126X_IRQ_CAD_DONE, "CAD_DONE"},
-      {SX126X_IRQ_CAD_DETECTED, "CAD_DETECTED"},
+      {RADIOLIB_SX126X_IRQ_TX_DONE, "TX_DONE"},
+      {RADIOLIB_SX126X_IRQ_RX_DONE, "RX_DONE"},
+      {RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED, "PREAMBLE_DETECTED"},
+      {RADIOLIB_SX126X_IRQ_SYNC_WORD_VALID, "SYNCWORD_VALID"},
+      {RADIOLIB_SX126X_IRQ_HEADER_VALID, "HEADER_VALID"},
+      {RADIOLIB_SX126X_IRQ_HEADER_ERR, "HEADER_ERR"},
+      {RADIOLIB_SX126X_IRQ_CRC_ERR, "CRC_ERR"},
+      {RADIOLIB_SX126X_IRQ_TIMEOUT, "RX_TX_TIMEOUT"},
+      {RADIOLIB_SX126X_IRQ_CAD_DONE, "CAD_DONE"},
+      {RADIOLIB_SX126X_IRQ_CAD_DETECTED, "CAD_DETECTED"},
   };
 
   for (const auto& entry : kIrqMap) {
@@ -356,15 +356,14 @@ void RadioSX1262::logIrqFlags(uint16_t flags) {
 }
 
 void RadioSX1262::handleDio1() {
-  uint16_t irqFlags = 0;                   // здесь окажутся прочитанные флаги IRQ
-  int16_t irqState = radio_.getIrqStatus(&irqFlags);
-  if (irqState == RADIOLIB_ERR_NONE) {
-    logIrqFlags(irqFlags);                 // выводим только активные флаги
+  RadioLibIrqFlags_t irqFlags = radio_.getIrqFlags(); // считываем активные флаги из новой API
+  if (irqFlags == RADIOLIB_SX126X_IRQ_NONE) {
+    DEBUG_LOG("RadioSX1262: событие DIO1 без активных флагов IRQ");
   } else {
-    LOG_WARN_VAL("RadioSX1262: не удалось получить статус IRQ, код=", irqState);
+    logIrqFlags(irqFlags);                 // выводим только активные флаги
   }
 
-  int16_t clearState = radio_.clearIrqStatus();
+  int16_t clearState = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL); // очищаем доступным публичным методом
   if (clearState != RADIOLIB_ERR_NONE) {
     LOG_WARN_VAL("RadioSX1262: не удалось очистить статус IRQ, код=", clearState);
   }
