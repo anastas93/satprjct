@@ -118,6 +118,22 @@ uint8_t testModeLocalCounter = 0;       // локальный счётчик п�
 
 WebServer server(80);       // HTTP-сервер для веб-интерфейса
 
+// Ожидание инициализации Serial с ограничением по времени, чтобы не блокировать запуск Wi-Fi
+bool waitForSerial(unsigned long timeout_ms) {
+#if defined(ARDUINO)
+  const unsigned long start = millis();
+  while (!Serial) {
+    if (timeout_ms > 0 && (millis() - start) >= timeout_ms) {
+      return false;  // истёк тайм-аут ожидания подключения к USB
+    }
+    delay(10);  // предотвращаем срабатывание сторожевого таймера
+  }
+#else
+  (void)timeout_ms;  // в хостовой сборке Serial отсутствует
+#endif
+  return true;
+}
+
 // Предварительные объявления для блоков SSE, чтобы Arduino-процессор прототипов
 // корректно обрабатывал пользовательские типы.
 struct PushClientSession;
@@ -2163,7 +2179,7 @@ String makeAccessPointSsid() {
 }
 
 // Настройка Wi-Fi точки доступа и запуск сервера
-void setupWifi() {
+bool setupWifi() {
   String ssid = makeAccessPointSsid();                   // формируем SSID с суффиксом устройства
 #if defined(ARDUINO)
   // Принудительно отключаем сохранение настроек и переводим модуль в режим точки доступа,
@@ -2196,7 +2212,7 @@ void setupWifi() {
   }
   if (!apStarted) {                                      // создаём AP
     LOG_ERROR("Wi-Fi: не удалось запустить точку доступа %s", ssid.c_str());
-    return;
+    return false;
   }
 
   // Задаём статический IP 192.168.4.1 для точки доступа
@@ -2242,11 +2258,12 @@ void setupWifi() {
 #else
   LOG_INFO("Wi-Fi: веб-сервер запущен в тестовом режиме (SSID %s)", ssid.c_str());
 #endif
+  return true;
 }
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) {}
+  bool serialReady = waitForSerial(1500);                // ждём подключения Serial, но не блокируемся
 #if SR_HAS_ESP_COREDUMP
   gCoreDumpClearPending = true;
   gCoreDumpClearAfterMs = millis() + 500;  // ждём старта фоновых задач
@@ -2255,9 +2272,14 @@ void setup() {
   LogHook::setDispatcher([](const LogHook::Entry& entry) {
     broadcastLogEntry(entry);
   });
+  if (!serialReady) {
+    LOG_WARN("Serial: USB-подключение не обнаружено, продолжаем запуск без ожидания ПК");
+  }
   String backendName = KeyLoader::backendName(KeyLoader::getBackend());
   LOG_INFO("Хранилище ключей: %s", backendName.c_str());
-  setupWifi();                                       // запускаем точку доступа
+  if (!setupWifi()) {                                 // запускаем точку доступа
+    LOG_ERROR("Wi-Fi: веб-интерфейс останется недоступным до перезапуска");
+  }
   radio.begin();
   tx.setAckEnabled(ackEnabled);
   tx.setAckRetryLimit(ackRetryLimit);
