@@ -11,6 +11,7 @@
 #include "libs/bit_interleaver/bit_interleaver.cpp" // битовый интерливинг
 #include "libs/scrambler/scrambler.cpp"             // скремблер
 #include "libs/simple_logger/simple_logger.cpp"     // журнал статусов
+#include "libs/log_hook/log_hook.cpp"               // буфер и push-хук журнала
 #include "libs/received_buffer/received_buffer.cpp" // буфер принятых сообщений
 #include "libs/key_loader/key_loader.cpp"           // загрузка и сохранение ключа
 #include "libs/key_transfer/key_transfer.cpp"       // передача корневого ключа по LoRa

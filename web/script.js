@@ -153,6 +153,13 @@ const UI = {
       awaiting: false,
       progress: new Map(),
     },
+    deviceLog: {
+      initialized: false,
+      loading: false,
+      known: new Set(),
+      lastId: 0,
+      queue: [],
+    },
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
@@ -916,6 +923,9 @@ function setTab(tab) {
     updateChatScrollButton();
   } else {
     updateChatUnreadBadge();
+  }
+  if (tab === "debug") {
+    hydrateDeviceLog({ limit: 150 }).catch((err) => console.warn("[debug] hydrateDeviceLog", err));
   }
 }
 
@@ -2094,6 +2104,41 @@ async function deviceFetch(cmd, params, timeoutMs) {
     }
   }
   return { ok: false, error: lastErr || "Unknown error" };
+}
+
+// Получение последних строк журнала устройства через HTTP
+async function fetchDeviceLogHistory(limit, timeoutMs) {
+  const timeout = timeoutMs || 4000;
+  let base;
+  try {
+    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+  } catch (e) {
+    base = new URL("http://192.168.4.1");
+  }
+  const url = new URL("/api/logs", base);
+  if (Number.isFinite(limit) && limit > 0) {
+    url.searchParams.set("n", String(Math.round(limit)));
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const res = await fetch(url.toString(), { signal: ctrl.signal, headers: { "Accept": "application/json" } });
+    clearTimeout(timer);
+    if (!res.ok) return { ok: false, error: "HTTP " + res.status };
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (err) {
+      return { ok: false, error: "invalid JSON" };
+    }
+    if (!data || !Array.isArray(data.logs)) {
+      return { ok: false, error: "missing logs" };
+    }
+    return { ok: true, logs: data.logs };
+  } catch (err) {
+    clearTimeout(timer);
+    return { ok: false, error: String(err) };
+  }
 }
 function summarizeResponse(text, fallback) {
   const raw = text != null ? String(text) : "";
@@ -3380,6 +3425,22 @@ function getReceivedMonitorState() {
   return state;
 }
 
+// Состояние буфера журнала устройства для вкладки Debug
+function getDeviceLogState() {
+  if (!UI.state || typeof UI.state !== "object") UI.state = {};
+  let state = UI.state.deviceLog;
+  if (!state || typeof state !== "object") {
+    state = { initialized: false, loading: false, known: new Set(), lastId: 0, queue: [] };
+    UI.state.deviceLog = state;
+  }
+  if (!(state.known instanceof Set)) {
+    state.known = new Set(state.known ? Array.from(state.known) : []);
+  }
+  if (!Number.isFinite(state.lastId)) state.lastId = 0;
+  if (!Array.isArray(state.queue)) state.queue = [];
+  return state;
+}
+
 // Форматирование продолжительности запроса в человеко-понятный вид
 function formatDurationMs(ms) {
   if (!Number.isFinite(ms)) return "—";
@@ -3393,6 +3454,13 @@ function formatDurationMs(ms) {
   const hours = Math.floor(minutes / 60);
   const restMin = minutes - hours * 60;
   return `${hours} ч ${restMin} мин`;
+}
+
+// Форматируем аппаратное uptime устройства с префиксом «+»
+function formatDeviceUptime(ms) {
+  if (!Number.isFinite(ms)) return "+0 мс";
+  const normalized = ms < 0 ? 0 : ms;
+  return "+" + formatDurationMs(normalized);
 }
 
 // Форматирование относительного времени (например, «5 с назад»)
@@ -3613,6 +3681,26 @@ function handleReceivedPushMessage(event) {
   scheduleReceivedRefreshFromPush(payload);
 }
 
+function handleDeviceLogPushMessage(event) {
+  const raw = event && typeof event.data === "string" ? event.data : "";
+  if (!raw) return;
+  let payload = null;
+  try {
+    payload = JSON.parse(raw);
+  } catch (err) {
+    console.warn("[push] не удалось распарсить log-сообщение:", err, raw);
+    return;
+  }
+  if (!payload || typeof payload.text === "undefined") return;
+  const state = getDeviceLogState();
+  const entry = { id: payload.id, uptime: payload.uptime, text: payload.text };
+  if (state.loading) {
+    state.queue.push(entry);
+    return;
+  }
+  appendDeviceLogEntries([entry]);
+}
+
 function closeReceivedPushChannel(opts) {
   const options = opts || {};
   const state = getReceivedMonitorState();
@@ -3669,6 +3757,12 @@ function openReceivedPushChannel() {
       push.connected = true;
       push.lastEventAt = Date.now();
       handleReceivedPushMessage(event);
+      updateReceivedMonitorDiagnostics();
+    });
+    source.addEventListener("log", (event) => {
+      push.connected = true;
+      push.lastEventAt = Date.now();
+      handleDeviceLogPushMessage(event);
       updateReceivedMonitorDiagnostics();
     });
     source.addEventListener("error", () => {
@@ -8786,15 +8880,102 @@ function classifyDebugMessage(text) {
   if (trimmed.startsWith("→") || low.startsWith("tx") || low.startsWith("cmd") || low.startsWith("send")) return "action";
   return "info";
 }
-function debugLog(text) {
+
+// Добавление записей устройства в область Debug
+function appendDeviceLogEntries(entries, opts) {
+  const log = UI.els.debugLog;
+  if (!log) return;
+  const list = Array.isArray(entries) ? entries : [];
+  const options = opts || {};
+  const state = getDeviceLogState();
+  const replace = options.replace === true;
+  if (replace) {
+    const nodes = log.querySelectorAll('.debug-line[data-origin="device"]');
+    nodes.forEach((node) => node.remove());
+    state.known.clear();
+    state.lastId = 0;
+  }
+  if (list.length === 0) {
+    if (replace) state.initialized = true;
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  let appended = 0;
+  for (const item of list) {
+    if (!item) continue;
+    const text = item.text != null ? String(item.text) : "";
+    if (!text) continue;
+    const idValue = Number(item.id);
+    const id = Number.isFinite(idValue) && idValue > 0 ? idValue : null;
+    if (id != null) {
+      if (state.known.has(id)) continue;
+      state.known.add(id);
+      if (id > state.lastId) state.lastId = id;
+    }
+    const uptimeValue = Number(item.uptime != null ? item.uptime : item.uptimeMs);
+    const uptime = Number.isFinite(uptimeValue) && uptimeValue >= 0 ? uptimeValue : null;
+    debugLog(text, {
+      origin: "device",
+      uptimeMs: uptime,
+      id: id,
+      fragment,
+    });
+    appended += 1;
+  }
+  if (appended > 0) {
+    log.appendChild(fragment);
+    log.scrollTop = log.scrollHeight;
+  }
+  if (replace) state.initialized = true;
+}
+
+// Загрузка последних сообщений журнала с устройства
+async function hydrateDeviceLog(options) {
+  const opts = options || {};
+  const state = getDeviceLogState();
+  if (state.loading) return;
+  if (state.initialized && !opts.force) return;
+  state.loading = true;
+  try {
+    const res = await fetchDeviceLogHistory(opts.limit || 150, opts.timeoutMs || 4000);
+    if (!res.ok) {
+      if (!opts.silent) debugLog("ERR LOGS: " + (res.error || "unknown"));
+    } else {
+      appendDeviceLogEntries(res.logs, { replace: true });
+      if (state.queue.length) {
+        const pending = state.queue.splice(0, state.queue.length);
+        appendDeviceLogEntries(pending);
+      }
+    }
+  } catch (err) {
+    if (!opts.silent) debugLog("ERR LOGS: " + err);
+  } finally {
+    state.loading = false;
+  }
+}
+function debugLog(text, opts) {
+  const options = opts || {};
   const log = UI.els.debugLog;
   if (!log) return;
   const line = document.createElement("div");
   const type = classifyDebugMessage(text);
   line.className = "debug-line debug-line--" + type;
-  line.textContent = "[" + new Date().toLocaleTimeString() + "] " + text;
-  log.appendChild(line);
-  log.scrollTop = log.scrollHeight;
+  if (options.origin) line.dataset.origin = options.origin;
+  if (options.id != null) line.dataset.id = String(options.id);
+  if (options.uptimeMs != null && Number.isFinite(options.uptimeMs)) {
+    line.dataset.uptime = String(options.uptimeMs);
+  }
+  const stamp = options.timestamp != null
+    ? new Date(options.timestamp).toLocaleTimeString()
+    : (options.uptimeMs != null && Number.isFinite(options.uptimeMs)
+        ? formatDeviceUptime(options.uptimeMs)
+        : new Date().toLocaleTimeString());
+  line.textContent = "[" + stamp + "] " + text;
+  const target = options.fragment && typeof options.fragment.appendChild === "function" ? options.fragment : log;
+  target.appendChild(line);
+  if (!options.fragment) {
+    log.scrollTop = log.scrollHeight;
+  }
 }
 
 async function loadVersion() {

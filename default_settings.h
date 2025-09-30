@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <array>
 #include "channel_bank.h" // Банк каналов
+#include "libs/log_hook/log_hook.h" // буферизованный хук логирования
 #include <string>
 #include <cstdarg>  // для работы с переменным числом аргументов
 #include <cstdio>   // для vsnprintf
@@ -69,6 +70,7 @@ namespace LogDetail {
     if (!shouldPrint(level, String(msg))) return;
     Serial.println(msg);
     Serial.flush();
+    LogHook::append(String(msg));
   }
 
   // Вывод строки с значением и фильтрацией дублей
@@ -78,6 +80,7 @@ namespace LogDetail {
     if (!shouldPrint(level, full)) return;
     Serial.print(prefix); Serial.println(val);
     Serial.flush();
+    LogHook::append(full);
   }
 
   // Форматированный вывод в стиле printf с фильтрацией дублей
@@ -112,6 +115,7 @@ namespace LogDetail {
     std::string s(msg);
     if (!shouldPrint(level, s)) return;
     std::cout << msg << std::endl;
+    LogHook::append(s);
   }
 
   // Вывод строки с значением в стандартный поток
@@ -122,6 +126,7 @@ namespace LogDetail {
     std::string s = oss.str();
     if (!shouldPrint(level, s)) return;
     std::cout << s << std::endl;
+    LogHook::append(s);
   }
 
   // Форматированный вывод в стиле printf с фильтрацией дублей
