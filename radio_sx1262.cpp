@@ -7,40 +7,10 @@
 #include <type_traits>
 #include <utility>
 
-namespace {
-
-// Компиляторные признаки доступных вариантов API обработки IRQ в RadioLib
-template <typename T, typename = void>
-struct HasIrqFlagsApi : std::false_type {};
-
-template <typename T>
-struct HasIrqFlagsApi<
-    T,
-    std::void_t<decltype(std::declval<T&>().getIrqFlags()),
-                decltype(std::declval<T&>().clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL))>>
-    : std::true_type {};
-
-template <typename T, typename = void>
-struct HasZeroArgIrqStatusApi : std::false_type {};
-
-template <typename T>
-struct HasZeroArgIrqStatusApi<
-    T,
-    std::void_t<decltype(std::declval<T&>().getIrqStatus())>> : std::true_type {};
-
-template <typename T, typename = void>
-struct HasPointerIrqStatusApi : std::false_type {};
-
-template <typename T>
-struct HasPointerIrqStatusApi<
-    T,
-    std::void_t<decltype(std::declval<T&>().getIrqStatus(static_cast<uint16_t*>(nullptr)))>>
-    : std::true_type {};
-
-template <typename T>
-struct AlwaysFalse : std::false_type {};
-
-} // namespace
+using radio_sx1262_detail::AlwaysFalse;
+using radio_sx1262_detail::HasIrqFlagsApi;
+using radio_sx1262_detail::HasPointerIrqStatusApi;
+using radio_sx1262_detail::HasZeroArgIrqStatusApi;
 
 RadioSX1262* RadioSX1262::instance_ = nullptr; // инициализация статического указателя
 

@@ -2,8 +2,46 @@
 #include <RadioLib.h>
 #include <vector>
 #include <cstdint>
+#include <type_traits>
+#include <utility>
 #include "radio_interface.h"
 #include "channel_bank.h"
+
+// Вспомогательные признаки для определения доступного варианта IRQ-API в RadioLib
+namespace radio_sx1262_detail {
+
+template <typename T, typename = void>
+struct HasIrqFlagsApi : std::false_type {};
+
+template <typename T>
+struct HasIrqFlagsApi<
+    T,
+    std::void_t<decltype(std::declval<T&>().getIrqFlags()),
+                decltype(std::declval<T&>().clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL))>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct HasZeroArgIrqStatusApi : std::false_type {};
+
+template <typename T>
+struct HasZeroArgIrqStatusApi<
+    T,
+    std::void_t<decltype(std::declval<T&>().getIrqStatus())>> : std::true_type {};
+
+template <typename T, typename = void>
+struct HasPointerIrqStatusApi : std::false_type {};
+
+template <typename T>
+struct HasPointerIrqStatusApi<
+    T,
+    std::void_t<decltype(
+        std::declval<T&>().getIrqStatus(static_cast<uint16_t*>(nullptr)))>>
+    : std::true_type {};
+
+template <typename T>
+struct AlwaysFalse : std::false_type {};
+
+} // namespace radio_sx1262_detail
 
 // Реализация радиоинтерфейса на базе SX1262
 class RadioSX1262 : public IRadio {
@@ -80,26 +118,51 @@ private:
   struct PublicSX1262 : public SX1262 {
     using SX1262::SX1262;
     using SX1262::clearIrqStatus;
-    using SX1262::getIrqStatus;
 
-    // Совместим интерфейсы RadioLib: новые обёртки сводятся к универсальным вызовам
-    uint16_t getIrqFlags() {
-      // РадиоLib в новых версиях возвращает флаги через getIrqFlags(),
-      // поэтому пробрасываем их через доступный getIrqStatus().
-      return SX1262::getIrqStatus();
-    }
-
-    int16_t clearIrqFlags(uint16_t /*mask*/) {
-      // Библиотека очищает все флаги сразу, поэтому игнорируем маску.
-      return SX1262::clearIrqStatus();
-    }
-
-    int16_t getIrqStatus(uint16_t* dest) {
-      // Старый интерфейс ожидал указатель: наполняем его и сообщаем об успехе.
-      if (dest) {
-        *dest = SX1262::getIrqStatus();
+    // Универсальный доступ к флагам IRQ с учётом варианта API библиотеки
+    uint32_t getIrqFlags() {
+      if constexpr (radio_sx1262_detail::HasIrqFlagsApi<SX1262>::value) {
+        return SX1262::getIrqFlags();
+      } else if constexpr (radio_sx1262_detail::HasZeroArgIrqStatusApi<SX1262>::value) {
+        return static_cast<uint32_t>(SX1262::getIrqStatus());
+      } else if constexpr (radio_sx1262_detail::HasPointerIrqStatusApi<SX1262>::value) {
+        uint16_t legacyFlags = 0;
+        int16_t state = SX1262::getIrqStatus(&legacyFlags);
+        return (state == RADIOLIB_ERR_NONE) ? legacyFlags : 0U;
+      } else {
+        return 0U;
       }
-      return RADIOLIB_ERR_NONE;
+    }
+
+    // Очистка флагов IRQ через доступный механизм
+    int16_t clearIrqFlags(uint32_t mask) {
+      if constexpr (radio_sx1262_detail::HasIrqFlagsApi<SX1262>::value) {
+        return SX1262::clearIrqFlags(mask);
+      } else {
+        (void)mask;
+        return SX1262::clearIrqStatus();
+      }
+    }
+
+    // Совместимость с API, ожидающим возвращение статуса без аргументов
+    uint16_t getIrqStatus() {
+      if constexpr (radio_sx1262_detail::HasZeroArgIrqStatusApi<SX1262>::value) {
+        return SX1262::getIrqStatus();
+      } else {
+        return static_cast<uint16_t>(getIrqFlags());
+      }
+    }
+
+    // Совместимость с API, ожидающим указатель на буфер
+    int16_t getIrqStatus(uint16_t* dest) {
+      if constexpr (radio_sx1262_detail::HasPointerIrqStatusApi<SX1262>::value) {
+        return SX1262::getIrqStatus(dest);
+      } else {
+        if (dest) {
+          *dest = static_cast<uint16_t>(getIrqFlags());
+        }
+        return RADIOLIB_ERR_NONE;
+      }
     }
   };
 
