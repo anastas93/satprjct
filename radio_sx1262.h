@@ -127,6 +127,8 @@ public:
 
   // Статический вывод активных флагов IRQ SX1262 в лог
   static void logIrqFlags(uint32_t flags);
+  // Принудительная проверка и вывод отложенных IRQ-логов (обходной вызов из внешнего кода)
+  void flushPendingIrqLog();
 
 private:
   static void onDio1Static();            // статический обработчик прерывания
