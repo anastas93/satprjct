@@ -209,21 +209,21 @@ int main() {
   txPriority.setSendPause(0);
   const char priorityMsg[] = "DATA";
   txPriority.queue(reinterpret_cast<const uint8_t*>(priorityMsg), sizeof(priorityMsg));
-  const uint8_t ackPayload = protocol::ack::MARKER;
-  txPriority.queue(&ackPayload, 1);            // отправляем ACK поверх очереди
+  const uint8_t ackPayloadMarker = protocol::ack::MARKER;
+  txPriority.queue(&ackPayloadMarker, 1);      // отправляем ACK поверх очереди
   txPriority.loop();                           // первый кадр обязан быть ACK
   assert(radioPriority.history.size() == 1);
   auto ackFrame = radioPriority.history.front();
   FrameHeader ackHdr;
-  std::vector<uint8_t> ackPayload;
+  std::vector<uint8_t> ackPayloadVec;
   size_t ackHeaderBytes = 0;
-  assert(decodeFrameNoCrc(ackFrame, ackHdr, ackPayload, ackHeaderBytes));
+  assert(decodeFrameNoCrc(ackFrame, ackHdr, ackPayloadVec, ackHeaderBytes));
   assert(ackHeaderBytes == FrameHeader::SIZE);
   assert((ackHdr.getFlags() & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0);
   assert(ackHdr.getPayloadLen() == 1);
   assert(ackFrame.size() == FrameHeader::SIZE + ackHdr.getPayloadLen());
-  assert(ackPayload.size() == 1);
-  assert(ackPayload.front() == protocol::ack::MARKER);
+  assert(ackPayloadVec.size() == 1);
+  assert(ackPayloadVec.front() == protocol::ack::MARKER);
   RxModule rxAck;
   std::vector<uint8_t> ackPlain;
   bool ackNotified = false;

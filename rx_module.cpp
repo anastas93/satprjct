@@ -264,12 +264,17 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   };
 
   extract_payload(payload_offset);
-  if (payload_buf_.size() != hdr.getPayloadLen() && headers_match && frame_buf_.size() >= FrameHeader::SIZE * 2) {
-    payload_offset = FrameHeader::SIZE * 2;               // пробуем интерпретацию старого формата
-    extract_payload(payload_offset);
+  bool payload_len_ok = (payload_buf_.size() == hdr.getPayloadLen());
+  if (!payload_len_ok && frame_buf_.size() >= FrameHeader::SIZE * 2) {
+    size_t alt_offset = FrameHeader::SIZE * 2;
+    extract_payload(alt_offset);
+    if (payload_buf_.size() == hdr.getPayloadLen()) {
+      payload_offset = alt_offset;                        // фиксируем смещение без дублированного заголовка
+      payload_len_ok = true;
+    }
   }
   profile_scope.mark(&ProfilingSnapshot::payload_extract);
-  if (payload_buf_.size() != hdr.getPayloadLen()) {
+  if (!payload_len_ok) {
     profile_scope.markDrop("несовпадение длины payload");
     return;
   }

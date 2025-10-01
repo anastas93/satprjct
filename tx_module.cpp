@@ -768,7 +768,7 @@ bool TxModule::processImmediateAck() {
   auto now = std::chrono::steady_clock::now();
   if (ack_delay_ms_ != 0 && now < next_ack_send_time_) {
     radio_.ensureReceiveMode();                    // выдерживаем паузу перед ответом
-    return false;
+    return true;                                   // сообщаем циклу, что ACK ещё ожидает отправки
   }
   PendingMessage ack = std::move(ack_queue_.front());
   ack_queue_.pop_front();
