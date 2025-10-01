@@ -4,12 +4,13 @@
 #if defined(ARDUINO)
 
 namespace {
-  // Проверка, содержит ли строка только печатные символы и пробелы/табуляции
+  // Проверка, содержит ли строка только печатные символы и пробелы/табуляции.
+  // Байты с установленным старшим битом считаем частью UTF-8 и разрешаем.
   bool isMostlyPrintable(const String& s) {
     for (size_t i = 0; i < s.length(); ++i) {
-      char c = s.charAt(i);
+      unsigned char c = static_cast<unsigned char>(s.charAt(i));
       if (c == '\t') continue;
-      if (static_cast<unsigned char>(c) < 0x20 || static_cast<unsigned char>(c) > 0x7E) {
+      if (c < 0x20 || c == 0x7F) {
         return false;
       }
     }
@@ -115,7 +116,17 @@ void SerialMirror::flushBufferToLog() {
   if (line.length() == 0) {
     return;
   }
-  if (isMostlyPrintable(line)) {
+  bool printable = isMostlyPrintable(line);
+  if (!printable) {
+    // Отдельно проверяем наличие UTF-8-байтов, чтобы не переводить кириллицу в HEX.
+    for (size_t i = 0; i < line.length(); ++i) {
+      if (static_cast<unsigned char>(line.charAt(i)) >= 0x80) {
+        LogHook::append(line);
+        return;
+      }
+    }
+  }
+  if (printable) {
     LogHook::append(line);
   } else {
     LogHook::append(toHexLine(line));
