@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <array>
 #include <vector>
+#include <deque>
 #include <string>
 #include <cstring> // для strlen
 #include <algorithm> // для std::equal
@@ -140,7 +141,9 @@ bool waitForSerial(unsigned long timeout_ms) {
 struct PushClientSession;
 bool sendSseFrame(PushClientSession& session, const String& event, const String& data, uint32_t id);
 String buildLogPayload(const LogHook::Entry& entry);
-void broadcastLogEntry(const LogHook::Entry& entry);
+void enqueueLogEntry(const LogHook::Entry& entry);
+bool broadcastLogEntry(const LogHook::Entry& entry);
+void flushPendingLogEntries();
 
 // Состояние генератора тестовых входящих сообщений
 struct TestRxmState {
@@ -484,6 +487,16 @@ struct PushClientSession {
 
 static std::vector<PushClientSession> gPushSessions;  // список подписчиков SSE
 static uint32_t gPushNextEventId = 1;                 // глобальный счётчик событий
+static std::deque<LogHook::Entry> gPendingLogEntries; // очередь строк журнала для отложенной отправки
+static constexpr size_t kMaxPendingLogEntries = 64;   // ограничение размера очереди журнала
+
+// Сохраняем запись журнала в локальной очереди, чтобы не блокировать Serial при отправке SSE
+void enqueueLogEntry(const LogHook::Entry& entry) {
+  if (gPendingLogEntries.size() >= kMaxPendingLogEntries) {
+    gPendingLogEntries.pop_front(); // отбрасываем самую старую запись при переполнении
+  }
+  gPendingLogEntries.push_back(entry);
+}
 
 // Формируем JSON-представление для уведомления о новом элементе буфера
 String buildReceivedPushPayload(ReceivedBuffer::Kind kind, const ReceivedBuffer::Item& item) {
@@ -596,18 +609,37 @@ void broadcastReceivedPush(ReceivedBuffer::Kind kind, const ReceivedBuffer::Item
 }
 
 // Рассылка строки журнала всем подписчикам SSE
-void broadcastLogEntry(const LogHook::Entry& entry) {
-  if (gPushSessions.empty()) return;
+bool broadcastLogEntry(const LogHook::Entry& entry) {
+  if (gPushSessions.empty()) return false;
   maintainPushSessions();
   String payload = buildLogPayload(entry);
   String eventName = F("log");
   uint32_t eventId = gPushNextEventId++;
+  bool delivered = false;
   for (auto it = gPushSessions.begin(); it != gPushSessions.end(); ) {
     if (!sendSseFrame(*it, eventName, payload, eventId)) {
       it->client.stop();
       it = gPushSessions.erase(it);
     } else {
       ++it;
+      delivered = true;
+    }
+  }
+  return delivered;
+}
+
+// Пытаемся передать накопленные строки журнала активным SSE-клиентам
+void flushPendingLogEntries() {
+  if (gPendingLogEntries.empty() || gPushSessions.empty()) {
+    return; // либо нечего отправлять, либо получателей пока нет
+  }
+  while (!gPendingLogEntries.empty() && !gPushSessions.empty()) {
+    LogHook::Entry entry = gPendingLogEntries.front();
+    gPendingLogEntries.pop_front();
+    if (!broadcastLogEntry(entry)) {
+      // Никто не получил запись (клиенты отключились) — вернём строку и подождём новых подключений
+      gPendingLogEntries.push_front(entry);
+      break;
     }
   }
 }
@@ -657,6 +689,7 @@ void handleSseConnect() {
     gPushSessions.pop_back();
     return;
   }
+  flushPendingLogEntries(); // сразу отдаём накопленные строки журнала новому подписчику
   LOG_INFO("HTTP push: новое подключение");
 }
 
@@ -2271,7 +2304,7 @@ void setup() {
 #endif
   KeyLoader::ensureStorage();
   LogHook::setDispatcher([](const LogHook::Entry& entry) {
-    broadcastLogEntry(entry);
+    enqueueLogEntry(entry); // складываем строку в очередь для неблокирующей доставки
   });
   if (!serialReady) {
     LOG_WARN("Serial: USB-подключение не обнаружено, продолжаем запуск без ожидания ПК");
@@ -2331,6 +2364,7 @@ void loop() {
 #endif
     server.handleClient();                  // обработка HTTP-запросов
     maintainPushSessions();                 // поддержка активных push-клиентов
+    flushPendingLogEntries();               // передаём накопленные логи без блокировок Serial
     radio.loop();                           // обработка входящих пакетов
     rx.tickCleanup();                       // фоновая очистка очередей RX даже без новых кадров
     tx.loop();                              // обработка очередей передачи
