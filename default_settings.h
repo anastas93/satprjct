@@ -59,20 +59,13 @@ namespace DefaultSettings {
 // Вспомогательные функции фильтрации повторяющихся сообщений
 namespace LogDetail {
 #ifdef ARDUINO
-  // Проверка необходимости вывода сообщения (Arduino)
-  inline bool shouldPrint(DefaultSettings::LogLevel level, const String& msg) {
-    static String last;                                   // последнее выведенное сообщение
+  // Проверка необходимости вывода сообщения (Arduino) без фильтрации дублей
+  inline bool shouldPrint(DefaultSettings::LogLevel level, const String& /*msg*/) {
     if (!DefaultSettings::DEBUG || level > DefaultSettings::LOG_LEVEL) return false;
-    if (level == DefaultSettings::LogLevel::DEBUG) {      // для DEBUG всегда разрешаем вывод
-      last = msg;                                         // сохраняем сообщение для консистентности
-      return true;
-    }
-    if (last == msg) return false;                        // пропускаем дубль для уровней выше DEBUG
-    last = msg;
     return true;
   }
 
-  // Вывод строки с фильтрацией дублей
+  // Вывод строки без фильтрации дублей
   inline void logMsg(DefaultSettings::LogLevel level, const char* msg) {
     if (!shouldPrint(level, String(msg))) return;
     Serial.println(msg);
@@ -82,7 +75,7 @@ namespace LogDetail {
 #endif
   }
 
-  // Вывод строки с значением и фильтрацией дублей
+  // Вывод строки со значением без фильтрации дублей
   template <typename T>
   inline void logMsgVal(DefaultSettings::LogLevel level, const char* prefix, const T& val) {
     String full = String(prefix) + String(val);
@@ -94,7 +87,7 @@ namespace LogDetail {
 #endif
   }
 
-  // Форматированный вывод в стиле printf с фильтрацией дублей
+  // Форматированный вывод в стиле printf без фильтрации дублей
   inline void logMsgFmt(DefaultSettings::LogLevel level, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -112,16 +105,9 @@ namespace LogDetail {
     logMsg(level, buffer.get());
   }
 #else
-  // Проверка необходимости вывода сообщения (стандартный вывод)
-  inline bool shouldPrint(DefaultSettings::LogLevel level, const std::string& msg) {
-    static std::string last;                              // последнее выведенное сообщение
+  // Проверка необходимости вывода сообщения (стандартный вывод) без фильтрации дублей
+  inline bool shouldPrint(DefaultSettings::LogLevel level, const std::string& /*msg*/) {
     if (!DefaultSettings::DEBUG || level > DefaultSettings::LOG_LEVEL) return false;
-    if (level == DefaultSettings::LogLevel::DEBUG) {      // для DEBUG не фильтруем повторяющиеся строки
-      last = msg;                                         // обновляем последнее сообщение
-      return true;
-    }
-    if (last == msg) return false;                        // пропускаем дубль для INFO/WARN/ERROR
-    last = msg;
     return true;
   }
 
@@ -148,7 +134,7 @@ namespace LogDetail {
 #endif
   }
 
-  // Форматированный вывод в стиле printf с фильтрацией дублей
+    // Форматированный вывод в стиле printf без фильтрации дублей
   inline void logMsgFmt(DefaultSettings::LogLevel level, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
