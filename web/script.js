@@ -74,6 +74,10 @@ const TWO_PI = Math.PI * 2;
 const POINTING_DEFAULT_MIN_ELEVATION = 10; // минимальный угол возвышения по умолчанию
 const POINTING_COMPASS_OFFSET_DEG = 180; // отображаем юг в верхней части компаса
 
+// Константы счётчика непрочитанных сообщений чата выносим наверх, чтобы избежать ошибок инициализации
+const CHAT_UNREAD_STORAGE_KEY = "chatUnread"; // ключ хранения количества непрочитанных сообщений
+const CHAT_UNREAD_MAX = 999; // максимальное значение счётчика, отображаемое в бейдже
+
 /* Состояние интерфейса */
 const UI = {
   tabs: ["chat", "channels", "pointing", "settings", "security", "debug"],
@@ -207,9 +211,6 @@ const IMAGE_ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/heic", "i
 const IMAGE_MAX_SOURCE_SIZE = 20 * 1024 * 1024; // 20 МБ — верхний предел исходного файла
 const IMAGE_CACHE_LIMIT = 32; // ограничение количества кэшированных изображений в памяти
 let chatDropCounter = 0; // глубина вложенных dragenter для зоны чата
-
-const CHAT_UNREAD_STORAGE_KEY = "chatUnread"; // ключ хранения количества непрочитанных сообщений
-const CHAT_UNREAD_MAX = 999; // максимальное значение счётчика, отображаемое в бейдже
 
 // Справочные данные по каналам из CSV
 const channelReference = {
