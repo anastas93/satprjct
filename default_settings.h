@@ -63,7 +63,11 @@ namespace LogDetail {
   inline bool shouldPrint(DefaultSettings::LogLevel level, const String& msg) {
     static String last;                                   // последнее выведенное сообщение
     if (!DefaultSettings::DEBUG || level > DefaultSettings::LOG_LEVEL) return false;
-    if (last == msg) return false;                        // пропускаем дубль
+    if (level == DefaultSettings::LogLevel::DEBUG) {      // для DEBUG всегда разрешаем вывод
+      last = msg;                                         // сохраняем сообщение для консистентности
+      return true;
+    }
+    if (last == msg) return false;                        // пропускаем дубль для уровней выше DEBUG
     last = msg;
     return true;
   }
@@ -112,7 +116,11 @@ namespace LogDetail {
   inline bool shouldPrint(DefaultSettings::LogLevel level, const std::string& msg) {
     static std::string last;                              // последнее выведенное сообщение
     if (!DefaultSettings::DEBUG || level > DefaultSettings::LOG_LEVEL) return false;
-    if (last == msg) return false;                        // пропускаем дубль
+    if (level == DefaultSettings::LogLevel::DEBUG) {      // для DEBUG не фильтруем повторяющиеся строки
+      last = msg;                                         // обновляем последнее сообщение
+      return true;
+    }
+    if (last == msg) return false;                        // пропускаем дубль для INFO/WARN/ERROR
     last = msg;
     return true;
   }
