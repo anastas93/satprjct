@@ -77,6 +77,7 @@ const POINTING_COMPASS_OFFSET_DEG = 180; // отображаем юг в вер�
 // Константы счётчика непрочитанных сообщений чата выносим наверх, чтобы избежать ошибок инициализации
 const CHAT_UNREAD_STORAGE_KEY = "chatUnread"; // ключ хранения количества непрочитанных сообщений
 const CHAT_UNREAD_MAX = 999; // максимальное значение счётчика, отображаемое в бейдже
+const CHAT_HISTORY_LIMIT = 500; // максимальное количество сообщений, сохраняемых в истории чата
 
 /* Состояние интерфейса */
 const UI = {
@@ -1141,6 +1142,65 @@ function getChatHistory() {
   return UI.state.chatHistory;
 }
 
+// Сдвигаем индексы элементов прогресса при обрезке истории чата
+function adjustChatProgressAfterTrim(removed) {
+  if (!Number.isFinite(removed) || removed <= 0) return;
+  const receivedState = UI.state && UI.state.received ? UI.state.received : null;
+  if (!receivedState || !(receivedState.progress instanceof Map)) return;
+  let changed = false;
+  for (const [key, info] of Array.from(receivedState.progress.entries())) {
+    if (!info || typeof info.index !== "number") {
+      receivedState.progress.delete(key);
+      changed = true;
+      continue;
+    }
+    const nextIndex = info.index - removed;
+    if (nextIndex < 0) {
+      receivedState.progress.delete(key);
+      changed = true;
+    } else if (nextIndex !== info.index) {
+      info.index = nextIndex;
+      changed = true;
+    }
+  }
+  if (changed && receivedState.progress.size === 0) {
+    setChatReceivingIndicatorState(false);
+  }
+}
+
+// Перестраиваем DOM истории чата и атрибуты dataset.index после обрезки
+function adjustChatDomAfterTrim(removed) {
+  if (!Number.isFinite(removed) || removed <= 0) return;
+  if (!UI.els || !UI.els.chatLog) return;
+  const currentMessages = UI.els.chatLog.querySelectorAll(".msg");
+  let removedCount = 0;
+  for (let i = 0; i < currentMessages.length && removedCount < removed; i += 1) {
+    const node = currentMessages[i];
+    if (node && node.parentNode) {
+      node.parentNode.removeChild(node);
+      removedCount += 1;
+    }
+  }
+  const nodes = UI.els.chatLog.querySelectorAll(".msg");
+  for (let i = 0; i < nodes.length; i += 1) {
+    nodes[i].dataset.index = String(i);
+  }
+}
+
+// Универсальная функция ограничения размера истории чата с синхронизацией индексов
+function applyChatHistoryLimit(entries, options) {
+  const opts = options || {};
+  const limitRaw = Number.isFinite(opts.limit) ? Number(opts.limit) : CHAT_HISTORY_LIMIT;
+  const limit = limitRaw > 0 ? Math.floor(limitRaw) : CHAT_HISTORY_LIMIT;
+  if (!Array.isArray(entries) || !Number.isFinite(limit) || limit <= 0) return 0;
+  const overflow = entries.length - limit;
+  if (overflow <= 0) return 0;
+  entries.splice(0, overflow);
+  if (opts.updateProgress !== false) adjustChatProgressAfterTrim(overflow);
+  if (opts.updateDom !== false) adjustChatDomAfterTrim(overflow);
+  return overflow;
+}
+
 function normalizeImageProfile(value) {
   const key = typeof value === "string" && value ? value.toUpperCase() : "S";
   if (Object.prototype.hasOwnProperty.call(IMAGE_PROFILES, key)) {
@@ -1176,8 +1236,9 @@ function imageNameFromRawName(rawName) {
 }
 function saveChatHistory() {
   const entries = getChatHistory();
+  applyChatHistoryLimit(entries, { updateDom: false, updateProgress: false });
   try {
-    storage.set("chatHistory", JSON.stringify(entries.slice(-500)));
+    storage.set("chatHistory", JSON.stringify(entries));
   } catch (err) {
     console.warn("[chat] не удалось сохранить историю:", err);
   }
@@ -1377,6 +1438,7 @@ function loadChatHistory() {
   }
   if (!Array.isArray(entries)) entries = [];
   const normalized = normalizeChatEntries(entries);
+  applyChatHistoryLimit(normalized, { updateDom: false });
   UI.state.chatHistory = normalized;
   if (UI.els.chatLog) UI.els.chatLog.innerHTML = "";
   UI.state.chatHydrating = true;
@@ -1401,8 +1463,10 @@ function persistChat(message, author, meta) {
   }
   if (!record.role) record.role = author === "you" ? "user" : "system";
   entries.push(record);
+  applyChatHistoryLimit(entries);
+  const index = entries.length - 1;
   saveChatHistory();
-  return { record, index: entries.length - 1 };
+  return { record, index };
 }
 function addChatMessage(entry, index, options) {
   const opts = options || {};
