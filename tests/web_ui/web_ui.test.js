@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createWebContext } = require('./context');
+const debugLogSamples = require('./debug_log_types.json');
 
 // Базовый контекст браузера для большинства проверок
 const base = createWebContext();
@@ -296,4 +297,23 @@ test('classifyDebugMessage и normalizeVersionText', () => {
 
   assert.equal(ctx.normalizeVersionText('version = "v1.2.3"'), '1.2.3');
   assert.equal(ctx.normalizeVersionText('unknown'), '');
+});
+
+// Проверяем отображение всех типов сообщений в debug-log
+test('debugLog создаёт элементы для каждого типа сообщения', () => {
+  const { context: logCtx, document: logDoc } = createWebContext();
+  const debugRoot = logDoc.createElement('div');
+  debugRoot.scrollHeight = 0;
+  logCtx.UI.els.debugLog = debugRoot;
+
+  debugLogSamples.forEach((sample, index) => {
+    const timestamp = Date.UTC(2024, 0, 1, 0, 0, index);
+    logCtx.debugLog(sample.text, { timestamp });
+    const node = debugRoot.children[index];
+    assert.equal(node.className, `debug-line debug-line--${sample.type}`);
+    assert(node.textContent.includes(sample.text));
+    assert(node.textContent.startsWith('['));
+  });
+
+  assert.equal(debugRoot.children.length, debugLogSamples.length);
 });
