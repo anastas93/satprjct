@@ -346,17 +346,18 @@ void RadioSX1262::logIrqFlags(uint32_t flags) {
   static constexpr struct {
     uint32_t mask;
     const char* name;
+    const char* description;
   } kIrqMap[] = {
-      {RADIOLIB_SX126X_IRQ_TX_DONE, "TX_DONE"},
-      {RADIOLIB_SX126X_IRQ_RX_DONE, "RX_DONE"},
-      {RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED, "PREAMBLE_DETECTED"},
-      {RADIOLIB_SX126X_IRQ_SYNC_WORD_VALID, "SYNCWORD_VALID"},
-      {RADIOLIB_SX126X_IRQ_HEADER_VALID, "HEADER_VALID"},
-      {RADIOLIB_SX126X_IRQ_HEADER_ERR, "HEADER_ERR"},
-      {RADIOLIB_SX126X_IRQ_CRC_ERR, "CRC_ERR"},
-      {RADIOLIB_SX126X_IRQ_TIMEOUT, "RX_TX_TIMEOUT"},
-      {RADIOLIB_SX126X_IRQ_CAD_DONE, "CAD_DONE"},
-      {RADIOLIB_SX126X_IRQ_CAD_DETECTED, "CAD_DETECTED"},
+      {RADIOLIB_SX126X_IRQ_TX_DONE, "IRQ_TX_DONE", "передача пакета завершена"},
+      {RADIOLIB_SX126X_IRQ_RX_DONE, "IRQ_RX_DONE", "пакет принят"},
+      {RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED, "IRQ_PREAMBLE_DETECTED", "найдена преамбула"},
+      {RADIOLIB_SX126X_IRQ_SYNC_WORD_VALID, "IRQ_SYNCWORD_VALID", "синхрослово совпало"},
+      {RADIOLIB_SX126X_IRQ_HEADER_VALID, "IRQ_HEADER_VALID", "корректный LoRa-заголовок принят"},
+      {RADIOLIB_SX126X_IRQ_HEADER_ERR, "IRQ_HEADER_ERR", "ошибка заголовка (битые биты/несовпадение CRC заголовка)"},
+      {RADIOLIB_SX126X_IRQ_CRC_ERR, "IRQ_CRC_ERR", "ошибка CRC полезной нагрузки"},
+      {RADIOLIB_SX126X_IRQ_TIMEOUT, "IRQ_RX_TX_TIMEOUT", "сработал таймаут приёма/передачи"},
+      {RADIOLIB_SX126X_IRQ_CAD_DONE, "IRQ_CAD_DONE", "завершено сканирование канала (Channel Activity Detection)"},
+      {RADIOLIB_SX126X_IRQ_CAD_DETECTED, "IRQ_CAD_DETECTED", "в канале обнаружена активность LoRa"},
   };
 
   const uint32_t effectiveMask = flags & 0xFFFFU; // нормализуем маску к 16 битам
@@ -366,7 +367,7 @@ void RadioSX1262::logIrqFlags(uint32_t flags) {
   }
 
   // Накапливаем человекочитаемые флаги в статическом буфере без динамических выделений
-  char knownFlags[128];
+  char knownFlags[512]; // буфер увеличен для хранения описаний флагов
   knownFlags[0] = '\0';
   size_t offset = 0U;
   uint32_t knownMask = 0U; // совокупная маска известных флагов
@@ -374,10 +375,10 @@ void RadioSX1262::logIrqFlags(uint32_t flags) {
     if ((effectiveMask & entry.mask) == 0U) {
       continue;
     }
-    const char* format = (offset == 0U) ? "%s" : " | %s"; // добавляем разделитель при необходимости
+    const char* format = (offset == 0U) ? "%s – %s" : " | %s – %s"; // добавляем разделитель при необходимости
     const int written = std::snprintf(knownFlags + offset,
                                       sizeof(knownFlags) - offset,
-                                      format, entry.name);
+                                      format, entry.name, entry.description);
     if (written < 0) {
       knownFlags[offset] = '\0'; // аварийно завершаем строку при ошибке форматирования
       break;
