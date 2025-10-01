@@ -649,6 +649,7 @@ g++ -I. tests/test_key_transfer.cpp \
   справочные методы.
 - `static void logIrqFlags(uint32_t flags)` — форматированный вывод активных IRQ-флагов радиочипа
   в журнал.
+- `void flushPendingIrqLog()` — обходной ручной вызов переноса и вывода отложенных IRQ-логов.
 - `bool resetToDefaults()` — возврат параметров к значениям по умолчанию.
 - Вспомогательная обёртка `PublicSX1262` добавляет совместимые методы `getIrqFlags()`,
   `clearIrqFlags(...)` и `getIrqStatus(uint16_t*)`, чтобы прошивка одинаково собиралась с разными

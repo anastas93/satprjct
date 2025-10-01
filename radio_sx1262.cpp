@@ -416,6 +416,11 @@ void RadioSX1262::logIrqFlags(uint32_t flags) {
   DEBUG_LOG("%s", message);
 }
 
+void RadioSX1262::flushPendingIrqLog() {
+  // Обеспечиваем обходной ручной вызов переноса IRQ-логов из ISR в основной поток
+  processPendingIrqLog();
+}
+
 void RadioSX1262::handleDio1() {
   uint32_t irqFlags = radio_.getIrqFlags();  // универсальное чтение флагов IRQ
   pendingIrqFlags_ = irqFlags;               // сохраняем флаги для вывода в основном потоке
@@ -463,7 +468,7 @@ void RadioSX1262::processPendingIrqLog() {
 
 // Проверка флага готовности и чтение данных
 void RadioSX1262::loop() {
-  processPendingIrqLog();                  // отложенный вывод статусов IRQ
+  flushPendingIrqLog();                    // отложенный вывод статусов IRQ
   if (!packetReady_) {                      // пакет пока не готов
     return;
   }
