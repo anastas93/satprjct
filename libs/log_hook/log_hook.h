@@ -14,6 +14,7 @@
 #  include <string>
 #  include <vector>
 #  include <utility>
+#  include <functional>
 #endif
 
 #include <vector>
@@ -23,7 +24,15 @@ namespace LogHook {
 #ifdef ARDUINO
   using LogString = String;  // На Arduino используем класс String
 #else
-  using LogString = std::string;  // Для хостовых сборок применяем std::string
+  using LogString = std::string;                // Для хостовых сборок применяем std::string
+#endif
+
+  struct Entry;  // предварительное объявление для типа диспетчера
+
+#ifdef ARDUINO
+  using Dispatcher = void(*)(const Entry&); // колбэк доставки новых сообщений
+#else
+  using Dispatcher = std::function<void(const Entry&)>; // диспетчер для push-уведомлений
 #endif
 
   // Структура одной записи журнала
@@ -32,9 +41,6 @@ namespace LogHook {
     LogString text;     // текст сообщения
     uint32_t uptime_ms; // время с момента старта устройства (millis)
   };
-
-#ifdef ARDUINO
-  using Dispatcher = void(*)(const Entry&); // колбэк доставки новых сообщений
 
   // Установка обработчика, который будет вызван при появлении новых записей
   void setDispatcher(Dispatcher cb);
@@ -51,15 +57,6 @@ namespace LogHook {
 
   // Возвращает текущий размер буфера
   size_t size();
-#else
-  // В хостовых сборках функции заглушены, чтобы не ломать тесты
-  inline void setDispatcher(void(*)(const Entry&)) {}
-  inline void append(const LogString&) {}
-  inline void append(const char*) {}
-  inline std::vector<Entry> getRecent(size_t) { return {}; }
-  inline void clear() {}
-  inline size_t size() { return 0; }
-#endif
 
 } // namespace LogHook
 #endif // LOG_HOOK_LOG_H
