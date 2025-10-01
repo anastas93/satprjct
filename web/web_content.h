@@ -2025,6 +2025,7 @@ tbody tr.selected-info td { font-weight:600; }
 .debug-line--error { color: color-mix(in oklab, var(--danger) 75%, var(--text) 25%); }
 .debug-line--warn { color: color-mix(in oklab, #facc15 70%, var(--text) 30%); }
 .debug-line--action { color: color-mix(in oklab, var(--accent) 70%, var(--text) 30%); }
+.debug-line__irq { font-size:.78rem; color: var(--muted); margin-top:.1rem; padding-left:1.2rem; }
 .debug-metrics { background: var(--panel-2); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius: .9rem; padding: 1rem; margin-bottom: 1.5rem; }
 .debug-metrics__header { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom:1rem; }
 .debug-metrics__status { font-size:.9rem; color: var(--muted); }
@@ -10831,6 +10832,41 @@ function classifyDebugMessage(text) {
   if (trimmed.startsWith("→") || low.startsWith("tx") || low.startsWith("cmd") || low.startsWith("send")) return "action";
   return "info";
 }
+// Карта пояснений для флагов IRQ SX1262
+const IRQ_FLAG_HINTS = {
+  TX_DONE: "передача пакета завершена",
+  RX_DONE: "пакет принят",
+  PREAMBLE_DETECTED: "найдена преамбула",
+  SYNCWORD_VALID: "синхрослово совпало",
+  HEADER_VALID: "корректный LoRa-заголовок принят",
+  HEADER_ERR: "ошибка заголовка (битые биты/несовпадение CRC заголовка)",
+  CRC_ERR: "ошибка CRC полезной нагрузки",
+  RX_TX_TIMEOUT: "сработал таймаут приёма/передачи",
+  CAD_DONE: "сканирование канала (CAD) завершено",
+  CAD_DETECTED: "обнаружена активность LoRa в канале",
+};
+// Выделяем подсказки по флагам IRQ из текста лога
+function collectIrqFlagHints(text) {
+  if (!text) return [];
+  const match = String(text).match(/расшифровка:\s*\[([^\]]+)\]/i);
+  if (!match) return [];
+  const parts = match[1]
+    .split(/\s*\|\s*/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (!parts.length) return [];
+  const seen = new Set();
+  const hints = [];
+  for (const part of parts) {
+    const normalized = part.replace(/^IRQ_/i, "").replace(/[^A-Z0-9_]/gi, "").toUpperCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    const hint = IRQ_FLAG_HINTS[normalized];
+    if (!hint) continue;
+    hints.push(`IRQ_${normalized} — ${hint}`);
+  }
+  return hints;
+}
 function debugLog(text) {
   const log = UI.els.debugLog;
   if (!log) return;
@@ -10839,6 +10875,13 @@ function debugLog(text) {
   line.className = "debug-line debug-line--" + type;
   line.textContent = "[" + new Date().toLocaleTimeString() + "] " + text;
   log.appendChild(line);
+  const irqHints = collectIrqFlagHints(text);
+  if (irqHints.length > 0) {
+    const details = document.createElement("div");
+    details.className = "debug-line__irq";
+    details.textContent = irqHints.join("; ");
+    line.appendChild(details);
+  }
   log.scrollTop = log.scrollHeight;
 }
 

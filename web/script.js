@@ -8882,6 +8882,43 @@ function classifyDebugMessage(text) {
   return "info";
 }
 
+// Карта пояснений для флагов IRQ SX1262, используем сокращённые ключи без префикса IRQ_
+const IRQ_FLAG_HINTS = {
+  TX_DONE: "передача пакета завершена",
+  RX_DONE: "пакет принят",
+  PREAMBLE_DETECTED: "найдена преамбула",
+  SYNCWORD_VALID: "синхрослово совпало",
+  HEADER_VALID: "корректный LoRa-заголовок принят",
+  HEADER_ERR: "ошибка заголовка (битые биты/несовпадение CRC заголовка)",
+  CRC_ERR: "ошибка CRC полезной нагрузки",
+  RX_TX_TIMEOUT: "сработал таймаут приёма/передачи",
+  CAD_DONE: "сканирование канала (CAD) завершено",
+  CAD_DETECTED: "обнаружена активность LoRa в канале",
+};
+
+// Выделение человекочитаемых подсказок по флагам IRQ из строки журнала
+function collectIrqFlagHints(text) {
+  if (!text) return [];
+  const match = String(text).match(/расшифровка:\s*\[([^\]]+)\]/i);
+  if (!match) return [];
+  const rawList = match[1]
+    .split(/\s*\|\s*/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (!rawList.length) return [];
+  const hints = [];
+  const seen = new Set();
+  for (const rawFlag of rawList) {
+    const normalized = rawFlag.replace(/^IRQ_/i, "").replace(/[^A-Z0-9_]/gi, "").toUpperCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    const hint = IRQ_FLAG_HINTS[normalized];
+    if (!hint) continue;
+    hints.push(`IRQ_${normalized} — ${hint}`);
+  }
+  return hints;
+}
+
 // Добавление записей устройства в область Debug
 function appendDeviceLogEntries(entries, opts) {
   const log = UI.els.debugLog;
@@ -8974,6 +9011,13 @@ function debugLog(text, opts) {
   line.textContent = "[" + stamp + "] " + text;
   const target = options.fragment && typeof options.fragment.appendChild === "function" ? options.fragment : log;
   target.appendChild(line);
+  const irqHints = collectIrqFlagHints(text);
+  if (irqHints.length > 0) {
+    const details = document.createElement("div");
+    details.className = "debug-line__irq";
+    details.textContent = irqHints.join("; ");
+    line.appendChild(details);
+  }
   if (!options.fragment) {
     log.scrollTop = log.scrollHeight;
   }

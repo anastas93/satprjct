@@ -317,3 +317,24 @@ test('debugLog создаёт элементы для каждого типа с
 
   assert.equal(debugRoot.children.length, debugLogSamples.length);
 });
+
+// Проверяем добавление расшифровок флагов IRQ SX1262
+test('debugLog показывает подсказки по IRQ-флагам', () => {
+  const { context: logCtx, document: logDoc } = createWebContext();
+  const debugRoot = logDoc.createElement('div');
+  debugRoot.scrollHeight = 0;
+  logCtx.UI.els.debugLog = debugRoot;
+
+  const text = 'RadioSX1262: IRQ=0x0043, расшифровка: [TX_DONE | RX_DONE]';
+  const timestamp = Date.UTC(2024, 0, 1, 12, 0, 0);
+  logCtx.debugLog(text, { timestamp });
+
+  assert.equal(debugRoot.children.length, 1);
+  const node = debugRoot.children[0];
+  assert(node.textContent.includes(text));
+  assert.equal(node.children.length, 1);
+  const hints = node.children[0];
+  assert.equal(hints.className, 'debug-line__irq');
+  assert(hints.textContent.includes('IRQ_TX_DONE — передача пакета завершена'));
+  assert(hints.textContent.includes('IRQ_RX_DONE — пакет принят'));
+});

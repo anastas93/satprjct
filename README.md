@@ -327,6 +327,9 @@
 - Функции `enqueueLogEntry` и `flushPendingLogEntries` складывают новые строки в небольшую очередь
   и выгружают их в SSE-клиентов из `loop()`, избавляя USB-Serial от пауз при длительной отправке
   push-сообщений.
+- Функция `collectIrqFlagHints` в `web/script.js` выделяет активные IRQ-флаги SX1262 из строк вида
+  `RadioSX1262: IRQ=…` и сразу добавляет в журнал Debug пояснения (`IRQ_TX_DONE — передача пакета
+  завершена`, `IRQ_RX_DONE — пакет принят`, `IRQ_CRC_ERR — ошибка CRC` и т. д.).
 
 ## HTTP API
 - `POST /api/tx` — отправляет текст через `TxModule` (используется кнопкой «Отправить по радио»).

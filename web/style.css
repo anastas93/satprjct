@@ -1504,6 +1504,7 @@ tbody tr.selected-info td { font-weight:600; }
 .debug-line--error { color: color-mix(in oklab, var(--danger) 75%, var(--text) 25%); }
 .debug-line--warn { color: color-mix(in oklab, #facc15 70%, var(--text) 30%); }
 .debug-line--action { color: color-mix(in oklab, var(--accent) 70%, var(--text) 30%); }
+.debug-line__irq { font-size:.78rem; color: var(--muted); margin-top:.1rem; padding-left:1.2rem; }
 .debug-metrics { background: var(--panel-2); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius:.9rem; padding:1rem; margin-bottom:1.5rem; }
 .debug-metrics__header { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom:1rem; }
 .debug-metrics__status { font-size:.9rem; color: var(--muted); }
