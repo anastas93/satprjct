@@ -407,25 +407,52 @@ void RadioSX1262::logIrqFlags(uint32_t flags) {
 
 void RadioSX1262::handleDio1() {
   uint32_t irqFlags = radio_.getIrqFlags();  // универсальное чтение флагов IRQ
-  if (irqFlags == RADIOLIB_SX126X_IRQ_NONE) {
-    DEBUG_LOG("RadioSX1262: событие DIO1 без активных флагов IRQ");
-  } else {
-    logIrqFlags(irqFlags);                   // выводим только активные флаги
+  pendingIrqFlags_ = irqFlags;               // сохраняем флаги для вывода в основном потоке
+  pendingIrqClearState_ =
+      radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL); // сохраняем код очистки IRQ
+  irqLogPending_ = true;                     // помечаем, что требуется вывод в loop()
+
+  packetReady_ = true;                     // устанавливаем флаг готовности пакета
+}
+
+void RadioSX1262::processPendingIrqLog() {
+  bool hasPending = false;
+  uint32_t flags = 0;
+  int16_t clearState = RADIOLIB_ERR_NONE;
+
+#if defined(ARDUINO)
+  noInterrupts();
+#endif
+  if (irqLogPending_) {
+    hasPending = true;
+    flags = pendingIrqFlags_;
+    clearState = pendingIrqClearState_;
+    irqLogPending_ = false; // сбрасываем флаг только при чтении актуальных данных
+  }
+#if defined(ARDUINO)
+  interrupts();
+#endif
+
+  if (!hasPending) {
+    return; // нет отложенных событий для вывода
   }
 
-  int16_t clearState =
-      radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL); // универсальная очистка IRQ
+  if (flags == RADIOLIB_SX126X_IRQ_NONE) {
+    DEBUG_LOG("RadioSX1262: событие DIO1 без активных флагов IRQ");
+  } else {
+    logIrqFlags(flags); // выводим только активные флаги
+  }
 
   if (clearState != RADIOLIB_ERR_NONE) {
     LOG_WARN_VAL("RadioSX1262: не удалось очистить статус IRQ, код=", clearState);
   }
 
-  packetReady_ = true;                     // устанавливаем флаг готовности пакета
   DEBUG_LOG("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
 }
 
 // Проверка флага готовности и чтение данных
 void RadioSX1262::loop() {
+  processPendingIrqLog();                  // отложенный вывод статусов IRQ
   if (!packetReady_) {                      // пакет пока не готов
     return;
   }

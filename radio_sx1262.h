@@ -38,9 +38,6 @@ struct HasPointerIrqStatusApi<
         std::declval<T&>().getIrqStatus(static_cast<uint16_t*>(nullptr)))>>
     : std::true_type {};
 
-template <typename T>
-struct AlwaysFalse : std::false_type {};
-
 // Вызов варианта getIrqStatus() без аргументов, если он доступен
 template <typename Radio>
 auto CallZeroArgGetIrqStatus(Radio& radio, int)
@@ -134,6 +131,7 @@ public:
 private:
   static void onDio1Static();            // статический обработчик прерывания
   void handleDio1();                     // обработка приёма
+  void processPendingIrqLog();           // перенос логов IRQ из контекста прерывания
 
   // Непосредственная установка частоты
   bool setFrequency(float freq);
@@ -199,6 +197,9 @@ private:
   RxCallback rx_cb_;                     // пользовательский колбэк
   static RadioSX1262* instance_;         // указатель на текущий объект
   volatile bool packetReady_ = false;    // флаг готовности пакета
+  volatile bool irqLogPending_ = false;  // требуется ли вывести отложенный лог IRQ
+  volatile uint32_t pendingIrqFlags_ = 0;          // сохранённые флаги IRQ из ISR
+  volatile int16_t pendingIrqClearState_ = RADIOLIB_ERR_NONE; // результат очистки IRQ
 
   ChannelBank bank_ = ChannelBank::EAST; // текущий банк
   uint8_t channel_ = 0;                  // текущий канал
