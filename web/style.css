@@ -403,6 +403,50 @@ main {
 .chat-receiving-indicator .indicator-text {
   white-space: nowrap;
 }
+.chat-irq-status {
+  margin-top: .75rem;
+  padding: .65rem .95rem;
+  border-radius: .85rem;
+  background: color-mix(in oklab, var(--panel) 88%, black 12%);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 68%, black 32%);
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  font-size: .92rem;
+  color: var(--muted);
+  box-shadow: 0 12px 26px rgba(0,0,0,.18);
+  transition: border-color .2s ease, color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+.chat-irq-status::before {
+  content: "⚡";
+  font-size: 1.15rem;
+  line-height: 1;
+  color: color-mix(in oklab, var(--accent-2) 70%, white 30%);
+}
+.chat-irq-status .chat-irq-text {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+.chat-irq-status .chat-irq-message {
+  font-weight: 600;
+}
+.chat-irq-status .chat-irq-meta {
+  font-size: .78rem;
+  color: var(--muted);
+}
+.chat-irq-status.active {
+  color: var(--text);
+  border-color: color-mix(in oklab, var(--accent) 50%, transparent);
+  background: color-mix(in oklab, var(--panel) 82%, black 18%);
+  box-shadow: 0 16px 30px rgba(0,0,0,.22);
+}
+.chat-irq-status.active::before {
+  color: color-mix(in oklab, var(--accent) 70%, white 30%);
+}
+.chat-irq-status.active .chat-irq-meta {
+  color: color-mix(in oklab, var(--accent-2) 55%, var(--muted) 45%);
+}
 @keyframes chat-receive-pulse {
   0% {
     transform: scale(.6);
@@ -624,6 +668,14 @@ main {
   }
   .chat-image-profile {
     width: 100%;
+  }
+  .chat-irq-status {
+    flex-direction: column;
+    align-items: stretch;
+    gap: .5rem;
+  }
+  .chat-irq-status::before {
+    margin-bottom: -.15rem;
   }
 }
 .fab { border-radius: 999px; width: 46px; height: 46px; display:grid; place-items:center; padding: 0; }
