@@ -699,8 +699,30 @@ async function init() {
   if (UI.els.endpoint) {
     UI.els.endpoint.value = UI.cfg.endpoint;
     UI.els.endpoint.addEventListener("change", () => {
-      const value = UI.els.endpoint.value.trim() || "http://192.168.4.1";
+      const fallback = UI.cfg.endpoint || "http://192.168.4.1";
+      const input = UI.els.endpoint.value.trim();
+      const candidate = input || "http://192.168.4.1";
+      let parsed = null;
+      try {
+        parsed = new URL(candidate);
+      } catch (err) {
+        console.warn("[endpoint] некорректный URL", err);
+      }
+      if (!parsed) {
+        note("Endpoint: введён некорректный URL, используется предыдущее значение");
+        UI.els.endpoint.value = fallback;
+        return;
+      }
+      const protocol = (parsed.protocol || "").toLowerCase();
+      if (protocol !== "http:" && protocol !== "https:") {
+        console.warn("[endpoint] неподдерживаемая схема", protocol);
+        note("Endpoint: схема не поддерживается, используется предыдущее значение");
+        UI.els.endpoint.value = fallback;
+        return;
+      }
+      const value = parsed.toString();
       UI.cfg.endpoint = value;
+      UI.els.endpoint.value = value;
       storage.set("endpoint", UI.cfg.endpoint);
       note("Endpoint: " + UI.cfg.endpoint);
       resyncAfterEndpointChange().catch((err) => console.warn("[endpoint] resync", err));
@@ -836,13 +858,27 @@ async function init() {
   const btnKeyRestore = $("#btnKeyRestore"); if (btnKeyRestore) btnKeyRestore.addEventListener("click", () => requestKeyRestore());
   const btnKeySend = $("#btnKeySend"); if (btnKeySend) btnKeySend.addEventListener("click", () => requestKeySend());
   const btnKeyRecv = $("#btnKeyRecv"); if (btnKeyRecv) btnKeyRecv.addEventListener("click", () => requestKeyReceive());
-  await refreshKeyState({ silent: true });
-
-  await syncSettingsFromDevice();
-  await refreshAckState();
-  await refreshAckRetry();
-  await refreshLightPackState();
-  await refreshEncryptionState();
+  const criticalInitTasks = [
+    { name: "refreshKeyState", run: () => refreshKeyState({ silent: true }) },
+    { name: "syncSettingsFromDevice", run: () => syncSettingsFromDevice() },
+    { name: "refreshAckState", run: () => refreshAckState() },
+    { name: "refreshAckRetry", run: () => refreshAckRetry() },
+    { name: "refreshLightPackState", run: () => refreshLightPackState() },
+    { name: "refreshEncryptionState", run: () => refreshEncryptionState() },
+  ];
+  const criticalResults = await Promise.allSettled(criticalInitTasks.map((task) => {
+    try {
+      return task.run();
+    } catch (err) {
+      console.warn("[init] синхронное исключение при запуске задачи", task.name, err);
+      return Promise.reject(err);
+    }
+  }));
+  criticalResults.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.warn("[init] задача инициализации завершилась ошибкой", criticalInitTasks[index].name, result.reason);
+    }
+  });
 
   await loadVersion().catch(() => {});
   probe().catch(() => {});
@@ -2058,11 +2094,19 @@ async function deviceFetch(cmd, params, timeoutMs) {
   } catch (e) {
     base = new URL("http://192.168.4.1");
   }
-  const candidates = [
-    new URL("/cmd", base),
-    new URL("/api/cmd", base),
-    new URL("/", base),
-  ];
+  const candidates = [];
+  const candidatePaths = ["/cmd", "/api/cmd", "/"];
+  for (const path of candidatePaths) {
+    try {
+      candidates.push(new URL(path, base));
+    } catch (err) {
+      console.warn("[deviceFetch] базовый URL не поддерживает относительный путь", path, err);
+    }
+  }
+  if (candidates.length === 0) {
+    console.warn("[deviceFetch] не удалось построить относительные пути, используется базовый адрес как есть");
+    candidates.push(base);
+  }
   const extras = new URLSearchParams();
   if (params) {
     for (const key in params) {
