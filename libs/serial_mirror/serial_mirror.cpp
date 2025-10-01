@@ -4,14 +4,27 @@
 #if defined(ARDUINO)
 
 namespace {
-  // Проверка, содержит ли строка только печатные символы и пробелы/табуляции
-  bool isMostlyPrintable(const String& s) {
+  // Проверка строки на печатность с возможностью сообщить о наличии UTF-8 байтов.
+  // Если встретились управляющие символы ASCII (кроме табуляции), возвращаем false.
+  // Параметр hasUtf8Out сообщает вызывающему коду, присутствуют ли байты >= 0x80.
+  bool isMostlyPrintable(const String& s, bool* hasUtf8Out = nullptr) {
+    bool hasUtf8 = false;
     for (size_t i = 0; i < s.length(); ++i) {
-      char c = s.charAt(i);
+      unsigned char c = static_cast<unsigned char>(s.charAt(i));
+      if (c >= 0x80) {
+        hasUtf8 = true;
+        continue;
+      }
       if (c == '\t') continue;
-      if (static_cast<unsigned char>(c) < 0x20 || static_cast<unsigned char>(c) > 0x7E) {
+      if (c < 0x20 || c == 0x7F) {
+        if (hasUtf8Out) {
+          *hasUtf8Out = hasUtf8;
+        }
         return false;
       }
+    }
+    if (hasUtf8Out) {
+      *hasUtf8Out = hasUtf8;
     }
     return true;
   }
@@ -115,11 +128,20 @@ void SerialMirror::flushBufferToLog() {
   if (line.length() == 0) {
     return;
   }
-  if (isMostlyPrintable(line)) {
+  bool hasUtf8 = false;
+  bool printable = isMostlyPrintable(line, &hasUtf8);
+  if (printable) {
     LogHook::append(line);
-  } else {
-    LogHook::append(toHexLine(line));
+    return;
   }
+  if (hasUtf8) {
+    LogHook::append(line);
+    LogHook::append(F("[SerialMirror] UTF-8 строка сохранена как текст (без HEX)"));
+    return;
+  }
+  LogHook::append(toHexLine(line));
+  LogHook::append(String(F("[SerialMirror] Бинарная строка преобразована в HEX, длина = ")) +
+                  String(static_cast<unsigned long>(line.length())));
 }
 
 SerialMirror SerialDebug(Serial);
