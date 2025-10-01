@@ -359,16 +359,22 @@ void RadioSX1262::logIrqFlags(uint32_t flags) {
       {RADIOLIB_SX126X_IRQ_CAD_DETECTED, "CAD_DETECTED"},
   };
 
+  const uint32_t effectiveMask = flags & 0xFFFFU; // нормализуем маску к 16 битам
+  if (effectiveMask == RADIOLIB_SX126X_IRQ_NONE) {
+    DEBUG_LOG("RadioSX1262: IRQ-флаги отсутствуют (маска=0x0000)");
+    return;
+  }
+
   // Накапливаем человекочитаемые флаги в статическом буфере без динамических выделений
   char knownFlags[128];
   knownFlags[0] = '\0';
   size_t offset = 0U;
   uint32_t knownMask = 0U; // совокупная маска известных флагов
   for (const auto& entry : kIrqMap) {
-    if ((flags & entry.mask) == 0U) {
+    if ((effectiveMask & entry.mask) == 0U) {
       continue;
     }
-    const char* format = (offset == 0U) ? "%s" : ", %s"; // добавляем разделитель при необходимости
+    const char* format = (offset == 0U) ? "%s" : " | %s"; // добавляем разделитель при необходимости
     const int written = std::snprintf(knownFlags + offset,
                                       sizeof(knownFlags) - offset,
                                       format, entry.name);
@@ -385,24 +391,28 @@ void RadioSX1262::logIrqFlags(uint32_t flags) {
     knownMask |= entry.mask; // учитываем распознанный флаг
   }
 
-  const uint32_t unknownMask = flags & ~knownMask; // маска неизвестных флагов
+  const uint32_t unknownMask = effectiveMask & ~knownMask; // маска неизвестных флагов
+  char message[224];
   if (knownFlags[0] != '\0') {
-    char message[192];
     if (unknownMask != 0U) {
       std::snprintf(message, sizeof(message),
-                    "RadioSX1262: активны IRQ-флаги: %s (неизвестные биты=0x%04lX)",
+                    "RadioSX1262: IRQ=0x%04lX, расшифровка: [%s], неизвестные биты=0x%04lX",
+                    static_cast<unsigned long>(effectiveMask),
                     knownFlags,
-                    static_cast<unsigned long>(unknownMask & 0xFFFFU));
+                    static_cast<unsigned long>(unknownMask));
     } else {
       std::snprintf(message, sizeof(message),
-                    "RadioSX1262: активны IRQ-флаги: %s",
+                    "RadioSX1262: IRQ=0x%04lX, расшифровка: [%s]",
+                    static_cast<unsigned long>(effectiveMask),
                     knownFlags);
     }
-    DEBUG_LOG("%s", message);
   } else {
-    DEBUG_LOG("RadioSX1262: активны неизвестные IRQ-флаги, маска=0x%04lX",
-              static_cast<unsigned long>(flags & 0xFFFFU));
+    std::snprintf(message, sizeof(message),
+                  "RadioSX1262: IRQ=0x%04lX, известные флаги отсутствуют",
+                  static_cast<unsigned long>(effectiveMask));
   }
+
+  DEBUG_LOG("%s", message);
 }
 
 void RadioSX1262::handleDio1() {
