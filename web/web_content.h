@@ -104,6 +104,12 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
           <span class="indicator-text">Приём сообщения…</span>
         </div>
       </div>
+      <div id="chatIrqStatus" class="chat-irq-status" aria-live="polite" role="status">
+        <div class="chat-irq-text">
+          <span class="chat-irq-message">IRQ: событий нет</span>
+          <small class="chat-irq-meta" hidden>—</small>
+        </div>
+      </div>
       <div class="chat-input">
         <div class="send-row">
           <input id="chatInput" type="text" placeholder="Сообщение" maxlength="2000" />

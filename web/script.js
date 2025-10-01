@@ -146,6 +146,11 @@ const UI = {
     chatSoundCtx: null,
     chatSoundLast: 0,
     chatImages: null,
+    irqStatus: {
+      message: "",
+      uptimeMs: null,
+      timestamp: null,
+    },
     testRxm: {
       polling: false,
       lastName: null,
@@ -459,6 +464,10 @@ async function init() {
   if (UI.els.chatRxIndicator) {
     setChatReceivingIndicatorState(getReceivedMonitorState().awaiting);
   }
+  UI.els.chatIrqStatus = $("#chatIrqStatus");
+  UI.els.chatIrqMessage = UI.els.chatIrqStatus ? UI.els.chatIrqStatus.querySelector(".chat-irq-message") : null;
+  UI.els.chatIrqMeta = UI.els.chatIrqStatus ? UI.els.chatIrqStatus.querySelector(".chat-irq-meta") : null;
+  renderChatIrqStatus();
   UI.els.sendBtn = $("#sendBtn");
   UI.els.chatImageBtn = $("#chatImageBtn");
   UI.els.chatImageInput = $("#chatImageInput");
@@ -8978,6 +8987,38 @@ function note(text) {
   toast.classList.add("show");
   setTimeout(() => { toast.hidden = true; }, 2200);
 }
+// Обновление визуального статуса последних IRQ событий под чатом
+function renderChatIrqStatus() {
+  const wrap = UI.els && UI.els.chatIrqStatus ? UI.els.chatIrqStatus : null;
+  if (!wrap) return;
+  const messageEl = UI.els.chatIrqMessage || wrap.querySelector(".chat-irq-message");
+  const metaEl = UI.els.chatIrqMeta || wrap.querySelector(".chat-irq-meta");
+  const state = UI.state && UI.state.irqStatus ? UI.state.irqStatus : { message: "", uptimeMs: null, timestamp: null };
+  if (!messageEl) return;
+  if (!state.message) {
+    messageEl.textContent = "IRQ: событий нет";
+    if (metaEl) {
+      metaEl.hidden = true;
+      metaEl.textContent = "";
+    }
+    wrap.classList.remove("active");
+    return;
+  }
+  messageEl.textContent = state.message;
+  if (metaEl) {
+    const parts = [];
+    if (Number.isFinite(state.uptimeMs)) parts.push(formatDeviceUptime(state.uptimeMs));
+    if (Number.isFinite(state.timestamp)) parts.push(new Date(state.timestamp).toLocaleTimeString());
+    if (parts.length) {
+      metaEl.hidden = false;
+      metaEl.textContent = parts.join(" · ");
+    } else {
+      metaEl.hidden = true;
+      metaEl.textContent = "";
+    }
+  }
+  wrap.classList.add("active");
+}
 function classifyDebugMessage(text) {
   const raw = text != null ? String(text) : "";
   const trimmed = raw.trim();
@@ -9080,6 +9121,19 @@ function debugLog(text, opts) {
         ? formatDeviceUptime(options.uptimeMs)
         : new Date().toLocaleTimeString());
   line.textContent = "[" + stamp + "] " + text;
+  if (options.origin === "device") {
+    const rawText = text != null ? String(text) : "";
+    const lowered = rawText.toLowerCase();
+    if (rawText && (lowered.includes("irq=") || /\birq[-_\s]/i.test(rawText)) && (lowered.includes("radiosx1262") || lowered.includes("sx1262"))) {
+      if (!UI.state.irqStatus || typeof UI.state.irqStatus !== "object") {
+        UI.state.irqStatus = { message: "", uptimeMs: null, timestamp: null };
+      }
+      UI.state.irqStatus.message = rawText;
+      UI.state.irqStatus.uptimeMs = Number.isFinite(options.uptimeMs) ? Number(options.uptimeMs) : null;
+      UI.state.irqStatus.timestamp = Date.now();
+      renderChatIrqStatus();
+    }
+  }
   const target = options.fragment && typeof options.fragment.appendChild === "function" ? options.fragment : log;
   target.appendChild(line);
   if (!options.fragment) {
