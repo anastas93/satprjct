@@ -199,6 +199,7 @@ private:
   RxCallback rx_cb_;                     // пользовательский колбэк
   static RadioSX1262* instance_;         // указатель на текущий объект
   volatile bool packetReady_ = false;    // флаг готовности пакета
+  volatile bool irqNeedsRead_ = false;   // требуется ли чтение IRQ-регистров в основном потоке
   volatile bool irqLogPending_ = false;  // требуется ли вывести отложенный лог IRQ
   volatile uint32_t pendingIrqFlags_ = 0;          // сохранённые флаги IRQ из ISR
   volatile int16_t pendingIrqClearState_ = RADIOLIB_ERR_NONE; // результат очистки IRQ

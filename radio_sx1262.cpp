@@ -422,36 +422,45 @@ void RadioSX1262::flushPendingIrqLog() {
 }
 
 void RadioSX1262::handleDio1() {
-  uint32_t irqFlags = radio_.getIrqFlags();  // универсальное чтение флагов IRQ
-  pendingIrqFlags_ = irqFlags;               // сохраняем флаги для вывода в основном потоке
-  pendingIrqClearState_ =
-      radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL); // сохраняем код очистки IRQ
-  irqLogPending_ = true;                     // помечаем, что требуется вывод в loop()
-
-  packetReady_ = true;                     // устанавливаем флаг готовности пакета
+  irqNeedsRead_ = true;   // отмечаем необходимость чтения IRQ-регистров в основном потоке
+  irqLogPending_ = true;  // помечаем, что требуется вывод в loop()
+  packetReady_ = true;    // устанавливаем флаг готовности пакета
 }
 
 void RadioSX1262::processPendingIrqLog() {
   bool hasPending = false;
-  uint32_t flags = 0;
-  int16_t clearState = RADIOLIB_ERR_NONE;
+  bool needRead = false;
 
 #if defined(ARDUINO)
   noInterrupts();
 #endif
+  if (irqNeedsRead_) {
+    irqNeedsRead_ = false;
+    needRead = true;  // фиксируем запрос на чтение IRQ-регистров
+  }
   if (irqLogPending_) {
     hasPending = true;
-    flags = pendingIrqFlags_;
-    clearState = pendingIrqClearState_;
     irqLogPending_ = false; // сбрасываем флаг только при чтении актуальных данных
   }
 #if defined(ARDUINO)
   interrupts();
 #endif
 
-  if (!hasPending) {
+  if (!hasPending && !needRead) {
     return; // нет отложенных событий для вывода
   }
+
+  if (needRead) {
+    const uint32_t flags = radio_.getIrqFlags();  // считываем флаги IRQ вне ISR
+    const int16_t clearState =
+        radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL); // очищаем IRQ вне ISR
+    pendingIrqFlags_ = flags;                // сохраняем флаги для последующего логирования
+    pendingIrqClearState_ = clearState;      // сохраняем код очистки IRQ
+    hasPending = true;                       // гарантируем обработку свежих данных
+  }
+
+  const uint32_t flags = pendingIrqFlags_;
+  const int16_t clearState = pendingIrqClearState_;
 
   if (flags == RADIOLIB_SX126X_IRQ_NONE) {
     DEBUG_LOG("RadioSX1262: событие DIO1 без активных флагов IRQ");
