@@ -1,6 +1,11 @@
 #include "simple_logger.h"
 #include <array>
 #include <string_view>
+#include "libs/log_hook/log_hook.h"          // публикация в веб-журнал
+
+#ifdef ARDUINO
+#  include <Arduino.h>
+#endif
 
 namespace {
 // Максимальный размер кольцевого буфера
@@ -37,6 +42,13 @@ void logStatus(const std::string& line) {
                                    : std::string_view(line.data(), pos);
   if (LogEntry* existing = findByPrefix(prefix_view)) {
     existing->line = line;                       // обновляем строку без перевыделения
+#ifdef ARDUINO
+    Serial.println(line.c_str());                // повторно выводим актуальную строку в Serial
+    Serial.flush();
+#endif
+#if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
+    LogHook::append(line.c_str());               // дублируем в буфер push-логов
+#endif
     return;
   }
 
@@ -51,6 +63,13 @@ void logStatus(const std::string& line) {
   LogEntry& entry = g_log[index];
   entry.prefix.assign(prefix_view.data(), prefix_view.size());
   entry.line = line;
+#ifdef ARDUINO
+  Serial.println(line.c_str());                  // выводим новую запись в Serial
+  Serial.flush();
+#endif
+#if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
+  LogHook::append(line.c_str());                 // передаём запись в веб-интерфейс
+#endif
 }
 
 std::vector<std::string> getLast(size_t count) {
