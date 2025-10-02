@@ -101,38 +101,18 @@ def render_js(entries: Iterable[TleEntry]) -> str:
     return "\n".join(lines)
 
 
-def render_header(js_body: str) -> str:
-    """Возвращает содержимое заголовка с TLE для прошивки."""
-
-    return "\n".join(
-        [
-            "#pragma once",
-            "#include <pgmspace.h>",
-            "// Геостационарные спутники в формате JavaScript",
-            "// Файл сгенерирован скриптом tools/generate_geostat_tle.py",
-            "const char GEOSTAT_TLE_JS[] PROGMEM = R\"~~~(",
-            js_body,
-            ")~~~\";",
-            "",
-        ]
-    )
-
-
 def main() -> None:
     """Читает REF/tle.txt и обновляет web/libs/geostat_tle.js."""
 
     repo_root = Path(__file__).resolve().parent.parent
     source = repo_root / "REF" / "tle.txt"
     target = repo_root / "web" / "libs" / "geostat_tle.js"
-    header_target = repo_root / "web" / "geostat_tle_js.h"
-
     entries = load_tle(source)
     geostat_entries = filter_geostat(entries)
     js_content = render_js(geostat_entries)
     target.write_text(js_content, encoding="utf-8")
-    header_target.write_text(render_header(js_content), encoding="utf-8")
     print(f"Сохранено {len(geostat_entries)} записей TLE в {target}")
-    print(f"Обновлён заголовок с TLE: {header_target}")
+    print("Запустите tools/generate_web_content.py для обновления web/web_content.h")
 
 
 if __name__ == "__main__":

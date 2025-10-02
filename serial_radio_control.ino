@@ -31,7 +31,6 @@
 #include <esp_system.h>  // доступ к уникальному идентификатору ESP32
 #endif
 #include "web/web_content.h"      // встроенные файлы веб-интерфейса
-#include "web/geostat_tle_js.h"   // статический набор TLE
 #ifndef ARDUINO
 #include <fstream>
 #else
