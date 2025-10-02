@@ -1351,6 +1351,25 @@ void handleApiTx() {
     server.send(405, "text/plain", "Method Not Allowed");
     return;
   }
+  // Проверяем, что клиент отправил ожидаемый заголовок Content-Type
+  String reqContentType = server.hasHeader("Content-Type") ? server.header("Content-Type") : String();
+  reqContentType.trim();
+  String loweredType = reqContentType;
+  loweredType.toLowerCase();
+  int delimPos = loweredType.indexOf(';');
+  String baseType = delimPos >= 0 ? loweredType.substring(0, delimPos) : loweredType;
+  baseType.trim();
+  if (baseType != "text/plain") {
+    server.send(415, "text/plain", "unsupported content-type");
+    std::string log = "API TX reject content-type=";
+    if (reqContentType.length() > 0) {
+      log += reqContentType.c_str();
+    } else {
+      log += "<missing>";
+    }
+    SimpleLogger::logStatus(log);
+    return;
+  }
   String body = server.arg("plain");                       // получаем сырой текст
   uint32_t testId = 0;                                      // идентификатор сообщения эмуляции
   String testErr;                                           // текст ошибки эмуляции
@@ -1391,6 +1410,33 @@ void handleApiTxImage() {
     server.send(405, "text/plain", "Method Not Allowed");
     return;
   }
+  // Контролируем MIME-типы ещё до чтения тела запроса
+  String reqContentType = server.hasHeader("Content-Type") ? server.header("Content-Type") : String();
+  reqContentType.trim();
+  String loweredType = reqContentType;
+  loweredType.toLowerCase();
+  int delimPos = loweredType.indexOf(';');
+  String baseType = delimPos >= 0 ? loweredType.substring(0, delimPos) : loweredType;
+  baseType.trim();
+  static const char* kAllowedImageTypes[] = {"image/jpeg", "image/pjpeg"};
+  bool typeAllowed = false;
+  for (const char* allowed : kAllowedImageTypes) {
+    if (baseType == allowed) {
+      typeAllowed = true;
+      break;
+    }
+  }
+  if (!typeAllowed) {
+    server.send(415, "text/plain", "unsupported content-type");
+    std::string log = "IMG TX reject content-type=";
+    if (reqContentType.length() > 0) {
+      log += reqContentType.c_str();
+    } else {
+      log += "<missing>";
+    }
+    SimpleLogger::logStatus(log);
+    return;
+  }
   String body = server.arg("plain");
   if (body.length() == 0) {                                 // защита от пустого тела
     server.send(400, "text/plain", "empty");
@@ -1415,6 +1461,8 @@ void handleApiTxImage() {
   std::memcpy(payload.data(), body.c_str(), len);           // копируем данные в вектор
   if (!isLikelyJpeg(payload.data(), payload.size())) {
     server.send(415, "text/plain", "not jpeg");
+    std::string log = "IMG TX reject body-sig bytes=" + std::to_string(payload.size());
+    SimpleLogger::logStatus(log);
     return;
   }
   // Читаем метаданные изображения из заголовков (необязательные поля)
