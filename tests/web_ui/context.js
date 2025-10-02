@@ -299,6 +299,8 @@ function createWebContext(options = {}) {
     'ACK_TIMEOUT_MIN_MS',
     'ACK_RETRY_DEFAULT',
     'ACK_RETRY_MAX',
+    'logErrorEvent',
+    'ERROR_LOG_REPEAT_WINDOW_MS',
   ];
   for (const name of exportNames) {
     try {
