@@ -139,5 +139,12 @@ void SerialMirror::flushBufferToLog() {
 
 SerialMirror SerialDebug(Serial);
 
+// Возвращаем действие переопределения Serial -> SerialDebug для остальных файлов.
+#undef SERIAL_MIRROR_DISABLE_REMAP
+#ifdef Serial
+#undef Serial
+#endif
+#define Serial SerialDebug
+
 #endif  // defined(ARDUINO)
 
