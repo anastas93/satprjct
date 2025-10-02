@@ -185,6 +185,13 @@ struct KeyTransferRuntime {
   bool legacy_peer = false;             // последний принятый кадр был в легаси-формате
 } keyTransferRuntime;
 
+// --- Состояние буферизации команд из Serial ---
+static String serialLineBuffer;                         // накапливаемая строка команды
+static bool serialLineOverflow = false;                 // флаг переполнения буфера
+static unsigned long serialLastByteAtMs = 0;            // время последнего принятого символа
+static constexpr size_t kSerialLineMaxLength = 1024;    // максимальная длина текстовой команды
+static constexpr unsigned long kSerialLineTimeoutMs = 200; // тайм-аут ожидания завершения строки
+
 // Преобразование массива байтов в hex-строку (верхний регистр)
 template <size_t N>
 String toHex(const std::array<uint8_t, N>& data) {
@@ -2368,9 +2375,49 @@ void loop() {
     rx.tickCleanup();                       // фоновая очистка очередей RX даже без новых кадров
     tx.loop();                              // обработка очередей передачи
     processTestRxm();                       // генерация тестовых входящих сообщений
-    if (Serial.available()) {
-      String line = Serial.readStringUntil('\n');
+    const unsigned long now = millis();
+    if (serialLineBuffer.length() > 0 && serialLastByteAtMs != 0 &&
+        (now - serialLastByteAtMs) > kSerialLineTimeoutMs) {
+      serialLineBuffer = "";              // тайм-аут: сбрасываем незавершённую команду
+      serialLineOverflow = false;
+      serialLastByteAtMs = 0;
+    }
+
+    while (Serial.available()) {
+      const int incoming = Serial.read();
+      if (incoming < 0) {
+        break;                             // неожиданный код — выходим из цикла
+      }
+      serialLastByteAtMs = millis();
+      if (incoming == '\r') {
+        continue;                          // игнорируем CR для поддержки CRLF
+      }
+      if (incoming != '\n') {
+        if (!serialLineOverflow) {
+          if (serialLineBuffer.length() < kSerialLineMaxLength) {
+            serialLineBuffer += static_cast<char>(incoming);
+          } else {
+            serialLineOverflow = true;     // достигнут предел длины команды
+          }
+        }
+        continue;
+      }
+
+      String line = serialLineBuffer;
+      const bool overflowed = serialLineOverflow;
+      serialLineBuffer = "";
+      serialLineOverflow = false;
+
+      if (overflowed) {
+        Serial.println("Ошибка: команда превышает допустимую длину и была сброшена");
+        continue;
+      }
+
       line.trim();
+      if (line.length() == 0) {
+        continue;                          // пустые строки игнорируем
+      }
+
       if (line.startsWith("BF ") || line.startsWith("BW ")) {
         float bw = line.substring(3).toFloat();
         if (radio.setBandwidth(bw)) {
@@ -2422,45 +2469,44 @@ void loop() {
         int pw = line.substring(3).toInt();
         if (radio.setPower(pw)) {
           Serial.println("Мощность установлена");
-      } else {
-        Serial.println("Ошибка установки мощности");
-      }
-      // управление режимом повышенного усиления приёмника
-    } else if (line.startsWith("RXBG")) {
-      if (line.length() <= 4) {
-        Serial.print("RXBG: ");
-        Serial.println(radio.isRxBoostedGainEnabled() ? "включён" : "выключен");
-      } else {
-        String arg = line.substring(4);
-        arg.trim();
-        bool desired = radio.isRxBoostedGainEnabled();
-        bool parsed = false;
-        if (arg.equalsIgnoreCase("1") || arg.equalsIgnoreCase("ON") || arg.equalsIgnoreCase("TRUE") ||
-            arg.equalsIgnoreCase("ВКЛ")) {
-          desired = true;
-          parsed = true;
-        } else if (arg.equalsIgnoreCase("0") || arg.equalsIgnoreCase("OFF") || arg.equalsIgnoreCase("FALSE") ||
-                   arg.equalsIgnoreCase("ВЫКЛ")) {
-          desired = false;
-          parsed = true;
-        } else if (arg.equalsIgnoreCase("TOGGLE") || arg.equalsIgnoreCase("SWAP")) {
-          desired = !desired;
-          parsed = true;
+        } else {
+          Serial.println("Ошибка установки мощности");
         }
-        if (!parsed) {
-          Serial.println("RXBG: используйте RXBG <0|1|toggle>");
-        } else if (radio.setRxBoostedGainMode(desired)) {
+      } else if (line.startsWith("RXBG")) {                   // управление режимом повышенного усиления приёмника
+        if (line.length() <= 4) {
           Serial.print("RXBG: ");
           Serial.println(radio.isRxBoostedGainEnabled() ? "включён" : "выключен");
         } else {
-          Serial.println("RXBG: ошибка установки режима");
+          String arg = line.substring(4);
+          arg.trim();
+          bool desired = radio.isRxBoostedGainEnabled();
+          bool parsed = false;
+          if (arg.equalsIgnoreCase("1") || arg.equalsIgnoreCase("ON") || arg.equalsIgnoreCase("TRUE") ||
+              arg.equalsIgnoreCase("ВКЛ")) {
+            desired = true;
+            parsed = true;
+          } else if (arg.equalsIgnoreCase("0") || arg.equalsIgnoreCase("OFF") || arg.equalsIgnoreCase("FALSE") ||
+                     arg.equalsIgnoreCase("ВЫКЛ")) {
+            desired = false;
+            parsed = true;
+          } else if (arg.equalsIgnoreCase("TOGGLE") || arg.equalsIgnoreCase("SWAP")) {
+            desired = !desired;
+            parsed = true;
+          }
+          if (!parsed) {
+            Serial.println("RXBG: используйте RXBG <0|1|toggle>");
+          } else if (radio.setRxBoostedGainMode(desired)) {
+            Serial.print("RXBG: ");
+            Serial.println(radio.isRxBoostedGainEnabled() ? "включён" : "выключен");
+          } else {
+            Serial.println("RXBG: ошибка установки режима");
+          }
         }
-      }
-    } else if (line.equalsIgnoreCase("BCN")) {
-      tx.prepareExternalSend();
-      radio.sendBeacon();
-      tx.completeExternalSend();
-      Serial.println("Маяк отправлен");
+      } else if (line.equalsIgnoreCase("BCN")) {
+        tx.prepareExternalSend();
+        radio.sendBeacon();
+        tx.completeExternalSend();
+        Serial.println("Маяк отправлен");
       } else if (line.equalsIgnoreCase("INFO")) {
         // выводим текущие настройки радиомодуля
         Serial.print("Банк: ");
