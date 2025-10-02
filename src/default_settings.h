@@ -27,7 +27,7 @@ namespace DefaultSettings {
   constexpr uint8_t BW_PRESET = 2;                // Индекс полосы (15,63 кГц)
   constexpr uint8_t SF_PRESET = 2;                // Индекс фактора расширения
   constexpr uint8_t CR_PRESET = 0;                // Индекс коэффициента кодирования
-  constexpr bool RX_BOOSTED_GAIN = false;         // Режим повышенного усиления приёмника
+  constexpr bool RX_BOOSTED_GAIN = true;         // Режим повышенного усиления приёмника
   constexpr size_t GATHER_BLOCK_SIZE = 110;       // Размер блока для PacketGatherer
   constexpr uint32_t SEND_PAUSE_MS = 370;          // Ожидание между отправками и приёмом (мс)
   constexpr uint32_t ACK_TIMEOUT_MS = 320;         // Тайм-аут ожидания ACK перед повтором (мс)
