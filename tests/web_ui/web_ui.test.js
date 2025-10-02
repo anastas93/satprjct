@@ -133,6 +133,25 @@ test('formatChatImageCaption собирает подпись', () => {
   assert.equal(caption, 'img-1 · 1.5 КиБ · 320×240 · профиль S · отправка…');
 });
 
+// Проверяем, что обновление статуса IRQ срабатывает на сообщении без символов после IRQ
+test('debugLog сохраняет статус IRQ для сообщений RadioSX1262 без хвоста', () => {
+  const wrap = document.createElement('div');
+  const messageEl = document.createElement('span');
+  const metaEl = document.createElement('span');
+  wrap.classList.remove('active');
+  UI.els.chatIrqStatus = wrap;
+  UI.els.chatIrqMessage = messageEl;
+  UI.els.chatIrqMeta = metaEl;
+  UI.els.debugLog = document.createElement('div');
+
+  ctx.debugLog('RadioSX1262: событие DIO1 без активных флагов IRQ', { origin: 'device', uptimeMs: 1234 });
+
+  assert.equal(UI.state.irqStatus.message, 'RadioSX1262: событие DIO1 без активных флагов IRQ');
+  assert.equal(UI.state.irqStatus.uptimeMs, 1234);
+  assert.equal(wrap.classList.contains('active'), true);
+  assert.equal(messageEl.textContent, 'RadioSX1262: событие DIO1 без активных флагов IRQ');
+});
+
 // Проверяем эвристику читаемости текста
 test('evaluateTextCandidate и selectReadableTextCandidate выбирают кириллицу', () => {
   const good = ctx.evaluateTextCandidate('Привет, мир!');
