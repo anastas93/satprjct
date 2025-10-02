@@ -692,7 +692,7 @@ bool sendSseFrame(PushClientSession& session, const String& event, const String&
 }
 
 // Очистка и keep-alive для всех активных клиентов
-void maintainPushSessions(bool forceKeepAlive = false) {
+void maintainPushSessions(bool forceKeepAlive) {
   if (gPushSessions.empty()) return;
   const uint32_t now = millis();
   for (auto it = gPushSessions.begin(); it != gPushSessions.end(); ) {
@@ -3054,3 +3054,4 @@ void loop() {
       }
     }
 }
+

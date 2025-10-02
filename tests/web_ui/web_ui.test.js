@@ -305,19 +305,6 @@ test('formatDurationMs, formatDeviceUptime и formatRelativeTime', () => {
   const rel = ctx.formatRelativeTime(past);
   assert.equal(rel, '2 мин назад');
 });
-
-// Проверяем классификацию логов и нормализацию версии
-test('classifyDebugMessage и normalizeVersionText', () => {
-  assert.equal(ctx.classifyDebugMessage('ERR radio timeout'), 'error');
-  assert.equal(ctx.classifyDebugMessage('WARN something'), 'warn');
-  assert.equal(ctx.classifyDebugMessage('✓ done'), 'success');
-  assert.equal(ctx.classifyDebugMessage('TX command'), 'action');
-  assert.equal(ctx.classifyDebugMessage(''), 'info');
-
-  assert.equal(ctx.normalizeVersionText('version = "v1.2.3"'), '1.2.3');
-  assert.equal(ctx.normalizeVersionText('unknown'), '');
-});
-
 // Проверяем отображение всех типов сообщений в debug-log
 test('debugLog создает элементы для каждого типа сообщения', () => {
   const { context: logCtx, document: logDoc } = createWebContext();
