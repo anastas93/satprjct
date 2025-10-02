@@ -3582,9 +3582,15 @@ function getReceivedMonitorState() {
       pendingRefresh: false,
       refreshScheduled: false,
       lastHint: null,
+      retryTimer: null,
+      pendingRetry: false,
+      nextRetryAt: null,
+      retryDelayMs: null,
+      lastFailureReason: null,
     };
   } else if (typeof EventSource === "undefined") {
     state.push.supported = false;
+    state.push.lastFailureReason = "EventSource API недоступен";
   }
   let limit = Number(state.limit);
   if (!Number.isFinite(limit) || limit <= 0) {
@@ -3677,6 +3683,13 @@ function updateReceivedMonitorDiagnostics() {
   } else if (metrics.consecutiveErrors > 0) {
     statusText = "Есть ошибки опроса";
     statusClass = "warn";
+  } else if (push.pendingRetry && push.nextRetryAt) {
+    const eta = Math.max(0, push.nextRetryAt - now);
+    statusText = "Повторная попытка push через " + formatDurationMs(eta);
+    statusClass = "warn";
+  } else if (push.pendingRetry) {
+    statusText = "Планируется повторная попытка push";
+    statusClass = "warn";
   } else if (metrics.lastOkAt) {
     statusText = "Ответ получен " + formatRelativeTime(metrics.lastOkAt);
     statusClass = "";
@@ -3693,6 +3706,12 @@ function updateReceivedMonitorDiagnostics() {
     let modeText = "Push-канал не активен";
     if (push.supported === false) {
       modeText = "Push недоступен в этом браузере, используется опрос";
+    } else if (push.pendingRetry && push.nextRetryAt) {
+      const eta = Math.max(0, push.nextRetryAt - now);
+      const reason = push.lastFailureReason ? ` (ошибка: ${push.lastFailureReason})` : "";
+      modeText = `Push: повторим подключение через ${formatDurationMs(eta)}${reason}`;
+    } else if (push.lastFailureReason) {
+      modeText = `Push временно недоступен, работает опрос · ${push.lastFailureReason}`;
     } else if (push.connected) {
       modeText = "Push активен, резервный опрос каждые 30 с";
     } else if (push.connecting) {
@@ -3889,13 +3908,37 @@ function closeReceivedPushChannel(opts) {
   push.connected = false;
   push.connecting = false;
   push.mode = "poll";
+  if (push.retryTimer) {
+    // Сбрасываем отложенное переподключение, если канал закрывается вручную
+    clearTimeout(push.retryTimer);
+    push.retryTimer = null;
+  }
+  push.pendingRetry = false;
+  push.nextRetryAt = null;
+  push.retryDelayMs = null;
 }
 
 function openReceivedPushChannel() {
   const state = getReceivedMonitorState();
   const push = state.push;
-  if (!push || push.supported === false || typeof EventSource === "undefined") {
-    if (push) push.mode = "poll";
+  if (push) {
+    // При каждой новой попытке пересчитываем поддержку SSE — настройки браузера могли измениться
+    push.supported = typeof EventSource !== "undefined";
+    if (push.retryTimer) {
+      clearTimeout(push.retryTimer);
+      push.retryTimer = null;
+    }
+    push.pendingRetry = false;
+    push.nextRetryAt = null;
+    push.retryDelayMs = null;
+  }
+  if (!push || push.supported === false) {
+    if (push) {
+      push.mode = "poll";
+      if (push.supported === false && !push.lastFailureReason) {
+        push.lastFailureReason = "EventSource API недоступен";
+      }
+    }
     startReceivedMonitor({ intervalMs: 5000, immediate: false });
     updateReceivedMonitorDiagnostics();
     return;
@@ -3914,6 +3957,7 @@ function openReceivedPushChannel() {
     push.connecting = true;
     push.retryCount = 0;
     push.mode = "push";
+    push.lastFailureReason = null;
     updateReceivedMonitorDiagnostics();
     source.addEventListener("open", () => {
       push.connected = true;
@@ -3922,6 +3966,13 @@ function openReceivedPushChannel() {
       push.lastErrorAt = null;
       push.retryCount = 0;
       push.mode = "push";
+      push.pendingRetry = false;
+      push.nextRetryAt = null;
+      push.retryDelayMs = null;
+      if (push.retryTimer) {
+        clearTimeout(push.retryTimer);
+        push.retryTimer = null;
+      }
       startReceivedMonitor({ intervalMs: 30000, immediate: false });
       updateReceivedMonitorDiagnostics();
     });
@@ -3950,8 +4001,33 @@ function openReceivedPushChannel() {
     });
   } catch (err) {
     console.warn("[push] не удалось открыть EventSource:", err);
-    push.supported = false;
+    push.connected = false;
+    push.connecting = false;
+    push.source = null;
+    push.lastErrorAt = Date.now();
+    const reasonText = err && err.message ? err.message : String(err);
+    push.lastFailureReason = reasonText;
+    push.retryCount = (push.retryCount || 0) + 1;
+    const previousDelay = Number(push.retryDelayMs);
+    const calculated = Number.isFinite(previousDelay) && previousDelay > 0 ? previousDelay * 2 : 1000;
+    const delay = Math.min(30000, Math.max(1000, calculated));
+    if (push.retryTimer) {
+      clearTimeout(push.retryTimer);
+      push.retryTimer = null;
+    }
+    push.retryDelayMs = delay;
+    push.nextRetryAt = Date.now() + delay;
+    push.pendingRetry = true;
+    push.retryTimer = setTimeout(() => {
+      // Плановая повторная попытка открытия SSE
+      push.retryTimer = null;
+      push.pendingRetry = false;
+      push.retryDelayMs = null;
+      push.nextRetryAt = null;
+      openReceivedPushChannel();
+    }, delay);
     push.mode = "poll";
+    startReceivedMonitor({ intervalMs: 5000, immediate: false });
     updateReceivedMonitorDiagnostics();
   }
 }
@@ -9438,6 +9514,21 @@ async function resyncAfterEndpointChange() {
     probe().catch(() => {});
     const monitor = getReceivedMonitorState();
     if (monitor && monitor.known) monitor.known = new Set();
+    if (monitor && monitor.push) {
+      // После смены адреса обнуляем состояние переподключения, чтобы гарантировать новую попытку SSE
+      const push = monitor.push;
+      if (push.retryTimer) {
+        clearTimeout(push.retryTimer);
+        push.retryTimer = null;
+      }
+      push.pendingRetry = false;
+      push.nextRetryAt = null;
+      push.retryDelayMs = null;
+      push.lastFailureReason = null;
+      push.retryCount = 0;
+      push.mode = "poll";
+      push.supported = typeof EventSource !== "undefined";
+    }
     await pollReceivedMessages({ silentError: true });
     openReceivedPushChannel();
   } catch (err) {
