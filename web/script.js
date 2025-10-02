@@ -2336,13 +2336,13 @@ async function sendCommand(cmd, params, opts) {
     handleCommandSideEffects(cmd, res.text);
     return res.text;
   }
+  const errText = res.error != null ? String(res.error) : "ошибка";
   if (!silent) {
     status("✗ " + cmd);
-    const errText = res.error != null ? String(res.error) : "ошибка";
     note("Команда " + cmd + ": " + summarizeResponse(errText, "ошибка"));
     logSystemCommand(cmd, errText, "error");
   }
-  debugLog("ERR " + (debugLabel || cmd) + ": " + res.error);
+  logErrorEvent(debugLabel || cmd, errText);
   return null;
 }
 async function postTx(text, timeoutMs) {
@@ -2475,7 +2475,7 @@ async function sendTextMessage(text, opts) {
   status("✗ TX");
   const errorText = res.error != null ? String(res.error) : "";
   note("Команда TX: " + summarizeResponse(errorText, "ошибка"));
-  debugLog("ERR TX: " + errorText);
+  logErrorEvent("TX", errorText || "ошибка");
   let attached = false;
   if (originIndex !== null) {
     attached = attachTxStatus(originIndex, { ok: false, text: errorText, raw: res.error });
@@ -6268,7 +6268,8 @@ async function refreshChannels(options) {
     }
   } catch (e) {
     if (!channels.length && !restoreChannelsFromStorage()) mockChannels();
-    debugLog("ERR refreshChannels: " + e);
+    const errText = e != null ? String(e) : "unknown";
+    logErrorEvent("refreshChannels", errText);
   }
   if (UI.state.channel == null) {
     const savedRaw = storage.get("set.CH");
@@ -6475,7 +6476,8 @@ async function runSearch() {
     }
   } catch (e) {
     cancelled = cancelled || searchState.cancel;
-    debugLog("ERR Search: " + e);
+    const errText = e != null ? String(e) : "unknown";
+    logErrorEvent("Search", errText);
   } finally {
     const requestedCancel = searchState.cancel || cancelled;
     searchState.running = false;
@@ -9207,7 +9209,10 @@ async function hydrateDeviceLog(options) {
   try {
     const res = await fetchDeviceLogHistory(opts.limit || 150, opts.timeoutMs || 4000);
     if (!res.ok) {
-      if (!opts.silent) debugLog("ERR LOGS: " + (res.error || "unknown"));
+      if (!opts.silent) {
+        const errText = res.error != null && res.error !== "" ? String(res.error) : "unknown";
+        logErrorEvent("LOGS", errText);
+      }
     } else {
       appendDeviceLogEntries(res.logs, { replace: true });
       if (state.queue.length) {
@@ -9216,15 +9221,31 @@ async function hydrateDeviceLog(options) {
       }
     }
   } catch (err) {
-    if (!opts.silent) debugLog("ERR LOGS: " + err);
+    if (!opts.silent) {
+      const errText = err != null ? String(err) : "unknown";
+      logErrorEvent("LOGS", errText);
+    }
   } finally {
     state.loading = false;
   }
 }
+function setDebugLineMessage(line, message, baseMessage) {
+  if (!line) return;
+  const payload = message != null ? String(message) : "";
+  if (baseMessage != null) {
+    line.dataset.baseMessage = String(baseMessage);
+  } else if (!line.dataset.baseMessage) {
+    line.dataset.baseMessage = payload;
+  }
+  line.dataset.message = payload;
+  const stamp = line.dataset.stamp || "";
+  line.textContent = stamp + payload;
+}
+
 function debugLog(text, opts) {
   const options = opts || {};
   const log = UI.els.debugLog;
-  if (!log) return;
+  if (!log) return null;
   const line = document.createElement("div");
   const type = classifyDebugMessage(text);
   line.className = "debug-line debug-line--" + type;
@@ -9238,7 +9259,8 @@ function debugLog(text, opts) {
     : (options.uptimeMs != null && Number.isFinite(options.uptimeMs)
         ? formatDeviceUptime(options.uptimeMs)
         : new Date().toLocaleTimeString());
-  line.textContent = "[" + stamp + "] " + text;
+  line.dataset.stamp = "[" + stamp + "] ";
+  setDebugLineMessage(line, text);
   if (options.origin === "device") {
     const rawText = text != null ? String(text) : "";
     const lowered = rawText.toLowerCase();
@@ -9257,6 +9279,49 @@ function debugLog(text, opts) {
   if (!options.fragment) {
     log.scrollTop = log.scrollHeight;
   }
+  return line;
+}
+
+// Интервал подавления одинаковых ошибок, чтобы не засорять журнал повторяющимися строками
+const ERROR_LOG_REPEAT_WINDOW_MS = 15000;
+const ERROR_LOG_REPEAT_MAX_COUNT = 99;
+const errorLogRepeatState = new Map();
+
+function logRepeatedMessage(key, message, opts) {
+  const now = Date.now();
+  const text = message != null ? String(message) : "";
+  const entry = errorLogRepeatState.get(key);
+  const lineConnected = entry && entry.line && typeof entry.line.isConnected === "boolean"
+    ? entry.line.isConnected
+    : true;
+  if (!entry || entry.text !== text || !lineConnected || (now - entry.lastTimestamp) > ERROR_LOG_REPEAT_WINDOW_MS) {
+    const line = debugLog(text, opts);
+    errorLogRepeatState.set(key, { text, line, count: 1, lastTimestamp: now });
+    if (line) {
+      line.dataset.repeatKey = key;
+      line.dataset.repeatCount = "1";
+      setDebugLineMessage(line, text, text);
+    }
+    return line;
+  }
+  entry.lastTimestamp = now;
+  entry.count = Math.min(entry.count + 1, ERROR_LOG_REPEAT_MAX_COUNT);
+  if (entry.line) {
+    const base = entry.text;
+    const suffix = entry.count > 1 ? " · повтор ×" + entry.count : "";
+    setDebugLineMessage(entry.line, base + suffix, base);
+    entry.line.dataset.repeatCount = String(entry.count);
+  }
+  return entry.line;
+}
+
+// Агрегированная запись об ошибке с префиксом ERR <label>
+function logErrorEvent(label, detail, opts) {
+  const cleanLabel = label != null ? String(label).trim() : "";
+  const prefix = cleanLabel ? "ERR " + cleanLabel : "ERR";
+  const detailText = detail != null ? String(detail) : "";
+  const message = detailText ? prefix + ": " + detailText : prefix;
+  return logRepeatedMessage("error:" + prefix, message, opts);
 }
 
 async function loadVersion() {

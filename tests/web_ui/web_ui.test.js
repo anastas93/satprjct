@@ -336,3 +336,25 @@ test('debugLog создаёт элементы для каждого типа с
 
   assert.equal(debugRoot.children.length, debugLogSamples.length);
 });
+
+// Проверяем, что повторяющиеся ошибки агрегируются и не засоряют журнал
+test('logErrorEvent объединяет одинаковые ошибки', () => {
+  const { context: errCtx, document: errDoc } = createWebContext();
+  const logRoot = errDoc.createElement('div');
+  errCtx.UI.els.debugLog = logRoot;
+
+  errCtx.Date.now = () => 1000;
+  errCtx.logErrorEvent('LOGS', 'тайм-аут запроса (4000 мс)');
+  assert.equal(logRoot.children.length, 1);
+  const first = logRoot.children[0];
+  assert(first.textContent.includes('ERR LOGS: тайм-аут запроса (4000 мс)'));
+
+  errCtx.logErrorEvent('LOGS', 'тайм-аут запроса (4000 мс)');
+  assert.equal(logRoot.children.length, 1);
+  assert(first.textContent.includes('повтор ×2'));
+
+  errCtx.Date.now = () => 1000 + errCtx.ERROR_LOG_REPEAT_WINDOW_MS + 5;
+  errCtx.logErrorEvent('LOGS', 'тайм-аут запроса (4000 мс)');
+  assert.equal(logRoot.children.length, 2);
+  assert(logRoot.children[1].textContent.includes('ERR LOGS: тайм-аут запроса (4000 мс)'));
+});
