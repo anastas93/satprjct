@@ -7675,6 +7675,10 @@ function parseJsonLenient(rawText) {
     .replace(/\/\*[\s\S]*?\*\//g, "") // убираем блочные комментарии
     .replace(/(^|[^:])\/\/.*$/gm, "$1"); // убираем построчные комментарии без трогания URL
   sanitized = sanitized.replace(/,\s*([}\]])/g, "$1"); // отрезаем висячие запятые
+  sanitized = sanitized.replace(/([\{,]\s*)([A-Za-z_][A-Za-z0-9_-]*)\s*:/g, (match, prefix, key) => {
+    // Аккуратно добавляем кавычки к необрамлённым идентификаторам ключей
+    return `${prefix}"${key}":`;
+  });
   sanitized = sanitized.replace(/([\{,]\s*)'([^'"\n]*)'\s*:/g, "$1\"$2\":"); // нормализуем ключи в кавычках
   sanitized = sanitized.replace(/:\s*'([^'"\n]*)'/g, ': "$1"'); // заменяем одиночные кавычки в значениях
   if (!sanitized.trim()) return null;
