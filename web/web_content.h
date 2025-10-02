@@ -1,68 +1,9 @@
 #pragma once
 #include <pgmspace.h>
-// Содержимое веб-интерфейса, встроенное в прошивку
-// index.html, style.css, script.js и libs/sha256.js подключаются без конвертации
+// Встроенные ресурсы веб-интерфейса.
+// Файл сгенерирован автоматически скриптом tools/generate_web_content.py.
 
-// libs/sha256.js
-const char SHA256_JS[] PROGMEM = R"~~~(
-/* Простая реализация SHA-256 на чистом JS.
- * Используется, когда WebCrypto недоступен (например, на HTTP).
- */
-(function(global){
-  function rotr(x,n){ return (x>>>n) | (x<<(32-n)); }
-  function sha256Bytes(bytes){
-    const K = new Uint32Array([
-      0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-      0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-      0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-      0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-      0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
-    ]);
-    const H = new Uint32Array([
-      0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-      0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19
-    ]);
-    const l = bytes.length;
-    const bitLen = l * 8;
-    const paddedLen = (((l + 9) >> 6) + 1) << 6; // длина с дополнением кратная 64
-    const buffer = new Uint8Array(paddedLen);
-    buffer.set(bytes);
-    buffer[l] = 0x80; // добавляем бит "1"
-    const dv = new DataView(buffer.buffer);
-    dv.setUint32(paddedLen - 8, Math.floor(bitLen / 4294967296));
-    dv.setUint32(paddedLen - 4, bitLen >>> 0);
-    const w = new Uint32Array(64);
-    for (let i = 0; i < paddedLen; i += 64) {
-      for (let j = 0; j < 16; j++) w[j] = dv.getUint32(i + j*4);
-      for (let j = 16; j < 64; j++) {
-        const s0 = rotr(w[j-15],7) ^ rotr(w[j-15],18) ^ (w[j-15]>>>3);
-        const s1 = rotr(w[j-2],17) ^ rotr(w[j-2],19) ^ (w[j-2]>>>10);
-        w[j] = (w[j-16] + s0 + w[j-7] + s1) >>> 0;
-      }
-      let a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
-      for (let j=0; j<64; j++) {
-        const S1 = rotr(e,6) ^ rotr(e,11) ^ rotr(e,25);
-        const ch = (e & f) ^ (~e & g);
-        const t1 = (h + S1 + ch + K[j] + w[j]) >>> 0;
-        const S0 = rotr(a,2) ^ rotr(a,13) ^ rotr(a,22);
-        const maj = (a & b) ^ (a & c) ^ (b & c);
-        const t2 = (S0 + maj) >>> 0;
-        h=g; g=f; f=e; e=(d + t1)>>>0; d=c; c=b; b=a; a=(t1 + t2)>>>0;
-      }
-      H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
-      H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
-    }
-    return Array.from(H).map(x=>x.toString(16).padStart(8,"0")).join("");
-  }
-  // экспорт в глобальный объект
-  global.sha256Bytes = sha256Bytes;
-})(this);
-)~~~";
-
-// index.html
+// web/index.html
 const char INDEX_HTML[] PROGMEM = R"~~~(
 <!DOCTYPE html>
 <html lang="ru">
@@ -644,10 +585,9 @@ const char INDEX_HTML[] PROGMEM = R"~~~(
   <script src="script.js"></script>
 </body>
 </html>
-
 )~~~";
 
-// style.css
+// web/style.css
 const char STYLE_CSS[] PROGMEM = R"~~~(
 /* satprjct redesign (rev2): Aurora + glass + depth — responsive with mobile dock */
 /* Themes */
@@ -847,6 +787,43 @@ body.nav-open { overflow: hidden; }
   font-weight: 700;
   position: relative;
 }
+.nav a .nav-badge {
+  /* Бейдж непрочитанных сообщений в шапке */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 .35rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--danger) 78%, black 15%);
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: .02em;
+  box-shadow: 0 4px 10px rgba(239, 68, 68, .35);
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+:root.light .nav a .nav-badge {
+  background: color-mix(in oklab, var(--danger) 85%, white 20%);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(220, 38, 38, .35);
+}
+:root.red .nav a .nav-badge {
+  background: color-mix(in oklab, var(--accent-2) 80%, black 10%);
+  box-shadow: 0 4px 10px rgba(244, 63, 94, .4);
+}
+.nav a .nav-badge.nav-badge-pop {
+  animation: nav-badge-pop .45s cubic-bezier(.2, .75, .3, 1.2);
+}
+@keyframes nav-badge-pop {
+  0% { transform: scale(.6); opacity: 0; }
+  55% { transform: scale(1.08); opacity: 1; }
+  75% { transform: scale(.95); }
+  100% { transform: scale(1); opacity: 1; }
+}
 .nav a[aria-current="page"] {
   color: var(--text);
   background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 70%, white 30%), var(--panel-2));
@@ -967,6 +944,114 @@ main {
 .chat-scroll-down:hover { transform: translateY(-2px); box-shadow: 0 18px 30px rgba(0,0,0,.38); }
 .chat-scroll-down:active { transform: translateY(0); box-shadow: 0 10px 18px rgba(0,0,0,.32); }
 .chat-scroll-down[hidden] { display: none; }
+.chat-receiving-indicator {
+  position: absolute;
+  left: .9rem;
+  bottom: .95rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .45rem .7rem;
+  border-radius: .85rem;
+  border: 1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--panel-2) 92%, white 8%), var(--panel-2));
+  color: var(--text);
+  font-size: .82rem;
+  font-weight: 600;
+  box-shadow: 0 14px 26px rgba(0,0,0,.32);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .2s ease, transform .2s ease;
+  z-index: 5;
+}
+.chat-receiving-indicator.active {
+  opacity: 1;
+  transform: translateY(0);
+}
+.chat-receiving-indicator .indicator-icon {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+.chat-receiving-indicator .indicator-icon::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px color-mix(in oklab, var(--accent) 85%, black 15%);
+}
+.chat-receiving-indicator .indicator-icon::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklab, var(--accent) 65%, transparent 35%);
+  animation: chat-receive-pulse 1.4s ease-out infinite;
+}
+.chat-receiving-indicator .indicator-text {
+  white-space: nowrap;
+}
+.chat-irq-status {
+  margin-top: .75rem;
+  padding: .65rem .95rem;
+  border-radius: .85rem;
+  background: color-mix(in oklab, var(--panel) 88%, black 12%);
+  border: 1px solid color-mix(in oklab, var(--panel-2) 68%, black 32%);
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  font-size: .92rem;
+  color: var(--muted);
+  box-shadow: 0 12px 26px rgba(0,0,0,.18);
+  transition: border-color .2s ease, color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+.chat-irq-status::before {
+  content: "⚡";
+  font-size: 1.15rem;
+  line-height: 1;
+  color: color-mix(in oklab, var(--accent-2) 70%, white 30%);
+}
+.chat-irq-status .chat-irq-text {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+.chat-irq-status .chat-irq-message {
+  font-weight: 600;
+}
+.chat-irq-status .chat-irq-meta {
+  font-size: .78rem;
+  color: var(--muted);
+}
+.chat-irq-status.active {
+  color: var(--text);
+  border-color: color-mix(in oklab, var(--accent) 50%, transparent);
+  background: color-mix(in oklab, var(--panel) 82%, black 18%);
+  box-shadow: 0 16px 30px rgba(0,0,0,.22);
+}
+.chat-irq-status.active::before {
+  color: color-mix(in oklab, var(--accent) 70%, white 30%);
+}
+.chat-irq-status.active .chat-irq-meta {
+  color: color-mix(in oklab, var(--accent-2) 55%, var(--muted) 45%);
+}
+@keyframes chat-receive-pulse {
+  0% {
+    transform: scale(.6);
+    opacity: .85;
+  }
+  60% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
 .msg {
   display:grid;
   gap:.35rem;
@@ -1019,6 +1104,29 @@ main {
 }
 .msg.rx .bubble-text { font-weight:600; }
 .msg.rx time { color: color-mix(in oklab, var(--good) 55%, var(--muted) 45%); }
+.msg.rx.progress .bubble {
+  background: color-mix(in oklab, var(--good) 12%, var(--panel) 88%);
+  border-style: dashed;
+}
+.msg.rx.progress .bubble-text { font-weight:600; }
+.bubble-text.with-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+}
+.bubble-spinner {
+  width: .85rem;
+  height: .85rem;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklab, var(--good) 80%, transparent 20%);
+  border-top-color: color-mix(in oklab, var(--good) 20%, transparent 80%);
+  animation: bubble-spinner 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+@keyframes bubble-spinner {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 .bubble-text { line-height:1.55; }
 /* Полный текст системного ответа */
 .bubble-detail {
@@ -1151,6 +1259,14 @@ main {
   }
   .chat-image-profile {
     width: 100%;
+  }
+  .chat-irq-status {
+    flex-direction: column;
+    align-items: stretch;
+    gap: .5rem;
+  }
+  .chat-irq-status::before {
+    margin-bottom: -.15rem;
   }
 }
 .fab { border-radius: 999px; width: 46px; height: 46px; display:grid; place-items:center; padding: 0; }
@@ -2031,7 +2147,7 @@ tbody tr.selected-info td { font-weight:600; }
 .debug-line--error { color: color-mix(in oklab, var(--danger) 75%, var(--text) 25%); }
 .debug-line--warn { color: color-mix(in oklab, #facc15 70%, var(--text) 30%); }
 .debug-line--action { color: color-mix(in oklab, var(--accent) 70%, var(--text) 30%); }
-.debug-metrics { background: var(--panel-2); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius: .9rem; padding: 1rem; margin-bottom: 1.5rem; }
+.debug-metrics { background: var(--panel-2); border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%); border-radius:.9rem; padding:1rem; margin-bottom:1.5rem; }
 .debug-metrics__header { display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom:1rem; }
 .debug-metrics__status { font-size:.9rem; color: var(--muted); }
 .debug-metrics__status.warn { color: color-mix(in oklab, #facc15 70%, var(--text) 30%); }
@@ -2046,325 +2162,7 @@ tbody tr.selected-info td { font-weight:600; }
 .debug-metrics-foot__entry.error { color: color-mix(in oklab, var(--danger) 70%, var(--text) 30%); }
 )~~~";
 
-// libs/freq-info.csv — справочник частот каналов
-const char FREQ_INFO_CSV[] PROGMEM = R"~~~(
-Channel,RX (MHz),TX (MHz),System,Band Plan,Purpose,Frequency (MHz),Bandwidth,Satellite Name,Satellite Position,Comments,Modulation,Usage
-0,243.625,316.725,UHF military,225-328.6 MHz,Military communications,243.625,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
-1,243.625,300.4,UHF military,225-328.6 MHz,Military communications,243.625,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
-2,243.8,298.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
-3,244.135,296.075,UHF FO,Band Plan P,Tactical communications,244.135,5KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
-4,244.275,300.25,UHF military,225-328.6 MHz,Military communications,,,,,,,
-5,245.2,312.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
-6,245.8,298.65,UHF military,225-328.6 MHz,Military communications,245.8,35KHz,Skynet 5C,17.8 West,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
-7,245.85,314.23,UHF military,225-328.6 MHz,Military communications,245.85,35KHz,Skynet 5A,5.9 East,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
-8,245.95,299.4,UHF military,225-328.6 MHz,Military communications,,,,,,,
-9,247.45,298.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
-10,248.75,306.9,Marisat,B,Tactical voice/data,248.75,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
-11,248.825,294.375,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder,248.825,30KHz,? IOR,,? March 2010,,
-12,249.375,316.975,UHF military,225-328.6 MHz,Military communications,249.375,30KHz,?,,IOR March 2010,,
-13,249.4,300.975,UHF military,225-328.6 MHz,Military communications,,,,,,,
-14,249.45,299.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
-15,249.45,312.75,UHF military,225-328.6 MHz,Military communications,,,,,,,
-16,249.49,313.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
-17,249.53,318.28,UHF military,225-328.6 MHz,Military communications,249.5295,8KHz,Skynet 5A,5.9 East,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
-18,249.85,316.25,UHF military,225-328.6 MHz,Military communications,,,,,,,
-19,249.85,298.83,UHF military,225-328.6 MHz,Military communications,,,,,,,
-20,249.89,300.5,UHF military,225-328.6 MHz,Military communications,,,,,,,
-21,249.93,308.75,UHF FO,Q,Tactical communications,,,,,,,
-22,250.09,312.6,UHF military,225-328.6 MHz,Military communications,,,,,,,
-23,250.9,308.3,UHF FO,Q,Tactical communications,250.9,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
-24,251.275,296.5,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder,,,,,,,
-25,251.575,308.45,UHF military,225-328.6 MHz,Military communications,,,,,,,
-26,251.6,298.225,UHF military,225-328.6 MHz,Military communications,,,,,,,
-27,251.85,292.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,251.85,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-28,251.9,292.9,FLTSATCOM/Leasat,A/X,Tactical communications,251.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-29,251.95,292.95,Navy 25 kHz,Navy 25K,Tactical voice/data communications,251.95,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-30,252.0,293.1,FLTSATCOM,B,Tactical communications,252.0,30KHz,UFO-10/11,70.0 East,March 2010,Narrowband FM/AM,Тактические голос/данные каналы
-31,252.05,293.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,252.05,25KHz,UFO-7,23.3 West,DAMA kg_net= 7 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
-32,252.15,293.15,UHF military,225-328.6 MHz,Military communications,252.15,25KHz,Fltsatcom 8,15.5 West,DAMA kg_net= 5 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
-33,252.2,299.15,UHF military,225-328.6 MHz,Military communications,,,,,,,
-34,252.4,309.7,UHF FO,Q,Tactical communications,252.4,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-35,252.45,309.75,UHF military,225-328.6 MHz,Military communications,252.45,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-36,252.5,309.8,UHF military,225-328.6 MHz,Military communications,252.5,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-37,252.55,309.85,UHF military,225-328.6 MHz,Military communications,252.55,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-38,252.625,309.925,UHF military,225-328.6 MHz,Military communications,,,,,,,
-39,253.55,294.55,UHF military,225-328.6 MHz,Military communications,253.55,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-40,253.6,295.95,UHF military,225-328.6 MHz,Military communications,253.6,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-41,253.65,294.65,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.65,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-42,253.7,294.7,FLTSATCOM/Leasat/UHF FO,A/X/O,Tactical communications,253.7,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-43,253.75,294.75,UHF military,225-328.6 MHz,Military communications,253.75,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
-44,253.8,296.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
-45,253.85,294.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.85,25KHz,UFO-7,23.3 West,DAMA kg_net= 9 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
-46,253.85,294.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.85,25KHz,UFO-7,23.3 West,DAMA kg_net= 9 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
-47,253.9,307.5,UHF military,225-328.6 MHz,Military communications,,,,,,,
-48,254.0,298.63,UHF military,225-328.6 MHz,Military communications,,,,,,,
-49,254.73,312.55,UHF military,225-328.6 MHz,Military communications,,,,,,,
-50,254.775,310.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
-51,254.83,296.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
-52,255.25,302.425,UHF military,225-328.6 MHz,Military communications,255.25,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-53,255.35,296.35,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.35,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-54,255.4,296.4,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-55,255.45,296.45,UHF military,225-328.6 MHz,Military communications,255.45,25KHz,UFO-7,23.3 West,DAMA kg_net= 3 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
-56,255.55,296.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.55,25KHz,Fltsatcom 8,15.5 West,,Narrowband FM/AM,Тактические голос/данные каналы
-57,255.55,296.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.55,25KHz,Fltsatcom 8,15.5 West,,Narrowband FM/AM,Тактические голос/данные каналы
-58,255.775,309.3,UHF military,225-328.6 MHz,Military communications,,,,,,,
-59,256.45,313.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
-60,256.6,305.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
-61,256.85,297.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,256.85,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-62,256.9,296.1,UHF military,225-328.6 MHz,Military communications,256.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-63,256.95,297.95,UHF military,225-328.6 MHz,Military communications,256.95,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-64,257.0,297.675,Navy 25 kHz,Navy 25K,Tactical voice/data communications,257.0,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-65,257.05,298.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,257.05,25KHz,UFO-7,23.3 West,DAMA kg_net= 4 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
-66,257.1,295.65,UHF military,225-328.6 MHz,Military communications,257.1,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-67,257.15,298.15,UHF military,225-328.6 MHz,Military communications,257.15,25KHz,Fltsatcom 8,15.5 West,DAMA kg_net= 6 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
-68,257.2,308.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
-69,257.25,309.475,UHF military,225-328.6 MHz,Military communications,,,,,,,
-70,257.3,309.725,UHF military,225-328.6 MHz,Military communications,,,,,,,
-71,257.35,307.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
-72,257.5,311.35,UHF military,225-328.6 MHz,Military communications,,,,,,,
-73,257.7,316.15,UHF military,225-328.6 MHz,Military communications,,,,,,,
-74,257.775,311.375,UHF military,225-328.6 MHz,Military communications,,,,,,,
-75,257.825,297.075,UHF military,225-328.6 MHz,Military communications,,,,,,,
-76,257.9,298.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
-77,258.15,293.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
-78,258.35,299.35,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.35,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-79,258.45,299.45,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.45,25KHz,UFO-2,28.3 East,PSK modem,PSK (Phase Shift Keying),Модемные каналы данных
-80,258.5,299.5,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.5,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-81,258.55,299.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.55,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
-82,258.65,299.65,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.65,25KHz,Fltsatcom 8,15.5 West,Strong GMSK,GMSK (Gaussian Minimum Shift Keying),Цифровая передача (тактическая/мобильная)
-83,259.0,317.925,UHF military,225-328.6 MHz,Military communications,,,,,,,
-84,259.05,317.975,UHF military,225-328.6 MHz,Military communications,,,,,,,
-85,259.975,310.05,UHF military,225-328.6 MHz,Military communications,259.975,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-86,260.025,310.225,UHF military,225-328.6 MHz,Military communications,260.025,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-87,260.075,310.275,UHF military,225-328.6 MHz,Military communications,260.075,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-88,260.125,310.125,UHF military,225-328.6 MHz,Military communications,260.125,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-89,260.175,310.325,UHF military,225-328.6 MHz,Military communications,,,,,,,
-90,260.375,292.975,UHF military,225-328.6 MHz,Military communications,260.375,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-91,260.425,297.575,UHF military,225-328.6 MHz,Military communications,260.425,25KHz,UFO-7,23.3 West,DAMA kg_net= 8 9k6+19k2,Narrowband FM/AM,DAMA (динамическое распределение каналов)
-92,260.425,294.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.425,25KHz,UFO-7,23.3 West,DAMA kg_net= 8 9k6+19k2,Narrowband FM/AM,DAMA (динамическое распределение каналов)
-93,260.475,294.075,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.475,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-94,260.525,294.125,UHF military,225-328.6 MHz,Military communications,260.525,25KHz,UFO-7,23.3 West,BPSK modem,BPSK (Binary Phase Shift Keying),Модемные каналы данных
-95,260.55,296.775,UHF military,225-328.6 MHz,Military communications,,,,,,,
-96,260.575,294.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.575,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-97,260.625,294.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.625,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-98,260.675,294.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.675,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-99,260.675,294.275,UHF military,225-328.6 MHz,Military communications,260.675,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-100,260.725,294.325,UHF military,225-328.6 MHz,Military communications,260.725,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-101,260.9,313.9,UHF military,225-328.6 MHz,Military communications,,,,,,,
-102,261.1,298.38,UHF military,225-328.6 MHz,Military communications,,,,,,,
-103,261.1,298.7,UHF military,225-328.6 MHz,Military communications,,,,,,,
-104,261.2,294.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
-105,262.0,314.2,UHF military,225-328.6 MHz,Military communications,262.0,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-106,262.04,307.075,UHF military,225-328.6 MHz,Military communications,,,,,,,
-107,262.075,306.975,UHF military,225-328.6 MHz,Military communications,262.075,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-108,262.125,295.725,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.125,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-109,262.175,297.025,UHF military,225-328.6 MHz,Military communications,262.175,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-110,262.175,295.775,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.175,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-111,262.225,295.825,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.225,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-112,262.275,295.875,UHF military,225-328.6 MHz,Military communications,262.275,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-113,262.275,300.275,UHF military,225-328.6 MHz,Military communications,262.275,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-114,262.325,295.925,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.325,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-115,262.375,295.975,UHF military,225-328.6 MHz,Military communications,262.375,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-116,262.425,296.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.425,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-117,263.45,311.4,UHF military,225-328.6 MHz,Military communications,,,,,,,
-118,263.5,309.875,UHF military,225-328.6 MHz,Military communications,,,,,,,
-119,263.575,297.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.575,25Khz,UFO-10/11,70.0 East,Data March 2010,Digital Narrowband Data,Цифровые данные (низкая/средняя скорость)
-120,263.625,297.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.625,25KHz,UFO-7,23.3 West,BPSK modem,BPSK (Binary Phase Shift Keying),Модемные каналы данных
-121,263.675,297.275,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.675,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-122,263.725,297.325,UHF military,225-328.6 MHz,Military communications,263.725,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
-123,263.775,297.375,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.775,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-124,263.825,297.425,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.825,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-125,263.875,297.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.875,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-126,263.925,297.525,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.925,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-127,265.25,306.25,UHF military,225-328.6 MHz,Military communications,265.25,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-128,265.35,306.35,UHF military,225-328.6 MHz,Military communications,265.35,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-129,265.4,294.425,FLTSATCOM/Leasat,A/X,Tactical communications,265.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-130,265.45,306.45,UHF military,225-328.6 MHz,Military communications,265.45,25KHz,UFO-7,23.3 West,Daily RATT transmissions,Narrowband FM/AM,Тактические голос/данные каналы
-131,265.5,302.525,UHF military,225-328.6 MHz,Military communications,265.5,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-132,265.55,306.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,265.55,25KHz,Fltsatcom 8,15.5 West,Many interfering carriers in tpx,Narrowband FM/AM,Тактические голос/данные каналы
-133,265.675,306.675,UHF military,225-328.6 MHz,Military communications,,,,,,,
-134,265.85,306.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
-135,266.75,316.575,UHF military,225-328.6 MHz,Military communications,266.75,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-136,266.85,307.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,266.85,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-137,266.9,297.625,UHF military,225-328.6 MHz,Military communications,266.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-138,266.95,307.95,Navy 25 kHz,Navy 25K,Tactical voice/data communications,266.95,25KHz,UFO-7,23.3 West,Russian phone relays,Narrowband FM/AM,Тактические голос/данные каналы
-139,267.05,308.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,267.05,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
-140,267.1,308.1,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
-141,267.15,308.15,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
-142,267.2,308.2,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
-143,267.25,308.25,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
-144,267.4,294.9,UHF military,225-328.6 MHz,Military communications,,,,,,,
-145,267.875,310.375,UHF military,225-328.6 MHz,Military communications,267.875,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-146,267.95,310.45,UHF military,225-328.6 MHz,Military communications,267.95,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-147,268.0,310.475,UHF military,225-328.6 MHz,Military communications,268.0,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-148,268.025,309.025,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
-149,268.05,310.55,UHF military,225-328.6 MHz,Military communications,268.05,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-150,268.1,310.6,UHF military,225-328.6 MHz,Military communications,268.1,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
-151,268.15,309.15,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.15,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-152,268.2,296.05,UHF military,225-328.6 MHz,Military communications,268.2,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-153,268.25,309.25,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.25,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
-154,268.3,309.3,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.3,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-155,268.35,309.35,UHF military,225-328.6 MHz,Military communications,268.35,25KHz,UFO-7,23.3 West,DAMA kg_net= 1 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
-156,268.4,295.9,FLTSATCOM/Leasat,C/Z,Tactical communications,268.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-157,268.45,309.45,UHF military,225-328.6 MHz,Military communications,268.45,25KHz,UFO-7,23.3 West,Many interfering carriers in tpx,Narrowband FM/AM,Тактические голос/данные каналы
-158,269.7,309.925,UHF military,225-328.6 MHz,Military communications,269.7,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-159,269.75,310.75,UHF military,225-328.6 MHz,Military communications,269.75,25KHz,UFO-2,28.3 East,Wheel,Narrowband FM/AM,Тактические голос/данные каналы
-160,269.8,310.025,UHF military,225-328.6 MHz,Military communications,269.8,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
-161,269.85,310.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,269.85,30KHz,UFO-7,23.3 West,DAMA kg_net= 2 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
-162,269.95,310.95,DOD 25 kHz,DOD 25K,Tactical communications (DoD),269.95,25KHz,UFO-7,23.3 West,PSK mode,PSK (Phase Shift Keying),Цифровые данные
-)~~~";
-
-// libs/mgrs.js — преобразование квадрата MGRS в широту и долготу (центр 100‑км сектора)
-const char MGRS_JS[] PROGMEM = R"~~~(
-/* Простейшая поддержка сетки MGRS (100 км) для вкладки Pointing.
- * Конвертирует обозначение зоны/полосы/квадрата в широту и долготу (центр квадрата).
- */
-(function (global) {
-  const EASTING_SETS = ["ABCDEFGH", "JKLMNPQR", "STUVWXYZ"];
-  const NORTHING_LETTERS = "ABCDEFGHJKLMNPQRSTUV";
-  const LAT_BANDS = {
-    C: [-80, -72],
-    D: [-72, -64],
-    E: [-64, -56],
-    F: [-56, -48],
-    G: [-48, -40],
-    H: [-40, -32],
-    J: [-32, -24],
-    K: [-24, -16],
-    L: [-16, -8],
-    M: [-8, 0],
-    N: [0, 8],
-    P: [8, 16],
-    Q: [16, 24],
-    R: [24, 32],
-    S: [32, 40],
-    T: [40, 48],
-    U: [48, 56],
-    V: [56, 64],
-    W: [64, 72],
-    X: [72, 84],
-  };
-  const WGS84_A = 6378137.0;
-  const WGS84_ECC = 0.00669437999014;
-  const K0 = 0.9996;
-  const RAD2DEG = 180 / Math.PI;
-
-  function normalizeInput(value) {
-    if (!value) return null;
-    const trimmed = String(value).toUpperCase().replace(/[^0-9A-Z]/g, "");
-    const match = trimmed.match(/^(\d{1,2})([C-HJ-NP-X])([A-HJ-NP-Z]{2})$/);
-    if (!match) return null;
-    const zone = parseInt(match[1], 10);
-    if (!Number.isFinite(zone) || zone < 1 || zone > 60) return null;
-    const band = match[2];
-    const e100k = match[3][0];
-    const n100k = match[3][1];
-    if (e100k === "I" || e100k === "O" || n100k === "I" || n100k === "O") return null;
-    return {
-      zone,
-      band,
-      e100k,
-      n100k,
-      text: String(zone) + band + e100k + n100k,
-    };
-  }
-
-  function utmToLatLon(zone, easting, northing, hemisphere) {
-    const eccPrimeSquared = WGS84_ECC / (1 - WGS84_ECC);
-    const e1 = (1 - Math.sqrt(1 - WGS84_ECC)) / (1 + Math.sqrt(1 - WGS84_ECC));
-    const x = easting - 500000.0;
-    let y = northing;
-    if (hemisphere === "S") {
-      y -= 10000000.0;
-    }
-    const M = y / K0;
-    const mu = M /
-      (WGS84_A * (1 - WGS84_ECC / 4 - (3 * WGS84_ECC * WGS84_ECC) / 64 - (5 * Math.pow(WGS84_ECC, 3)) / 256));
-    const phi1Rad =
-      mu + (3 * e1 / 2 - 27 * Math.pow(e1, 3) / 32) * Math.sin(2 * mu) +
-      (21 * e1 * e1 / 16 - 55 * Math.pow(e1, 4) / 32) * Math.sin(4 * mu) +
-      (151 * Math.pow(e1, 3) / 96) * Math.sin(6 * mu) +
-      (1097 * Math.pow(e1, 4) / 512) * Math.sin(8 * mu);
-    const sinPhi1 = Math.sin(phi1Rad);
-    const cosPhi1 = Math.cos(phi1Rad);
-    const tanPhi1 = Math.tan(phi1Rad);
-    const N1 = WGS84_A / Math.sqrt(1 - WGS84_ECC * sinPhi1 * sinPhi1);
-    const R1 = WGS84_A * (1 - WGS84_ECC) / Math.pow(1 - WGS84_ECC * sinPhi1 * sinPhi1, 1.5);
-    const T1 = tanPhi1 * tanPhi1;
-    const C1 = eccPrimeSquared * cosPhi1 * cosPhi1;
-    const D = x / (N1 * K0);
-
-    const lat = phi1Rad -
-      (N1 * tanPhi1 / R1) *
-        (D * D / 2 - (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * eccPrimeSquared) * Math.pow(D, 4) / 24 +
-          (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * eccPrimeSquared - 3 * C1 * C1) * Math.pow(D, 6) / 720);
-    const lon =
-      (D - (1 + 2 * T1 + C1) * Math.pow(D, 3) / 6 +
-        (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * eccPrimeSquared + 24 * T1 * T1) * Math.pow(D, 5) / 120) /
-      cosPhi1;
-    const lonOrigin = (zone - 1) * 6 - 180 + 3;
-    return {
-      lat: lat * RAD2DEG,
-      lon: lon * RAD2DEG + lonOrigin,
-    };
-  }
-
-  function solveLatLon(data) {
-    const bandRange = LAT_BANDS[data.band];
-    if (!bandRange) return null;
-    const eastingLetters = EASTING_SETS[(data.zone - 1) % 3];
-    const colIndex = eastingLetters.indexOf(data.e100k);
-    if (colIndex < 0) return null;
-    const easting = 100000 + colIndex * 100000 + 50000;
-
-    const northingOffset = data.zone % 2 === 0 ? 5 : 0;
-    const rotated = NORTHING_LETTERS.slice(northingOffset) + NORTHING_LETTERS.slice(0, northingOffset);
-    const rowIndex = rotated.indexOf(data.n100k);
-    if (rowIndex < 0) return null;
-    const baseNorthing = rowIndex * 100000 + 50000;
-
-    const hemisphere = data.band >= "N" ? "N" : "S";
-    const cycle = 2000000;
-    let candidate = baseNorthing + (hemisphere === "S" ? 10000000 : 0);
-    let result = utmToLatLon(data.zone, easting, candidate, hemisphere);
-    let attempts = 0;
-    while ((result.lat < bandRange[0] || result.lat >= bandRange[1]) && attempts < 10) {
-      if (result.lat < bandRange[0]) {
-        candidate += cycle;
-      } else {
-        candidate -= cycle;
-        if (candidate <= 0 && hemisphere !== "S") break;
-      }
-      result = utmToLatLon(data.zone, easting, candidate, hemisphere);
-      attempts += 1;
-    }
-    if (result.lat < bandRange[0] || result.lat >= bandRange[1]) return null;
-    return {
-      lat: result.lat,
-      lon: result.lon,
-      zone: data.zone,
-      band: data.band,
-      square: data.e100k + data.n100k,
-    };
-  }
-
-  global.satMgrs = {
-    normalize100k(value) {
-      return normalizeInput(value);
-    },
-    toLatLon100k(value) {
-      const normalized = normalizeInput(value);
-      if (!normalized) return null;
-      const solved = solveLatLon(normalized);
-      if (!solved) return null;
-      solved.text = normalized.text;
-      return solved;
-    },
-  };
-})(typeof window !== "undefined" ? window : this);
-)~~~";
-
-// script.js
+// web/script.js
 const char SCRIPT_JS[] PROGMEM = R"~~~(
 /* satprjct web/app.js — vanilla JS only */
 /* Безопасная обёртка для localStorage: веб-приложение должно работать даже без постоянного хранилища */
@@ -2442,6 +2240,11 @@ const TWO_PI = Math.PI * 2;
 const POINTING_DEFAULT_MIN_ELEVATION = 10; // минимальный угол возвышения по умолчанию
 const POINTING_COMPASS_OFFSET_DEG = 180; // отображаем юг в верхней части компаса
 
+// Константы счётчика непрочитанных сообщений чата выносим наверх, чтобы избежать ошибок инициализации
+const CHAT_UNREAD_STORAGE_KEY = "chatUnread"; // ключ хранения количества непрочитанных сообщений
+const CHAT_UNREAD_MAX = 999; // максимальное значение счётчика, отображаемое в бейдже
+const CHAT_HISTORY_LIMIT = 500; // максимальное количество сообщений, сохраняемых в истории чата
+
 /* Состояние интерфейса */
 const UI = {
   tabs: ["chat", "channels", "pointing", "settings", "security", "debug"],
@@ -2458,11 +2261,14 @@ const UI = {
     lastMessage: "",
   },
   state: {
+    activeTab: null,
     bank: null,
     channel: null,
     ack: null,
     ackRetry: null,
     ackBusy: false,
+    lightPack: null,
+    lightPackBusy: false,
     rxBoostedGain: null,
     encBusy: false,
     encryption: null,
@@ -2497,9 +2303,20 @@ const UI = {
     chatHistory: [],
     chatHydrating: false,
     chatScrollPinned: true,
+    chatUnread: (() => {
+      const raw = storage.get(CHAT_UNREAD_STORAGE_KEY);
+      const parsed = raw != null ? parseInt(raw, 10) : NaN;
+      if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+      return Math.min(Math.max(parsed, 0), CHAT_UNREAD_MAX);
+    })(),
     chatSoundCtx: null,
     chatSoundLast: 0,
     chatImages: null,
+    irqStatus: {
+      message: "",
+      uptimeMs: null,
+      timestamp: null,
+    },
     testRxm: {
       polling: false,
       lastName: null,
@@ -2512,10 +2329,16 @@ const UI = {
       awaiting: false,
       progress: new Map(),
     },
+    deviceLog: {
+      initialized: false,
+      loading: false,
+      known: new Set(),
+      lastId: 0,
+      queue: [],
+    },
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
-    ackDelay: null,
     encTest: null,
     autoNightTimer: null,
     autoNightActive: false,
@@ -2743,8 +2566,6 @@ const PAUSE_MIN_MS = 0;
 const PAUSE_MAX_MS = 60000;
 const ACK_TIMEOUT_MIN_MS = 0;
 const ACK_TIMEOUT_MAX_MS = 60000;
-const ACK_DELAY_MIN_MS = 0;
-const ACK_DELAY_MAX_MS = 5000;
 
 /* Определяем предпочитаемую тему только при наличии поддержки matchMedia */
 function detectPreferredTheme() {
@@ -2784,6 +2605,7 @@ async function init() {
   UI.els.receivedDiag = {
     root: $("#recvDiag"),
     status: $("#recvDiagStatus"),
+    mode: $("#recvDiagMode"),
     interval: $("#recvDiagInterval"),
     lastStart: $("#recvDiagLastStart"),
     lastFinish: $("#recvDiagLastFinish"),
@@ -2808,6 +2630,10 @@ async function init() {
   if (UI.els.chatRxIndicator) {
     setChatReceivingIndicatorState(getReceivedMonitorState().awaiting);
   }
+  UI.els.chatIrqStatus = $("#chatIrqStatus");
+  UI.els.chatIrqMessage = UI.els.chatIrqStatus ? UI.els.chatIrqStatus.querySelector(".chat-irq-message") : null;
+  UI.els.chatIrqMeta = UI.els.chatIrqStatus ? UI.els.chatIrqStatus.querySelector(".chat-irq-meta") : null;
+  renderChatIrqStatus();
   UI.els.sendBtn = $("#sendBtn");
   UI.els.chatImageBtn = $("#chatImageBtn");
   UI.els.chatImageInput = $("#chatImageInput");
@@ -2821,12 +2647,13 @@ async function init() {
   UI.els.ackSettingHint = $("#ackSettingHint");
   UI.els.ackRetry = $("#ACKR");
   UI.els.ackRetryHint = $("#ackRetryHint");
+  UI.els.lightPack = $("#LIGHTPACK");
+  UI.els.lightPackHint = $("#lightPackHint");
+  UI.els.lightPackControl = $("#lightPackControl");
   UI.els.pauseInput = $("#PAUSE");
   UI.els.pauseHint = $("#pauseHint");
   UI.els.ackTimeout = $("#ACKT");
   UI.els.ackTimeoutHint = $("#ackTimeoutHint");
-  UI.els.ackDelay = $("#ACKD");
-  UI.els.ackDelayHint = $("#ackDelayHint");
   UI.els.rxBoostedGain = $("#RXBG");
   UI.els.rxBoostedGainHint = $("#rxBoostedGainHint");
   UI.els.testRxmMessage = $("#TESTRXMMSG");
@@ -3000,6 +2827,7 @@ async function init() {
   // Навигация по вкладкам
   const hash = location.hash ? location.hash.slice(1) : "";
   const initialTab = UI.tabs.includes(hash) ? hash : (storage.get("activeTab") || "chat");
+  UI.state.activeTab = initialTab;
   for (const tab of UI.tabs) {
     const link = UI.els.nav ? UI.els.nav.querySelector('[data-tab="' + tab + '"]') : null;
     if (link) {
@@ -3010,6 +2838,7 @@ async function init() {
       });
     }
   }
+  updateChatUnreadBadge();
   setTab(initialTab);
   initPointingTab();
 
@@ -3046,8 +2875,30 @@ async function init() {
   if (UI.els.endpoint) {
     UI.els.endpoint.value = UI.cfg.endpoint;
     UI.els.endpoint.addEventListener("change", () => {
-      const value = UI.els.endpoint.value.trim() || "http://192.168.4.1";
+      const fallback = UI.cfg.endpoint || "http://192.168.4.1";
+      const input = UI.els.endpoint.value.trim();
+      const candidate = input || "http://192.168.4.1";
+      let parsed = null;
+      try {
+        parsed = new URL(candidate);
+      } catch (err) {
+        console.warn("[endpoint] некорректный URL", err);
+      }
+      if (!parsed) {
+        note("Endpoint: введён некорректный URL, используется предыдущее значение");
+        UI.els.endpoint.value = fallback;
+        return;
+      }
+      const protocol = (parsed.protocol || "").toLowerCase();
+      if (protocol !== "http:" && protocol !== "https:") {
+        console.warn("[endpoint] неподдерживаемая схема", protocol);
+        note("Endpoint: схема не поддерживается, используется предыдущее значение");
+        UI.els.endpoint.value = fallback;
+        return;
+      }
+      const value = parsed.toString();
       UI.cfg.endpoint = value;
+      UI.els.endpoint.value = value;
       storage.set("endpoint", UI.cfg.endpoint);
       note("Endpoint: " + UI.cfg.endpoint);
       resyncAfterEndpointChange().catch((err) => console.warn("[endpoint] resync", err));
@@ -3115,6 +2966,7 @@ async function init() {
 
   loadChatHistory();
   startReceivedMonitor({ immediate: true });
+  openReceivedPushChannel();
 
   // Управление ACK и тестами
   if (UI.els.ackChip) UI.els.ackChip.addEventListener("click", onAckChipToggle);
@@ -3125,10 +2977,12 @@ async function init() {
       void withAckLock(() => setAck(UI.els.ackSetting.checked));
     });
   }
+  if (UI.els.lightPack) {
+    UI.els.lightPack.addEventListener("change", onLightPackToggle);
+  }
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
   if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
-  if (UI.els.ackDelay) UI.els.ackDelay.addEventListener("change", onAckDelayInputChange);
   if (UI.els.rxBoostedGain) {
     UI.els.rxBoostedGain.addEventListener("change", () => {
       UI.els.rxBoostedGain.indeterminate = false;
@@ -3172,15 +3026,35 @@ async function init() {
 
   // Безопасность
   const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", () => requestKeyGen());
+  const btnKeyGenPeer = $("#btnKeyGenPeer");
+  if (btnKeyGenPeer) {
+    UI.els.keyGenPeerBtn = btnKeyGenPeer;
+    btnKeyGenPeer.addEventListener("click", () => requestKeyGenPeer());
+  }
   const btnKeyRestore = $("#btnKeyRestore"); if (btnKeyRestore) btnKeyRestore.addEventListener("click", () => requestKeyRestore());
   const btnKeySend = $("#btnKeySend"); if (btnKeySend) btnKeySend.addEventListener("click", () => requestKeySend());
   const btnKeyRecv = $("#btnKeyRecv"); if (btnKeyRecv) btnKeyRecv.addEventListener("click", () => requestKeyReceive());
-  await refreshKeyState({ silent: true });
-
-  await syncSettingsFromDevice();
-  await refreshAckState();
-  await refreshAckRetry();
-  await refreshEncryptionState();
+  const criticalInitTasks = [
+    { name: "refreshKeyState", run: () => refreshKeyState({ silent: true }) },
+    { name: "syncSettingsFromDevice", run: () => syncSettingsFromDevice() },
+    { name: "refreshAckState", run: () => refreshAckState() },
+    { name: "refreshAckRetry", run: () => refreshAckRetry() },
+    { name: "refreshLightPackState", run: () => refreshLightPackState() },
+    { name: "refreshEncryptionState", run: () => refreshEncryptionState() },
+  ];
+  const criticalResults = await Promise.allSettled(criticalInitTasks.map((task) => {
+    try {
+      return task.run();
+    } catch (err) {
+      console.warn("[init] синхронное исключение при запуске задачи", task.name, err);
+      return Promise.reject(err);
+    }
+  }));
+  criticalResults.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.warn("[init] задача инициализации завершилась ошибкой", criticalInitTasks[index].name, result.reason);
+    }
+  });
 
   await loadVersion().catch(() => {});
   probe().catch(() => {});
@@ -3199,8 +3073,48 @@ function setMenuOpen(open) {
   document.body.classList.toggle("nav-open", open);
 }
 
+/* Обновляем бейдж непрочитанных сообщений в меню */
+function updateChatUnreadBadge(opts) {
+  const options = opts || {};
+  const nav = UI.els.nav || $("#siteNav");
+  const link = nav ? nav.querySelector('[data-tab="chat"]') : $(".nav [data-tab=\"chat\"]");
+  if (!link) return;
+  const badge = link.querySelector(".nav-badge");
+  if (!badge) return;
+  if (!badge.dataset.listener) {
+    badge.addEventListener("animationend", () => {
+      badge.classList.remove("nav-badge-pop");
+    });
+    badge.dataset.listener = "1";
+  }
+  const unreadRaw = Number(UI.state.chatUnread || 0);
+  const unread = Math.max(0, Math.min(unreadRaw, CHAT_UNREAD_MAX));
+  if (unread <= 0) {
+    badge.hidden = true;
+    badge.textContent = "";
+    badge.setAttribute("aria-live", "off");
+    badge.setAttribute("aria-label", "Непрочитанных сообщений нет");
+    badge.classList.remove("nav-badge-pop");
+    badge.dataset.count = "0";
+    return;
+  }
+  const text = unread > 99 ? "99+" : String(unread);
+  badge.hidden = false;
+  badge.textContent = text;
+  badge.setAttribute("aria-live", "polite");
+  badge.setAttribute("aria-label", `Непрочитанные сообщения: ${text}`);
+  badge.dataset.count = String(unread);
+  if (options.animate) {
+    badge.classList.remove("nav-badge-pop");
+    // Перезапуск анимации появления бейджа
+    void badge.offsetWidth;
+    badge.classList.add("nav-badge-pop");
+  }
+}
+
 /* Вкладки */
 function setTab(tab) {
+  UI.state.activeTab = tab;
   for (const t of UI.tabs) {
     const panel = $("#tab-" + t);
     const link = UI.els.nav ? UI.els.nav.querySelector('[data-tab="' + t + '"]') : null;
@@ -3213,7 +3127,19 @@ function setTab(tab) {
   }
   storage.set("activeTab", tab);
   if (tab !== "channels") hideChannelInfo();
-  if (tab === "chat") updateChatScrollButton();
+  if (tab === "chat") {
+    if (UI.state.chatUnread !== 0) {
+      UI.state.chatUnread = 0;
+    }
+    storage.set(CHAT_UNREAD_STORAGE_KEY, "0");
+    updateChatUnreadBadge();
+    updateChatScrollButton();
+  } else {
+    updateChatUnreadBadge();
+  }
+  if (tab === "debug") {
+    hydrateDeviceLog({ limit: 150 }).catch((err) => console.warn("[debug] hydrateDeviceLog", err));
+  }
 }
 
 /* Тема */
@@ -3391,6 +3317,65 @@ function getChatHistory() {
   return UI.state.chatHistory;
 }
 
+// Сдвигаем индексы элементов прогресса при обрезке истории чата
+function adjustChatProgressAfterTrim(removed) {
+  if (!Number.isFinite(removed) || removed <= 0) return;
+  const receivedState = UI.state && UI.state.received ? UI.state.received : null;
+  if (!receivedState || !(receivedState.progress instanceof Map)) return;
+  let changed = false;
+  for (const [key, info] of Array.from(receivedState.progress.entries())) {
+    if (!info || typeof info.index !== "number") {
+      receivedState.progress.delete(key);
+      changed = true;
+      continue;
+    }
+    const nextIndex = info.index - removed;
+    if (nextIndex < 0) {
+      receivedState.progress.delete(key);
+      changed = true;
+    } else if (nextIndex !== info.index) {
+      info.index = nextIndex;
+      changed = true;
+    }
+  }
+  if (changed && receivedState.progress.size === 0) {
+    setChatReceivingIndicatorState(false);
+  }
+}
+
+// Перестраиваем DOM истории чата и атрибуты dataset.index после обрезки
+function adjustChatDomAfterTrim(removed) {
+  if (!Number.isFinite(removed) || removed <= 0) return;
+  if (!UI.els || !UI.els.chatLog) return;
+  const currentMessages = UI.els.chatLog.querySelectorAll(".msg");
+  let removedCount = 0;
+  for (let i = 0; i < currentMessages.length && removedCount < removed; i += 1) {
+    const node = currentMessages[i];
+    if (node && node.parentNode) {
+      node.parentNode.removeChild(node);
+      removedCount += 1;
+    }
+  }
+  const nodes = UI.els.chatLog.querySelectorAll(".msg");
+  for (let i = 0; i < nodes.length; i += 1) {
+    nodes[i].dataset.index = String(i);
+  }
+}
+
+// Универсальная функция ограничения размера истории чата с синхронизацией индексов
+function applyChatHistoryLimit(entries, options) {
+  const opts = options || {};
+  const limitRaw = Number.isFinite(opts.limit) ? Number(opts.limit) : CHAT_HISTORY_LIMIT;
+  const limit = limitRaw > 0 ? Math.floor(limitRaw) : CHAT_HISTORY_LIMIT;
+  if (!Array.isArray(entries) || !Number.isFinite(limit) || limit <= 0) return 0;
+  const overflow = entries.length - limit;
+  if (overflow <= 0) return 0;
+  entries.splice(0, overflow);
+  if (opts.updateProgress !== false) adjustChatProgressAfterTrim(overflow);
+  if (opts.updateDom !== false) adjustChatDomAfterTrim(overflow);
+  return overflow;
+}
+
 function normalizeImageProfile(value) {
   const key = typeof value === "string" && value ? value.toUpperCase() : "S";
   if (Object.prototype.hasOwnProperty.call(IMAGE_PROFILES, key)) {
@@ -3426,8 +3411,9 @@ function imageNameFromRawName(rawName) {
 }
 function saveChatHistory() {
   const entries = getChatHistory();
+  applyChatHistoryLimit(entries, { updateDom: false, updateProgress: false });
   try {
-    storage.set("chatHistory", JSON.stringify(entries.slice(-500)));
+    storage.set("chatHistory", JSON.stringify(entries));
   } catch (err) {
     console.warn("[chat] не удалось сохранить историю:", err);
   }
@@ -3627,6 +3613,7 @@ function loadChatHistory() {
   }
   if (!Array.isArray(entries)) entries = [];
   const normalized = normalizeChatEntries(entries);
+  applyChatHistoryLimit(normalized, { updateDom: false });
   UI.state.chatHistory = normalized;
   if (UI.els.chatLog) UI.els.chatLog.innerHTML = "";
   UI.state.chatHydrating = true;
@@ -3651,8 +3638,10 @@ function persistChat(message, author, meta) {
   }
   if (!record.role) record.role = author === "you" ? "user" : "system";
   entries.push(record);
+  applyChatHistoryLimit(entries);
+  const index = entries.length - 1;
   saveChatHistory();
-  return { record, index: entries.length - 1 };
+  return { record, index };
 }
 function addChatMessage(entry, index, options) {
   const opts = options || {};
@@ -4344,11 +4333,19 @@ async function deviceFetch(cmd, params, timeoutMs) {
   } catch (e) {
     base = new URL("http://192.168.4.1");
   }
-  const candidates = [
-    new URL("/cmd", base),
-    new URL("/api/cmd", base),
-    new URL("/", base),
-  ];
+  const candidates = [];
+  const candidatePaths = ["/cmd", "/api/cmd", "/"];
+  for (const path of candidatePaths) {
+    try {
+      candidates.push(new URL(path, base));
+    } catch (err) {
+      console.warn("[deviceFetch] базовый URL не поддерживает относительный путь", path, err);
+    }
+  }
+  if (candidates.length === 0) {
+    console.warn("[deviceFetch] не удалось построить относительные пути, используется базовый адрес как есть");
+    candidates.push(base);
+  }
   const extras = new URLSearchParams();
   if (params) {
     for (const key in params) {
@@ -4391,6 +4388,41 @@ async function deviceFetch(cmd, params, timeoutMs) {
     }
   }
   return { ok: false, error: lastErr || "Unknown error" };
+}
+
+// Получение последних строк журнала устройства через HTTP
+async function fetchDeviceLogHistory(limit, timeoutMs) {
+  const timeout = timeoutMs || 4000;
+  let base;
+  try {
+    base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+  } catch (e) {
+    base = new URL("http://192.168.4.1");
+  }
+  const url = new URL("/api/logs", base);
+  if (Number.isFinite(limit) && limit > 0) {
+    url.searchParams.set("n", String(Math.round(limit)));
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const res = await fetch(url.toString(), { signal: ctrl.signal, headers: { "Accept": "application/json" } });
+    clearTimeout(timer);
+    if (!res.ok) return { ok: false, error: "HTTP " + res.status };
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (err) {
+      return { ok: false, error: "invalid JSON" };
+    }
+    if (!data || !Array.isArray(data.logs)) {
+      return { ok: false, error: "missing logs" };
+    }
+    return { ok: true, logs: data.logs };
+  } catch (err) {
+    clearTimeout(timer);
+    return { ok: false, error: String(err) };
+  }
 }
 function summarizeResponse(text, fallback) {
   const raw = text != null ? String(text) : "";
@@ -5449,6 +5481,21 @@ function logReceivedMessage(entry, opts) {
     // В чат попадают только элементы со статусом ready; без имени их сложно отслеживать.
     return;
   }
+  if (options.isNew && UI.state.activeTab !== "chat") {
+    const current = Math.max(0, Number(UI.state.chatUnread) || 0);
+    const next = Math.min(current + 1, CHAT_UNREAD_MAX);
+    if (next !== current) {
+      UI.state.chatUnread = next;
+      storage.set(CHAT_UNREAD_STORAGE_KEY, String(next));
+    }
+    updateChatUnreadBadge({ animate: true });
+  } else if (options.isNew && UI.state.activeTab === "chat") {
+    if (UI.state.chatUnread !== 0) {
+      UI.state.chatUnread = 0;
+      storage.set(CHAT_UNREAD_STORAGE_KEY, "0");
+    }
+    updateChatUnreadBadge();
+  }
   const bytes = entry && entry._hexBytes instanceof Uint8Array ? entry._hexBytes : hexToBytes(entry.hex);
   const isImage = entryType === "ready" && bytes && bytes.length >= 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
   const textValue = resolveReceivedText(entry);
@@ -5633,6 +5680,24 @@ function getReceivedMonitorState() {
       runningSince: null,
     };
   }
+  if (!state.push || typeof state.push !== "object") {
+    state.push = {
+      supported: typeof EventSource !== "undefined",
+      connected: false,
+      connecting: false,
+      source: null,
+      mode: "poll",
+      lastEventAt: null,
+      lastOpenAt: null,
+      lastErrorAt: null,
+      retryCount: 0,
+      pendingRefresh: false,
+      refreshScheduled: false,
+      lastHint: null,
+    };
+  } else if (typeof EventSource === "undefined") {
+    state.push.supported = false;
+  }
   let limit = Number(state.limit);
   if (!Number.isFinite(limit) || limit <= 0) {
     const storedRaw = storage.get("recvLimit");
@@ -5641,6 +5706,22 @@ function getReceivedMonitorState() {
   }
   if (!Number.isFinite(limit) || limit <= 0) limit = 20;
   state.limit = Math.min(Math.max(Math.round(limit), 1), 200);
+  return state;
+}
+
+// Состояние буфера журнала устройства для вкладки Debug
+function getDeviceLogState() {
+  if (!UI.state || typeof UI.state !== "object") UI.state = {};
+  let state = UI.state.deviceLog;
+  if (!state || typeof state !== "object") {
+    state = { initialized: false, loading: false, known: new Set(), lastId: 0, queue: [] };
+    UI.state.deviceLog = state;
+  }
+  if (!(state.known instanceof Set)) {
+    state.known = new Set(state.known ? Array.from(state.known) : []);
+  }
+  if (!Number.isFinite(state.lastId)) state.lastId = 0;
+  if (!Array.isArray(state.queue)) state.queue = [];
   return state;
 }
 
@@ -5657,6 +5738,13 @@ function formatDurationMs(ms) {
   const hours = Math.floor(minutes / 60);
   const restMin = minutes - hours * 60;
   return `${hours} ч ${restMin} мин`;
+}
+
+// Форматируем аппаратное uptime устройства с префиксом «+»
+function formatDeviceUptime(ms) {
+  if (!Number.isFinite(ms)) return "+0 мс";
+  const normalized = ms < 0 ? 0 : ms;
+  return "+" + formatDurationMs(normalized);
 }
 
 // Форматирование относительного времени (например, «5 с назад»)
@@ -5682,9 +5770,17 @@ function updateReceivedMonitorDiagnostics() {
   const metrics = state.metrics || {};
   const statusEl = els.status;
   const now = Date.now();
+  const push = state.push || {};
   let statusText = "Ожидание запуска";
   let statusClass = "";
-  if (state.running) {
+  if (push.connected) {
+    const last = push.lastEventAt ? formatRelativeTime(push.lastEventAt) : "недавно";
+    statusText = "Push подписка активна · " + last;
+    statusClass = "";
+  } else if (push.connecting) {
+    statusText = "Подключение к push-каналу…";
+    statusClass = "";
+  } else if (state.running) {
     statusText = "Выполняется запрос";
     statusClass = "warn";
   } else if (metrics.consecutiveErrors >= 3) {
@@ -5704,6 +5800,19 @@ function updateReceivedMonitorDiagnostics() {
     statusEl.textContent = statusText;
     statusEl.classList.remove("warn", "error");
     if (statusClass) statusEl.classList.add(statusClass);
+  }
+  if (els.mode) {
+    let modeText = "Push-канал не активен";
+    if (push.supported === false) {
+      modeText = "Push недоступен в этом браузере, используется опрос";
+    } else if (push.connected) {
+      modeText = "Push активен, резервный опрос каждые 30 с";
+    } else if (push.connecting) {
+      modeText = "Push: ожидаем подключение, работает стандартный опрос";
+    } else {
+      modeText = "Используется опрос каждые 5 с";
+    }
+    els.mode.textContent = modeText;
   }
   const intervalMs = Number(metrics.configuredIntervalMs);
   if (els.interval) {
@@ -5799,15 +5908,164 @@ function handleReceivedSnapshot(items) {
   const prev = state.known;
   const next = new Set();
   const list = Array.isArray(items) ? items : [];
+  const firstLoad = !state.snapshotReady;
   for (let i = 0; i < list.length; i += 1) {
     const entry = list[i];
     const name = entry && entry.name ? String(entry.name).trim() : "";
     if (name) next.add(name);
-    const isNew = !!(name && !prev.has(name));
+    const isNew = !firstLoad && !!(name && !prev.has(name));
     logReceivedMessage(entry, { isNew });
   }
   state.known = next;
+  state.snapshotReady = true;
   updateChatReceivingIndicatorFromRsts(list);
+}
+
+function scheduleReceivedRefreshFromPush(hint) {
+  const state = getReceivedMonitorState();
+  const push = state.push;
+  if (!push) return;
+  push.lastHint = hint || null;
+  if (push.refreshScheduled) return;
+  push.refreshScheduled = true;
+  Promise.resolve().then(() => {
+    push.refreshScheduled = false;
+    if (state.running) {
+      push.pendingRefresh = true;
+      return;
+    }
+    pollReceivedMessages({ silentError: true }).catch((err) => {
+      console.warn("[push] ошибка обновления списка сообщений:", err);
+    });
+  });
+}
+
+function handleReceivedPushMessage(event) {
+  const state = getReceivedMonitorState();
+  const push = state.push;
+  if (!push) return;
+  const raw = event && typeof event.data === "string" ? event.data : "";
+  let payload = null;
+  if (raw) {
+    try {
+      payload = JSON.parse(raw);
+    } catch (err) {
+      push.lastHint = raw;
+    }
+  }
+  if (payload && payload.kind) {
+    const kind = String(payload.kind).toLowerCase();
+    if (kind === "split") {
+      state.awaiting = true;
+      setChatReceivingIndicatorState(true);
+    } else if (kind === "ready") {
+      state.awaiting = false;
+    }
+  }
+  scheduleReceivedRefreshFromPush(payload);
+}
+
+function handleDeviceLogPushMessage(event) {
+  const raw = event && typeof event.data === "string" ? event.data : "";
+  if (!raw) return;
+  let payload = null;
+  try {
+    payload = JSON.parse(raw);
+  } catch (err) {
+    console.warn("[push] не удалось распарсить log-сообщение:", err, raw);
+    return;
+  }
+  if (!payload || typeof payload.text === "undefined") return;
+  const state = getDeviceLogState();
+  const entry = { id: payload.id, uptime: payload.uptime, text: payload.text };
+  if (state.loading) {
+    state.queue.push(entry);
+    return;
+  }
+  appendDeviceLogEntries([entry]);
+}
+
+function closeReceivedPushChannel(opts) {
+  const options = opts || {};
+  const state = getReceivedMonitorState();
+  const push = state.push;
+  if (!push) return;
+  if (push.source && typeof push.source.close === "function") {
+    try {
+      push.source.close();
+    } catch (err) {
+      if (!options.silent) console.warn("[push] ошибка закрытия EventSource:", err);
+    }
+  }
+  push.source = null;
+  push.connected = false;
+  push.connecting = false;
+  push.mode = "poll";
+}
+
+function openReceivedPushChannel() {
+  const state = getReceivedMonitorState();
+  const push = state.push;
+  if (!push || push.supported === false || typeof EventSource === "undefined") {
+    if (push) push.mode = "poll";
+    startReceivedMonitor({ intervalMs: 5000, immediate: false });
+    updateReceivedMonitorDiagnostics();
+    return;
+  }
+  closeReceivedPushChannel({ silent: true });
+  let url;
+  try {
+    const base = new URL(UI.cfg.endpoint || "http://192.168.4.1");
+    url = new URL("/events", base).toString();
+  } catch (err) {
+    url = "http://192.168.4.1/events";
+  }
+  try {
+    const source = new EventSource(url);
+    push.source = source;
+    push.connecting = true;
+    push.retryCount = 0;
+    push.mode = "push";
+    updateReceivedMonitorDiagnostics();
+    source.addEventListener("open", () => {
+      push.connected = true;
+      push.connecting = false;
+      push.lastOpenAt = Date.now();
+      push.lastErrorAt = null;
+      push.retryCount = 0;
+      push.mode = "push";
+      startReceivedMonitor({ intervalMs: 30000, immediate: false });
+      updateReceivedMonitorDiagnostics();
+    });
+    source.addEventListener("received", (event) => {
+      push.connected = true;
+      push.lastEventAt = Date.now();
+      handleReceivedPushMessage(event);
+      updateReceivedMonitorDiagnostics();
+    });
+    source.addEventListener("log", (event) => {
+      push.connected = true;
+      push.lastEventAt = Date.now();
+      handleDeviceLogPushMessage(event);
+      updateReceivedMonitorDiagnostics();
+    });
+    source.addEventListener("error", () => {
+      push.connected = false;
+      push.connecting = true;
+      push.lastErrorAt = Date.now();
+      push.retryCount = (push.retryCount || 0) + 1;
+      if (push.retryCount >= 3) {
+        push.mode = "poll";
+        startReceivedMonitor({ intervalMs: 5000, immediate: false });
+      }
+      updateReceivedMonitorDiagnostics();
+    });
+  } catch (err) {
+    console.warn("[push] не удалось открыть EventSource:", err);
+    push.supported = false;
+    push.mode = "poll";
+    updateReceivedMonitorDiagnostics();
+  }
 }
 
 // Фоновый запрос RSTS использует тот же базовый тайм-аут, что и sendCommand,
@@ -5880,6 +6138,10 @@ async function pollReceivedMessages(opts) {
     metrics.runningSince = null;
     updateReceivedMonitorDiagnostics();
     state.running = false;
+    if (state.push && state.push.pendingRefresh) {
+      state.push.pendingRefresh = false;
+      scheduleReceivedRefreshFromPush(state.push.lastHint);
+    }
   }
 }
 
@@ -8382,13 +8644,6 @@ function clampAckTimeoutMs(value) {
   if (num > ACK_TIMEOUT_MAX_MS) return ACK_TIMEOUT_MAX_MS;
   return Math.round(num);
 }
-function clampAckDelayMs(value) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return ACK_DELAY_MIN_MS;
-  if (num < ACK_DELAY_MIN_MS) return ACK_DELAY_MIN_MS;
-  if (num > ACK_DELAY_MAX_MS) return ACK_DELAY_MAX_MS;
-  return Math.round(num);
-}
 function clampTestRxmMessage(value) {
   const text = value == null ? "" : String(value);
   if (text.length > TEST_RXM_MESSAGE_MAX) {
@@ -8413,12 +8668,6 @@ function parseAckTimeoutResponse(text) {
   const token = extractNumericToken(text);
   if (token == null) return null;
   return clampAckTimeoutMs(Number(token));
-}
-function parseAckDelayResponse(text) {
-  if (!text) return null;
-  const token = extractNumericToken(text);
-  if (token == null) return null;
-  return clampAckDelayMs(Number(token));
 }
 function parseRxBoostedGainResponse(text) {
   if (!text) return null;
@@ -8470,8 +8719,7 @@ function updateAckRetryUi() {
       const attempts = state != null ? state : "—";
       const timeout = UI.state.ackTimeout != null ? UI.state.ackTimeout + " мс" : "—";
       const pause = UI.state.pauseMs != null ? UI.state.pauseMs + " мс" : "—";
-      const delay = UI.state.ackDelay != null ? UI.state.ackDelay + " мс" : "—";
-      hint.textContent = "Повторные отправки: " + attempts + " раз. Пауза: " + pause + ". Ожидание ACK: " + timeout + ". Задержка ответа: " + delay + ".";
+      hint.textContent = "Повторные отправки: " + attempts + " раз. Пауза: " + pause + ". Ожидание ACK: " + timeout + ".";
     } else {
       hint.textContent = "Доступно после включения ACK.";
     }
@@ -8501,25 +8749,6 @@ function updateAckTimeoutUi() {
     hint.textContent = value != null ? ("Время ожидания ACK: " + value + " мс.") : "Время ожидания ACK не загружено.";
   }
 }
-function updateAckDelayUi() {
-  const input = UI.els.ackDelay;
-  const value = UI.state.ackDelay;
-  if (input && document.activeElement !== input && value != null) {
-    input.value = String(value);
-  }
-  const hint = UI.els.ackDelayHint;
-  if (hint) {
-    if (value == null) {
-      hint.textContent = "Задержка отправки ACK не загружена.";
-    } else {
-      let text = "Задержка перед отправкой подтверждения: " + value + " мс.";
-      if (UI.state.ack !== true) {
-        text += " Параметр вступит в силу после включения ACK.";
-      }
-      hint.textContent = text;
-    }
-  }
-}
 function updateAckUi() {
   const chip = UI.els.ackChip;
   const text = UI.els.ackText;
@@ -8546,7 +8775,6 @@ function updateAckUi() {
     }
   }
   updateAckRetryUi();
-  updateAckDelayUi();
 }
 function onPauseInputChange() {
   if (!UI.els.pauseInput) return;
@@ -8565,16 +8793,6 @@ function onAckTimeoutInputChange() {
   UI.state.ackTimeout = num;
   storage.set("set.ACKT", String(num));
   updateAckTimeoutUi();
-  updateAckRetryUi();
-}
-function onAckDelayInputChange() {
-  if (!UI.els.ackDelay) return;
-  const raw = UI.els.ackDelay.value;
-  const num = clampAckDelayMs(parseInt(raw, 10));
-  UI.els.ackDelay.value = String(num);
-  UI.state.ackDelay = num;
-  storage.set("set.ACKD", String(num));
-  updateAckDelayUi();
   updateAckRetryUi();
 }
 async function setAck(value) {
@@ -8632,6 +8850,95 @@ async function refreshAckState() {
   updateAckUi();
   return null;
 }
+function parseLightPackResponse(text) {
+  if (!text) return null;
+  const trimmed = String(text).trim();
+  if (!trimmed) return null;
+  const token = extractNumericToken(trimmed);
+  if (token === "1") return true;
+  if (token === "0") return false;
+  const low = trimmed.toLowerCase();
+  if (low.indexOf("light:1") >= 0) return true;
+  if (low.indexOf("light:0") >= 0) return false;
+  if (low.indexOf("on") >= 0 || low.indexOf("включ") >= 0) return true;
+  if (low.indexOf("off") >= 0 || low.indexOf("выключ") >= 0) return false;
+  return null;
+}
+function updateLightPackUi() {
+  const input = UI.els.lightPack;
+  const hint = UI.els.lightPackHint;
+  const wrap = UI.els.lightPackControl;
+  const state = UI.state.lightPack;
+  const busy = UI.state.lightPackBusy;
+  if (wrap) {
+    wrap.classList.toggle("waiting", busy);
+    if (busy) wrap.setAttribute("aria-busy", "true");
+    else wrap.removeAttribute("aria-busy");
+  }
+  if (input) {
+    input.disabled = busy;
+    if (state === null) {
+      input.indeterminate = true;
+    } else {
+      input.indeterminate = false;
+      input.checked = state;
+    }
+  }
+  if (hint) {
+    if (state === true) {
+      hint.textContent = "Light pack активен: текст передаётся без служебного префикса.";
+    } else if (state === false) {
+      hint.textContent = "Light pack выключен: используется стандартный префикс для пакетов.";
+    } else {
+      hint.textContent = "Состояние Light pack ещё не получено.";
+    }
+  }
+}
+async function refreshLightPackState() {
+  const res = await deviceFetch("LIGHT", {}, 2000);
+  if (res.ok) {
+    const state = parseLightPackResponse(res.text);
+    if (state !== null) {
+      UI.state.lightPack = state;
+      storage.set("set.LIGHTPACK", state ? "1" : "0");
+      updateLightPackUi();
+      return state;
+    }
+  }
+  UI.state.lightPack = null;
+  updateLightPackUi();
+  return null;
+}
+async function setLightPack(value) {
+  if (UI.state.lightPackBusy) return UI.state.lightPack;
+  UI.state.lightPackBusy = true;
+  updateLightPackUi();
+  try {
+    const response = await sendCommand("LIGHT", { v: value ? "1" : "0" });
+    if (typeof response === "string") {
+      const parsed = parseLightPackResponse(response);
+      if (parsed !== null) {
+        UI.state.lightPack = parsed;
+        storage.set("set.LIGHTPACK", parsed ? "1" : "0");
+        updateLightPackUi();
+        return parsed;
+      }
+    }
+    return await refreshLightPackState();
+  } finally {
+    UI.state.lightPackBusy = false;
+    updateLightPackUi();
+  }
+}
+async function onLightPackToggle(event) {
+  if (!UI.els.lightPack) return;
+  if (UI.state.lightPackBusy) {
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    updateLightPackUi();
+    return;
+  }
+  await setLightPack(UI.els.lightPack.checked);
+}
 async function refreshAckRetry() {
   const res = await deviceFetch("ACKR", {}, 2000);
   if (res.ok) {
@@ -8644,23 +8951,6 @@ async function refreshAckRetry() {
     }
   }
   UI.state.ackRetry = null;
-  updateAckRetryUi();
-  return null;
-}
-async function refreshAckDelay() {
-  const res = await deviceFetch("ACKD", {}, 2000);
-  if (res.ok) {
-    const parsed = parseAckDelayResponse(res.text);
-    if (parsed !== null) {
-      UI.state.ackDelay = parsed;
-      storage.set("set.ACKD", String(parsed));
-      updateAckDelayUi();
-      updateAckRetryUi();
-      return parsed;
-    }
-  }
-  UI.state.ackDelay = null;
-  updateAckDelayUi();
   updateAckRetryUi();
   return null;
 }
@@ -8893,7 +9183,7 @@ async function refreshEncryptionState() {
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","ACKD","TESTRXMMSG"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","TESTRXMMSG"];
 function normalizePowerPreset(raw) {
   if (raw == null) return null;
   const str = String(raw).trim();
@@ -8951,12 +9241,6 @@ function loadSettings() {
       if (UI.els.ackTimeout) UI.els.ackTimeout.value = String(num);
       UI.state.ackTimeout = num;
       updateAckTimeoutUi();
-    } else if (key === "ACKD") {
-      const num = clampAckDelayMs(parseInt(v, 10));
-      if (UI.els.ackDelay) UI.els.ackDelay.value = String(num);
-      UI.state.ackDelay = num;
-      updateAckDelayUi();
-      updateAckRetryUi();
     } else if (key === "TESTRXMMSG") {
       const text = clampTestRxmMessage(v);
       if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = text;
@@ -8969,6 +9253,15 @@ function loadSettings() {
     }
   }
   updateRxBoostedGainUi();
+  if (UI.els.lightPack) {
+    const stored = storage.get("set.LIGHTPACK");
+    if (stored === "1" || stored === "0") {
+      UI.state.lightPack = stored === "1";
+    } else {
+      UI.state.lightPack = null;
+    }
+    updateLightPackUi();
+  }
 }
 function saveSettingsLocal() {
   for (let i = 0; i < SETTINGS_KEYS.length; i++) {
@@ -8986,8 +9279,6 @@ function saveSettingsLocal() {
       v = String(clampPauseMs(parseInt(v, 10)));
     } else if (key === "ACKT") {
       v = String(clampAckTimeoutMs(parseInt(v, 10)));
-    } else if (key === "ACKD") {
-      v = String(clampAckDelayMs(parseInt(v, 10)));
     } else if (key === "TESTRXMMSG") {
       v = clampTestRxmMessage(v);
       if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = v;
@@ -9065,17 +9356,6 @@ async function applySettingsToDevice() {
         updateAckRetryUi();
         storage.set("set.ACKT", String(effective));
       }
-    } else if (key === "ACKD") {
-      const parsed = clampAckDelayMs(parseInt(value, 10));
-      const resp = await sendCommand("ACKD", { v: String(parsed) });
-      if (resp !== null) {
-        const applied = parseAckDelayResponse(resp);
-        const effective = applied != null ? applied : parsed;
-        UI.state.ackDelay = effective;
-        if (UI.els.ackDelay) UI.els.ackDelay.value = String(effective);
-        updateAckDelayUi();
-        storage.set("set.ACKD", String(effective));
-      }
     } else {
       const resp = await sendCommand(key, { v: value });
       if (resp !== null) storage.set("set." + key, value);
@@ -9084,7 +9364,7 @@ async function applySettingsToDevice() {
   note("Применение завершено.");
   await refreshChannels().catch(() => {});
   await refreshAckState();
-  await refreshAckDelay();
+  await refreshLightPackState();
   await refreshRxBoostedGain();
 }
 function exportSettings() {
@@ -9102,8 +9382,6 @@ function exportSettings() {
       obj[key] = String(clampPauseMs(parseInt(el.value, 10)));
     } else if (key === "ACKT") {
       obj[key] = String(clampAckTimeoutMs(parseInt(el.value, 10)));
-    } else if (key === "ACKD") {
-      obj[key] = String(clampAckDelayMs(parseInt(el.value, 10)));
     } else if (key === "TESTRXMMSG") {
       obj[key] = clampTestRxmMessage(el.value || "");
     } else {
@@ -9171,15 +9449,6 @@ function importSettings() {
         updateAckTimeoutUi();
         updateAckRetryUi();
         storage.set("set.ACKT", String(num));
-        continue;
-      }
-      if (key === "ACKD") {
-        const num = clampAckDelayMs(parseInt(obj[key], 10));
-        if (UI.els.ackDelay) UI.els.ackDelay.value = String(num);
-        UI.state.ackDelay = num;
-        updateAckDelayUi();
-        updateAckRetryUi();
-        storage.set("set.ACKD", String(num));
         continue;
       }
       if (key === "TESTRXMMSG") {
@@ -9340,21 +9609,6 @@ async function syncSettingsFromDevice() {
   } catch (err) {
     console.warn("[settings] ACKT", err);
   }
-  try {
-    const ackDRes = await deviceFetch("ACKD", {}, 2000);
-    if (ackDRes.ok) {
-      const parsed = parseAckDelayResponse(ackDRes.text);
-      if (parsed !== null) {
-        UI.state.ackDelay = parsed;
-        if (UI.els.ackDelay) UI.els.ackDelay.value = String(parsed);
-        storage.set("set.ACKD", String(parsed));
-        updateAckDelayUi();
-        updateAckRetryUi();
-      }
-    }
-  } catch (err) {
-    console.warn("[settings] ACKD", err);
-  }
 
   updateChannelSelect();
   updateChannelSelectHint();
@@ -9369,12 +9623,14 @@ function renderKeyState(state) {
   const peerEl = $("#keyPeer");
   const backupEl = $("#keyBackup");
   const messageEl = $("#keyMessage");
+  const peerBtn = UI.els.keyGenPeerBtn || $("#btnKeyGenPeer");
   if (!data || typeof data !== "object") {
     if (stateEl) stateEl.textContent = "—";
     if (idEl) idEl.textContent = "";
     if (pubEl) pubEl.textContent = "";
     if (peerEl) peerEl.textContent = "";
     if (backupEl) backupEl.textContent = "";
+    if (peerBtn) peerBtn.disabled = true;
   } else {
     const type = data.type === "external" ? "EXTERNAL" : "LOCAL";
     if (stateEl) stateEl.textContent = type;
@@ -9390,6 +9646,11 @@ function renderKeyState(state) {
       }
     }
     if (backupEl) backupEl.textContent = data.hasBackup ? "Есть резерв" : "";
+    if (peerBtn) {
+      // Активируем кнопку KEYGEN PEER только когда известен удалённый ключ
+      const hasPeer = typeof data.peer === "string" && data.peer.trim().length > 0;
+      peerBtn.disabled = !hasPeer;
+    }
   }
   if (messageEl) messageEl.textContent = UI.key.lastMessage || "";
 }
@@ -9410,11 +9671,16 @@ async function refreshKeyState(options) {
       } catch (err) {
         // Всегда оставляем комментарии на русском
         console.warn("[key] не удалось разобрать JSON KEYSTATE:", err);
-        data = parseKeyStateFallback(rawText);
-        if (!data) parseFailed = true;
-        else {
-          // Резервный разбор сработал, предупреждаем в консоли
-          console.warn("[key] использован резервный парсер KEYSTATE");
+        data = parseJsonLenient(rawText);
+        if (data) {
+          console.warn("[key] JSON KEYSTATE очищен и разобран повторно");
+        } else {
+          data = parseKeyStateFallback(rawText);
+          if (!data) parseFailed = true;
+          else {
+            // Резервный разбор сработал, предупреждаем в консоли
+            console.warn("[key] использован резервный парсер KEYSTATE");
+          }
         }
       }
     }
@@ -9450,6 +9716,26 @@ async function refreshKeyState(options) {
     note("Ошибка KEYSTATE: " + res.error);
   }
   if (!res.ok) debugLog("KEYSTATE ✗ " + res.error);
+}
+
+// Аккуратно очищаем нестандартный JSON прежде чем отдавать его в JSON.parse
+function parseJsonLenient(rawText) {
+  const raw = rawText != null ? String(rawText).trim() : "";
+  if (!raw) return null;
+  let sanitized = raw.replace(/^\uFEFF/, "");
+  sanitized = sanitized
+    .replace(/\/\*[\s\S]*?\*\//g, "") // убираем блочные комментарии
+    .replace(/(^|[^:])\/\/.*$/gm, "$1"); // убираем построчные комментарии без трогания URL
+  sanitized = sanitized.replace(/,\s*([}\]])/g, "$1"); // отрезаем висячие запятые
+  sanitized = sanitized.replace(/([\{,]\s*)'([^'"\n]*)'\s*:/g, "$1\"$2\":"); // нормализуем ключи в кавычках
+  sanitized = sanitized.replace(/:\s*'([^'"\n]*)'/g, ': "$1"'); // заменяем одиночные кавычки в значениях
+  if (!sanitized.trim()) return null;
+  try {
+    return JSON.parse(sanitized);
+  } catch (err) {
+    console.warn("[key] повторная попытка JSON.parse не удалась:", err);
+    return null;
+  }
 }
 
 // Пытаемся восстановить объект состояния ключа из нестрогого JSON или пары ключ=значение
@@ -9550,43 +9836,56 @@ function parseKeygenPlainResponse(text) {
   };
 }
 
-async function requestKeyGen() {
-  status("→ KEYGEN");
-  debugLog("KEYGEN → запрос генерации");
-  const res = await deviceFetch("KEYGEN", {}, 6000);
+// Универсальный обработчик команд, которые обновляют ключи устройства
+async function handleKeyGenerationCommand(options) {
+  const command = options.command;
+  const label = options.label || command;
+  const params = options.params || {};
+  const requestLog = options.requestLog || "запрос";
+  const successMessage = options.successMessage || "Ключ обновлён";
+  const emptyResponseMessage = options.emptyResponseMessage || "устройство вернуло пустой ответ";
+  const timeoutMs = options.timeoutMs || 6000;
+  const refreshAfterPlain = options.refreshAfterPlain !== false;
+
+  status(`→ ${label}`);
+  debugLog(`${label} → ${requestLog}`);
+  const res = await deviceFetch(command, params, timeoutMs);
   if (!res.ok) {
-    debugLog("KEYGEN ✗ " + res.error);
-    status("✗ KEYGEN");
-    note("Ошибка KEYGEN: " + res.error);
-    return;
+    debugLog(`${label} ✗ ${res.error}`);
+    status(`✗ ${label}`);
+    note(`Ошибка ${label}: ${res.error}`);
+    return false;
   }
+
   const rawText = res.text != null ? String(res.text) : "";
-  debugLog("KEYGEN ← " + rawText);
+  debugLog(`${label} ← ${rawText}`);
   const trimmed = rawText.trim();
   if (!trimmed) {
-    status("✗ KEYGEN");
-    note("KEYGEN: устройство вернуло пустой ответ");
-    return;
+    status(`✗ ${label}`);
+    note(`${label}: ${emptyResponseMessage}`);
+    return false;
   }
+
   let data = null;
   try {
     data = JSON.parse(trimmed);
   } catch (err) {
-    console.warn("[key] не удалось разобрать ответ KEYGEN как JSON:", err);
+    console.warn(`[key] не удалось разобрать ответ ${label} как JSON:`, err);
   }
   if (data && data.error) {
-    note("KEYGEN: " + data.error);
-    status("✗ KEYGEN");
-    return;
+    note(`${label}: ${data.error}`);
+    status(`✗ ${label}`);
+    return false;
   }
   if (data) {
     UI.key.state = data;
-    UI.key.lastMessage = "Сгенерирован новый локальный ключ";
+    UI.key.lastMessage = successMessage;
     renderKeyState(data);
-    debugLog("KEYGEN ✓ ключ обновлён на устройстве");
-    status("✓ KEYGEN");
-    return;
+    debugLog(`${label} ✓ ключ обновлён на устройстве`);
+    status(`✓ ${label}`);
+    return true;
   }
+
   const plainInfo = parseKeygenPlainResponse(trimmed);
   if (plainInfo) {
     UI.key.lastMessage = plainInfo.message;
@@ -9597,25 +9896,53 @@ async function requestKeyGen() {
       UI.key.state = null;
       renderKeyState(null);
     }
-    note(plainInfo.note);
-    status("✓ KEYGEN");
-    await refreshKeyState({ silent: true }).catch((err) => {
-      console.warn("[key] не удалось обновить состояние после KEYGEN:", err);
-    });
-    return;
+    note(`${label}: ${plainInfo.message}`);
+    status(`✓ ${label}`);
+    debugLog(`${label} ✓ ${plainInfo.message}`);
+    if (refreshAfterPlain) {
+      await refreshKeyState({ silent: true }).catch((err) => {
+        console.warn(`[key] не удалось обновить состояние после ${label}:`, err);
+      });
+    }
+    return true;
   }
+
   const normalized = trimmed.toLowerCase();
   if (/(err|fail|ошиб|нет)/.test(normalized)) {
-    status("✗ KEYGEN");
-    note("KEYGEN: " + trimmed);
-    return;
+    status(`✗ ${label}`);
+    note(`${label}: ${trimmed}`);
+    debugLog(`${label} ✗ ${trimmed}`);
+    return false;
   }
-  UI.key.lastMessage = "Ключ обновлён";
+
+  UI.key.lastMessage = successMessage;
   renderKeyState(UI.key.state);
-  note("KEYGEN: " + trimmed);
-  status("✓ KEYGEN");
-  await refreshKeyState({ silent: true }).catch((err) => {
-    console.warn("[key] не удалось обновить состояние после KEYGEN:", err);
+  note(`${label}: ${trimmed}`);
+  status(`✓ ${label}`);
+  debugLog(`${label} ✓ ${trimmed}`);
+  if (refreshAfterPlain) {
+    await refreshKeyState({ silent: true }).catch((err) => {
+      console.warn(`[key] не удалось обновить состояние после ${label}:`, err);
+    });
+  }
+  return true;
+}
+
+async function requestKeyGen() {
+  await handleKeyGenerationCommand({
+    command: "KEYGEN",
+    label: "KEYGEN",
+    requestLog: "запрос генерации",
+    successMessage: "Сгенерирован новый локальный ключ",
+  });
+}
+
+async function requestKeyGenPeer() {
+  await handleKeyGenerationCommand({
+    command: "KEYGEN PEER",
+    label: "KEYGEN PEER",
+    requestLog: "запрос повторного применения удалённого ключа",
+    successMessage: "Обновлён симметричный ключ по сохранённому удалённому ключу",
   });
 }
 
@@ -10826,6 +11153,38 @@ function note(text) {
   toast.classList.add("show");
   setTimeout(() => { toast.hidden = true; }, 2200);
 }
+// Обновление визуального статуса последних IRQ событий под чатом
+function renderChatIrqStatus() {
+  const wrap = UI.els && UI.els.chatIrqStatus ? UI.els.chatIrqStatus : null;
+  if (!wrap) return;
+  const messageEl = UI.els.chatIrqMessage || wrap.querySelector(".chat-irq-message");
+  const metaEl = UI.els.chatIrqMeta || wrap.querySelector(".chat-irq-meta");
+  const state = UI.state && UI.state.irqStatus ? UI.state.irqStatus : { message: "", uptimeMs: null, timestamp: null };
+  if (!messageEl) return;
+  if (!state.message) {
+    messageEl.textContent = "IRQ: событий нет";
+    if (metaEl) {
+      metaEl.hidden = true;
+      metaEl.textContent = "";
+    }
+    wrap.classList.remove("active");
+    return;
+  }
+  messageEl.textContent = state.message;
+  if (metaEl) {
+    const parts = [];
+    if (Number.isFinite(state.uptimeMs)) parts.push(formatDeviceUptime(state.uptimeMs));
+    if (Number.isFinite(state.timestamp)) parts.push(new Date(state.timestamp).toLocaleTimeString());
+    if (parts.length) {
+      metaEl.hidden = false;
+      metaEl.textContent = parts.join(" · ");
+    } else {
+      metaEl.hidden = true;
+      metaEl.textContent = "";
+    }
+  }
+  wrap.classList.add("active");
+}
 function classifyDebugMessage(text) {
   const raw = text != null ? String(text) : "";
   const trimmed = raw.trim();
@@ -10837,15 +11196,115 @@ function classifyDebugMessage(text) {
   if (trimmed.startsWith("→") || low.startsWith("tx") || low.startsWith("cmd") || low.startsWith("send")) return "action";
   return "info";
 }
-function debugLog(text) {
+
+// Добавление записей устройства в область Debug
+function appendDeviceLogEntries(entries, opts) {
+  const log = UI.els.debugLog;
+  if (!log) return;
+  const list = Array.isArray(entries) ? entries : [];
+  const options = opts || {};
+  const state = getDeviceLogState();
+  const replace = options.replace === true;
+  if (replace) {
+    const nodes = log.querySelectorAll('.debug-line[data-origin="device"]');
+    nodes.forEach((node) => node.remove());
+    state.known.clear();
+    state.lastId = 0;
+  }
+  if (list.length === 0) {
+    if (replace) state.initialized = true;
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  let appended = 0;
+  for (const item of list) {
+    if (!item) continue;
+    const text = item.text != null ? String(item.text) : "";
+    if (!text) continue;
+    const idValue = Number(item.id);
+    const id = Number.isFinite(idValue) && idValue > 0 ? idValue : null;
+    if (id != null) {
+      if (state.known.has(id)) continue;
+      state.known.add(id);
+      if (id > state.lastId) state.lastId = id;
+    }
+    const uptimeValue = Number(item.uptime != null ? item.uptime : item.uptimeMs);
+    const uptime = Number.isFinite(uptimeValue) && uptimeValue >= 0 ? uptimeValue : null;
+    debugLog(text, {
+      origin: "device",
+      uptimeMs: uptime,
+      id: id,
+      fragment,
+    });
+    appended += 1;
+  }
+  if (appended > 0) {
+    log.appendChild(fragment);
+    log.scrollTop = log.scrollHeight;
+  }
+  if (replace) state.initialized = true;
+}
+
+// Загрузка последних сообщений журнала с устройства
+async function hydrateDeviceLog(options) {
+  const opts = options || {};
+  const state = getDeviceLogState();
+  if (state.loading) return;
+  if (state.initialized && !opts.force) return;
+  state.loading = true;
+  try {
+    const res = await fetchDeviceLogHistory(opts.limit || 150, opts.timeoutMs || 4000);
+    if (!res.ok) {
+      if (!opts.silent) debugLog("ERR LOGS: " + (res.error || "unknown"));
+    } else {
+      appendDeviceLogEntries(res.logs, { replace: true });
+      if (state.queue.length) {
+        const pending = state.queue.splice(0, state.queue.length);
+        appendDeviceLogEntries(pending);
+      }
+    }
+  } catch (err) {
+    if (!opts.silent) debugLog("ERR LOGS: " + err);
+  } finally {
+    state.loading = false;
+  }
+}
+function debugLog(text, opts) {
+  const options = opts || {};
   const log = UI.els.debugLog;
   if (!log) return;
   const line = document.createElement("div");
   const type = classifyDebugMessage(text);
   line.className = "debug-line debug-line--" + type;
-  line.textContent = "[" + new Date().toLocaleTimeString() + "] " + text;
-  log.appendChild(line);
-  log.scrollTop = log.scrollHeight;
+  if (options.origin) line.dataset.origin = options.origin;
+  if (options.id != null) line.dataset.id = String(options.id);
+  if (options.uptimeMs != null && Number.isFinite(options.uptimeMs)) {
+    line.dataset.uptime = String(options.uptimeMs);
+  }
+  const stamp = options.timestamp != null
+    ? new Date(options.timestamp).toLocaleTimeString()
+    : (options.uptimeMs != null && Number.isFinite(options.uptimeMs)
+        ? formatDeviceUptime(options.uptimeMs)
+        : new Date().toLocaleTimeString());
+  line.textContent = "[" + stamp + "] " + text;
+  if (options.origin === "device") {
+    const rawText = text != null ? String(text) : "";
+    const lowered = rawText.toLowerCase();
+    if (rawText && (lowered.includes("irq=") || /\birq(?:[-_\s]|$)/i.test(rawText)) && (lowered.includes("radiosx1262") || lowered.includes("sx1262"))) {
+      if (!UI.state.irqStatus || typeof UI.state.irqStatus !== "object") {
+        UI.state.irqStatus = { message: "", uptimeMs: null, timestamp: null };
+      }
+      UI.state.irqStatus.message = rawText;
+      UI.state.irqStatus.uptimeMs = Number.isFinite(options.uptimeMs) ? Number(options.uptimeMs) : null;
+      UI.state.irqStatus.timestamp = Date.now();
+      renderChatIrqStatus();
+    }
+  }
+  const target = options.fragment && typeof options.fragment.appendChild === "function" ? options.fragment : log;
+  target.appendChild(line);
+  if (!options.fragment) {
+    log.scrollTop = log.scrollHeight;
+  }
 }
 
 async function loadVersion() {
@@ -10963,9 +11422,802 @@ async function resyncAfterEndpointChange() {
     const monitor = getReceivedMonitorState();
     if (monitor && monitor.known) monitor.known = new Set();
     await pollReceivedMessages({ silentError: true });
+    openReceivedPushChannel();
   } catch (err) {
     console.warn("[endpoint] resync error", err);
   }
 }
-
 )~~~";
+
+// web/libs/sha256.js
+const char SHA256_JS[] PROGMEM = R"~~~(
+/* Простая реализация SHA-256 на чистом JS.
+ * Используется, когда WebCrypto недоступен (например, на HTTP).
+ */
+(function(global){
+  function rotr(x,n){ return (x>>>n) | (x<<(32-n)); }
+  function sha256Bytes(bytes){
+    const K = new Uint32Array([
+      0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+      0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+      0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+      0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+      0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+    ]);
+    const H = new Uint32Array([
+      0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+      0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19
+    ]);
+    const l = bytes.length;
+    const bitLen = l * 8;
+    const paddedLen = (((l + 9) >> 6) + 1) << 6; // длина с дополнением кратная 64
+    const buffer = new Uint8Array(paddedLen);
+    buffer.set(bytes);
+    buffer[l] = 0x80; // добавляем бит "1"
+    const dv = new DataView(buffer.buffer);
+    dv.setUint32(paddedLen - 8, Math.floor(bitLen / 4294967296));
+    dv.setUint32(paddedLen - 4, bitLen >>> 0);
+    const w = new Uint32Array(64);
+    for (let i = 0; i < paddedLen; i += 64) {
+      for (let j = 0; j < 16; j++) w[j] = dv.getUint32(i + j*4);
+      for (let j = 16; j < 64; j++) {
+        const s0 = rotr(w[j-15],7) ^ rotr(w[j-15],18) ^ (w[j-15]>>>3);
+        const s1 = rotr(w[j-2],17) ^ rotr(w[j-2],19) ^ (w[j-2]>>>10);
+        w[j] = (w[j-16] + s0 + w[j-7] + s1) >>> 0;
+      }
+      let a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+      for (let j=0; j<64; j++) {
+        const S1 = rotr(e,6) ^ rotr(e,11) ^ rotr(e,25);
+        const ch = (e & f) ^ (~e & g);
+        const t1 = (h + S1 + ch + K[j] + w[j]) >>> 0;
+        const S0 = rotr(a,2) ^ rotr(a,13) ^ rotr(a,22);
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + maj) >>> 0;
+        h=g; g=f; f=e; e=(d + t1)>>>0; d=c; c=b; b=a; a=(t1 + t2)>>>0;
+      }
+      H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
+      H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
+    }
+    return Array.from(H).map(x=>x.toString(16).padStart(8,"0")).join("");
+  }
+  // экспорт в глобальный объект
+  global.sha256Bytes = sha256Bytes;
+})(this);
+)~~~";
+
+// web/libs/mgrs.js
+const char MGRS_JS[] PROGMEM = R"~~~(
+/* Поддержка сетки MGRS (100 км) для вкладки Pointing.
+ * Используется упрощённая адаптация алгоритмов библиотеки proj4js/mgrs (MIT).
+ */
+(function (global) {
+  // Константы UTM/MGRS (адаптированы из proj4js/mgrs)
+  const NUM_100K_SETS = 6;
+  const SET_ORIGIN_COLUMN_LETTERS = "AJSAJS";
+  const SET_ORIGIN_ROW_LETTERS = "AFAFAF";
+  const A = 65;
+  const I = 73;
+  const O = 79;
+  const V = 86;
+  const Z = 90;
+  const ECC_SQUARED = 0.00669438;
+  const SCALE_FACTOR = 0.9996;
+  const SEMI_MAJOR_AXIS = 6378137;
+  const EASTING_OFFSET = 500000;
+  const NORTHING_OFFSET = 10000000;
+  const UTM_ZONE_WIDTH = 6;
+  const HALF_UTM_ZONE_WIDTH = UTM_ZONE_WIDTH / 2;
+
+  // Нормализация ввода — принимаем только обозначения зоны и 100‑км квадрата
+  function normalizeInput(value) {
+    if (!value) return null;
+    const trimmed = String(value).toUpperCase().replace(/[^0-9A-Z]/g, "");
+    const match = trimmed.match(/^(\d{1,2})([C-HJ-NP-X])([A-HJ-NP-Z]{2})$/);
+    if (!match) return null;
+    const zone = parseInt(match[1], 10);
+    if (!Number.isFinite(zone) || zone < 1 || zone > 60) return null;
+    const e100k = match[3][0];
+    const n100k = match[3][1];
+    if (e100k === "I" || e100k === "O" || n100k === "I" || n100k === "O") return null;
+    return {
+      zone,
+      band: match[2],
+      e100k,
+      n100k,
+      text: String(zone) + match[2] + e100k + n100k,
+    };
+  }
+
+  function degToRad(deg) {
+    return (deg * (Math.PI / 180));
+  }
+
+  function radToDeg(rad) {
+    return (180 * (rad / Math.PI));
+  }
+
+  function get100kSetForZone(i) {
+    let setParm = i % NUM_100K_SETS;
+    if (setParm === 0) {
+      setParm = NUM_100K_SETS;
+    }
+    return setParm;
+  }
+
+  function getEastingFromChar(e, set) {
+    let curCol = SET_ORIGIN_COLUMN_LETTERS.charCodeAt(set - 1);
+    let eastingValue = 100000;
+    let rewindMarker = false;
+
+    while (curCol !== e.charCodeAt(0)) {
+      curCol++;
+      if (curCol === I) curCol++;
+      if (curCol === O) curCol++;
+      if (curCol > Z) {
+        if (rewindMarker) {
+          throw new Error("Bad character: " + e);
+        }
+        curCol = A;
+        rewindMarker = true;
+      }
+      eastingValue += 100000;
+    }
+    return eastingValue;
+  }
+
+  function getNorthingFromChar(n, set) {
+    if (n > "V") {
+      throw new TypeError("MGRSPoint given invalid Northing " + n);
+    }
+    let curRow = SET_ORIGIN_ROW_LETTERS.charCodeAt(set - 1);
+    let northingValue = 0;
+    let rewindMarker = false;
+
+    while (curRow !== n.charCodeAt(0)) {
+      curRow++;
+      if (curRow === I) curRow++;
+      if (curRow === O) curRow++;
+      if (curRow > V) {
+        if (rewindMarker) {
+          throw new Error("Bad character: " + n);
+        }
+        curRow = A;
+        rewindMarker = true;
+      }
+      northingValue += 100000;
+    }
+    return northingValue;
+  }
+
+  function getMinNorthing(zoneLetter) {
+    switch (zoneLetter) {
+      case "C": return 1100000;
+      case "D": return 2000000;
+      case "E": return 2800000;
+      case "F": return 3700000;
+      case "G": return 4600000;
+      case "H": return 5500000;
+      case "J": return 6400000;
+      case "K": return 7300000;
+      case "L": return 8200000;
+      case "M": return 9100000;
+      case "N": return 0;
+      case "P": return 800000;
+      case "Q": return 1700000;
+      case "R": return 2600000;
+      case "S": return 3500000;
+      case "T": return 4400000;
+      case "U": return 5300000;
+      case "V": return 6200000;
+      case "W": return 7000000;
+      case "X": return 7900000;
+      default:
+        throw new TypeError("Invalid zone letter: " + zoneLetter);
+    }
+  }
+
+  function decodeMgrs(mgrsString) {
+    if (!mgrsString) throw new TypeError("MGRSPoint converting from empty value");
+    let value = mgrsString.replace(/ /g, "");
+    let i = 0;
+    let zoneBuffer = "";
+    const length = value.length;
+
+    while (!(/[A-Z]/).test(value.charAt(i))) {
+      if (i >= 2) throw new Error("MGRSPoint bad conversion from: " + value);
+      zoneBuffer += value.charAt(i);
+      i++;
+    }
+
+    const zoneNumber = parseInt(zoneBuffer, 10);
+    if (i === 0 || i + 3 > length) throw new Error("MGRSPoint bad conversion from " + value);
+
+    const zoneLetter = value.charAt(i++);
+    if (zoneLetter <= "A" || zoneLetter === "B" || zoneLetter === "Y" || zoneLetter >= "Z" || zoneLetter === "I" || zoneLetter === "O") {
+      throw new Error("MGRSPoint zone letter " + zoneLetter + " not handled: " + value);
+    }
+
+    const hunK = value.substring(i, i += 2);
+    const set = get100kSetForZone(zoneNumber);
+    const east100k = getEastingFromChar(hunK.charAt(0), set);
+    let north100k = getNorthingFromChar(hunK.charAt(1), set);
+    while (north100k < getMinNorthing(zoneLetter)) {
+      north100k += 2000000;
+    }
+
+    const remainder = length - i;
+    if (remainder % 2 !== 0) {
+      throw new Error("MGRSPoint has to have an even number of digits: " + value);
+    }
+
+    const sep = remainder / 2;
+    let accuracyBonus;
+    let sepEasting = 0;
+    let sepNorthing = 0;
+    if (sep > 0) {
+      accuracyBonus = 100000 / Math.pow(10, sep);
+      const eastingString = value.substring(i, i + sep);
+      const northingString = value.substring(i + sep);
+      sepEasting = parseFloat(eastingString) * accuracyBonus;
+      sepNorthing = parseFloat(northingString) * accuracyBonus;
+    }
+
+    return {
+      easting: east100k + sepEasting,
+      northing: north100k + sepNorthing,
+      zoneLetter,
+      zoneNumber,
+      accuracy: accuracyBonus,
+    };
+  }
+
+  function UTMtoLL(utm) {
+    const { northing: UTMNorthing, easting: UTMEasting, zoneLetter, zoneNumber } = utm;
+    if (zoneNumber < 0 || zoneNumber > 60) return null;
+
+    const a = SEMI_MAJOR_AXIS;
+    const e1 = (1 - Math.sqrt(1 - ECC_SQUARED)) / (1 + Math.sqrt(1 - ECC_SQUARED));
+    const x = UTMEasting - EASTING_OFFSET;
+    let y = UTMNorthing;
+    if (zoneLetter < "N") {
+      y -= NORTHING_OFFSET;
+    }
+
+    const longOrigin = (zoneNumber - 1) * UTM_ZONE_WIDTH - 180 + HALF_UTM_ZONE_WIDTH;
+    const eccPrimeSquared = ECC_SQUARED / (1 - ECC_SQUARED);
+    const M = y / SCALE_FACTOR;
+    const mu = M / (a * (1 - ECC_SQUARED / 4 - 3 * ECC_SQUARED * ECC_SQUARED / 64 - 5 * ECC_SQUARED * ECC_SQUARED * ECC_SQUARED / 256));
+
+    const phi1Rad = mu + (3 * e1 / 2 - 27 * Math.pow(e1, 3) / 32) * Math.sin(2 * mu)
+      + (21 * e1 * e1 / 16 - 55 * Math.pow(e1, 4) / 32) * Math.sin(4 * mu)
+      + (151 * Math.pow(e1, 3) / 96) * Math.sin(6 * mu);
+
+    const N1 = a / Math.sqrt(1 - ECC_SQUARED * Math.sin(phi1Rad) * Math.sin(phi1Rad));
+    const T1 = Math.tan(phi1Rad) * Math.tan(phi1Rad);
+    const C1 = eccPrimeSquared * Math.cos(phi1Rad) * Math.cos(phi1Rad);
+    const R1 = a * (1 - ECC_SQUARED) / Math.pow(1 - ECC_SQUARED * Math.sin(phi1Rad) * Math.sin(phi1Rad), 1.5);
+    const D = x / (N1 * SCALE_FACTOR);
+
+    let lat = phi1Rad - (N1 * Math.tan(phi1Rad) / R1) * (D * D / 2 - (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * eccPrimeSquared) * Math.pow(D, 4) / 24
+      + (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * eccPrimeSquared - 3 * C1 * C1) * Math.pow(D, 6) / 720);
+    lat = radToDeg(lat);
+
+    let lon = (D - (1 + 2 * T1 + C1) * Math.pow(D, 3) / 6
+      + (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * eccPrimeSquared + 24 * T1 * T1) * Math.pow(D, 5) / 120) / Math.cos(phi1Rad);
+    lon = longOrigin + radToDeg(lon);
+
+    if (typeof utm.accuracy === "number") {
+      const topRight = UTMtoLL({
+        northing: utm.northing + utm.accuracy,
+        easting: utm.easting + utm.accuracy,
+        zoneLetter: utm.zoneLetter,
+        zoneNumber: utm.zoneNumber,
+      });
+      if (!topRight) return null;
+      return {
+        top: topRight.lat,
+        right: topRight.lon,
+        bottom: lat,
+        left: lon,
+      };
+    }
+
+    return { lat, lon };
+  }
+
+  function toLatLon100k(value) {
+    const normalized = normalizeInput(value);
+    if (!normalized) return null;
+    let utm;
+    try {
+      utm = decodeMgrs(normalized.text);
+    } catch (err) {
+      return null;
+    }
+    if (!utm) return null;
+    const point = UTMtoLL(utm);
+    if (!point || typeof point.lat !== "number" || typeof point.lon !== "number") return null;
+    return {
+      lat: point.lat,
+      lon: point.lon,
+      zone: normalized.zone,
+      band: normalized.band,
+      square: normalized.e100k + normalized.n100k,
+      text: normalized.text,
+    };
+  }
+
+  global.satMgrs = {
+    normalize100k(value) {
+      return normalizeInput(value);
+    },
+    toLatLon100k(value) {
+      return toLatLon100k(value);
+    },
+  };
+})(typeof window !== "undefined" ? window : this);
+)~~~";
+
+// web/libs/freq-info.csv
+const char FREQ_INFO_CSV[] PROGMEM = R"~~~(
+Channel,RX (MHz),TX (MHz),System,Band Plan,Purpose,Frequency (MHz),Bandwidth,Satellite Name,Satellite Position,Comments,Modulation,Usage
+0,243.625,316.725,UHF military,225-328.6 MHz,Military communications,243.625,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+1,243.625,300.4,UHF military,225-328.6 MHz,Military communications,243.625,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+2,243.8,298.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+3,244.135,296.075,UHF FO,Band Plan P,Tactical communications,244.135,5KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+4,244.275,300.25,UHF military,225-328.6 MHz,Military communications,,,,,,,
+5,245.2,312.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
+6,245.8,298.65,UHF military,225-328.6 MHz,Military communications,245.8,35KHz,Skynet 5C,17.8 West,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
+7,245.85,314.23,UHF military,225-328.6 MHz,Military communications,245.85,35KHz,Skynet 5A,5.9 East,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
+8,245.95,299.4,UHF military,225-328.6 MHz,Military communications,,,,,,,
+9,247.45,298.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
+10,248.75,306.9,Marisat,B,Tactical voice/data,248.75,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+11,248.825,294.375,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder,248.825,30KHz,? IOR,,? March 2010,,
+12,249.375,316.975,UHF military,225-328.6 MHz,Military communications,249.375,30KHz,?,,IOR March 2010,,
+13,249.4,300.975,UHF military,225-328.6 MHz,Military communications,,,,,,,
+14,249.45,299.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
+15,249.45,312.75,UHF military,225-328.6 MHz,Military communications,,,,,,,
+16,249.49,313.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
+17,249.53,318.28,UHF military,225-328.6 MHz,Military communications,249.5295,8KHz,Skynet 5A,5.9 East,,PSK/FM Mixed,Военные голос/данные (UK/NATO)
+18,249.85,316.25,UHF military,225-328.6 MHz,Military communications,,,,,,,
+19,249.85,298.83,UHF military,225-328.6 MHz,Military communications,,,,,,,
+20,249.89,300.5,UHF military,225-328.6 MHz,Military communications,,,,,,,
+21,249.93,308.75,UHF FO,Q,Tactical communications,,,,,,,
+22,250.09,312.6,UHF military,225-328.6 MHz,Military communications,,,,,,,
+23,250.9,308.3,UHF FO,Q,Tactical communications,250.9,36KHz,ComsatBW-2,13.2 East,,Wideband FM/AM,Широкополосные военные/правительственные каналы
+24,251.275,296.5,30 kHz Transponder,30K Transponder,30 kHz voice/data transponder,,,,,,,
+25,251.575,308.45,UHF military,225-328.6 MHz,Military communications,,,,,,,
+26,251.6,298.225,UHF military,225-328.6 MHz,Military communications,,,,,,,
+27,251.85,292.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,251.85,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+28,251.9,292.9,FLTSATCOM/Leasat,A/X,Tactical communications,251.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+29,251.95,292.95,Navy 25 kHz,Navy 25K,Tactical voice/data communications,251.95,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+30,252.0,293.1,FLTSATCOM,B,Tactical communications,252.0,30KHz,UFO-10/11,70.0 East,March 2010,Narrowband FM/AM,Тактические голос/данные каналы
+31,252.05,293.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,252.05,25KHz,UFO-7,23.3 West,DAMA kg_net= 7 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+32,252.15,293.15,UHF military,225-328.6 MHz,Military communications,252.15,25KHz,Fltsatcom 8,15.5 West,DAMA kg_net= 5 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+33,252.2,299.15,UHF military,225-328.6 MHz,Military communications,,,,,,,
+34,252.4,309.7,UHF FO,Q,Tactical communications,252.4,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+35,252.45,309.75,UHF military,225-328.6 MHz,Military communications,252.45,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+36,252.5,309.8,UHF military,225-328.6 MHz,Military communications,252.5,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+37,252.55,309.85,UHF military,225-328.6 MHz,Military communications,252.55,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+38,252.625,309.925,UHF military,225-328.6 MHz,Military communications,,,,,,,
+39,253.55,294.55,UHF military,225-328.6 MHz,Military communications,253.55,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+40,253.6,295.95,UHF military,225-328.6 MHz,Military communications,253.6,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+41,253.65,294.65,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.65,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+42,253.7,294.7,FLTSATCOM/Leasat/UHF FO,A/X/O,Tactical communications,253.7,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+43,253.75,294.75,UHF military,225-328.6 MHz,Military communications,253.75,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+44,253.8,296.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
+45,253.85,294.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.85,25KHz,UFO-7,23.3 West,DAMA kg_net= 9 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+46,253.85,294.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,253.85,25KHz,UFO-7,23.3 West,DAMA kg_net= 9 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+47,253.9,307.5,UHF military,225-328.6 MHz,Military communications,,,,,,,
+48,254.0,298.63,UHF military,225-328.6 MHz,Military communications,,,,,,,
+49,254.73,312.55,UHF military,225-328.6 MHz,Military communications,,,,,,,
+50,254.775,310.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
+51,254.83,296.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+52,255.25,302.425,UHF military,225-328.6 MHz,Military communications,255.25,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+53,255.35,296.35,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.35,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+54,255.4,296.4,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+55,255.45,296.45,UHF military,225-328.6 MHz,Military communications,255.45,25KHz,UFO-7,23.3 West,DAMA kg_net= 3 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+56,255.55,296.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.55,25KHz,Fltsatcom 8,15.5 West,,Narrowband FM/AM,Тактические голос/данные каналы
+57,255.55,296.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,255.55,25KHz,Fltsatcom 8,15.5 West,,Narrowband FM/AM,Тактические голос/данные каналы
+58,255.775,309.3,UHF military,225-328.6 MHz,Military communications,,,,,,,
+59,256.45,313.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
+60,256.6,305.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
+61,256.85,297.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,256.85,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+62,256.9,296.1,UHF military,225-328.6 MHz,Military communications,256.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+63,256.95,297.95,UHF military,225-328.6 MHz,Military communications,256.95,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+64,257.0,297.675,Navy 25 kHz,Navy 25K,Tactical voice/data communications,257.0,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+65,257.05,298.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,257.05,25KHz,UFO-7,23.3 West,DAMA kg_net= 4 9k6+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+66,257.1,295.65,UHF military,225-328.6 MHz,Military communications,257.1,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+67,257.15,298.15,UHF military,225-328.6 MHz,Military communications,257.15,25KHz,Fltsatcom 8,15.5 West,DAMA kg_net= 6 9k6,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+68,257.2,308.8,UHF military,225-328.6 MHz,Military communications,,,,,,,
+69,257.25,309.475,UHF military,225-328.6 MHz,Military communications,,,,,,,
+70,257.3,309.725,UHF military,225-328.6 MHz,Military communications,,,,,,,
+71,257.35,307.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+72,257.5,311.35,UHF military,225-328.6 MHz,Military communications,,,,,,,
+73,257.7,316.15,UHF military,225-328.6 MHz,Military communications,,,,,,,
+74,257.775,311.375,UHF military,225-328.6 MHz,Military communications,,,,,,,
+75,257.825,297.075,UHF military,225-328.6 MHz,Military communications,,,,,,,
+76,257.9,298.0,UHF military,225-328.6 MHz,Military communications,,,,,,,
+77,258.15,293.2,UHF military,225-328.6 MHz,Military communications,,,,,,,
+78,258.35,299.35,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.35,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+79,258.45,299.45,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.45,25KHz,UFO-2,28.3 East,PSK modem,PSK (Phase Shift Keying),Модемные каналы данных
+80,258.5,299.5,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.5,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+81,258.55,299.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.55,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+82,258.65,299.65,Navy 25 kHz,Navy 25K,Tactical voice/data communications,258.65,25KHz,Fltsatcom 8,15.5 West,Strong GMSK,GMSK (Gaussian Minimum Shift Keying),Цифровая передача (тактическая/мобильная)
+83,259.0,317.925,UHF military,225-328.6 MHz,Military communications,,,,,,,
+84,259.05,317.975,UHF military,225-328.6 MHz,Military communications,,,,,,,
+85,259.975,310.05,UHF military,225-328.6 MHz,Military communications,259.975,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+86,260.025,310.225,UHF military,225-328.6 MHz,Military communications,260.025,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+87,260.075,310.275,UHF military,225-328.6 MHz,Military communications,260.075,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+88,260.125,310.125,UHF military,225-328.6 MHz,Military communications,260.125,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+89,260.175,310.325,UHF military,225-328.6 MHz,Military communications,,,,,,,
+90,260.375,292.975,UHF military,225-328.6 MHz,Military communications,260.375,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+91,260.425,297.575,UHF military,225-328.6 MHz,Military communications,260.425,25KHz,UFO-7,23.3 West,DAMA kg_net= 8 9k6+19k2,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+92,260.425,294.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.425,25KHz,UFO-7,23.3 West,DAMA kg_net= 8 9k6+19k2,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+93,260.475,294.075,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.475,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+94,260.525,294.125,UHF military,225-328.6 MHz,Military communications,260.525,25KHz,UFO-7,23.3 West,BPSK modem,BPSK (Binary Phase Shift Keying),Модемные каналы данных
+95,260.55,296.775,UHF military,225-328.6 MHz,Military communications,,,,,,,
+96,260.575,294.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.575,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+97,260.625,294.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.625,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+98,260.675,294.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD),260.675,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+99,260.675,294.275,UHF military,225-328.6 MHz,Military communications,260.675,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+100,260.725,294.325,UHF military,225-328.6 MHz,Military communications,260.725,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+101,260.9,313.9,UHF military,225-328.6 MHz,Military communications,,,,,,,
+102,261.1,298.38,UHF military,225-328.6 MHz,Military communications,,,,,,,
+103,261.1,298.7,UHF military,225-328.6 MHz,Military communications,,,,,,,
+104,261.2,294.95,UHF military,225-328.6 MHz,Military communications,,,,,,,
+105,262.0,314.2,UHF military,225-328.6 MHz,Military communications,262.0,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+106,262.04,307.075,UHF military,225-328.6 MHz,Military communications,,,,,,,
+107,262.075,306.975,UHF military,225-328.6 MHz,Military communications,262.075,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+108,262.125,295.725,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.125,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+109,262.175,297.025,UHF military,225-328.6 MHz,Military communications,262.175,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+110,262.175,295.775,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.175,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+111,262.225,295.825,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.225,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+112,262.275,295.875,UHF military,225-328.6 MHz,Military communications,262.275,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+113,262.275,300.275,UHF military,225-328.6 MHz,Military communications,262.275,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+114,262.325,295.925,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.325,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+115,262.375,295.975,UHF military,225-328.6 MHz,Military communications,262.375,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+116,262.425,296.025,DOD 25 kHz,DOD 25K,Tactical communications (DoD),262.425,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+117,263.45,311.4,UHF military,225-328.6 MHz,Military communications,,,,,,,
+118,263.5,309.875,UHF military,225-328.6 MHz,Military communications,,,,,,,
+119,263.575,297.175,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.575,25Khz,UFO-10/11,70.0 East,Data March 2010,Digital Narrowband Data,Цифровые данные (низкая/средняя скорость)
+120,263.625,297.225,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.625,25KHz,UFO-7,23.3 West,BPSK modem,BPSK (Binary Phase Shift Keying),Модемные каналы данных
+121,263.675,297.275,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.675,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+122,263.725,297.325,UHF military,225-328.6 MHz,Military communications,263.725,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+123,263.775,297.375,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.775,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+124,263.825,297.425,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.825,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+125,263.875,297.475,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.875,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+126,263.925,297.525,DOD 25 kHz,DOD 25K,Tactical communications (DoD),263.925,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+127,265.25,306.25,UHF military,225-328.6 MHz,Military communications,265.25,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+128,265.35,306.35,UHF military,225-328.6 MHz,Military communications,265.35,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+129,265.4,294.425,FLTSATCOM/Leasat,A/X,Tactical communications,265.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+130,265.45,306.45,UHF military,225-328.6 MHz,Military communications,265.45,25KHz,UFO-7,23.3 West,Daily RATT transmissions,Narrowband FM/AM,Тактические голос/данные каналы
+131,265.5,302.525,UHF military,225-328.6 MHz,Military communications,265.5,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+132,265.55,306.55,Navy 25 kHz,Navy 25K,Tactical voice/data communications,265.55,25KHz,Fltsatcom 8,15.5 West,Many interfering carriers in tpx,Narrowband FM/AM,Тактические голос/данные каналы
+133,265.675,306.675,UHF military,225-328.6 MHz,Military communications,,,,,,,
+134,265.85,306.85,UHF military,225-328.6 MHz,Military communications,,,,,,,
+135,266.75,316.575,UHF military,225-328.6 MHz,Military communications,266.75,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+136,266.85,307.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,266.85,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+137,266.9,297.625,UHF military,225-328.6 MHz,Military communications,266.9,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+138,266.95,307.95,Navy 25 kHz,Navy 25K,Tactical voice/data communications,266.95,25KHz,UFO-7,23.3 West,Russian phone relays,Narrowband FM/AM,Тактические голос/данные каналы
+139,267.05,308.05,Navy 25 kHz,Navy 25K,Tactical voice/data communications,267.05,25KHz,UFO-7,23.3 West,,Narrowband FM/AM,Тактические голос/данные каналы
+140,267.1,308.1,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+141,267.15,308.15,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+142,267.2,308.2,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+143,267.25,308.25,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+144,267.4,294.9,UHF military,225-328.6 MHz,Military communications,,,,,,,
+145,267.875,310.375,UHF military,225-328.6 MHz,Military communications,267.875,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+146,267.95,310.45,UHF military,225-328.6 MHz,Military communications,267.95,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+147,268.0,310.475,UHF military,225-328.6 MHz,Military communications,268.0,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+148,268.025,309.025,Navy 25 kHz,Navy 25K,Tactical voice/data communications,,,,,,,
+149,268.05,310.55,UHF military,225-328.6 MHz,Military communications,268.05,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+150,268.1,310.6,UHF military,225-328.6 MHz,Military communications,268.1,30KHz,Sicral 1B,11.8 East,,PSK (Phase Shift Keying),Итальянская военная связь (голос/данные)
+151,268.15,309.15,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.15,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+152,268.2,296.05,UHF military,225-328.6 MHz,Military communications,268.2,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+153,268.25,309.25,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.25,25KHz,UFO-2,28.3 East,,Narrowband FM/AM,Тактические голос/данные каналы
+154,268.3,309.3,Navy 25 kHz,Navy 25K,Tactical voice/data communications,268.3,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+155,268.35,309.35,UHF military,225-328.6 MHz,Military communications,268.35,25KHz,UFO-7,23.3 West,DAMA kg_net= 1 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+156,268.4,295.9,FLTSATCOM/Leasat,C/Z,Tactical communications,268.4,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+157,268.45,309.45,UHF military,225-328.6 MHz,Military communications,268.45,25KHz,UFO-7,23.3 West,Many interfering carriers in tpx,Narrowband FM/AM,Тактические голос/данные каналы
+158,269.7,309.925,UHF military,225-328.6 MHz,Military communications,269.7,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+159,269.75,310.75,UHF military,225-328.6 MHz,Military communications,269.75,25KHz,UFO-2,28.3 East,Wheel,Narrowband FM/AM,Тактические голос/данные каналы
+160,269.8,310.025,UHF military,225-328.6 MHz,Military communications,269.8,25KHz,UFO-10/11,70.0 East,,Narrowband FM/AM,Тактические голос/данные каналы
+161,269.85,310.85,Navy 25 kHz,Navy 25K,Tactical voice/data communications,269.85,30KHz,UFO-7,23.3 West,DAMA kg_net= 2 9k6+19k2+32k,Narrowband FM/AM,DAMA (динамическое распределение каналов)
+162,269.95,310.95,DOD 25 kHz,DOD 25K,Tactical communications (DoD),269.95,25KHz,UFO-7,23.3 West,PSK mode,PSK (Phase Shift Keying),Цифровые данные
+)~~~";
+
+// web/libs/geostat_tle.js
+const char GEOSTAT_TLE_JS[] PROGMEM = R"~~~(
+// Геостационарные спутники из REF/tle.txt (фильтр по наклонению и среднему движению)
+// Файл сгенерирован скриптом tools/generate_geostat_tle.py
+(function(global){
+  const tle = [
+  {
+    "name": "OPS 0757 (TACSAT)",
+    "line1": "1 03691U 69013A   22083.65958150  .00000048  00000-0  00000-0 0  9994",
+    "line2": "2 03691   1.1382 293.9008 0015240 291.3913  61.4549  1.00438695 98582"
+  },
+  {
+    "name": "MARISAT 1",
+    "line1": "1 08697U 76017A   22083.47307565 -.00000130  00000-0  00000+0 0  9997",
+    "line2": "2 08697   9.4298 308.0145 0013559 153.4087  74.2575  0.99209735166755"
+  },
+  {
+    "name": "MARISAT 2",
+    "line1": "1 09478U 76101A   22083.62934434 -.00000044  00000-0  00000-0 0  9992",
+    "line2": "2 09478   9.0521 316.5884 0102530 322.3755  14.7293  0.97590233108272"
+  },
+  {
+    "name": "MARISAT 3",
+    "line1": "1 08882U 76053A   22083.56744873 -.00000176  00000-0  00000-0 0  9991",
+    "line2": "2 08882  11.2718 313.1676 0122641 298.0496 255.9990  0.95899900106330"
+  },
+  {
+    "name": "NATO 2A",
+    "line1": "1 04353U 70021A   22083.64038487 -.00000128  00000-0  00000-0 0  9992",
+    "line2": "2 04353   4.2612 290.9626 0002180 168.6866 212.3113  1.00267890110275"
+  },
+  {
+    "name": "NATO 2B",
+    "line1": "1 04902U 71009A   22083.63725102 -.00000099  00000-0  00000-0 0  9992",
+    "line2": "2 04902   5.0908 283.5153 0005489 157.8279 224.9355  1.00271107103149"
+  },
+  {
+    "name": "NATO 3A",
+    "line1": "1 08808U 76035A   22083.46130427 -.00000286  00000-0  00000-0 0  9994",
+    "line2": "2 08808   8.4965 308.7229 0020554 290.3834  54.9182  0.99845006731836"
+  },
+  {
+    "name": "NATO 3B",
+    "line1": "1 09785U 77005A   22083.63283691 -.00000083  00000-0  00000-0 0  9993",
+    "line2": "2 09785  11.4011 320.3640 0044318  19.2903 157.1103  0.95268846101942"
+  },
+  {
+    "name": "NATO 3C",
+    "line1": "1 11115U 78106A   22083.83504979 -.00000122  00000-0  00000-0 0  9997",
+    "line2": "2 11115  11.9703 326.1982 0002744   8.3861 169.5246  0.98483958639999"
+  },
+  {
+    "name": "NATO 3D",
+    "line1": "1 15391U 84115A   22083.57501007 -.00000213  00000-0  00000-0 0  9995",
+    "line2": "2 15391  14.4503   4.1984 0105106  93.9303 113.1587  0.94955421133208"
+  },
+  {
+    "name": "NATO 4A",
+    "line1": "1 21047U 91001A   22079.96093859 -.00000110  00000-0  00000-0 0  9997",
+    "line2": "2 21047  13.2273   3.8778 0003442 104.1814  82.5534  0.98283824112891"
+  },
+  {
+    "name": "NATO 4B",
+    "line1": "1 22921U 93076A   22083.54193237 -.00000082  00000-0  00000-0 0  9991",
+    "line2": "2 22921  12.6647   9.8930 0007136  40.0437 175.9930  0.98517569103387"
+  },
+  {
+    "name": "PAKSAT 1 (ANATOLIA 1)",
+    "line1": "1 23779U 96006A   22083.88896361 -.00000217  00000-0  00000-0 0  9994",
+    "line2": "2 23779   7.6454  57.8114 0002698  63.4929 312.8733  0.99591844 95460"
+  },
+  {
+    "name": "Intelsat 22",
+    "line1": "1 38098U 12011A   22083.84507990 -.00000069  00000-0  00000-0 0  9996",
+    "line2": "2 38098   0.0095 202.8642 0002802 166.4992 189.2476  1.00271312 36325"
+  },
+  {
+    "name": "COMSATBW-1",
+    "line1": "1 35943U 09054B   22083.62803991  .00000015  00000-0  00000-0 0  9991",
+    "line2": "2 35943   0.0778  97.5731 0002619 299.1306  74.4441  1.00272077 45816"
+  },
+  {
+    "name": "COMSATBW-2",
+    "line1": "1 36582U 10021B   22083.83339265  .00000078  00000-0  00000-0 0  9997",
+    "line2": "2 36582   0.0689  94.9949 0002313 287.6127 112.8497  1.00269927 43460"
+  },
+  {
+    "name": "MUOS 1",
+    "line1": "1 38093U 12009A   22083.88251799 -.00000136  00000-0  00000-0 0  9990",
+    "line2": "2 38093   2.8436  29.7253 0058771 358.0649  12.2220  1.00273314 36952"
+  },
+  {
+    "name": "MUOS 2",
+    "line1": "1 39206U 13036A   22083.86742925  .00000056  00000-0  00000-0 0  9992",
+    "line2": "2 39206   2.6398  20.1948 0051732 181.9264 115.4432  1.00274455 31690"
+  },
+  {
+    "name": "MUOS 3",
+    "line1": "1 40374U 15002A   22083.82754904 -.00000138  00000-0  00000-0 0  9993",
+    "line2": "2 40374   2.5401   9.3896 0051626 176.6498 278.6304  1.00270448 26091"
+  },
+  {
+    "name": "MUOS 4",
+    "line1": "1 40887U 15044A   22083.77202144 -.00000102  00000-0  00000-0 0  9997",
+    "line2": "2 40887   2.5558   4.4365 0058377 359.6597 171.0748  1.00271454 24064"
+  },
+  {
+    "name": "MUOS 5",
+    "line1": "1 41622U 16041A   22083.64648823 -.00000149  00000-0  00000-0 0  9998",
+    "line2": "2 41622   5.8106 301.5749 0194214 233.4703 134.7522  1.00272046 21592"
+  },
+  {
+    "name": "SKYNET 1",
+    "line1": "1 04250U 69101A   22083.63582503 -.00000088  00000-0  00000-0 0  9992",
+    "line2": "2 04250   3.5324 285.8664 0020042 283.1259  95.0723  1.00269381119026"
+  },
+  {
+    "name": "SKYNET 2B",
+    "line1": "1 07547U 74094A   22083.69284299  .00000136  00000-0  00000-0 0  9991",
+    "line2": "2 07547   7.4218 297.1398 0004685 136.2730  26.0000  1.00346827109268"
+  },
+  {
+    "name": "SKYNET 4A",
+    "line1": "1 20401U 90001A   22083.24170772 -.00000123  00000-0  00000-0 0  9999",
+    "line2": "2 20401  13.0926 358.8230 0010581 299.0424 256.3706  0.98996909 31466"
+  },
+  {
+    "name": "SKYNET 4B",
+    "line1": "1 19687U 88109A   22083.16914223 -.00000182  00000-0  00000-0 0  9992",
+    "line2": "2 19687  14.5382 348.6986 0002828 355.2116 179.1812  0.99670240102754"
+  },
+  {
+    "name": "SKYNET 4C",
+    "line1": "1 20776U 90079A   22083.85574941  .00000120  00000-0  00000-0 0  9998",
+    "line2": "2 20776  13.8305   0.6961 0003214   6.5851 156.5296  1.00276681115395"
+  },
+  {
+    "name": "SKYNET 4D",
+    "line1": "1 25134U 98002A   22083.04389699 -.00000116  00000-0  00000-0 0  9996",
+    "line2": "2 25134  11.7925  19.6868 0005859  74.3332 115.8913  0.99154503 88043"
+  },
+  {
+    "name": "SKYNET 4E",
+    "line1": "1 25639U 99009B   22083.04404500 -.00000037  00000-0  00000-0 0  9995",
+    "line2": "2 25639  11.2057  17.3794 0002711 341.0872 197.6767  1.00274641 35882"
+  },
+  {
+    "name": "SKYNET 4F",
+    "line1": "1 26695U 01005B   22083.88129693  .00000014  00000-0  00000-0 0  9990",
+    "line2": "2 26695  10.5746  26.6582 0002491  88.9089 277.3986  0.99144722 77295"
+  },
+  {
+    "name": "SKYNET 5A",
+    "line1": "1 30794U 07007B   22083.84981118 -.00000282  00000-0  00000-0 0  9995",
+    "line2": "2 30794   1.9953  88.6685 0003037 278.1802 216.5723  1.00272930 55206"
+  },
+  {
+    "name": "SKYNET 5B",
+    "line1": "1 32294U 07056B   22083.83583476  .00000132  00000-0  00000-0 0  9993",
+    "line2": "2 32294   1.3141  89.7509 0003993 270.3454 148.1481  1.00271905 52705"
+  },
+  {
+    "name": "SKYNET 5C",
+    "line1": "1 33055U 08030A   22083.89899368 -.00000151  00000-0  00000+0 0  9999",
+    "line2": "2 33055   0.0668 350.1710 0003226  36.5084 101.4286  1.00270840 50407"
+  },
+  {
+    "name": "SKYNET 5D",
+    "line1": "1 39034U 12075A   22083.82063293  .00000089  00000-0  00000-0 0  9999",
+    "line2": "2 39034   0.0717 357.5966 0003665   8.6768 164.1607  1.00274730 33670"
+  },
+  {
+    "name": "LEASAT 1",
+    "line1": "1 15384U 84113C   22083.17027608 -.00000092  00000-0  00000+0 0  9995",
+    "line2": "2 15384  12.8671 347.0443 0025770 266.0748 276.6447  0.98543784108785"
+  },
+  {
+    "name": "LEASAT 2",
+    "line1": "1 15236U 84093C   22083.54775705 -.00000179  00000-0  00000-0 0  9994",
+    "line2": "2 15236  13.7755 325.2443 0026491 237.3353 326.8578  0.97457073112991"
+  },
+  {
+    "name": "LEASAT 3",
+    "line1": "1 15643U 85028C   22083.63618006 -.00000067  00000-0  00000-0 0  9991",
+    "line2": "2 15643  14.4583 321.4886 0071400 264.4074  77.3375  0.96961777121623"
+  },
+  {
+    "name": "LEASAT 4",
+    "line1": "1 15995U 85076D   22083.46021365 -.00000160  00000-0  00000-0 0  9995",
+    "line2": "2 15995  12.0922 338.6941 0005529 353.9521 337.7999  0.97800082103016"
+  },
+  {
+    "name": "LEASAT 5",
+    "line1": "1 20410U 90002B   22081.96155833  .00000057  00000-0  00000-0 0  9993",
+    "line2": "2 20410  11.5213 359.8403 0008531  43.8387 153.7856  0.99595150103017"
+  },
+  {
+    "name": "OPS 6391 (FLTSATCOM 1)",
+    "line1": "1 10669U 78016A   22083.89681323 -.00000253  00000-0  00000+0 0  9999",
+    "line2": "2 10669  10.7840 307.4329 0005858 189.5039 339.3514  0.99006091739341"
+  },
+  {
+    "name": "OPS 6392 (FLTSATCOM 2)",
+    "line1": "1 11353U 79038A   22083.89951699 -.00000222  00000-0  00000+0 0  9997",
+    "line2": "2 11353  11.0943 315.3100 0018429  51.8721 123.7212  0.98545981155147"
+  },
+  {
+    "name": "OPS 6393 (FLTSATCOM 3)",
+    "line1": "1 11669U 80004A   22083.59794965 -.00000192  00000-0  00000-0 0  9997",
+    "line2": "2 11669   9.3771 316.2822 0023746 196.5515 156.1181  1.00163822154354"
+  },
+  {
+    "name": "OPS 6394 (FLTSATCOM 4)",
+    "line1": "1 12046U 80087A   22083.30279953 -.00000055  00000-0  00000+0 0  9999",
+    "line2": "2 12046  11.2730 317.1441 0005578  92.6517 267.3529  0.98951031114865"
+  },
+  {
+    "name": "FLTSATCOM 5",
+    "line1": "1 12635U 81073A   22083.37050207 -.00000190  00000-0  00000-0 0  9996",
+    "line2": "2 12635  16.9567 324.6144 0012661 116.2838  55.5501  0.98607169117828"
+  },
+  {
+    "name": "FLTSATCOM 7 (USA 20)",
+    "line1": "1 17181U 86096A   22083.52396388 -.00000140  00000-0  00000-0 0  9992",
+    "line2": "2 17181  13.9635 350.6088 0038278 300.0063 269.1146  0.98930428136672"
+  },
+  {
+    "name": "FLTSATCOM 8 (USA 46)",
+    "line1": "1 20253U 89077A   22083.91045723 -.00000085  00000-0  00000-0 0  9993",
+    "line2": "2 20253  12.8842   0.7986 0004573  67.3524 153.8242  1.00272162245114"
+  },
+  {
+    "name": "UFO 2 (USA 95)",
+    "line1": "1 22787U 93056A   22083.08524037  .00000122  00000-0  00000-0 0  9998",
+    "line2": "2 22787  11.4471  11.6071 0004132 354.0666 235.2715  1.00269492103048"
+  },
+  {
+    "name": "UFO 3 (USA 104)",
+    "line1": "1 23132U 94035A   22083.04049549 -.00000060  00000-0  00000-0 0  9999",
+    "line2": "2 23132  11.7410  14.5454 0003243  21.8090 155.2523  1.00287320116196"
+  },
+  {
+    "name": "UFO 4 (USA 108)",
+    "line1": "1 23467U 95003A   22083.69331020 -.00000029  00000-0  00000-0 0  9990",
+    "line2": "2 23467   9.8492  18.1762 0003818  28.4715 197.3434  1.00271732 99459"
+  },
+  {
+    "name": "UFO 5 (USA 111)",
+    "line1": "1 23589U 95027A   22083.62733389 -.00000152  00000-0  00000-0 0  9995",
+    "line2": "2 23589  11.0859  17.6113 0006694  14.9718 204.9186  0.98752629 97731"
+  },
+  {
+    "name": "UFO 6 (USA 114)",
+    "line1": "1 23696U 95057A   22082.92688021  .00000036  00000-0  00000-0 0  9991",
+    "line2": "2 23696  10.3153  21.3738 0005744  78.7418 116.9097  0.98762227 96506"
+  },
+  {
+    "name": "UFO 7 (USA 127)",
+    "line1": "1 23967U 96042A   22083.28725021 -.00000289  00000-0  00000-0 0  9990",
+    "line2": "2 23967   9.7308  23.9422 0009386  53.5434 165.4027  1.00218142 93981"
+  },
+  {
+    "name": "UFO 8 (USA 138)",
+    "line1": "1 25258U 98016A   22083.69444823 -.00000032  00000-0  00000-0 0  9997",
+    "line2": "2 25258   9.3363  30.2335 0003143 347.7192 225.8201  1.00269013 88354"
+  },
+  {
+    "name": "UFO 9 (USA 140)",
+    "line1": "1 25501U 98058A   22082.83954490 -.00000010  00000-0  00000-0 0  9991",
+    "line2": "2 25501   9.6105  27.5268 0014854 338.5973 184.9526  0.98175309 84645"
+  },
+  {
+    "name": "UFO 10 (USA 146)",
+    "line1": "1 25967U 99063A   22083.86805484 -.00000196  00000-0  00000-0 0  9991",
+    "line2": "2 25967   8.6097  33.7111 0003153   0.5555  77.5493  1.00267739 81851"
+  },
+  {
+    "name": "UFO 11 (USA 174)",
+    "line1": "1 28117U 03057A   22083.01785374 -.00000099  00000-0  00000-0 0  9993",
+    "line2": "2 28117   6.8670  37.9130 0005318 354.5212 230.0634  1.00271147 66946"
+  }
+  ];
+  if (!global.SAT_TLE_DATA) {
+    global.SAT_TLE_DATA = tle;
+  } else if (Array.isArray(global.SAT_TLE_DATA)) {
+    global.SAT_TLE_DATA = global.SAT_TLE_DATA.concat(tle);
+  } else {
+    global.SAT_TLE_DATA = tle;
+  }
+})(typeof globalThis !== "undefined" ? globalThis : (typeof window !== "undefined" ? window : this));
+)~~~";
+
