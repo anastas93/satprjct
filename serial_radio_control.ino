@@ -2320,7 +2320,24 @@ void setup() {
   if (!setupWifi()) {                                 // запускаем точку доступа
     LOG_ERROR("Wi-Fi: веб-интерфейс останется недоступным до перезапуска");
   }
-  radio.begin();
+  // Пытаемся запустить радиомодуль с ограничением по числу попыток, чтобы не зависнуть в setup()
+  constexpr uint8_t kRadioInitAttempts = 3;
+  bool radioReady = false;
+  for (uint8_t attempt = 1; attempt <= kRadioInitAttempts; ++attempt) {
+    if (radio.begin()) {
+      radioReady = true;
+      break;
+    }
+    const int16_t code = radio.getLastErrorCode();
+    char prefix[160];
+    std::snprintf(prefix, sizeof(prefix),
+                  "RadioSX1262: radio.begin() попытка %u завершилась ошибкой, код=",
+                  static_cast<unsigned>(attempt));
+    LOG_ERROR_VAL(prefix, code);
+  }
+  if (!radioReady) {
+    LOG_ERROR("RadioSX1262: инициализация не завершена, продолжаем работу без готовности радио");
+  }
   tx.setAckEnabled(ackEnabled);
   tx.setAckRetryLimit(ackRetryLimit);
   tx.setSendPause(DefaultSettings::SEND_PAUSE_MS);
