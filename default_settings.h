@@ -43,6 +43,7 @@ namespace DefaultSettings {
   constexpr const char* WIFI_SSID = "sat_ap";      // SSID точки доступа
   constexpr const char* WIFI_PASS = "12345678";    // пароль точки доступа
   constexpr bool DEBUG = true;                    // Флаг отладочного вывода
+  constexpr bool SERIAL_FLUSH_AFTER_LOG = false;  // Принудительный Serial.flush() после каждой строки
   // Уровни журналирования для фильтрации сообщений
   enum class LogLevel : uint8_t { ERROR = 0, WARN = 1, INFO = 2, DEBUG = 3 };
   constexpr LogLevel LOG_LEVEL = LogLevel::DEBUG;   // Текущий уровень вывода
@@ -69,7 +70,9 @@ namespace LogDetail {
   inline void logMsg(DefaultSettings::LogLevel level, const char* msg) {
     if (!shouldPrint(level, String(msg))) return;
     Serial.println(msg);
-    Serial.flush();
+    if (SERIAL_FLUSH_AFTER_LOG) {
+      Serial.flush();
+    }
 #if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
     LogHook::append(String(msg));
 #endif
@@ -81,7 +84,9 @@ namespace LogDetail {
     String full = String(prefix) + String(val);
     if (!shouldPrint(level, full)) return;
     Serial.print(prefix); Serial.println(val);
-    Serial.flush();
+    if (SERIAL_FLUSH_AFTER_LOG) {
+      Serial.flush();
+    }
 #if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
     LogHook::append(full);
 #endif

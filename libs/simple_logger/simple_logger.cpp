@@ -1,7 +1,8 @@
 #include "simple_logger.h"
 #include <array>
 #include <string_view>
-#include "libs/log_hook/log_hook.h"          // публикация в веб-журнал
+#include "default_settings.h"               // глобальные настройки логирования
+#include "libs/log_hook/log_hook.h"         // публикация в веб-журнал
 
 #ifdef ARDUINO
 #  include <Arduino.h>
@@ -44,7 +45,9 @@ void logStatus(const std::string& line) {
     existing->line = line;                       // обновляем строку без перевыделения
 #ifdef ARDUINO
     Serial.println(line.c_str());                // повторно выводим актуальную строку в Serial
-    Serial.flush();
+    if (DefaultSettings::SERIAL_FLUSH_AFTER_LOG) {
+      Serial.flush();
+    }
 #endif
 #if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
     LogHook::append(line.c_str());               // дублируем в буфер push-логов
@@ -65,7 +68,9 @@ void logStatus(const std::string& line) {
   entry.line = line;
 #ifdef ARDUINO
   Serial.println(line.c_str());                  // выводим новую запись в Serial
-  Serial.flush();
+  if (DefaultSettings::SERIAL_FLUSH_AFTER_LOG) {
+    Serial.flush();
+  }
 #endif
 #if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
   LogHook::append(line.c_str());                 // передаём запись в веб-интерфейс
