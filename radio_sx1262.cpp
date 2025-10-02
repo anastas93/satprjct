@@ -285,7 +285,14 @@ bool RadioSX1262::startReceiveWithRetry(const char* context) {
                   static_cast<unsigned>(attempt), ctx);
     LOG_ERROR_VAL(prefix, state);                          // фиксируем код ошибки
     lastError_ = state;                                    // сохраняем код для внешнего запроса
-    if (state == RADIOLIB_ERR_CHANNEL_BUSY) {              // канал занят — выполняем программный сброс
+#if defined(RADIOLIB_ERR_CHANNEL_BUSY)
+    const bool channelBusy = (state == RADIOLIB_ERR_CHANNEL_BUSY);
+#elif defined(RADIOLIB_ERR_CHANNEL_BUSY_LBT)
+    const bool channelBusy = (state == RADIOLIB_ERR_CHANNEL_BUSY_LBT);
+#else
+    const bool channelBusy = false;
+#endif
+    if (channelBusy) {                                      // канал занят — выполняем программный сброс
       const int16_t resetState = radio_.reset();
       if (resetState != RADIOLIB_ERR_NONE) {
         LOG_WARN_VAL("RadioSX1262: программный сброс после занятого канала вернул код=", resetState);
