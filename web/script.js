@@ -9124,7 +9124,7 @@ function debugLog(text, opts) {
   if (options.origin === "device") {
     const rawText = text != null ? String(text) : "";
     const lowered = rawText.toLowerCase();
-    if (rawText && (lowered.includes("irq=") || /\birq[-_\s]/i.test(rawText)) && (lowered.includes("radiosx1262") || lowered.includes("sx1262"))) {
+    if (rawText && (lowered.includes("irq=") || /\birq(?:[-_\s]|$)/i.test(rawText)) && (lowered.includes("radiosx1262") || lowered.includes("sx1262"))) {
       if (!UI.state.irqStatus || typeof UI.state.irqStatus !== "object") {
         UI.state.irqStatus = { message: "", uptimeMs: null, timestamp: null };
       }
