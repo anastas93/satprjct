@@ -435,6 +435,7 @@ async function init() {
   UI.els.version = $("#appVersion");
   updateFooterVersion(); // сразу показываем сохранённую версию, если она есть
   UI.els.toast = $("#toast");
+  UI.els.settingsForm = $("#settingsForm");
   UI.els.debugLog = $("#debugLog");
   UI.els.receivedDiag = {
     root: $("#recvDiag"),
@@ -700,6 +701,10 @@ async function init() {
     UI.els.themeRedToggle.setAttribute("aria-pressed", UI.cfg.accent === "red" ? "true" : "false");
     UI.els.themeRedToggle.addEventListener("click", () => toggleAccent());
   }
+  if (UI.els.settingsForm) {
+    // Блокируем стандартную отправку формы, чтобы страница не перезагружалась при нажатии Enter
+    UI.els.settingsForm.addEventListener("submit", (event) => event.preventDefault());
+  }
   if (UI.els.autoNightSwitch) {
     UI.els.autoNightSwitch.checked = UI.cfg.autoNight;
     UI.els.autoNightSwitch.addEventListener("change", () => setAutoNight(UI.els.autoNightSwitch.checked));
@@ -708,6 +713,12 @@ async function init() {
   // Настройка endpoint
   if (UI.els.endpoint) {
     UI.els.endpoint.value = UI.cfg.endpoint;
+    UI.els.endpoint.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        UI.els.endpoint.blur();
+      }
+    });
     UI.els.endpoint.addEventListener("change", () => {
       const fallback = UI.cfg.endpoint || "http://192.168.4.1";
       const input = UI.els.endpoint.value.trim();
