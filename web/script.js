@@ -78,6 +78,7 @@ const POINTING_COMPASS_OFFSET_DEG = 180; // отображаем юг в вер�
 const CHAT_UNREAD_STORAGE_KEY = "chatUnread"; // ключ хранения количества непрочитанных сообщений
 const CHAT_UNREAD_MAX = 999; // максимальное значение счётчика, отображаемое в бейдже
 const CHAT_HISTORY_LIMIT = 500; // максимальное количество сообщений, сохраняемых в истории чата
+const CHANNELS_CACHE_STORAGE_KEY = "channelsCache"; // ключ localStorage для кеша списка каналов
 
 /* Состояние интерфейса */
 const UI = {
@@ -611,6 +612,14 @@ async function init() {
   if (UI.els.channelInfoCrBtn) {
     UI.els.channelInfoCrBtn.addEventListener("click", onChannelCrTest);
   }
+
+  const restoredChannels = restoreChannelsFromStorage();
+  if (restoredChannels) {
+    renderChannels();
+    updateChannelSelect();
+    updateChannelSelectHint();
+  }
+
   if (UI.els.channelInfoStabilityExportCsv) {
     UI.els.channelInfoStabilityExportCsv.addEventListener("click", onChannelStabilityExportCsv);
   }
@@ -4063,6 +4072,58 @@ function startReceivedMonitor(opts) {
 
 /* Таблица каналов */
 let channels = [];
+let channelsMocked = false;
+
+// Восстанавливаем список каналов из кеша браузера, если устройство временно недоступно
+function restoreChannelsFromStorage() {
+  const raw = storage.get(CHANNELS_CACHE_STORAGE_KEY);
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.length) return false;
+    const normalized = parsed.map(normalizeChannelEntry).filter(Boolean);
+    if (!normalized.length) return false;
+    channels = normalized;
+    channelsMocked = false;
+    return true;
+  } catch (err) {
+    console.warn("[channels] не удалось восстановить кеш:", err);
+    storage.remove(CHANNELS_CACHE_STORAGE_KEY);
+    return false;
+  }
+}
+
+// Сохраняем актуальный список каналов в кеш браузера
+function persistChannelsToStorage(list) {
+  if (channelsMocked) return;
+  try {
+    storage.set(CHANNELS_CACHE_STORAGE_KEY, JSON.stringify(list));
+  } catch (err) {
+    console.warn("[channels] не удалось сохранить кеш:", err);
+  }
+}
+
+// Приводим объект канала к ожидаемой структуре, отбрасывая некорректные данные
+function normalizeChannelEntry(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const ch = Number(entry.ch);
+  const tx = Number(entry.tx);
+  const rx = Number(entry.rx);
+  if (!Number.isFinite(ch) || !Number.isFinite(tx)) return null;
+  const normalizedRx = Number.isFinite(rx) ? rx : tx;
+  const rssi = Number(entry.rssi);
+  const snr = Number(entry.snr);
+  return {
+    ch,
+    tx,
+    rx: normalizedRx,
+    rssi: Number.isFinite(rssi) ? rssi : 0,
+    snr: Number.isFinite(snr) ? snr : 0,
+    st: typeof entry.st === "string" ? entry.st : "",
+    scan: typeof entry.scan === "string" ? entry.scan : "",
+    scanState: typeof entry.scanState === "string" ? entry.scanState : null,
+  };
+}
 // Служебное состояние поиска по каналам
 const searchState = { running: false, cancel: false };
 
@@ -6006,11 +6067,13 @@ function splitCsvRow(row) {
 }
 
 function mockChannels() {
+  if (channels.length) return;
   channels = [
     { ch: 1, tx: 868.1, rx: 868.1, rssi: -92, snr: 8.5, st: "idle", scan: "", scanState: null },
     { ch: 2, tx: 868.3, rx: 868.3, rssi: -97, snr: 7.1, st: "listen", scan: "", scanState: null },
     { ch: 3, tx: 868.5, rx: 868.5, rssi: -88, snr: 10.2, st: "tx", scan: "", scanState: null },
   ];
+  channelsMocked = true;
 }
 function renderChannels() {
   const tbody = $("#channelsTable tbody");
@@ -6187,11 +6250,13 @@ async function refreshChannels(options) {
       const parsed = parseChannels(list.text);
       if (parsed.length) {
         channels = parsed;
+        channelsMocked = false;
+        persistChannelsToStorage(channels);
       } else if (!channels.length) {
-        mockChannels();
+        if (!restoreChannelsFromStorage()) mockChannels();
       }
     } else if (!channels.length) {
-      mockChannels();
+      if (!restoreChannelsFromStorage()) mockChannels();
     }
     const current = await deviceFetch("CH", {}, 2000);
     if (current.ok && current.text) {
@@ -6202,7 +6267,7 @@ async function refreshChannels(options) {
       }
     }
   } catch (e) {
-    if (!channels.length) mockChannels();
+    if (!channels.length && !restoreChannelsFromStorage()) mockChannels();
     debugLog("ERR refreshChannels: " + e);
   }
   if (UI.state.channel == null) {
@@ -6240,7 +6305,7 @@ function parseChannels(text) {
       scanState: null,
     });
   }
-  return out;
+  return out.map(normalizeChannelEntry).filter(Boolean);
 }
 function applyPingResult(text) {
   if (UI.state.channel == null) return;
@@ -6248,6 +6313,7 @@ function applyPingResult(text) {
   if (!entry) return;
   applyPingToEntry(entry, text);
   renderChannels();
+  persistChannelsToStorage(channels);
 }
 function applySearchResult(text) {
   const lines = text.split(/\r?\n/);
@@ -6270,7 +6336,10 @@ function applySearchResult(text) {
     entry.scanState = state || entry.scanState;
     changed = true;
   }
-  if (changed) renderChannels();
+  if (changed) {
+    renderChannels();
+    persistChannelsToStorage(channels);
+  }
 }
 function exportChannelsCsv() {
   const lines = [["ch","tx","rx","rssi","snr","status","scan_state","scan"]];
