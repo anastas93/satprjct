@@ -3895,6 +3895,35 @@ function handleDeviceLogPushMessage(event) {
   appendDeviceLogEntries([entry]);
 }
 
+function handleIrqPushMessage(event) {
+  const raw = event && typeof event.data === "string" ? event.data : "";
+  if (!raw) return;
+  let payload = null;
+  try {
+    payload = JSON.parse(raw);
+  } catch (err) {
+    console.warn("[push] не удалось распарсить irq-сообщение:", err, raw);
+    return;
+  }
+  if (!UI.state || typeof UI.state !== "object") return;
+  if (!UI.state.irqStatus || typeof UI.state.irqStatus !== "object") {
+    UI.state.irqStatus = { message: "", uptimeMs: null, timestamp: null };
+  }
+  const message = payload && typeof payload.message === "string" ? payload.message : "";
+  if (!message) {
+    UI.state.irqStatus.message = "";
+    UI.state.irqStatus.uptimeMs = null;
+    UI.state.irqStatus.timestamp = null;
+    renderChatIrqStatus();
+    return;
+  }
+  const uptimeValue = Number(payload && payload.uptime);
+  UI.state.irqStatus.message = message;
+  UI.state.irqStatus.uptimeMs = Number.isFinite(uptimeValue) && uptimeValue >= 0 ? uptimeValue : null;
+  UI.state.irqStatus.timestamp = Date.now();
+  renderChatIrqStatus();
+}
+
 function closeReceivedPushChannel(opts) {
   const options = opts || {};
   const state = getReceivedMonitorState();
@@ -3989,6 +4018,12 @@ function openReceivedPushChannel() {
       push.connected = true;
       push.lastEventAt = Date.now();
       handleDeviceLogPushMessage(event);
+      updateReceivedMonitorDiagnostics();
+    });
+    source.addEventListener("irq", (event) => {
+      push.connected = true;
+      push.lastEventAt = Date.now();
+      handleIrqPushMessage(event);
       updateReceivedMonitorDiagnostics();
     });
     source.addEventListener("error", () => {

@@ -152,6 +152,29 @@ test('debugLog сохраняет статус IRQ для сообщений Rad
   assert.equal(messageEl.textContent, 'RadioSX1262: событие DIO1 без активных флагов IRQ');
 });
 
+test('handleIrqPushMessage обновляет статус без доступа к журналу', () => {
+  UI.els.chatIrqStatus = document.createElement('div');
+  UI.els.chatIrqStatus.className = 'chat-irq-status';
+  const messageEl = document.createElement('span');
+  messageEl.className = 'chat-irq-message';
+  const metaEl = document.createElement('span');
+  metaEl.className = 'chat-irq-meta';
+  UI.els.chatIrqStatus.appendChild(messageEl);
+  UI.els.chatIrqStatus.appendChild(metaEl);
+  UI.els.chatIrqMessage = messageEl;
+  UI.els.chatIrqMeta = metaEl;
+  const payload = {
+    message: 'RadioSX1262: IRQ=0x0002, расшифровка: [IRQ_RX_DONE – пакет принят]',
+    uptime: 4321,
+    timestamp: 1000,
+  };
+  ctx.handleIrqPushMessage({ data: JSON.stringify(payload) });
+  assert.equal(UI.state.irqStatus.message, payload.message);
+  assert.equal(UI.state.irqStatus.uptimeMs, 4321);
+  assert.equal(UI.els.chatIrqMessage.textContent, payload.message);
+  assert.equal(UI.els.chatIrqStatus.classList.contains('active'), true);
+});
+
 // Проверяем эвристику читаемости текста
 test('evaluateTextCandidate и selectReadableTextCandidate выбирают кириллицу', () => {
   const good = ctx.evaluateTextCandidate('Привет, мир!');

@@ -33,6 +33,7 @@
 #include "web/web_content.h"      // встроенные файлы веб-интерфейса
 #ifndef ARDUINO
 #include <fstream>
+#include <chrono>
 #else
 #include <FS.h>
 using NetworkClient = WiFiClient;
@@ -169,6 +170,13 @@ String buildLogPayload(const LogHook::Entry& entry);
 void enqueueLogEntry(const LogHook::Entry& entry);
 bool broadcastLogEntry(const LogHook::Entry& entry);
 void flushPendingLogEntries();
+struct LastIrqStatus;
+void updateLastIrqStatus(const char* message, uint32_t uptimeMs);
+void flushPendingIrqStatus(bool force = false);
+String buildIrqStatusPayload(const LastIrqStatus& status);
+bool broadcastIrqStatus(const LastIrqStatus& status);
+static void onRadioIrqLog(const char* message, uint32_t uptimeMs);
+void maintainPushSessions(bool forceKeepAlive = false);
 String cmdKeyTransferSendLora();
 bool enqueueTextMessage(const String& payload, uint32_t& outId, String& err);
 bool enqueueBinaryMessage(const uint8_t* data, size_t len, uint32_t& outId, String& err);
@@ -525,12 +533,95 @@ static uint32_t gPushNextEventId = 1;                 // глобальный с
 static std::deque<LogHook::Entry> gPendingLogEntries; // очередь строк журнала для отложенной отправки
 static constexpr size_t kMaxPendingLogEntries = 64;   // ограничение размера очереди журнала
 
+#if defined(ARDUINO)
+static uint32_t systemMillis() {
+  return millis();
+}
+#else
+static uint32_t systemMillis() {
+  using namespace std::chrono;
+  static const auto start = steady_clock::now();
+  return static_cast<uint32_t>(duration_cast<milliseconds>(steady_clock::now() - start).count());
+}
+#endif
+
+struct LastIrqStatus {
+  String message;          // последняя строка журнала с расшифровкой IRQ
+  uint32_t uptimeMs = 0;   // uptime устройства на момент обработки IRQ
+  uint32_t capturedAtMs = 0; // локальное время фиксации (millis)
+  bool hasValue = false;   // получали ли мы когда-либо IRQ
+  bool dirty = false;      // требуется ли отправка SSE-сообщения
+};
+
+static LastIrqStatus gLastIrqStatus;                  // актуальный статус IRQ для SSE
+
 // Сохраняем запись журнала в локальной очереди, чтобы не блокировать Serial при отправке SSE
 void enqueueLogEntry(const LogHook::Entry& entry) {
   if (gPendingLogEntries.size() >= kMaxPendingLogEntries) {
     gPendingLogEntries.pop_front(); // отбрасываем самую старую запись при переполнении
   }
   gPendingLogEntries.push_back(entry);
+}
+
+void updateLastIrqStatus(const char* message, uint32_t uptimeMs) {
+  if (!message) {
+    return; // некорректный указатель, пропускаем обновление
+  }
+  gLastIrqStatus.message = String(message);
+  gLastIrqStatus.uptimeMs = uptimeMs;
+  gLastIrqStatus.capturedAtMs = systemMillis();
+  gLastIrqStatus.hasValue = true;
+  gLastIrqStatus.dirty = true;
+}
+
+String buildIrqStatusPayload(const LastIrqStatus& status) {
+  String payload = "{";
+  payload += "\"message\":\"";
+  payload += jsonEscape(status.message);
+  payload += "\",\"uptime\":";
+  payload += String(static_cast<unsigned long>(status.uptimeMs));
+  payload += ",\"timestamp\":";
+  payload += String(static_cast<unsigned long>(status.capturedAtMs));
+  payload += "}";
+  return payload;
+}
+
+bool broadcastIrqStatus(const LastIrqStatus& status) {
+  if (gPushSessions.empty()) {
+    return false;
+  }
+  maintainPushSessions();
+  String payload = buildIrqStatusPayload(status);
+  String eventName = F("irq");
+  uint32_t eventId = gPushNextEventId++;
+  bool delivered = false;
+  for (auto it = gPushSessions.begin(); it != gPushSessions.end(); ) {
+    if (!sendSseFrame(*it, eventName, payload, eventId)) {
+      it->client.stop();
+      it = gPushSessions.erase(it);
+    } else {
+      delivered = true;
+      ++it;
+    }
+  }
+  return delivered;
+}
+
+void flushPendingIrqStatus(bool force) {
+  if (!gLastIrqStatus.hasValue) {
+    return; // ещё не получали ни одного IRQ
+  }
+  if (!force && !gLastIrqStatus.dirty) {
+    return; // актуальное состояние уже доставлено подписчикам
+  }
+  if (!broadcastIrqStatus(gLastIrqStatus)) {
+    return; // пока нет активных клиентов — попробуем позже
+  }
+  gLastIrqStatus.dirty = false;
+}
+
+static void onRadioIrqLog(const char* message, uint32_t uptimeMs) {
+  updateLastIrqStatus(message, uptimeMs);
 }
 
 // Формируем JSON-представление для уведомления о новом элементе буфера
@@ -724,6 +815,7 @@ void handleSseConnect() {
     return;
   }
   flushPendingLogEntries(); // сразу отдаём накопленные строки журнала новому подписчику
+  flushPendingIrqStatus(true); // синхронизируем статус IRQ при подключении клиента
   LOG_INFO("HTTP push: новое подключение");
 }
 
@@ -2480,6 +2572,7 @@ void setup() {
     if (handleKeyTransferFrame(d, l)) return;                // перехватываем кадр обмена ключами
     rx.onReceive(d, l);
   });
+  radio.setIrqLogCallback(onRadioIrqLog);                    // транслируем IRQ-логи в SSE даже при отключённом Serial
   LOG_INFO("Команды: BF <полоса>, SF <фактор>, CR <код>, BANK <e|w|t|a|h>, CH <номер>, PW <0-9>, RXBG <0|1>, TX <строка>, TXL <размер>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], LIGHT [0|1], ACKR <повторы>, PAUSE <мс>, ACKT <мс>, ACKD <мс>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
 }
 
@@ -2494,6 +2587,7 @@ void loop() {
     server.handleClient();                  // обработка HTTP-запросов
     maintainPushSessions();                 // поддержка активных push-клиентов
     flushPendingLogEntries();               // передаём накопленные логи без блокировок Serial
+    flushPendingIrqStatus();                // публикуем последний статус IRQ при наличии подписчиков
     radio.loop();                           // обработка входящих пакетов
     rx.tickCleanup();                       // фоновая очистка очередей RX даже без новых кадров
     tx.loop();                              // обработка очередей передачи

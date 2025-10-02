@@ -396,8 +396,14 @@ void RadioSX1262::onDio1Static() {
   }
 }
 
-void RadioSX1262::logIrqFlags(uint32_t flags) {
-  // Карта соответствия аппаратных флагов IRQ их человекочитаемым именам
+namespace {
+// Формирование человекочитаемой строки с активными IRQ-флагами без динамических аллокаций
+size_t formatIrqLogMessage(uint32_t flags, char* buffer, size_t capacity) {
+  if (!buffer || capacity == 0) {
+    return 0;
+  }
+  buffer[0] = '\0';
+
   static constexpr struct {
     uint32_t mask;
     const char* name;
@@ -415,59 +421,63 @@ void RadioSX1262::logIrqFlags(uint32_t flags) {
       {RADIOLIB_SX126X_IRQ_CAD_DETECTED, "IRQ_CAD_DETECTED", "в канале обнаружена активность LoRa"},
   };
 
-  const uint32_t effectiveMask = flags & 0xFFFFU; // нормализуем маску к 16 битам
+  const uint32_t effectiveMask = flags & 0xFFFFU;
   if (effectiveMask == RADIOLIB_SX126X_IRQ_NONE) {
-    LOG_INFO("RadioSX1262: IRQ-флаги отсутствуют (маска=0x0000)");
-    return;
+    std::snprintf(buffer, capacity, "RadioSX1262: IRQ-флаги отсутствуют (маска=0x0000)");
+    return std::strlen(buffer);
   }
 
-  // Накапливаем человекочитаемые флаги в статическом буфере без динамических выделений
-  char knownFlags[512]; // буфер увеличен для хранения описаний флагов
+  char knownFlags[512];
   knownFlags[0] = '\0';
   size_t offset = 0U;
-  uint32_t knownMask = 0U; // совокупная маска известных флагов
+  uint32_t knownMask = 0U;
   for (const auto& entry : kIrqMap) {
     if ((effectiveMask & entry.mask) == 0U) {
       continue;
     }
-    const char* format = (offset == 0U) ? "%s – %s" : " | %s – %s"; // добавляем разделитель при необходимости
+    const char* format = (offset == 0U) ? "%s – %s" : " | %s – %s";
     const int written = std::snprintf(knownFlags + offset,
                                       sizeof(knownFlags) - offset,
                                       format, entry.name, entry.description);
     if (written < 0) {
-      knownFlags[offset] = '\0'; // аварийно завершаем строку при ошибке форматирования
+      knownFlags[offset] = '\0';
       break;
     }
     const size_t writtenSize = static_cast<size_t>(written);
     if (writtenSize >= sizeof(knownFlags) - offset) {
-      offset = sizeof(knownFlags) - 1U; // защита от выхода за границы буфера
+      offset = sizeof(knownFlags) - 1U;
     } else {
       offset += writtenSize;
     }
-    knownMask |= entry.mask; // учитываем распознанный флаг
+    knownMask |= entry.mask;
   }
 
-  const uint32_t unknownMask = effectiveMask & ~knownMask; // маска неизвестных флагов
-  char message[224];
+  const uint32_t unknownMask = effectiveMask & ~knownMask;
   if (knownFlags[0] != '\0') {
     if (unknownMask != 0U) {
-      std::snprintf(message, sizeof(message),
+      std::snprintf(buffer, capacity,
                     "RadioSX1262: IRQ=0x%04lX, расшифровка: [%s], неизвестные биты=0x%04lX",
                     static_cast<unsigned long>(effectiveMask),
                     knownFlags,
                     static_cast<unsigned long>(unknownMask));
     } else {
-      std::snprintf(message, sizeof(message),
+      std::snprintf(buffer, capacity,
                     "RadioSX1262: IRQ=0x%04lX, расшифровка: [%s]",
                     static_cast<unsigned long>(effectiveMask),
                     knownFlags);
     }
   } else {
-    std::snprintf(message, sizeof(message),
+    std::snprintf(buffer, capacity,
                   "RadioSX1262: IRQ=0x%04lX, известные флаги отсутствуют",
                   static_cast<unsigned long>(effectiveMask));
   }
+  return std::strlen(buffer);
+}
+} // namespace
 
+void RadioSX1262::logIrqFlags(uint32_t flags) {
+  char message[224];
+  formatIrqLogMessage(flags, message, sizeof(message));
   LOG_INFO("%s", message);
 }
 
@@ -517,10 +527,20 @@ void RadioSX1262::processPendingIrqLog() {
   const uint32_t flags = pendingIrqFlags_;
   const int16_t clearState = pendingIrqClearState_;
 
+  const uint32_t eventUptime = millis();
   if (flags == RADIOLIB_SX126X_IRQ_NONE) {
-    LOG_INFO("RadioSX1262: событие DIO1 без активных флагов IRQ");
+    static const char kNoFlagsMsg[] = "RadioSX1262: событие DIO1 без активных флагов IRQ";
+    LOG_INFO("%s", kNoFlagsMsg);
+    if (irqCallback_) {
+      irqCallback_(kNoFlagsMsg, eventUptime);
+    }
   } else {
-    logIrqFlags(flags); // выводим только активные флаги
+    char message[224];
+    formatIrqLogMessage(flags, message, sizeof(message));
+    LOG_INFO("%s", message);
+    if (irqCallback_) {
+      irqCallback_(message, eventUptime);
+    }
   }
 
   if (clearState != RADIOLIB_ERR_NONE) {
@@ -528,6 +548,10 @@ void RadioSX1262::processPendingIrqLog() {
   }
 
   LOG_INFO("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
+}
+
+void RadioSX1262::setIrqLogCallback(IrqLogCallback cb) {
+  irqCallback_ = cb;
 }
 
 // Проверка флага готовности и чтение данных

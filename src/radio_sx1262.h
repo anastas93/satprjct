@@ -131,6 +131,9 @@ public:
   static void logIrqFlags(uint32_t flags);
   // Принудительная проверка и вывод отложенных IRQ-логов (обходной вызов из внешнего кода)
   void flushPendingIrqLog();
+  // Установка внешнего обработчика, который будет получать готовую строку IRQ-лога
+  using IrqLogCallback = void(*)(const char* message, uint32_t uptimeMs);
+  void setIrqLogCallback(IrqLogCallback cb);
 
 private:
   static void onDio1Static();            // статический обработчик прерывания
@@ -202,6 +205,7 @@ private:
 
   PublicSX1262 radio_;                   // экземпляр радиомодуля
   RxCallback rx_cb_;                     // пользовательский колбэк
+  IrqLogCallback irqCallback_ = nullptr; // внешнее уведомление об IRQ-логе
   static RadioSX1262* instance_;         // указатель на текущий объект
   volatile bool packetReady_ = false;    // флаг готовности пакета
   volatile bool irqNeedsRead_ = false;   // требуется ли чтение IRQ-регистров в основном потоке
