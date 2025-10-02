@@ -1,0 +1,6 @@
+[submodule "libs/RadioLib"]
+	path = libs/RadioLib
+	url = https://github.com/jgromes/RadioLib
+[submodule "libs/libsodium"]
+	path = libs/libsodium
+	url = git@github.com:jedisct1/libsodium.git

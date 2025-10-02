@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Sat Project Web</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="bg"><div class="grid"></div><div class="aurora"></div><div class="stars"></div></div>
+  <!-- Шапка сайта с навигацией -->
+  <header class="site-header glass">
+    <div class="brand">SAT-COMMUNICATION<span class="tag">web</span></div>
+    <nav class="nav" id="siteNav">
+      <a href="#" data-tab="chat">Chat<span class="nav-badge" aria-label="Непрочитанные сообщения: 0" aria-live="off" hidden>0</span></a>
+      <a href="#" data-tab="channels">Channels/Ping</a>
+      <a href="#" data-tab="pointing">Antenna helper</a>
+      <a href="#" data-tab="settings">Settings</a>
+      <a href="#" data-tab="security">Security</a>
+      <a href="#" data-tab="debug">Debug</a>
+    </nav>
+    <div id="navOverlay" class="nav-overlay" hidden></div>
+    <div class="header-actions">
+      <button id="themeToggle" class="icon-btn" aria-label="Тема">🌓</button>
+      <button id="themeRedToggle" class="icon-btn" aria-label="Красная тема">🔴</button>
+      <button id="menuToggle" class="icon-btn only-mobile" aria-label="Меню">☰</button>
+    </div>
+  </header>
+  <main>
+    <!-- Вкладка чата -->
+    <section id="tab-chat" class="tab">
+      <h2>Chat</h2>
+      <div class="chat-area">
+        <div id="chatLog" class="chat-log"></div>
+        <button type="button" id="chatScrollBottom" class="chat-scroll-down" aria-label="Прокрутить вниз"><span>↓</span></button>
+        <div id="chatRxIndicator" class="chat-receiving-indicator" hidden>
+          <span class="indicator-icon" aria-hidden="true"></span>
+          <span class="indicator-text">Приём сообщения…</span>
+        </div>
+      </div>
+      <div id="chatIrqStatus" class="chat-irq-status" aria-live="polite" role="status">
+        <div class="chat-irq-text">
+          <span class="chat-irq-message">IRQ: событий нет</span>
+          <small class="chat-irq-meta" hidden>—</small>
+        </div>
+      </div>
+      <div class="chat-input">
+        <div class="send-row">
+          <input id="chatInput" type="text" placeholder="Сообщение" maxlength="2000" />
+          <button id="sendBtn" class="btn">Отправить</button>
+        </div>
+        <div class="chat-upload">
+          <button type="button" id="chatImageBtn" class="icon-btn ghost" aria-label="Отправить изображение" title="Загрузить изображение"><span>📷</span></button>
+          <select id="chatImageProfile" class="chat-image-profile" aria-label="Профиль изображений">
+            <option value="S">S — 320×240, серый</option>
+            <option value="M">M — 320×240, серый+</option>
+            <option value="L">L — 320×240, цвет</option>
+          </select>
+        </div>
+        <input id="chatImageInput" type="file" accept="image/jpeg,image/png,image/heic,image/heif" hidden multiple />
+      </div>
+      <div class="group-title"><span>Состояние ACK</span><span class="line"></span></div>
+      <div class="status-row">
+        <button type="button" class="chip state state-chip" id="ackStateChip" data-state="unknown" title="Переключить ACK" aria-label="Переключить ACK">
+          <span class="label">ACK</span>
+          <span id="ackStateText">—</span>
+        </button>
+        <button type="button" class="chip state state-chip" id="encStateChip" data-state="unknown" title="Переключить шифрование" aria-label="Переключить шифрование">
+          <span class="label">ENC</span>
+          <span id="encStateText">—</span>
+        </button>
+      </div>
+      <details id="chatCommands" class="chat-commands">
+        <summary>Команды</summary>
+        <div class="cmd-buttons actions">
+          <button class="btn" data-cmd="INFO">INFO</button>
+          <button class="btn" data-cmd="STS">STS</button>
+          <button class="btn" data-cmd="RSTS">RSTS</button>
+          <button class="btn" data-cmd="BCN">BCN</button>
+          <button class="btn" data-cmd="TESTRXM">TESTRXM</button>
+        </div>
+        <div class="cmd-inline">
+          <label for="txlSize">TXL (байт)</label>
+          <input id="txlSize" type="number" min="1" max="8192" value="1024" />
+          <button id="btnTxlSend" class="btn">Отправить тест</button>
+        </div>
+      </details>
+    </section>
+    <!-- Вкладка каналов и пинга -->
+    <section id="tab-channels" class="tab" hidden>
+      <h2>Channels / Ping</h2>
+      <div class="actions">
+        <button id="btnPing" class="btn">Ping</button>
+        <button id="btnSearch" class="btn">Search</button>
+        <button id="btnRefresh" class="btn">Обновить</button>
+        <button id="btnExportCsv" class="btn">CSV</button>
+      </div>
+      <div id="channelRefStatus" class="channel-ref-status small" hidden></div>
+      <div class="channel-layout">
+        <div class="table-wrap pretty">
+          <table id="channelsTable">
+            <thead>
+              <tr><th>CH</th><th>TX,MHz</th><th>RX,MHz</th><th>RSSI</th><th>SNR</th><th>ST</th><th>SCAN</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="channelInfoPanel" class="channel-info glass" hidden>
+          <div class="channel-info-header">
+            <div class="channel-info-title">Канал <span id="channelInfoTitle">—</span></div>
+            <button id="channelInfoClose" type="button" class="icon-btn ghost small" aria-label="Скрыть информацию">✕</button>
+          </div>
+          <div id="channelInfoEmpty" class="channel-info-placeholder small muted">Выберите канал в таблице, чтобы увидеть подробности.</div>
+          <div id="channelInfoStatus" class="channel-info-status small muted" hidden></div>
+          <div id="channelInfoBody" class="channel-info-body" hidden>
+            <div class="channel-info-block">
+              <div class="channel-info-caption">Текущие данные</div>
+              <dl class="channel-info-list">
+                <div><dt>RX (MHz)</dt><dd id="channelInfoRxCurrent">—</dd></div>
+                <div><dt>TX (MHz)</dt><dd id="channelInfoTxCurrent">—</dd></div>
+                <div><dt>RSSI</dt><dd id="channelInfoRssi">—</dd></div>
+                <div><dt>SNR</dt><dd id="channelInfoSnr">—</dd></div>
+                <div><dt>Статус</dt><dd id="channelInfoStatusCurrent">—</dd></div>
+                <div><dt>SCAN</dt><dd id="channelInfoScan">—</dd></div>
+              </dl>
+            </div>
+            <div class="channel-info-block">
+              <div class="channel-info-caption">Справочник</div>
+              <dl class="channel-info-list">
+                <div><dt>RX (MHz)</dt><dd id="channelInfoRxRef">—</dd></div>
+                <div><dt>TX (MHz)</dt><dd id="channelInfoTxRef">—</dd></div>
+                <div><dt>Частота (MHz)</dt><dd id="channelInfoFrequency">—</dd></div>
+                <div><dt>Система</dt><dd id="channelInfoSystem">—</dd></div>
+                <div><dt>План</dt><dd id="channelInfoBand">—</dd></div>
+                <div><dt>Полоса</dt><dd id="channelInfoBandwidth">—</dd></div>
+                <div><dt>Назначение</dt><dd id="channelInfoPurpose">—</dd></div>
+                <div><dt>Спутник</dt><dd id="channelInfoSatellite">—</dd></div>
+                <div><dt>Позиция</dt><dd id="channelInfoPosition">—</dd></div>
+                <div><dt>Модуляция</dt><dd id="channelInfoModulation">—</dd></div>
+                <div><dt>Использование</dt><dd id="channelInfoUsage">—</dd></div>
+                <div><dt>Комментарий</dt><dd id="channelInfoComments">—</dd></div>
+              </dl>
+            </div>
+            <div class="channel-info-actions">
+              <button id="channelInfoSetCurrent" class="btn">Установить текущим каналом</button>
+            </div>
+            <div class="channel-info-block channel-info-tests-block">
+              <div class="channel-info-caption">Тесты</div>
+              <div class="channel-info-tests">
+                <button id="channelInfoStabilityTest" class="btn">Stability test</button>
+                <button id="channelInfoCrTest" class="btn">CR test</button>
+              </div>
+              <div id="channelInfoTestsStatus" class="channel-info-status small muted" hidden></div>
+              <div id="channelInfoStabilitySummary" class="channel-info-test-summary" hidden>
+                <div class="channel-info-test-summary-main">
+                  <div><span>Успешных пакетов</span><strong id="channelInfoStabilitySuccess">—</strong></div>
+                  <div><span>Успешность</span><strong id="channelInfoStabilityPercent">—</strong></div>
+                  <div><span>Средняя задержка</span><strong id="channelInfoStabilityLatencyAvg">—</strong></div>
+                  <div><span>Джиттер (σ)</span><strong id="channelInfoStabilityLatencyJitter">—</strong></div>
+                </div>
+                <div class="channel-info-test-legend small">
+                  <span data-type="rssi">RSSI</span>
+                  <span data-type="snr">SNR</span>
+                </div>
+              </div>
+              <div id="channelInfoStabilityIssues" class="channel-info-test-issues small muted" hidden></div>
+              <div id="channelInfoStabilityCards" class="channel-info-test-cards" hidden>
+                <div class="channel-info-test-card">
+                  <div class="label">RSSI</div>
+                  <div class="value" id="channelInfoStabilityRssiRange">—</div>
+                  <div class="meta" id="channelInfoStabilityRssiMeta">—</div>
+                </div>
+                <div class="channel-info-test-card">
+                  <div class="label">SNR</div>
+                  <div class="value" id="channelInfoStabilitySnrRange">—</div>
+                  <div class="meta" id="channelInfoStabilitySnrMeta">—</div>
+                </div>
+                <div class="channel-info-test-card">
+                  <div class="label">Задержка</div>
+                  <div class="value" id="channelInfoStabilityLatencyRange">—</div>
+                  <div class="meta" id="channelInfoStabilityLatencyMeta">—</div>
+                </div>
+              </div>
+              <div id="channelInfoStabilityResult" class="channel-info-test-chart" hidden>
+                <canvas id="channelInfoStabilityChart" width="360" height="200"></canvas>
+                <div id="channelInfoStabilityTooltip" class="channel-info-test-tooltip" hidden></div>
+              </div>
+              <div id="channelInfoStabilityHistory" class="channel-info-test-history" hidden>
+                <div class="channel-info-test-history-header">
+                  <div class="channel-info-test-history-title">История Stability</div>
+                  <div class="channel-info-test-history-actions">
+                    <button id="channelInfoStabilityExportCsv" class="btn ghost small">Экспорт CSV</button>
+                    <button id="channelInfoStabilityExportJson" class="btn ghost small">Экспорт JSON</button>
+                    <button id="channelInfoStabilityHistoryClear" class="btn ghost small">Очистить</button>
+                  </div>
+                </div>
+                <div id="channelInfoStabilityHistoryEmpty" class="small muted">История пуста — выполните Stability test.</div>
+                <ul id="channelInfoStabilityHistoryList" class="channel-info-test-history-list"></ul>
+              </div>
+              <div id="channelInfoCrResult" class="channel-info-cr" hidden>
+                <table class="channel-info-cr-table">
+                  <thead>
+                    <tr><th>CR</th><th>Ping</th><th>RSSI</th><th>SNR</th></tr>
+                  </thead>
+                  <tbody id="channelInfoCrTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- Вкладка наведения антенны -->
+    <section id="tab-pointing" class="tab" hidden>
+      <!-- Заголовок вкладки скрыт по требованию макета -->
+      <div id="pointingSummary" class="pointing-summary glass">
+        <div class="pointing-summary-chip" id="pointingTleBadge" data-state="warn">
+          <span class="pointing-summary-icon">🛰️</span>
+          <span id="pointingTleText">TLE • нет данных</span>
+        </div>
+        <div class="pointing-summary-chip" id="pointingLocationBadge" data-state="idle">
+          <span class="pointing-summary-icon">📍</span>
+          <span id="pointingLocationText">Позиция • нет данных</span>
+        </div>
+        <div class="pointing-summary-chip" id="pointingSatBadge" data-state="idle">
+          <span class="pointing-summary-icon">🗺️</span>
+          <span id="pointingSatText">Спутники • —</span>
+        </div>
+      </div>
+      <div class="pointing-grid">
+        <article class="pointing-card glass">
+          <h3>Активный спутник</h3>
+          <label class="pointing-select">
+            <span>Выбор спутника</span>
+            <select id="pointingSatSelect"></select>
+          </label>
+          <div class="pointing-sat-details" id="pointingSatDetails" hidden>
+            <div>Долгота подспутника: <strong id="pointingSubLon">—</strong></div>
+            <div>Широта подспутника: <strong id="pointingSubLat">—</strong></div>
+            <div>Высота орбиты: <strong id="pointingSatAltitude">—</strong></div>
+            <div>Дистанция: <strong id="pointingRange">—</strong></div>
+          </div>
+        </article>
+        <article class="pointing-card glass">
+          <h3>Наведение на спутник</h3>
+          <div class="pointing-target-grid">
+            <div class="pointing-target-metric"><span class="label">Азимут</span><strong id="pointingTargetAz">—</strong></div>
+            <div class="pointing-target-metric"><span class="label">Возвышение</span><strong id="pointingTargetEl">—</strong></div>
+          </div>
+          <div class="pointing-compass" id="pointingCompass">
+            <div class="pointing-compass-dial">
+              <div class="pointing-compass-radar" id="pointingCompassRadar"></div>
+              <div class="pointing-compass-axes" aria-hidden="true"></div>
+              <div class="pointing-compass-rose" aria-hidden="true">
+                <span data-dir="south">S</span>
+                <span data-dir="east">E</span>
+                <span data-dir="north">N</span>
+                <span data-dir="west">W</span>
+              </div>
+              <div class="pointing-compass-center"></div>
+              <div class="pointing-compass-graduations"></div>
+            </div>
+            <div class="pointing-compass-legend" id="pointingCompassLegend" aria-hidden="true">
+              <span data-quadrant="north">Север • N</span>
+              <span data-quadrant="east">Восток • E</span>
+              <span data-quadrant="south">Юг • S</span>
+              <span data-quadrant="west">Запад • W</span>
+            </div>
+          </div>
+          <label class="pointing-min-el pointing-min-el-footer">
+            <span>Мин. возвышение</span>
+            <input id="pointingMinElevation" type="range" min="0" max="30" step="1" value="10" />
+            <span id="pointingMinElValue" class="pointing-min-el-value">10°</span>
+          </label>
+        </article>
+        <article class="pointing-card glass pointing-card-wide">
+          <h3>Доступные спутники</h3>
+          <div class="pointing-horizon" id="pointingHorizon">
+            <div class="pointing-horizon-azimuths" aria-hidden="true">
+              <span data-az="0">0° • N</span>
+              <span data-az="90">90° • E</span>
+              <span data-az="180">180° • S</span>
+              <span data-az="270">270° • W</span>
+            </div>
+            <div class="pointing-horizon-track" id="pointingHorizonTrack"></div>
+            <div class="pointing-horizon-empty small muted" id="pointingHorizonEmpty">Укажите координаты, чтобы увидеть спутники.</div>
+          </div>
+          <p class="small muted" id="pointingSatSummary">После выбора квадрата MGRS появится список видимых спутников и их параметры.</p>
+          <div class="pointing-sat-list" id="pointingSatList"></div>
+        </article>
+        <article class="pointing-card glass">
+          <details id="pointingObserverDetails" class="pointing-observer">
+            <summary class="pointing-observer-summary">
+              <span class="title">Положение наблюдателя</span>
+              <span class="value" id="pointingObserverLabel">—</span>
+            </summary>
+            <div class="pointing-observer-body">
+              <p class="small muted">Укажите квадрат MGRS (100 км) и при необходимости высоту. По умолчанию используется сектор 43U CR.</p>
+              <div class="pointing-observer-grid">
+                <label>MGRS 100 км
+                  <input id="pointingMgrsInput" type="text" maxlength="8" placeholder="43U CR" />
+                </label>
+                <label>Высота (м)
+                  <input id="pointingManualAlt" type="number" step="1" min="-500" max="9000" placeholder="0" />
+                </label>
+              </div>
+              <div class="pointing-observer-meta">
+                <div><span class="label">Широта</span><strong id="pointingLat">—</strong></div>
+                <div><span class="label">Долгота</span><strong id="pointingLon">—</strong></div>
+                <div><span class="label">Высота</span><strong id="pointingAlt">—</strong></div>
+              </div>
+              <button id="pointingMgrsApply" class="btn ghost">Применить</button>
+            </div>
+          </details>
+        </article>
+      </div>
+    </section>
+
+
+    <!-- Вкладка настроек -->
+    <section id="tab-settings" class="tab" hidden>
+      <h2>Settings</h2>
+      <form id="settingsForm" class="settings-form">
+        <section class="settings-section">
+          <h3>Подключение</h3>
+          <div class="settings-group">
+            <label>Endpoint (HTTP)
+              <input type="url" id="endpoint" inputmode="url" placeholder="http://192.168.4.1" autocomplete="url" spellcheck="false" autocapitalize="none" />
+              <div class="field-hint">Адрес HTTP-интерфейса радиомодуля. Значение сохраняется локально.</div>
+            </label>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3>Канал</h3>
+          <div class="settings-group two">
+            <label>Bank
+              <select id="BANK">
+                <option value="e">EAST</option>
+                <option value="w">WEST</option>
+                <option value="t">TEST</option>
+                <option value="a">ALL</option>
+                <option value="h">HOME</option>
+              </select>
+            </label>
+            <label>Channel
+              <select id="CH"></select>
+              <div id="channelSelectHint" class="field-hint"></div>
+            </label>
+          </div>
+          <div class="settings-group two">
+            <label>BW (kHz)
+              <select id="BF">
+                <option value="7.81">7.81</option>
+                <option value="10.42">10.42</option>
+                <option value="15.63">15.63</option>
+                <option value="20.83" selected>20.83</option>
+                <option value="31.25">31.25</option>
+              </select>
+            </label>
+            <label>SF
+              <select id="SF">
+                <option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option>
+              </select>
+            </label>
+            <label>CR
+              <select id="CR">
+                <option value="5">4/5</option>
+                <option value="6">4/6</option>
+                <option value="7">4/7</option>
+                <option value="8">4/8</option>
+              </select>
+            </label>
+            <label>Power
+              <select id="PW">
+                <option value="-5">-5 dBm</option><option value="-2">-2 dBm</option><option value="1">1 dBm</option><option value="4">4 dBm</option>
+                <option value="7">7 dBm</option><option value="10">10 dBm</option><option value="13">13 dBm</option><option value="16">16 dBm</option>
+                <option value="19">19 dBm</option><option value="22">22 dBm</option>
+              </select>
+            </label>
+          </div>
+          <div class="settings-toggle" id="rxBoostedGainControl">
+            <label class="chip switch">
+              <input type="checkbox" id="RXBG" />
+              <span>RX boosted gain</span>
+            </label>
+            <div id="rxBoostedGainHint" class="field-hint">Состояние не загружено.</div>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3>ACK и задержки</h3>
+          <div class="settings-group">
+            <div class="settings-toggle" id="ackSettingControl">
+              <label class="chip switch">
+                <input type="checkbox" id="ACK" />
+                <span>ACK (подтверждения)</span>
+              </label>
+              <div id="ackSettingHint" class="field-hint">Состояние не загружено.</div>
+            </div>
+            <div class="settings-group two">
+              <label>ACK повторы
+                <input id="ACKR" type="number" min="0" max="10" value="3" />
+                <div id="ackRetryHint" class="field-hint">Доступно после включения ACK.</div>
+              </label>
+              <label>ACK тайм-аут (мс)
+                <input id="ACKT" type="number" min="0" max="60000" value="320" />
+                <div id="ackTimeoutHint" class="field-hint">Время ожидания ACK не загружено.</div>
+              </label>
+              <label>ACK задержка (мс)
+                <input id="ACKD" type="number" min="0" max="5000" value="20" />
+                <div id="ackDelayHint" class="field-hint">Задержка отправки ACK не загружена.</div>
+              </label>
+            </div>
+            <label>Пауза между пакетами (мс)
+              <input id="PAUSE" type="number" min="0" max="60000" value="370" />
+              <div id="pauseHint" class="field-hint">Пауза между пакетами не загружена.</div>
+            </label>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3>Режим передачи</h3>
+          <div class="settings-group">
+            <div class="settings-toggle" id="lightPackControl">
+              <label class="chip switch">
+                <input type="checkbox" id="LIGHTPACK" />
+                <span>Light pack — прямой текст</span>
+              </label>
+              <div id="lightPackHint" class="field-hint">Сообщения передаются без служебного префикса и отображаются как есть.</div>
+            </div>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3>Тестовые сообщения</h3>
+          <div class="settings-group">
+            <label>Сообщение для TESTRXM
+              <input id="TESTRXMMSG" type="text" maxlength="2048" placeholder="Lorem ipsum dolor sit amet" />
+              <div id="testRxmMessageHint" class="field-hint">Будет использован встроенный шаблон Lorem ipsum.</div>
+            </label>
+          </div>
+          <div class="settings-toggle" id="testModeControl">
+            <label class="chip switch">
+              <input type="checkbox" id="TESTMODE" />
+              <span>Тестовый режим TX/RX (SendMsg_BR/received_msg)</span>
+            </label>
+            <div id="testModeHint" class="field-hint">Состояние не загружено.</div>
+          </div>
+        </section>
+        <div class="settings-actions actions">
+          <button type="button" id="btnSaveSettings" class="btn">Сохранить</button>
+          <button type="button" id="btnApplySettings" class="btn btn-primary">Применить</button>
+          <button type="button" id="btnExportSettings" class="btn">Экспорт</button>
+          <button type="button" id="btnImportSettings" class="btn">Импорт</button>
+          <button type="button" id="btnClearCache" class="btn danger">Очистить</button>
+        </div>
+        <button type="button" id="INFO" class="btn" data-cmd="INFO">INFO</button>
+        <section class="settings-section">
+          <h3>Тема</h3>
+          <div class="settings-group">
+            <div class="settings-toggle" id="autoNightControl">
+              <label class="chip switch">
+                <input type="checkbox" id="autoNightMode" />
+                <span>Авто ночной режим</span>
+              </label>
+              <div id="autoNightHint" class="field-hint">Ночная тема включается автоматически с 21:00 до 07:00.</div>
+            </div>
+          </div>
+        </section>
+      </form>
+    </section>
+    <!-- Вкладка безопасности -->
+    <section id="tab-security" class="tab" hidden>
+      <h2>Security</h2>
+      <div class="key-info">
+        <div>Состояние: <span id="keyState">—</span></div>
+        <div class="small muted">ID: <span id="keyId"></span></div>
+        <div id="keyPublic" class="mono small muted"></div>
+        <div id="keyPeer" class="mono small muted" hidden></div>
+        <div id="keyBackup" class="small muted"></div>
+      </div>
+      <div class="actions">
+        <button id="btnKeyGen" class="btn">KEYGEN</button>
+        <button id="btnKeyGenPeer" class="btn" disabled>KEYGEN PEER</button>
+        <button id="btnKeyRestore" class="btn">KEY RESTORE</button>
+        <button id="btnKeySend" class="btn">KEYTRANSFER SEND</button>
+        <button id="btnKeyRecv" class="btn">KEYTRANSFER RECEIVE</button>
+      </div>
+      <div id="keyMessage" class="small muted"></div>
+      <div id="encTest" class="enc-test" data-status="idle">
+        <div class="enc-test-header">
+          <div class="enc-test-title">ENCT · тест шифрования</div>
+          <div id="encTestStatus" class="small muted">Нет данных</div>
+          <button id="btnEncTestRun" class="btn ghost small" data-cmd="ENCT">ENCT</button>
+        </div>
+        <div class="enc-test-grid">
+          <div class="enc-test-field">
+            <div class="field-label">Исходные данные</div>
+            <pre id="encTestPlain" class="codeblock small">—</pre>
+          </div>
+          <div class="enc-test-field">
+            <div class="field-label">Расшифровка</div>
+            <pre id="encTestDecoded" class="codeblock small">—</pre>
+          </div>
+          <div class="enc-test-field">
+            <div class="field-label">Шифртекст (hex)</div>
+            <pre id="encTestCipher" class="codeblock small mono">—</pre>
+          </div>
+          <div class="enc-test-field">
+            <div class="field-label">Tag (hex)</div>
+            <pre id="encTestTag" class="codeblock small mono">—</pre>
+          </div>
+          <div class="enc-test-field">
+            <div class="field-label">Nonce</div>
+            <pre id="encTestNonce" class="codeblock small mono">—</pre>
+          </div>
+        </div>
+        <div class="small muted">Нажмите ENCT, чтобы увидеть актуальные данные теста.</div>
+      </div>
+    </section>
+    <!-- Вкладка отладочных логов -->
+    <section id="tab-debug" class="tab" hidden>
+      <h2>Debug</h2>
+      <div id="recvDiag" class="debug-metrics">
+        <div class="debug-metrics__header">
+          <h3>Мониторинг опроса RSTS</h3>
+          <span id="recvDiagStatus" class="debug-metrics__status">Ожидание запуска</span>
+          <div id="recvDiagMode" class="debug-metrics__mode small muted">Push-канал не активен</div>
+        </div>
+        <p class="small muted">Для push-подписки требуется новая прошивка с поддержкой SSE. Если канал недоступен, интерфейс автоматически использует прежний опрос командой RSTS.</p>
+        <div class="debug-metrics-grid">
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Интервал опроса</span>
+            <span id="recvDiagInterval" class="debug-metrics-item__value">—</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Последний старт</span>
+            <span id="recvDiagLastStart" class="debug-metrics-item__value">—</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Последний ответ</span>
+            <span id="recvDiagLastFinish" class="debug-metrics-item__value">—</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Длительность запроса</span>
+            <span id="recvDiagDuration" class="debug-metrics-item__value">—</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Средняя длительность</span>
+            <span id="recvDiagAvg" class="debug-metrics-item__value">—</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Фактический интервал</span>
+            <span id="recvDiagGap" class="debug-metrics-item__value">—</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Выполнено/успехи/ошибки</span>
+            <span id="recvDiagTotals" class="debug-metrics-item__value">0 / 0 ✓ / 0 ✗</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Таймауты</span>
+            <span id="recvDiagTimeouts" class="debug-metrics-item__value">0</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Блокировки</span>
+            <span id="recvDiagOverlaps" class="debug-metrics-item__value">0</span>
+          </div>
+        </div>
+        <div class="debug-metrics-foot">
+          <div id="recvDiagLastError" class="debug-metrics-foot__entry" hidden>Ошибок нет</div>
+          <div id="recvDiagBlocked" class="debug-metrics-foot__entry" hidden>Блокировок не было</div>
+        </div>
+      </div>
+      <div class="actions debug-actions">
+        <button id="btnRstsFull" class="btn">RSTS FULL</button>
+        <button id="btnRstsJson" class="btn ghost">RSTS JSON</button>
+        <button id="btnRstsDownloadJson" class="btn ghost">Скачать RSTS FULL JSON</button>
+      </div>
+      <div id="debugLog" class="debug-log"></div>
+    </section>
+  </main>
+  <footer class="site-footer">
+    <div id="statusLine" class="small muted"></div>
+    <div class="footer-meta" id="footerMeta">Powered by AS Systems · <span id="appVersion">—</span></div>
+  </footer>
+  <div id="toast" class="toast" hidden></div>
+  <script src="libs/geostat_tle.js"></script>
+  <script src="libs/sha256.js"></script>
+  <script src="libs/mgrs.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
+
