@@ -34,8 +34,12 @@ int main() {
   const std::vector<uint8_t> payload = {'T','E','S','T'}; // тестовое сообщение
   uint16_t id = tx.queue(payload.data(), payload.size());
   assert(id == 1);                                 // ожидаем первый идентификатор
-  bool sent = tx.loop();
-  assert(sent);                                    // кадр должен быть отправлен
+  size_t sent_loops = 0;
+  while (tx.loop()) {
+    ++sent_loops;
+    if (sent_loops > 32) break;
+  }
+  assert(sent_loops > 0);                          // кадр должен быть отправлен
   assert(received == payload);                     // колбэк получает исходное сообщение
 
   auto names = buffer.list(5);                     // совместимость со списком имён

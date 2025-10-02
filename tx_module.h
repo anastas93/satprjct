@@ -49,6 +49,17 @@ public:
   // Фиксация момента завершения прямой отправки, чтобы пауза применялась ко всем модулям
   void completeExternalSend();
 private:
+  struct PreparedFragment {
+    std::vector<uint8_t> payload;               // кодированный фрагмент
+    uint16_t payload_size = 0;                       // длина полезных данных фрагмента
+    bool conv_encoded = false;                       // применялась ли свёртка
+    uint16_t cipher_len = 0;                         // длина шифртекста
+    uint16_t plain_len = 0;                          // длина исходного блока
+    uint16_t chunk_idx = 0;                          // индекс фрагмента внутри сообщения
+    uint8_t header_flags = 0;                        // итоговые флаги кадра
+    uint32_t packed_meta = 0;                        // упакованные метаданные
+  };
+
   struct PendingMessage {
     uint16_t id = 0;                         // идентификатор сообщения
     std::vector<uint8_t> data;               // данные сообщения с префиксом
@@ -59,16 +70,22 @@ private:
     bool is_plain = false;                   // признак «сырых» пакетов без заголовка
     std::string packet_tag;                  // идентификатор пакета для группировки частей
     std::string status_prefix;               // префикс для журнала статусов
+    size_t next_fragment = 0;                // индекс следующего фрагмента к отправке
+    std::chrono::steady_clock::time_point next_allowed_send{}; // момент, когда разрешена отправка
+    bool completed = false;                  // признак завершённой передачи
+    std::vector<PreparedFragment> fragments; // подготовленные фрагменты для повторов
   };
 
-  bool transmit(const PendingMessage& message);
+  bool transmit(PendingMessage& message);
+  bool ensureFragmentsReady(PendingMessage& message);
+  bool canSendFragment(PendingMessage& message, const std::chrono::steady_clock::time_point& now);
   static bool isAckPayload(const std::vector<uint8_t>& data);
   static std::string extractPacketTag(const std::vector<uint8_t>& data);
   static std::string extractStatusPrefix(const std::vector<uint8_t>& data);
   void archiveFollowingParts(uint8_t qos, const std::string& tag);
   void scheduleFromArchive();
   void onSendSuccess();
-  void waitForPauseWindow();
+  bool waitForPauseWindow();
   bool processImmediateAck();
 
   IRadio& radio_;

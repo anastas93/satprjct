@@ -18,6 +18,7 @@
 #include "../libs/crypto/chacha20_poly1305.h"  // параметры нового AEAD
 #include "../libs/key_loader/key_loader.h" // загрузка ключа
 #include "../libs/protocol/ack_utils.h"   // маркер ACK
+#include "../libs/simple_logger/simple_logger.h" // контроль статусов
 
 // Простая заглушка радиоинтерфейса
 class MockRadio : public IRadio {
@@ -109,10 +110,19 @@ int main() {
   MockRadio radio;
   TxModule tx(radio, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
   tx.setAckResponseDelay(0);
+  auto drainTx = [](TxModule& module) {
+    size_t iterations = 0;
+    while (iterations < 256) {
+      if (!module.loop()) break;
+      ++iterations;
+    }
+    return iterations;
+  };
   const char* msg = "HELLO";
   uint16_t id = tx.queue(reinterpret_cast<const uint8_t*>(msg), 5);
   assert(id==1);                          // ожидаемый ID
-  tx.loop();                              // формируем кадр
+  size_t initialLoops = drainTx(tx);      // формируем кадр по шагам
+  assert(initialLoops == 1);
   FrameHeader hdr;
   std::vector<uint8_t> payload_clean;
   size_t header_bytes = 0;
@@ -152,14 +162,20 @@ int main() {
   txAck.setSendPause(0);              // убираем ожидание между циклами
   std::vector<uint8_t> big(80, 'A');  // гарантированно несколько частей
   txAck.queue(big.data(), big.size());
-  txAck.loop();                       // первая попытка
+  size_t firstAttempt = drainTx(txAck); // первая попытка
+  assert(firstAttempt > 0);
+  auto firstLogs = SimpleLogger::getLast(1);
+  assert(!firstLogs.empty());
+  assert(firstLogs.front().find(" PROG") != std::string::npos);
   std::this_thread::sleep_for(std::chrono::milliseconds(2));
-  txAck.loop();                       // срабатывает тайм-аут, попытка №2 станет доступна
-  txAck.loop();                       // повторная отправка
+  size_t retryAttempt = drainTx(txAck); // повторная отправка после тайм-аута
+  assert(retryAttempt > 0);
   std::this_thread::sleep_for(std::chrono::milliseconds(2));
-  txAck.loop();                       // тайм-аут, пакет уходит в архив вместе с остатком
+  size_t archiveStep = drainTx(txAck); // тайм-аут, пакет уходит в архив вместе с остатком
+  assert(archiveStep == 0);
   size_t sent_before = radioAck.history.size();
-  txAck.loop();                       // новых фрагментов не должно появиться
+  size_t noMoreFragments = drainTx(txAck); // новых фрагментов не должно появиться
+  assert(noMoreFragments == 0);
   assert(radioAck.history.size() == sent_before);
 
   // Проверяем завершение пакета при обнулении лимита ретраев до прихода ACK
@@ -172,12 +188,14 @@ int main() {
   txNoAck.setSendPause(0);
   const char first_msg[] = "DATA1";
   txNoAck.queue(reinterpret_cast<const uint8_t*>(first_msg), sizeof(first_msg));
-  txNoAck.loop();                     // первая отправка требует ACK
+  size_t firstNoAck = drainTx(txNoAck); // первая отправка требует ACK
+  assert(firstNoAck > 0);
   assert(radioNoAck.history.size() == 1);
   txNoAck.setAckRetryLimit(0);        // отменяем ожидание подтверждения
   const char second_msg[] = "DATA2";
   txNoAck.queue(reinterpret_cast<const uint8_t*>(second_msg), sizeof(second_msg));
-  txNoAck.loop();                     // второе сообщение должно уйти без ожидания тайм-аута
+  size_t secondNoAck = drainTx(txNoAck); // второе сообщение должно уйти без ожидания тайм-аута
+  assert(secondNoAck > 0);
   assert(radioNoAck.history.size() == 2);
 
   // Проверяем, что при ack_timeout=0 пакет не попадает в архив после обнуления лимита
@@ -190,13 +208,19 @@ int main() {
   txZero.setSendPause(0);
   const char zero_msg[] = "ZERO";
   txZero.queue(reinterpret_cast<const uint8_t*>(zero_msg), sizeof(zero_msg));
-  txZero.loop();                      // сообщение отправлено и ждёт ACK
+  size_t zeroFirst = drainTx(txZero);  // сообщение отправлено и ждёт ACK
+  assert(zeroFirst > 0);
   assert(radioZero.history.size() == 1);
   txZero.setAckRetryLimit(0);         // сбрасываем лимит — сообщение считается доставленным
-  txZero.loop();                      // не должно появиться повторных отправок
+  size_t zeroSecond = drainTx(txZero); // не должно появиться повторных отправок
+  assert(zeroSecond == 0);
+  auto zeroLog = SimpleLogger::getLast(1);
+  assert(!zeroLog.empty());
+  assert(zeroLog.front().find(" GO") != std::string::npos);
   assert(radioZero.history.size() == 1);
   txZero.setAckEnabled(false);        // если бы сообщение ушло в архив, оно бы восстановилось и отправилось
-  txZero.loop();
+  size_t zeroFinal = drainTx(txZero);
+  assert(zeroFinal == 0);
   assert(radioZero.history.size() == 1);
 
   // Проверяем, что ACK-сообщения уходят раньше обычных пакетов

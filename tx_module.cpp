@@ -145,6 +145,9 @@ uint16_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos, bool with
     ack_msg.attempts_left = 0;                    // повторы не нужны
     ack_msg.expect_ack = false;                   // ACK никогда не ждёт подтверждения
     ack_msg.is_ack = true;                        // помечаем быстрый кадр подтверждения
+    ack_msg.next_fragment = 0;
+    ack_msg.completed = false;
+    ack_msg.next_allowed_send = std::chrono::steady_clock::time_point::min();
     ack_queue_.push_back(std::move(ack_msg));
     auto now = std::chrono::steady_clock::now();
     next_ack_send_time_ = ack_delay_ms_ == 0
@@ -218,12 +221,18 @@ bool TxModule::loop() {
           --inflight_->attempts_left;
           waiting_ack_ = false;
           DEBUG_LOG("TxModule: повтор без ACK");
+          inflight_->next_fragment = 0;
+          inflight_->completed = false;
+          inflight_->next_allowed_send = std::chrono::steady_clock::time_point::min();
           bypass_pause = true;                     // повторяем без учёта общей паузы
         } else {
           DEBUG_LOG("TxModule: ACK не получен, перенос в архив");
           uint8_t failed_qos = inflight_->qos;
           std::string failed_tag = inflight_->packet_tag;
           inflight_->attempts_left = ack_retry_limit_;
+          inflight_->next_fragment = 0;
+          inflight_->completed = false;
+          inflight_->next_allowed_send = std::chrono::steady_clock::time_point::min();
           archive_.push_back(std::move(*inflight_));
           inflight_.reset();
           waiting_ack_ = false;
@@ -286,6 +295,10 @@ bool TxModule::loop() {
       out.status_prefix = extractStatusPrefix(out.data);
       if (!ack_enabled_) out.expect_ack = false;
     }
+    out.next_fragment = 0;
+    out.completed = false;
+    out.next_allowed_send = std::chrono::steady_clock::time_point::min();
+    out.fragments.clear();
     return true;
   };
 
@@ -303,17 +316,14 @@ bool TxModule::loop() {
     if (!inflight_) return false;
     message = &*inflight_;
   } else {
-    if (delayed_) {
-      temp.emplace(std::move(*delayed_));
-      delayed_.reset();
-    } else {
+    if (!delayed_) {
       PendingMessage fresh;
       if (!fetchNext(fresh)) return false;
       fresh.expect_ack = false;
-      temp.emplace(std::move(fresh));
+      delayed_.emplace(std::move(fresh));
     }
-    if (!temp) return false;
-    message = &*temp;
+    if (!delayed_) return false;
+    message = &*delayed_;
   }
 
   if (!message) return false;
@@ -330,6 +340,9 @@ bool TxModule::loop() {
   }
 
   auto send_moment = last_send_;
+  if (!message->completed) {
+    return true;
+  }
   if (ack_enabled_) {
     if (message->expect_ack) {
       waiting_ack_ = true;
@@ -344,6 +357,7 @@ bool TxModule::loop() {
     }
   } else {
     onSendSuccess();
+    delayed_.reset();
   }
   return true;
 }
@@ -415,7 +429,8 @@ void TxModule::reloadKey() {
   DEBUG_LOG("TxModule: ключ перечитан");
 }
 
-bool TxModule::transmit(const PendingMessage& message) {
+
+bool TxModule::transmit(PendingMessage& message) {
   const auto& msg = message.data;
   if (msg.empty()) {
     DEBUG_LOG("TxModule: пустой пакет");
@@ -429,254 +444,306 @@ bool TxModule::transmit(const PendingMessage& message) {
     prefix = extractStatusPrefix(msg);
   }
 
+  auto now = std::chrono::steady_clock::now();
+  if (!canSendFragment(message, now)) {
+    return false;                                      // пауза ещё не истекла, попробуем в следующем цикле
+  }
+
   if (message.is_plain) {
-    waitForPauseWindow();
-    radio_.send(msg.data(), msg.size());        // отправляем «сырые» байты напрямую
-    last_send_ = std::chrono::steady_clock::now();
+    radio_.send(msg.data(), msg.size());
+    last_send_ = now;
+    if (pause_ms_ != 0) {
+      message.next_allowed_send = now + std::chrono::milliseconds(pause_ms_);
+    } else {
+      message.next_allowed_send = std::chrono::steady_clock::time_point::min();
+    }
+    message.next_fragment = 1;
+    message.completed = true;
     if (!prefix.empty() && (!ack_enabled_ || !message.expect_ack)) {
-      SimpleLogger::logStatus(prefix + " GO");  // фиксируем успешную отправку для журналирования
+      SimpleLogger::logStatus(prefix + " GO");
     }
     return true;
   }
 
-  struct PreparedFragment {
-    std::array<uint8_t, MAX_FRAGMENT_LEN> payload{}; // предвыделенный буфер полезной нагрузки
-    uint16_t payload_size = 0;                       // фактическая длина полезной нагрузки
-    bool conv_encoded = false;                      // применялось ли свёрточное кодирование
-    uint16_t cipher_len = 0;                        // длина шифртекста вместе с тегом
-    uint16_t plain_len = 0;                         // длина исходных данных до шифрования
-    uint16_t chunk_idx = 0;                         // номер блока внутри сообщения для нонса
-    uint8_t header_flags = 0;                       // итоговые флаги кадра
-    uint32_t packed_meta = 0;                       // упакованные метаданные (флаги, индекс, длина)
-  };
+  if (!ensureFragmentsReady(message)) {
+    DEBUG_LOG("TxModule: не удалось подготовить фрагменты");
+    return false;
+  }
 
-  std::vector<PreparedFragment> fragments;
-  fragments.reserve(is_ack_frame ? 1
-                                 : (msg.size() + EFFECTIVE_DATA_CHUNK - 1) / EFFECTIVE_DATA_CHUNK);
-  bool sent = false;
+  if (message.next_fragment >= message.fragments.size()) {
+    message.completed = true;
+    if (!prefix.empty() && (!ack_enabled_ || !message.expect_ack)) {
+      SimpleLogger::logStatus(prefix + " GO");
+    }
+    return false;
+  }
 
-  if (is_ack_frame) {
-    PreparedFragment frag;
-    if (msg.size() > frag.payload.size()) {
-      LOG_ERROR("TxModule: ACK превышает размер слота");
-      return false;
-    }
-    frag.payload_size = static_cast<uint16_t>(msg.size());
-    if (!msg.empty()) {
-      std::memcpy(frag.payload.data(), msg.data(), msg.size());
-    }
-    frag.chunk_idx = 0;
-    frag.header_flags = 0;                             // подтверждение всегда отправляется открытым текстом
-    frag.packed_meta = packMetadata(frag.header_flags, frag.chunk_idx, frag.payload_size);
-    fragments.push_back(frag);
+  auto& frag = message.fragments[message.next_fragment];
+  uint32_t header_meta = packMetadata(frag.header_flags,
+                                      static_cast<uint16_t>(frag.chunk_idx),
+                                      frag.payload_size);
+  if (header_meta != frag.packed_meta) {
+    LOG_ERROR("TxModule: несоответствие упакованных метаданных при отправке");
+    return false;
+  }
+
+  FrameHeader hdr;
+  hdr.ver = FRAME_VERSION_AEAD;
+  hdr.msg_id = static_cast<uint16_t>(message.id);
+  hdr.frag_cnt = static_cast<uint16_t>(message.fragments.size());
+  hdr.setFlags(frag.header_flags);
+  hdr.setFragIdx(static_cast<uint16_t>(frag.chunk_idx));
+  hdr.setPayloadLen(frag.payload_size);
+
+  std::array<uint8_t, MAX_FRAME_SIZE> frame_buf{};
+  uint8_t hdr_buf[FrameHeader::SIZE];
+  if (!hdr.encode(hdr_buf, sizeof(hdr_buf), frag.payload.data(), frag.payload_size)) {
+    LOG_ERROR("TxModule: не удалось закодировать заголовок");
+    return false;
+  }
+  size_t frame_size = 0;
+  std::memcpy(frame_buf.data() + frame_size, hdr_buf, FrameHeader::SIZE);
+  frame_size += FrameHeader::SIZE;
+
+  size_t payload_bytes = insertPilots(frag.payload.data(), frag.payload_size,
+                                      frame_buf.data() + frame_size,
+                                      frame_buf.size() - frame_size);
+  if (payload_bytes == 0 && frag.payload_size != 0) {
+    LOG_ERROR("TxModule: вставка пилотов не удалась");
+    return false;
+  }
+  frame_size += payload_bytes;
+  scrambler::scramble(frame_buf.data(), frame_size);
+
+  if (frame_size > MAX_FRAME_SIZE) {
+    LOG_ERROR_VAL("TxModule: превышен размер кадра=", frame_size);
+    return false;
+  }
+
+  radio_.send(frame_buf.data(), frame_size);
+  last_send_ = now;
+  if (pause_ms_ != 0) {
+    message.next_allowed_send = now + std::chrono::milliseconds(pause_ms_);
   } else {
-    PacketSplitter rs_splitter(PayloadMode::SMALL, EFFECTIVE_DATA_CHUNK);
-    MessageBuffer tmp((msg.size() + EFFECTIVE_DATA_CHUNK - 1) / EFFECTIVE_DATA_CHUNK);
-    rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size(), false);
+    message.next_allowed_send = std::chrono::steady_clock::time_point::min();
+  }
 
-    std::vector<uint8_t> part;
-    part.reserve(tmp.slotSize());                     // используем вместимость слота
-    std::vector<uint8_t> enc;
-    enc.reserve(MAX_CIPHER_CHUNK);
-    std::vector<uint8_t> tag;
-    tag.reserve(TAG_LEN);
-    std::vector<uint8_t> conv;
-    conv.reserve(MAX_FRAGMENT_LEN);
-    std::vector<uint8_t> conv_input;
-    conv_input.reserve(RS_ENC_LEN + CONV_TAIL_BYTES);
+  ++message.next_fragment;
+  message.completed = message.next_fragment >= message.fragments.size();
 
-    std::vector<std::vector<uint8_t>> plain_parts;
-    while (tmp.hasPending()) {
-      part.clear();
-      uint16_t dummy = 0;
-      if (!tmp.pop(dummy, part)) break;
-      plain_parts.push_back(part);
+  if (!prefix.empty()) {
+    if (!message.completed || message.expect_ack) {
+      SimpleLogger::logStatus(prefix + " PROG");
+    } else if (!ack_enabled_ || !message.expect_ack) {
+      SimpleLogger::logStatus(prefix + " GO");
+    }
+  }
+
+  DEBUG_LOG_VAL("TxModule: отправлен фрагмент=", message.next_fragment - 1);
+  return true;
+}
+
+bool TxModule::ensureFragmentsReady(PendingMessage& message) {
+  if (message.is_plain) {
+    return true;                                         // прямые пакеты не требуют подготовки
+  }
+  if (!message.fragments.empty()) {
+    return true;                                         // фрагменты уже собраны
+  }
+
+  const auto& msg = message.data;
+  if (msg.empty()) {
+    return false;
+  }
+
+  message.fragments.clear();
+  message.next_fragment = 0;
+  message.completed = false;
+
+  if (message.is_ack) {
+    PreparedFragment frag;
+    frag.payload_size = static_cast<uint16_t>(msg.size());
+    frag.payload.assign(msg.begin(), msg.end());
+    frag.chunk_idx = 0;
+    frag.header_flags = 0;
+    frag.packed_meta = packMetadata(frag.header_flags, frag.chunk_idx, frag.payload_size);
+    message.fragments.push_back(frag);
+    return true;
+  }
+
+  PacketSplitter rs_splitter(PayloadMode::SMALL, EFFECTIVE_DATA_CHUNK);
+  MessageBuffer tmp((msg.size() + EFFECTIVE_DATA_CHUNK - 1) / EFFECTIVE_DATA_CHUNK);
+  rs_splitter.splitAndEnqueue(tmp, msg.data(), msg.size(), false);
+
+  std::vector<uint8_t> part;
+  part.reserve(tmp.slotSize());
+  std::vector<std::vector<uint8_t>> plain_parts;
+  while (tmp.hasPending()) {
+    part.clear();
+    uint16_t dummy = 0;
+    if (!tmp.pop(dummy, part)) break;
+    plain_parts.push_back(part);
+  }
+
+  if (plain_parts.empty()) {
+    return false;
+  }
+
+  message.fragments.reserve(plain_parts.size());
+
+  std::vector<uint8_t> enc;
+  enc.reserve(MAX_CIPHER_CHUNK);
+  std::vector<uint8_t> tag;
+  tag.reserve(TAG_LEN);
+  std::vector<uint8_t> conv;
+  conv.reserve(MAX_FRAGMENT_LEN);
+  std::vector<uint8_t> conv_input;
+  conv_input.reserve(RS_ENC_LEN + CONV_TAIL_BYTES);
+
+  uint16_t total_fragments = static_cast<uint16_t>(plain_parts.size());
+  for (size_t part_idx = 0; part_idx < plain_parts.size(); ++part_idx) {
+    const auto& stored_part = plain_parts[part_idx];
+    enc.clear();
+    tag.clear();
+    conv.clear();
+    conv_input.clear();
+
+    const size_t plain_len = stored_part.size();
+    uint16_t current_idx = static_cast<uint16_t>(part_idx);
+    uint8_t base_flags = 0;
+    if (encryption_enabled_) base_flags |= FrameHeader::FLAG_ENCRYPTED;
+    if (message.expect_ack) base_flags |= FrameHeader::FLAG_ACK_REQUIRED;
+
+    size_t cipher_len_guess = plain_len + TAG_LEN;
+    if (cipher_len_guess > MAX_CIPHER_CHUNK) {
+      LOG_WARN_VAL("TxModule: ожидаемый шифртекст превышает лимит=", cipher_len_guess);
+      continue;
     }
 
-    uint16_t total_fragments = static_cast<uint16_t>(plain_parts.size());
-    for (size_t part_idx = 0; part_idx < plain_parts.size(); ++part_idx) {
-      const auto& stored_part = plain_parts[part_idx];
-      enc.clear();
-      tag.clear();
-      const size_t plain_len = stored_part.size();
-      uint16_t current_idx = static_cast<uint16_t>(part_idx);
-      uint8_t base_flags = 0;
-      if (encryption_enabled_) base_flags |= FrameHeader::FLAG_ENCRYPTED;
-      if (message.expect_ack) base_flags |= FrameHeader::FLAG_ACK_REQUIRED;
-      size_t cipher_len_guess = plain_len + TAG_LEN;
-      if (cipher_len_guess > MAX_CIPHER_CHUNK) {
-        LOG_WARN_VAL("TxModule: ожидаемый шифртекст превышает лимит=", cipher_len_guess);
-        continue;
-      }
-
-      bool conv_expected = false;
-      size_t payload_guess = cipher_len_guess;
-      if (cipher_len_guess > 0) {
-        if (USE_RS && cipher_len_guess == RS_DATA_LEN) {
-          size_t conv_input_len = RS_ENC_LEN + CONV_TAIL_BYTES;
-          size_t conv_payload_len = conv_input_len * 2;
-          if (conv_payload_len <= MAX_FRAGMENT_LEN) {
-            conv_expected = true;
-            payload_guess = conv_payload_len;
-          }
-        } else {
-          size_t conv_input_len = cipher_len_guess + CONV_TAIL_BYTES;
-          size_t conv_payload_len = conv_input_len * 2;
-          if (conv_payload_len <= MAX_FRAGMENT_LEN) {
-            conv_expected = true;
-            payload_guess = conv_payload_len;
-          }
+    bool conv_expected = false;
+    size_t payload_guess = cipher_len_guess;
+    if (cipher_len_guess > 0) {
+      if (USE_RS && cipher_len_guess == RS_DATA_LEN) {
+        size_t conv_input_len = RS_ENC_LEN + CONV_TAIL_BYTES;
+        size_t conv_payload_len = conv_input_len * 2;
+        if (conv_payload_len <= MAX_FRAGMENT_LEN) {
+          conv_expected = true;
+          payload_guess = conv_payload_len;
         }
-      }
-
-      if (payload_guess > FrameHeader::LEN_MASK) {
-        LOG_WARN_VAL("TxModule: длина полезной нагрузки вне 12-битного диапазона=", payload_guess);
-        continue;
-      }
-
-      uint8_t planned_flags = base_flags;
-      if (conv_expected) planned_flags |= FrameHeader::FLAG_CONV_ENCODED;
-      uint32_t packed_meta = packMetadata(planned_flags, current_idx, static_cast<uint16_t>(payload_guess));
-
-      auto nonce = KeyLoader::makeNonce(FRAME_VERSION_AEAD, total_fragments, packed_meta,
-                                        static_cast<uint16_t>(message.id));
-      if (encryption_enabled_) {
-        auto aad = makeAad(FRAME_VERSION_AEAD, total_fragments, packed_meta,
-                           static_cast<uint16_t>(message.id));
-        if (!crypto::chacha20poly1305::encrypt(key_.data(), key_.size(),
-                                               nonce.data(), nonce.size(),
-                                               aad.data(), aad.size(),
-                                               stored_part.data(), stored_part.size(),
-                                               enc, tag)) {
-          LOG_ERROR("TxModule: ошибка шифрования");
-          continue;
-        }
-        enc.insert(enc.end(), tag.begin(), tag.end());
       } else {
-        enc.assign(stored_part.begin(), stored_part.end());
-        enc.insert(enc.end(), TAG_LEN, 0x00);              // добавляем пустой тег для выравнивания
-      }
-
-      const size_t cipher_len = enc.size();
-      if (cipher_len > MAX_CIPHER_CHUNK) {
-        LOG_WARN_VAL("TxModule: блок шифртекста превышает лимит=", cipher_len);
-        continue;                                       // пропускаем некорректный блок
-      }
-
-      bool conv_applied = false;
-      if (conv_expected) {
-        if (USE_RS && cipher_len == RS_DATA_LEN) {
-          uint8_t rs_buf[RS_ENC_LEN];
-          rs255223::encode(enc.data(), rs_buf);
-          byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
-          conv_input.assign(rs_buf, rs_buf + RS_ENC_LEN);
-          conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00);
-          conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
-          conv_applied = true;
-        } else if (!enc.empty()) {
-          conv_input.assign(enc.begin(), enc.end());
-          conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00); // добавляем «хвост» для сброса регистра
-          conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
-          conv_applied = true;
-        }
-        if (conv_applied && USE_BIT_INTERLEAVER && !conv.empty()) {
-          bit_interleaver::interleave(conv.data(), conv.size());
+        size_t conv_input_len = cipher_len_guess + CONV_TAIL_BYTES;
+        size_t conv_payload_len = conv_input_len * 2;
+        if (conv_payload_len <= MAX_FRAGMENT_LEN) {
+          conv_expected = true;
+          payload_guess = conv_payload_len;
         }
       }
+    }
 
-      if (!conv_applied) {
-        conv.assign(enc.begin(), enc.end());            // fallback: отправляем без свёртки
-      }
+    if (payload_guess > FrameHeader::LEN_MASK) {
+      LOG_WARN_VAL("TxModule: длина полезной нагрузки вне 12-битного диапазона=", payload_guess);
+      continue;
+    }
 
-      if (conv_applied && conv.size() > MAX_FRAGMENT_LEN) {
-        LOG_WARN_VAL("TxModule: свёрнутый блок превышает лимит=", conv.size());
-        conv.assign(enc.begin(), enc.end());            // возвращаемся к исходному варианту
-        conv_applied = false;
-      }
+    uint8_t planned_flags = base_flags;
+    if (conv_expected) planned_flags |= FrameHeader::FLAG_CONV_ENCODED;
+    uint32_t packed_meta = packMetadata(planned_flags, current_idx, static_cast<uint16_t>(payload_guess));
 
-      PreparedFragment frag;
-      if (conv.size() > frag.payload.size()) {
-        LOG_WARN("TxModule: подготовленный блок не помещается в слот");
+    auto nonce = KeyLoader::makeNonce(FRAME_VERSION_AEAD, total_fragments, packed_meta,
+                                      static_cast<uint16_t>(message.id));
+    if (encryption_enabled_) {
+      auto aad = makeAad(FRAME_VERSION_AEAD, total_fragments, packed_meta,
+                         static_cast<uint16_t>(message.id));
+      if (!crypto::chacha20poly1305::encrypt(key_.data(), key_.size(),
+                                             nonce.data(), nonce.size(),
+                                             aad.data(), aad.size(),
+                                             stored_part.data(), stored_part.size(),
+                                             enc, tag)) {
+        LOG_ERROR("TxModule: ошибка шифрования");
         continue;
       }
-      frag.payload_size = static_cast<uint16_t>(conv.size());
-      if (!conv.empty()) {
-        std::memcpy(frag.payload.data(), conv.data(), conv.size());
+      enc.insert(enc.end(), tag.begin(), tag.end());
+    } else {
+      enc.assign(stored_part.begin(), stored_part.end());
+      enc.insert(enc.end(), TAG_LEN, 0x00);
+    }
+
+    const size_t cipher_len = enc.size();
+    if (cipher_len > MAX_CIPHER_CHUNK) {
+      LOG_WARN_VAL("TxModule: блок шифртекста превышает лимит=", cipher_len);
+      continue;
+    }
+
+    bool conv_applied = false;
+    if (conv_expected) {
+      if (USE_RS && cipher_len == RS_DATA_LEN) {
+        uint8_t rs_buf[RS_ENC_LEN];
+        rs255223::encode(enc.data(), rs_buf);
+        byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
+        conv_input.assign(rs_buf, rs_buf + RS_ENC_LEN);
+        conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00);
+        conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
+        conv_applied = true;
+      } else if (!enc.empty()) {
+        conv_input.assign(enc.begin(), enc.end());
+        conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00);
+        conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
+        conv_applied = true;
       }
-
-      uint8_t final_flags = base_flags;
-      if (conv_applied) final_flags |= FrameHeader::FLAG_CONV_ENCODED;
-      uint32_t final_meta = packMetadata(final_flags, current_idx, frag.payload_size);
-      if (final_meta != packed_meta) {
-        LOG_ERROR("TxModule: рассогласование метаданных AEAD и заголовка");
-        continue;
+      if (conv_applied && USE_BIT_INTERLEAVER && !conv.empty()) {
+        bit_interleaver::interleave(conv.data(), conv.size());
       }
-
-      frag.conv_encoded = conv_applied;
-      frag.cipher_len = static_cast<uint16_t>(cipher_len);
-      frag.plain_len = static_cast<uint16_t>(plain_len);
-      frag.chunk_idx = current_idx;
-      frag.header_flags = final_flags;
-      frag.packed_meta = final_meta;
-      fragments.push_back(frag);
     }
+
+    if (!conv_applied) {
+      conv.assign(enc.begin(), enc.end());
+    }
+
+    if (conv_applied && conv.size() > MAX_FRAGMENT_LEN) {
+      LOG_WARN_VAL("TxModule: свёрнутый блок превышает лимит=", conv.size());
+      conv.assign(enc.begin(), enc.end());
+      conv_applied = false;
+    }
+
+    PreparedFragment frag;
+    frag.payload_size = static_cast<uint16_t>(conv.size());
+    frag.payload.assign(conv.begin(), conv.end());
+
+    uint8_t final_flags = base_flags;
+    if (conv_applied) final_flags |= FrameHeader::FLAG_CONV_ENCODED;
+    uint32_t final_meta = packMetadata(final_flags, current_idx, frag.payload_size);
+    if (final_meta != packed_meta) {
+      LOG_ERROR("TxModule: рассогласование метаданных AEAD и заголовка");
+      continue;
+    }
+
+    frag.conv_encoded = conv_applied;
+    frag.cipher_len = static_cast<uint16_t>(cipher_len);
+    frag.plain_len = static_cast<uint16_t>(plain_len);
+    frag.chunk_idx = current_idx;
+    frag.header_flags = final_flags;
+    frag.packed_meta = final_meta;
+    message.fragments.push_back(frag);
   }
 
-  uint16_t frag_cnt = static_cast<uint16_t>(fragments.size());
-  std::array<uint8_t, MAX_FRAME_SIZE> frame_buf{};      // общий буфер кадра
-  for (size_t idx = 0; idx < fragments.size(); ++idx) {
-    auto& frag = fragments[idx];
-    if (frag.chunk_idx != idx) {
-      LOG_ERROR("TxModule: индекс фрагмента не совпадает с сохранённым значением");
-      continue;
-    }
-    uint32_t header_meta = packMetadata(frag.header_flags, static_cast<uint16_t>(frag.chunk_idx), frag.payload_size);
-    if (header_meta != frag.packed_meta) {
-      LOG_ERROR("TxModule: несоответствие упакованных метаданных при сборке кадра");
-      continue;
-    }
-    FrameHeader hdr;
-    hdr.ver = FRAME_VERSION_AEAD;
-    hdr.msg_id = static_cast<uint16_t>(message.id);
-    hdr.frag_cnt = frag_cnt;
-    hdr.setFlags(frag.header_flags);
-    hdr.setFragIdx(static_cast<uint16_t>(frag.chunk_idx));
-    hdr.setPayloadLen(frag.payload_size);
+  return !message.fragments.empty();
+}
 
-    uint8_t hdr_buf[FrameHeader::SIZE];
-    if (!hdr.encode(hdr_buf, sizeof(hdr_buf), frag.payload.data(), frag.payload_size)) {
-      DEBUG_LOG("TxModule: ошибка кодирования заголовка");
-      continue;
-    }
-
-    size_t frame_size = 0;
-    std::memcpy(frame_buf.data() + frame_size, hdr_buf, FrameHeader::SIZE);
-    frame_size += FrameHeader::SIZE;
-    size_t payload_bytes = insertPilots(frag.payload.data(), frag.payload_size,
-                                        frame_buf.data() + frame_size,
-                                        frame_buf.size() - frame_size);
-    if (payload_bytes == 0 && frag.payload_size != 0) {
-      LOG_ERROR("TxModule: вставка пилотов не удалась");
-      continue;
-    }
-    frame_size += payload_bytes;
-    scrambler::scramble(frame_buf.data(), frame_size);
-
-    if (frame_size > MAX_FRAME_SIZE) {
-      LOG_ERROR_VAL("TxModule: превышен размер кадра=", frame_size);
-      continue;
-    }
-    waitForPauseWindow();
-    radio_.send(frame_buf.data(), frame_size);
-    last_send_ = std::chrono::steady_clock::now();
-    DEBUG_LOG_VAL("TxModule: отправлен фрагмент=", idx);
-    sent = true;
+bool TxModule::canSendFragment(PendingMessage& message, const std::chrono::steady_clock::time_point& now) {
+  if (pause_ms_ == 0) {
+    return true;
   }
-
-  if (!prefix.empty() && (!ack_enabled_ || !message.expect_ack)) {
-    SimpleLogger::logStatus(prefix + " GO");
+  auto sentinel = std::chrono::steady_clock::time_point::min();
+  auto target = message.next_allowed_send;
+  if (target == sentinel) {
+    target = last_send_ + std::chrono::milliseconds(pause_ms_);
+    message.next_allowed_send = target;
   }
-  return sent;
+  if (now < target) {
+    radio_.ensureReceiveMode();
+    return false;
+  }
+  return true;
 }
 
 bool TxModule::isAckPayload(const std::vector<uint8_t>& data) {
@@ -724,6 +791,10 @@ void TxModule::archiveFollowingParts(uint8_t qos, const std::string& tag) {
       archived.packet_tag = tag;
       archived.status_prefix = extractStatusPrefix(archived.data);
     }
+    archived.next_fragment = 0;
+    archived.completed = false;
+    archived.next_allowed_send = std::chrono::steady_clock::time_point::min();
+    archived.fragments.clear();
     archive_.push_back(std::move(archived));
     DEBUG_LOG("TxModule: часть пакета перенесена в архив");
   }
@@ -733,6 +804,9 @@ void TxModule::scheduleFromArchive() {
   if (delayed_ || archive_.empty()) return;
   delayed_.emplace(std::move(archive_.front()));
   archive_.pop_front();
+  delayed_->next_fragment = 0;
+  delayed_->completed = false;
+  delayed_->next_allowed_send = std::chrono::steady_clock::time_point::min();
   if (delayed_->is_plain) {
     delayed_->attempts_left = 0;
     delayed_->expect_ack = false;
@@ -748,19 +822,13 @@ void TxModule::onSendSuccess() {
   scheduleFromArchive();
 }
 
-void TxModule::waitForPauseWindow() {
-  if (pause_ms_ == 0) return;
+bool TxModule::waitForPauseWindow() {
+  if (pause_ms_ == 0) return true;
   auto target = last_send_ + std::chrono::milliseconds(pause_ms_);
   auto now = std::chrono::steady_clock::now();
-  if (now >= target) return;
-  auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(target - now);
-  if (remaining.count() <= 0) return;
+  if (now >= target) return true;
   radio_.ensureReceiveMode();
-#ifdef ARDUINO
-  delay(static_cast<unsigned long>(remaining.count()));
-#else
-  std::this_thread::sleep_for(remaining);
-#endif
+  return false;
 }
 
 bool TxModule::processImmediateAck() {
@@ -880,7 +948,13 @@ void TxModule::setEncryptionEnabled(bool enabled) {
 }
 
 void TxModule::prepareExternalSend() {
-  waitForPauseWindow();
+  while (!waitForPauseWindow()) {
+#ifdef ARDUINO
+    yield();
+#else
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
+  }
 }
 
 void TxModule::completeExternalSend() {
