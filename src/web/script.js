@@ -3611,15 +3611,36 @@ function getDeviceLogState() {
   if (!UI.state || typeof UI.state !== "object") UI.state = {};
   let state = UI.state.deviceLog;
   if (!state || typeof state !== "object") {
-    state = { initialized: false, loading: false, known: new Set(), lastId: 0, queue: [] };
+    state = { initialized: false, loading: false, known: new Set(), lastId: 0, lastUptimeMs: null, queue: [] };
     UI.state.deviceLog = state;
   }
   if (!(state.known instanceof Set)) {
     state.known = new Set(state.known ? Array.from(state.known) : []);
   }
   if (!Number.isFinite(state.lastId)) state.lastId = 0;
+  state.lastUptimeMs = Number.isFinite(state.lastUptimeMs) ? state.lastUptimeMs : null;
   if (!Array.isArray(state.queue)) state.queue = [];
   return state;
+}
+
+function resetDeviceLogState(state, options) {
+  const target = state || getDeviceLogState();
+  if (!(target.known instanceof Set)) {
+    target.known = new Set(target.known ? Array.from(target.known) : []);
+  }
+  target.known.clear();
+  target.lastId = 0;
+  target.lastUptimeMs = null;
+  if (!options || options.preserveQueue !== true) {
+    target.queue = [];
+  } else if (!Array.isArray(target.queue)) {
+    target.queue = [];
+  }
+  target.initialized = false;
+  if (options && options.clearDom && UI.els && UI.els.debugLog) {
+    const nodes = UI.els.debugLog.querySelectorAll('.debug-card[data-origin="device"]');
+    nodes.forEach((node) => node.remove());
+  }
 }
 
 // Форматирование продолжительности запроса в человеко-понятный вид
@@ -4004,6 +4025,12 @@ function openReceivedPushChannel() {
       if (push.retryTimer) {
         clearTimeout(push.retryTimer);
         push.retryTimer = null;
+      }
+      const logState = getDeviceLogState();
+      if (logState.initialized && !logState.loading) {
+        hydrateDeviceLog({ limit: 150, force: true, silent: true }).catch((err) => {
+          console.warn('[debug] hydrateDeviceLog(reconnect)', err);
+        });
       }
       startReceivedMonitor({ intervalMs: 30000, immediate: false });
       updateReceivedMonitorDiagnostics();
@@ -9284,42 +9311,61 @@ function appendDeviceLogEntries(entries, opts) {
   if (replace) {
     const nodes = log.querySelectorAll('.debug-card[data-origin="device"]');
     nodes.forEach((node) => node.remove());
-    state.known.clear();
-    state.lastId = 0;
+    resetDeviceLogState(state, { preserveQueue: true });
   }
   if (list.length === 0) {
     if (replace) state.initialized = true;
     return;
   }
-  const fragment = document.createDocumentFragment();
+  let fragment = document.createDocumentFragment();
   let appended = 0;
+  let resetApplied = false;
   for (const item of list) {
     if (!item) continue;
     const text = item.text != null ? String(item.text) : "";
     if (!text) continue;
     const idValue = Number(item.id);
     const id = Number.isFinite(idValue) && idValue > 0 ? idValue : null;
+    const uptimeValue = Number(item.uptime != null ? item.uptime : item.uptimeMs);
+    const uptime = Number.isFinite(uptimeValue) && uptimeValue >= 0 ? uptimeValue : null;
+
+    if (!resetApplied && !replace) {
+      const knownId = id != null && state.known.has(id);
+      const idWrapped = knownId && state.lastId > 0 && id < state.lastId;
+      const uptimeRegressed = uptime != null && state.lastUptimeMs != null && uptime + 100 < state.lastUptimeMs;
+      if (idWrapped || uptimeRegressed) {
+        resetDeviceLogState(state, { clearDom: true });
+        fragment = document.createDocumentFragment();
+        appended = 0;
+        resetApplied = true;
+      }
+    }
+
     if (id != null) {
       if (state.known.has(id)) continue;
       state.known.add(id);
       if (id > state.lastId) state.lastId = id;
     }
-    const uptimeValue = Number(item.uptime != null ? item.uptime : item.uptimeMs);
-    const uptime = Number.isFinite(uptimeValue) && uptimeValue >= 0 ? uptimeValue : null;
     debugLog(text, {
       origin: "device",
       uptimeMs: uptime,
       id: id,
       fragment,
     });
+    if (uptime != null && (state.lastUptimeMs == null || uptime > state.lastUptimeMs)) {
+      state.lastUptimeMs = uptime;
+    }
     appended += 1;
   }
   if (appended > 0) {
     log.appendChild(fragment);
     log.scrollTop = log.scrollHeight;
+    if (!replace) state.initialized = true;
   }
   if (replace) state.initialized = true;
 }
+
+
 
 // Загрузка последних сообщений журнала с устройства
 async function hydrateDeviceLog(options) {
