@@ -90,6 +90,8 @@ public:
   float getLastRssi() const; // последний RSSI
   // Получить случайный байт
   uint8_t randomByte();
+  // Получить последний код ошибки RadioLib
+  int16_t getLastErrorCode() const { return lastError_; }
     // Выбор банка каналов (EAST, WEST, TEST, ALL)
     bool setBank(ChannelBank bank);
     // Выбор канала 0-166 в зависимости от банка
@@ -137,6 +139,9 @@ private:
 
   // Непосредственная установка частоты
   bool setFrequency(float freq);
+
+  // Запуск приёма с повторными попытками и логированием
+  bool startReceiveWithRetry(const char* context);
 
   // Обёртка над SX1262 с публичным доступом к очистке IRQ-статуса
   struct PublicSX1262 : public SX1262 {
@@ -215,6 +220,7 @@ private:
 
   float lastSnr_ = 0.0f;     // SNR последнего пакета
   float lastRssi_ = 0.0f;    // RSSI последнего пакета
+  int16_t lastError_ = RADIOLIB_ERR_NONE; // последний код ошибки RadioLib
 
     // Таблицы частот для всех банков
     static const float* fRX_bank_[5];
