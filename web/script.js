@@ -2229,7 +2229,16 @@ async function deviceFetch(cmd, params, timeoutMs) {
       return { ok: true, text: text, url: requestUrl };
     } catch (e) {
       clearTimeout(timer);
-      lastErr = String(e);
+      const name = e && e.name ? String(e.name) : "";
+      const message = e && e.message ? String(e.message) : "";
+      // Преобразуем ошибки fetch в более понятные пользователю сообщения
+      if (name === "AbortError") {
+        lastErr = `тайм-аут запроса (${timeout} мс)`;
+      } else if (name === "TypeError" && (!message || /Failed to fetch/i.test(message))) {
+        lastErr = "сетевой запрос не выполнен (проверьте подключение к устройству)";
+      } else {
+        lastErr = message || String(e);
+      }
     }
   }
   return { ok: false, error: lastErr || "Unknown error" };
@@ -2266,7 +2275,15 @@ async function fetchDeviceLogHistory(limit, timeoutMs) {
     return { ok: true, logs: data.logs };
   } catch (err) {
     clearTimeout(timer);
-    return { ok: false, error: String(err) };
+    const name = err && err.name ? String(err.name) : "";
+    const message = err && err.message ? String(err.message) : "";
+    if (name === "AbortError") {
+      return { ok: false, error: `тайм-аут запроса (${timeout} мс)` };
+    }
+    if (name === "TypeError" && (!message || /Failed to fetch/i.test(message))) {
+      return { ok: false, error: "сетевой запрос не выполнен (проверьте подключение к устройству)" };
+    }
+    return { ok: false, error: message || String(err) };
   }
 }
 function summarizeResponse(text, fallback) {
@@ -2348,7 +2365,16 @@ async function postTx(text, timeoutMs) {
     return { ok: true, text: body };
   } catch (e) {
     clearTimeout(timer);
-    return { ok: false, error: String(e) };
+    const name = e && e.name ? String(e.name) : "";
+    const message = e && e.message ? String(e.message) : "";
+    // Сообщаем о сетевых ошибках на понятном языке
+    if (name === "AbortError") {
+      return { ok: false, error: `тайм-аут запроса (${timeout} мс)` };
+    }
+    if (name === "TypeError" && (!message || /Failed to fetch/i.test(message))) {
+      return { ok: false, error: "сетевой запрос не выполнен (проверьте подключение к устройству)" };
+    }
+    return { ok: false, error: message || String(e) };
   }
 }
 
@@ -2382,7 +2408,15 @@ async function postImage(blob, meta, timeoutMs) {
     return { ok: true, text: body };
   } catch (err) {
     clearTimeout(timer);
-    return { ok: false, error: String(err) };
+    const name = err && err.name ? String(err.name) : "";
+    const message = err && err.message ? String(err.message) : "";
+    if (name === "AbortError") {
+      return { ok: false, error: `тайм-аут запроса (${timeout} мс)` };
+    }
+    if (name === "TypeError" && (!message || /Failed to fetch/i.test(message))) {
+      return { ok: false, error: "сетевой запрос не выполнен (проверьте подключение к устройству)" };
+    }
+    return { ok: false, error: message || String(err) };
   }
 }
 
