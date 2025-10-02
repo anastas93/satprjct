@@ -50,16 +50,23 @@ def _choose_delimiter(content: str) -> str:
     return delimiter
 
 
-def _render_constant(const_name: str, content: str, source_path: Path) -> str:
-    """Формирует объявление PROGMEM-константы для одного файла."""
+def _render_constant(const_name: str, content: bytes, source_path: Path) -> str:
+    """Формирует PROGMEM-массив байтов для содержимого файла."""
 
-    delimiter = _choose_delimiter(content)
     relative = source_path.as_posix()
+    if not content:
+        body = "  "
+    else:
+        lines = []
+        for idx in range(0, len(content), 16):
+            chunk = ", ".join(f"0x{byte:02x}" for byte in content[idx:idx + 16])
+            lines.append(f"  {chunk}")
+        body = ",\n".join(lines)
     return (
         f"// {relative}\n"
-        f"const char {const_name}[] PROGMEM = R\"{delimiter}(\n"
-        f"{content}\n"
-        f"){delimiter}\";\n"
+        f"const uint8_t {const_name}[] PROGMEM = {{\n"
+        f"{body}\n"
+        f"}};\n"
     )
 
 
@@ -72,7 +79,8 @@ def generate_header(repo_root: Path, output: Path) -> None:
         if not source.is_file():
             raise FileNotFoundError(f"Не найден исходный файл {relative_path}")
         content = _normalise_content(source.read_text(encoding="utf-8"))
-        parts.append(_render_constant(const_name, content, Path(relative_path)))
+        content_bytes = content.encode("utf-8")
+        parts.append(_render_constant(const_name, content_bytes, Path(relative_path)))
         parts.append("\n")
     output.write_text("".join(parts), encoding="utf-8")
 

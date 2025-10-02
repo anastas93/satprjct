@@ -123,13 +123,18 @@ uint8_t testModeLocalCounter = 0;       // локальный счётчик п�
 
 WebServer server(80);       // HTTP-сервер для веб-интерфейса
 
+template <typename T, size_t N>
+constexpr size_t progmemLength(const T (&)[N]) {
+  return N;
+}
+
 template <size_t N>
-constexpr size_t progmemLength(const char (&)[N]) {
+constexpr size_t progmemLength(const char (&array)[N]) {
   return N ? (N - 1) : 0;
 }
 
 static void sendProgmemAsset(const char* contentType,
-                             PGM_P data,
+                             const uint8_t* data,
                              size_t length,
                              bool cacheable = true) {
   if (cacheable) {
@@ -137,7 +142,7 @@ static void sendProgmemAsset(const char* contentType,
   } else {
     server.sendHeader("Cache-Control", "no-cache");
   }
-  server.send_P(200, contentType, data, length);
+  server.send_P(200, contentType, reinterpret_cast<PGM_P>(data), length);
 }
 
 // Ожидание инициализации Serial с ограничением по времени, чтобы не блокировать запуск Wi-Fi
