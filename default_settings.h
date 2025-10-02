@@ -70,7 +70,7 @@ namespace LogDetail {
   inline void logMsg(DefaultSettings::LogLevel level, const char* msg) {
     if (!shouldPrint(level, String(msg))) return;
     Serial.println(msg);
-    if (SERIAL_FLUSH_AFTER_LOG) {
+    if (DefaultSettings::SERIAL_FLUSH_AFTER_LOG) {
       Serial.flush();
     }
 #if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
@@ -84,7 +84,7 @@ namespace LogDetail {
     String full = String(prefix) + String(val);
     if (!shouldPrint(level, full)) return;
     Serial.print(prefix); Serial.println(val);
-    if (SERIAL_FLUSH_AFTER_LOG) {
+    if (DefaultSettings::SERIAL_FLUSH_AFTER_LOG) {
       Serial.flush();
     }
 #if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
