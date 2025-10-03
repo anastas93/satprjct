@@ -846,6 +846,8 @@ g++ -I. tests/test_key_transfer.cpp \
   доставке сообщения и `false`, если попытку требуется повторить позже (например, до появления USB).
   Тип `KeyLoader::LogCallback` на Arduino получает `const __FlashStringHelper*`, чтобы не копировать
   строки из PROGMEM, а в хостовых сборках принимает `const char*`.
+- `void flushBufferedLogs()` — вручную инициировать повторную попытку выгрузки буфера KeyLoader,
+  например, сразу после того как Serial стал доступен без перепривязки обработчика.
 
 ### `crypto/hkdf`
 - `Prk extract(const uint8_t* salt, size_t salt_len, const uint8_t* ikm, size_t ikm_len)` — стадия

@@ -132,6 +132,9 @@ void endEphemeralSession();
 // Установка пользовательского обработчика логов KeyLoader.
 void setLogCallback(LogCallback callback);
 
+// Принудительно выгрузить буферизированные сообщения KeyLoader после появления Serial/обработчика.
+void flushBufferedLogs();
+
 }  // namespace KeyLoader
 
 

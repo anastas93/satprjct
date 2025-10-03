@@ -80,6 +80,7 @@ using FlashMessage = const __FlashStringHelper*;
 
 LogCallback g_log_callback = nullptr;
 std::vector<FlashMessage> g_buffered_logs;
+bool g_flush_retry_pending = false;                   // требуется повторная попытка выгрузки буфера
 
 // Печать сообщения напрямую в Serial либо через пользовательский коллбэк.
 bool emitLogDirect(FlashMessage msg) {
@@ -97,11 +98,13 @@ bool emitLogDirect(FlashMessage msg) {
 }
 
 // Попытка выгрузить буфер с накопленными сообщениями.
-void flushBufferedLogs() {
+void drainBufferedLogs() {
   if (g_buffered_logs.empty()) {
+    g_flush_retry_pending = false;
     return;
   }
   if (!g_log_callback && !Serial) {
+    g_flush_retry_pending = true;
     return;
   }
   std::vector<FlashMessage> pending;
@@ -112,15 +115,17 @@ void flushBufferedLogs() {
     }
   }
   g_buffered_logs.swap(pending);
+  g_flush_retry_pending = !g_buffered_logs.empty();
 }
 
 // Унифицированный вывод сообщения KeyLoader с безопасной буферизацией до готовности Serial.
 bool logMessage(FlashMessage msg) {
-  flushBufferedLogs();
+  drainBufferedLogs();
   if (emitLogDirect(msg)) {
     return true;
   }
   g_buffered_logs.push_back(msg);
+  g_flush_retry_pending = true;
   return false;
 }
 #endif
@@ -1289,16 +1294,26 @@ const char* backendName(StorageBackend backend) {
 void setLogCallback(LogCallback callback) {
   g_log_callback = callback;
   if (!g_log_callback) {
+    g_flush_retry_pending = false;
     return;
   }
-  if (!Serial) {
-    // UART ещё не готов — оставляем накопленные сообщения в буфере.
-    return;
-  }
+  g_flush_retry_pending = true;
   flushBufferedLogs();
+}
+
+void flushBufferedLogs() {
+  if (!g_flush_retry_pending) {
+    return;                                             // нечего выгружать прямо сейчас
+  }
+  drainBufferedLogs();
+  if (!g_buffered_logs.empty() && Serial) {
+    // Если коллбэк не готов, но Serial уже активен, повторяем попытку прямого вывода.
+    drainBufferedLogs();
+  }
 }
 #else
 void setLogCallback(LogCallback) {}
+void flushBufferedLogs() {}
 #endif
 
 } // namespace KeyLoader
