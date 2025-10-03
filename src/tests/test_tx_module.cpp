@@ -97,6 +97,26 @@ bool decodeFrameNoCrc(const std::vector<uint8_t>& raw,
   return true;
 }
 
+// Заглушка, которая всегда проваливает шифрование для проверки обработки ошибок
+bool encryptAlwaysFail(const uint8_t* key, size_t key_len,
+                       const uint8_t* nonce, size_t nonce_len,
+                       const uint8_t* aad, size_t aad_len,
+                       const uint8_t* input, size_t input_len,
+                       std::vector<uint8_t>& output,
+                       std::vector<uint8_t>& tag) {
+  (void)key;
+  (void)key_len;
+  (void)nonce;
+  (void)nonce_len;
+  (void)aad;
+  (void)aad_len;
+  (void)input;
+  (void)input_len;
+  output.clear();
+  tag.clear();
+  return false;
+}
+
 } // namespace
 
 // Проверка формирования кадра и вызова send
@@ -177,6 +197,36 @@ int main() {
   size_t noMoreFragments = drainTx(txAck); // новых фрагментов не должно появиться
   assert(noMoreFragments == 0);
   assert(radioAck.history.size() == sent_before);
+
+  // Проверяем обработку отказа подготовки фрагментов и повторную попытку без пропуска индексов
+  MockRadio radioFail;
+  TxModule txFail(radioFail, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txFail.setAckEnabled(false);
+  txFail.setSendPause(0);
+  TxModule::setEncryptOverrideForTests(&encryptAlwaysFail);
+  const char failing_msg[] = "ERR";
+  uint16_t failId = txFail.queue(reinterpret_cast<const uint8_t*>(failing_msg), sizeof(failing_msg));
+  assert(failId == 1);
+  bool firstFailAttempt = txFail.loop();
+  assert(!firstFailAttempt);
+  assert(radioFail.history.empty());
+  assert(txFail.delayed_);
+  assert(txFail.delayed_->fragments.empty());
+  assert(txFail.delayed_->next_fragment == 0);
+  bool secondFailAttempt = txFail.loop();
+  assert(!secondFailAttempt);
+  assert(radioFail.history.empty());
+  assert(txFail.delayed_);
+  assert(txFail.delayed_->next_fragment == 0);
+  TxModule::resetEncryptOverrideForTests();
+  bool recoveryAttempt = txFail.loop();
+  assert(recoveryAttempt);
+  assert(radioFail.history.size() == 1);
+  FrameHeader failHdr;
+  std::vector<uint8_t> failPayload;
+  size_t failHeaderBytes = 0;
+  assert(decodeFrameNoCrc(radioFail.last, failHdr, failPayload, failHeaderBytes));
+  assert(failHdr.getFragIdx() == 0);
 
   // Проверяем завершение пакета при обнулении лимита ретраев до прихода ACK
   MockRadio radioNoAck;

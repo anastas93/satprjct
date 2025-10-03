@@ -688,6 +688,10 @@ g++ -I. tests/test_key_transfer.cpp \
   частями одного сообщения.
 - Последовательность кодирования: `rs255223::encode()` → `byte_interleaver::interleave()` →
   `conv_codec::encodeBits()` → (опционально) `bit_interleaver::interleave()` → `scrambler::scramble()`.
+- `static void setEncryptOverrideForTests(TxModule::EncryptOverride fn)` и
+  `static void resetEncryptOverrideForTests()` — тестовый хук для подмены реализации
+  ChaCha20-Poly1305. Используется только в `src/tests`, чтобы эмулировать ошибки подготовки
+  фрагментов без переписывания производственного кода.
 
 ### RxModule
 - `void setCallback(RxModule::Callback cb)` — обработчик входящих данных.

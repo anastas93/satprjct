@@ -61,6 +61,9 @@ static constexpr size_t EFFECTIVE_DATA_CHUNK =
 static_assert(EFFECTIVE_DATA_CHUNK > 0, "Размер части для кодирования должен быть положительным");
 static constexpr size_t MAX_CIPHER_CHUNK = EFFECTIVE_DATA_CHUNK + TAG_LEN; // максимум байт шифртекста в одном блоке
 
+// Указатель на функцию шифрования, который может быть переопределён тестами
+static TxModule::EncryptOverride g_encrypt_impl = crypto::chacha20poly1305::encrypt;
+
 // Вставка пилотов каждые 64 байта
 static size_t insertPilots(const uint8_t* in, size_t len, uint8_t* out, size_t out_capacity) {
   size_t written = 0;
@@ -125,6 +128,16 @@ TxModule::TxModule(IRadio& radio, const std::array<size_t,4>& capacities, Payloa
   last_send_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(pause_ms_);
   last_attempt_ = last_send_;
   next_ack_send_time_ = std::chrono::steady_clock::now(); // ACK можно отправлять сразу после старта
+}
+
+// Переопределение функции шифрования для unit-тестов
+void TxModule::setEncryptOverrideForTests(EncryptOverride fn) {
+  g_encrypt_impl = fn ? fn : crypto::chacha20poly1305::encrypt;
+}
+
+// Возврат стандартной реализации шифрования после завершения тестов
+void TxModule::resetEncryptOverrideForTests() {
+  g_encrypt_impl = crypto::chacha20poly1305::encrypt;
 }
 
 // Смена режима пакета
@@ -556,6 +569,7 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
 
   const auto& msg = message.data;
   if (msg.empty()) {
+    LOG_ERROR("TxModule: пустое сообщение при подготовке фрагментов");
     return false;
   }
 
@@ -589,6 +603,7 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
   }
 
   if (plain_parts.empty()) {
+    LOG_ERROR("TxModule: разделитель вернул пустые части");
     return false;
   }
 
@@ -604,6 +619,13 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
   conv_input.reserve(RS_ENC_LEN + CONV_TAIL_BYTES);
 
   uint16_t total_fragments = static_cast<uint16_t>(plain_parts.size());
+  auto abortPreparation = [&]() {
+    message.fragments.clear();
+    message.next_fragment = 0;
+    message.completed = false;
+    return false;
+  };
+
   for (size_t part_idx = 0; part_idx < plain_parts.size(); ++part_idx) {
     const auto& stored_part = plain_parts[part_idx];
     enc.clear();
@@ -619,8 +641,8 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
 
     size_t cipher_len_guess = plain_len + TAG_LEN;
     if (cipher_len_guess > MAX_CIPHER_CHUNK) {
-      LOG_WARN_VAL("TxModule: ожидаемый шифртекст превышает лимит=", cipher_len_guess);
-      continue;
+      LOG_ERROR_VAL("TxModule: ожидаемый шифртекст превышает лимит=", cipher_len_guess);
+      return abortPreparation();
     }
 
     bool conv_expected = false;
@@ -644,8 +666,8 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
     }
 
     if (payload_guess > FrameHeader::LEN_MASK) {
-      LOG_WARN_VAL("TxModule: длина полезной нагрузки вне 12-битного диапазона=", payload_guess);
-      continue;
+      LOG_ERROR_VAL("TxModule: длина полезной нагрузки вне 12-битного диапазона=", payload_guess);
+      return abortPreparation();
     }
 
     uint8_t planned_flags = base_flags;
@@ -655,15 +677,19 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
     auto nonce = KeyLoader::makeNonce(FRAME_VERSION_AEAD, total_fragments, packed_meta,
                                       static_cast<uint16_t>(message.id));
     if (encryption_enabled_) {
+      if (!g_encrypt_impl) {
+        LOG_ERROR("TxModule: функция шифрования не задана");
+        return abortPreparation();
+      }
       auto aad = makeAad(FRAME_VERSION_AEAD, total_fragments, packed_meta,
                          static_cast<uint16_t>(message.id));
-      if (!crypto::chacha20poly1305::encrypt(key_.data(), key_.size(),
-                                             nonce.data(), nonce.size(),
-                                             aad.data(), aad.size(),
-                                             stored_part.data(), stored_part.size(),
-                                             enc, tag)) {
+      if (!g_encrypt_impl(key_.data(), key_.size(),
+                          nonce.data(), nonce.size(),
+                          aad.data(), aad.size(),
+                          stored_part.data(), stored_part.size(),
+                          enc, tag)) {
         LOG_ERROR("TxModule: ошибка шифрования");
-        continue;
+        return abortPreparation();
       }
       enc.insert(enc.end(), tag.begin(), tag.end());
     } else {
@@ -673,8 +699,8 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
 
     const size_t cipher_len = enc.size();
     if (cipher_len > MAX_CIPHER_CHUNK) {
-      LOG_WARN_VAL("TxModule: блок шифртекста превышает лимит=", cipher_len);
-      continue;
+      LOG_ERROR_VAL("TxModule: блок шифртекста превышает лимит=", cipher_len);
+      return abortPreparation();
     }
 
     bool conv_applied = false;
@@ -717,7 +743,7 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
     uint32_t final_meta = packMetadata(final_flags, current_idx, frag.payload_size);
     if (final_meta != packed_meta) {
       LOG_ERROR("TxModule: рассогласование метаданных AEAD и заголовка");
-      continue;
+      return abortPreparation();
     }
 
     frag.conv_encoded = conv_applied;
@@ -729,7 +755,12 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
     message.fragments.push_back(frag);
   }
 
-  return !message.fragments.empty();
+  if (message.fragments.empty()) {
+    LOG_ERROR("TxModule: подготовка фрагментов завершилась без результата");
+    return false;
+  }
+
+  return true;
 }
 
 bool TxModule::canSendFragment(PendingMessage& message, const std::chrono::steady_clock::time_point& now) {

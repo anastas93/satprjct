@@ -48,6 +48,15 @@ public:
   void prepareExternalSend();
   // Фиксация момента завершения прямой отправки, чтобы пауза применялась ко всем модулям
   void completeExternalSend();
+  // Тестовый хук для подмены функции шифрования (используется только в unit-тестах)
+  using EncryptOverride = bool (*)(const uint8_t* key, size_t key_len,
+                                   const uint8_t* nonce, size_t nonce_len,
+                                   const uint8_t* aad, size_t aad_len,
+                                   const uint8_t* input, size_t input_len,
+                                   std::vector<uint8_t>& output,
+                                   std::vector<uint8_t>& tag);
+  static void setEncryptOverrideForTests(EncryptOverride fn);
+  static void resetEncryptOverrideForTests();
 private:
   struct PreparedFragment {
     std::vector<uint8_t> payload;               // кодированный фрагмент
