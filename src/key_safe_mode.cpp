@@ -75,25 +75,32 @@ void activateKeySafeMode(const char* reason) {
     return;
   }
   const std::string context = contextOrDefault(reason);
-  gLastReason = context;
-  gLastReasonValid = true;
+  const bool alreadyActive = gSafeModeFlag && *gSafeModeFlag;
   if (gStorageReadyFlag) {
     *gStorageReadyFlag = false;
   }
   // Сохраняем предыдущее состояние только при первом входе.
-  if (gSafeModeFlag && !*gSafeModeFlag && gEncryptionFlag) {
+  if (!alreadyActive && gSafeModeFlag && gEncryptionFlag) {
     gEncryptionBackup = *gEncryptionFlag;
     gEncryptionBackupValid = true;
   }
   disableEncryptionForSafeMode();
-  if (gSafeModeFlag && !*gSafeModeFlag) {
+  if (!alreadyActive && gSafeModeFlag) {
     *gSafeModeFlag = true;
+    gLastReason = context;
+    gLastReasonValid = true;
     SimpleLogger::logStatus("KEY SAFE MODE ON: " + context);
     LOG_ERROR("CRITICAL: хранилище ключей недоступно (%s), шифрование отключено и ключевые команды заблокированы",
               context.c_str());
   } else {
-    LOG_ERROR("CRITICAL: повторная ошибка доступа к хранилищу ключей (%s), защищённый режим уже активен",
-              context.c_str());
+    if (!gLastReasonValid || gLastReason != context) {
+      // Фиксируем новый контекст проблемы и сообщаем без повышения уровня до CRITICAL.
+      gLastReason = context;
+      gLastReasonValid = true;
+      SimpleLogger::logStatus("KEY SAFE MODE CONTEXT UPDATE: " + context);
+      LOG_WARN("Key safe mode: обновлён контекст проблемы (%s), защищённый режим уже активен",
+               context.c_str());
+    }
   }
 }
 

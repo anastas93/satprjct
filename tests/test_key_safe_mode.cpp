@@ -36,6 +36,29 @@ int main() {
   assert(keySafeModeHasReason());
   assert(keySafeModeReason() == "storage-missing");
 
+  // Повторная активация с тем же контекстом не должна порождать CRITICAL-сообщение.
+  LogHook::clear();
+  activateKeySafeMode("storage-missing");
+  auto duplicate = LogHook::getRecent(4);
+  for (const auto& entry : duplicate) {
+    assert(entry.text.find("повторная ошибка доступа") == std::string::npos);
+  }
+  assert(keySafeModeReason() == "storage-missing");
+
+  // Новый контекст при активном режиме должен обновляться без критического уровня.
+  LogHook::clear();
+  activateKeySafeMode("storage-degraded");
+  bool contextUpdated = false;
+  auto updateLogs = LogHook::getRecent(4);
+  for (const auto& entry : updateLogs) {
+    if (entry.text.find("KEY SAFE MODE CONTEXT UPDATE") != std::string::npos) {
+      contextUpdated = true;
+    }
+    assert(entry.text.find("повторная ошибка доступа") == std::string::npos);
+  }
+  assert(contextUpdated);
+  assert(keySafeModeReason() == "storage-degraded");
+
   // Восстанавливаем хранилище: safe mode должен вернуть исходное состояние шифрования.
   encryptionEnabled = false; // имитируем обнулённый глобальный флаг.
   keyStorageReady = false;
