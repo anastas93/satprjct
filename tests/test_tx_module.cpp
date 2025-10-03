@@ -304,6 +304,30 @@ int main() {
   assert(!noMore);
   assert(radioFlow.history.size() == 2);
 
+  // Проверяем, что увеличение ack_timeout во время ожидания не вызывает немедленный повтор
+  MockRadio radioGrowTimeout;
+  TxModule txGrowTimeout(radioGrowTimeout, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txGrowTimeout.setAckResponseDelay(0);
+  txGrowTimeout.setAckEnabled(true);
+  txGrowTimeout.setAckRetryLimit(1);
+  txGrowTimeout.setAckTimeout(10);
+  txGrowTimeout.setSendPause(0);
+  const char growMsg[] = "GROW";
+  txGrowTimeout.queue(reinterpret_cast<const uint8_t*>(growMsg), sizeof(growMsg));
+  bool firstGrowSend = txGrowTimeout.loop();
+  assert(firstGrowSend);
+  assert(radioGrowTimeout.history.size() == 1);
+  assert(txGrowTimeout.waiting_ack_);
+  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  txGrowTimeout.setAckTimeout(40);
+  bool noImmediateRepeat = txGrowTimeout.loop();
+  assert(!noImmediateRepeat);
+  assert(radioGrowTimeout.history.size() == 1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  bool retryAfterGrow = txGrowTimeout.loop();
+  assert(retryAfterGrow);
+  assert(radioGrowTimeout.history.size() == 2);
+
   // Проверяем, что при ack_timeout < pause повтор и следующий пакет не ждут паузу
   MockRadio radioPauseAck;
   TxModule txPauseAck(radioPauseAck, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);

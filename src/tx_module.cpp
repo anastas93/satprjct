@@ -389,8 +389,9 @@ uint32_t TxModule::getSendPause() const {
 }
 
 void TxModule::setAckTimeout(uint32_t timeout_ms) {
-  ack_timeout_ms_ = timeout_ms;
   auto now = std::chrono::steady_clock::now();
+  uint32_t previous_timeout = ack_timeout_ms_;
+  ack_timeout_ms_ = timeout_ms;
   if (ack_timeout_ms_ == 0) {
     last_attempt_ = now;
     bool had_waiting = waiting_ack_;
@@ -412,7 +413,24 @@ void TxModule::setAckTimeout(uint32_t timeout_ms) {
     scheduleFromArchive();
   } else {
     if (waiting_ack_) {
-      last_attempt_ = now - std::chrono::milliseconds(timeout_ms);
+      // При увеличении тайм-аута фиксируем реальное время последней передачи,
+      // чтобы не запускать повтор мгновенно после смены параметра.
+      if (previous_timeout == 0) {
+        last_attempt_ = now;
+      } else {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_attempt_);
+        if (elapsed.count() < 0) {
+          last_attempt_ = now;
+        } else if (ack_timeout_ms_ < previous_timeout &&
+                   elapsed.count() > static_cast<long>(ack_timeout_ms_)) {
+          // Если фактически уже превышен новый лимит — допускаем немедленный повтор.
+          last_attempt_ = now - std::chrono::milliseconds(ack_timeout_ms_);
+        } else {
+          if (last_attempt_ > now) {
+            last_attempt_ = now;
+          }
+        }
+      }
     }
     if (inflight_) {
       if (inflight_->is_plain) {
