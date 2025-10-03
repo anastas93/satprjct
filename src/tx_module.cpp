@@ -292,7 +292,6 @@ bool TxModule::loop() {
       if (buffers_[i].hasPending()) { buf = &buffers_[i]; qos_idx = static_cast<uint8_t>(i); break; }
     }
     if (!buf) {
-      DEBUG_LOG("TxModule: очереди пусты");
       return false;
     }
     std::vector<uint8_t> msg;
@@ -1048,3 +1047,4 @@ void TxModule::prepareExternalSend() {
 void TxModule::completeExternalSend() {
   last_send_ = std::chrono::steady_clock::now();
 }
+

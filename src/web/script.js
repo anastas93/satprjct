@@ -3632,7 +3632,7 @@ function getDeviceLogState() {
   if (!UI.state || typeof UI.state !== "object") UI.state = {};
   let state = UI.state.deviceLog;
   if (!state || typeof state !== "object") {
-    state = { initialized: false, loading: false, known: new Set(), lastId: 0, lastUptimeMs: null, queue: [] };
+    state = { initialized: false, loading: false, known: new Set(), lastId: 0, lastUptimeMs: null, timeOffsetMs: null, queue: [] };
     UI.state.deviceLog = state;
   }
   if (!(state.known instanceof Set)) {
@@ -3640,6 +3640,7 @@ function getDeviceLogState() {
   }
   if (!Number.isFinite(state.lastId)) state.lastId = 0;
   state.lastUptimeMs = Number.isFinite(state.lastUptimeMs) ? state.lastUptimeMs : null;
+  state.timeOffsetMs = Number.isFinite(state.timeOffsetMs) ? state.timeOffsetMs : null;
   if (!Array.isArray(state.queue)) state.queue = [];
   return state;
 }
@@ -3652,6 +3653,7 @@ function resetDeviceLogState(state, options) {
   target.known.clear();
   target.lastId = 0;
   target.lastUptimeMs = null;
+  target.timeOffsetMs = null;
   if (!options || options.preserveQueue !== true) {
     target.queue = [];
   } else if (!Array.isArray(target.queue)) {
@@ -9549,6 +9551,14 @@ function appendDeviceLogEntries(entries, opts) {
     const uptimeValue = Number(item.uptime != null ? item.uptime : item.uptimeMs);
     const uptime = Number.isFinite(uptimeValue) && uptimeValue >= 0 ? uptimeValue : null;
 
+    let timestamp = null;
+    if (uptime != null) {
+      if (state.timeOffsetMs == null) {
+        state.timeOffsetMs = Date.now() - uptime;
+      }
+      timestamp = state.timeOffsetMs + uptime;
+    }
+
     if (!resetApplied && !replace) {
       const knownId = id != null && state.known.has(id);
       const idWrapped = knownId && state.lastId > 0 && id < state.lastId;
@@ -9571,6 +9581,7 @@ function appendDeviceLogEntries(entries, opts) {
       uptimeMs: uptime,
       id: id,
       fragment,
+      timestamp,
     });
     if (uptime != null && (state.lastUptimeMs == null || uptime > state.lastUptimeMs)) {
       state.lastUptimeMs = uptime;
@@ -9661,12 +9672,15 @@ function debugLog(text, opts) {
     card.dataset.uptime = String(options.uptimeMs);
   }
 
-  const stampValue = options.timestamp != null
-    ? new Date(options.timestamp).toLocaleTimeString()
-    : (options.uptimeMs != null && Number.isFinite(options.uptimeMs)
-        ? formatDeviceUptime(options.uptimeMs)
-        : new Date().toLocaleTimeString());
+  const timestampValue = options.timestamp != null ? Number(options.timestamp) : NaN;
+  const hasTimestamp = Number.isFinite(timestampValue);
+  const stampValue = hasTimestamp
+    ? new Date(timestampValue).toLocaleTimeString()
+    : new Date().toLocaleTimeString();
   card.dataset.stamp = '[' + stampValue + ']';
+  if (hasTimestamp) {
+    card.dataset.timestamp = String(timestampValue);
+  }
 
   const meta = document.createElement('div');
   meta.className = 'debug-card__meta';
@@ -9715,7 +9729,7 @@ function debugLog(text, opts) {
       }
       UI.state.irqStatus.message = rawText;
       UI.state.irqStatus.uptimeMs = Number.isFinite(options.uptimeMs) ? Number(options.uptimeMs) : null;
-      UI.state.irqStatus.timestamp = Date.now();
+      UI.state.irqStatus.timestamp = hasTimestamp ? timestampValue : Date.now();
       renderChatIrqStatus();
     }
   }

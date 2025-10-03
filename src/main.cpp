@@ -870,7 +870,12 @@ void handleSseConnect() {
   }
   flushPendingLogEntries(); // сразу отдаём накопленные строки журнала новому подписчику
   flushPendingIrqStatus(true); // синхронизируем статус IRQ при подключении клиента
-  LOG_INFO("HTTP push: новое подключение");
+  static uint32_t lastPushLogMs = 0;
+  const int32_t sinceLastLog = static_cast<int32_t>(now - lastPushLogMs);
+  if (lastPushLogMs == 0 || sinceLastLog < 0 || sinceLastLog >= 30000) {
+    LOG_INFO("HTTP push: новое подключение");
+    lastPushLogMs = now;
+  }
 }
 
 // Выдача нового идентификатора для тестовых сообщений
