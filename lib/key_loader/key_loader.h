@@ -5,6 +5,13 @@
 
 namespace KeyLoader {
 
+#ifdef ARDUINO
+class __FlashStringHelper;
+using LogCallback = void (*)(const __FlashStringHelper* message);
+#else
+using LogCallback = void (*)(const char* message);
+#endif
+
 // Доступные варианты хранилища ключей
 enum class StorageBackend : uint8_t {
   UNKNOWN = 0,  // режим автоопределения или отсутствие хранилища
@@ -115,6 +122,9 @@ bool hasEphemeralSession();
 
 // Сброс активной эпемерной пары (зануление приватного ключа).
 void endEphemeralSession();
+
+// Установка пользовательского обработчика логов KeyLoader.
+void setLogCallback(LogCallback callback);
 
 }  // namespace KeyLoader
 

@@ -2841,6 +2841,10 @@ bool setupWifi() {
 
 void setup() {
   Serial.begin(115200);
+  // Подключаем KeyLoader к Serial, чтобы выгрузить накопленные сообщения после инициализации UART.
+  KeyLoader::setLogCallback([](const __FlashStringHelper* msg) {
+    Serial.println(msg);
+  });
   bool serialReady = waitForSerial(1500);                // ждём подключения Serial, но не блокируемся
 #if SR_HAS_ESP_COREDUMP
   gCoreDumpClearPending = true;

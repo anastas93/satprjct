@@ -823,6 +823,9 @@ g++ -I. tests/test_key_transfer.cpp \
   эпемерную пару X25519 и вернуть публичный ключ для включения в кадр обмена.
 - `bool hasEphemeralSession()` — проверить, активна ли временная пара для текущего сеанса.
 - `void endEphemeralSession()` — стереть эпемерный приватный ключ и сбросить состояние обмена.
+- `void setLogCallback(KeyLoader::LogCallback callback)` — передать обработчик логов (например,
+  после `Serial.begin()`), чтобы накопленные сообщения KeyLoader выгрузились безопасно и не
+  обращались к неинициализированному UART.
 
 ### `crypto/hkdf`
 - `Prk extract(const uint8_t* salt, size_t salt_len, const uint8_t* ikm, size_t ikm_len)` — стадия
