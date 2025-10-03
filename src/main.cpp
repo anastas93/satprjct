@@ -6,6 +6,9 @@
 #include <cstring> // для strlen
 #include <algorithm> // для std::equal
 #include <cstdio>    // для snprintf при подготовке JSON
+#include <cstdlib>   // для strtol/strtof при разборе HTTP-параметров
+#include <cerrno>    // для анализа ошибок strtol/strtof
+#include <cctype>    // для std::isspace при валидации остатка строки
 
 // --- Радио и модули ---
 #include "radio_sx1262.h"
@@ -2183,6 +2186,158 @@ String cmdRstsJson(int cnt) {
   return out;
 }
 
+// Универсальный разбор числа с плавающей запятой из HTTP-параметра с проверкой границ
+static bool parseFloatArgument(const String& rawInput,
+                               float minValue,
+                               float maxValue,
+                               float& outValue,
+                               String& errorMessage,
+                               const char* valueName,
+                               const char* units = nullptr,
+                               uint8_t precision = 2) {
+  String trimmed = rawInput;
+  trimmed.trim();
+  if (trimmed.length() == 0) {
+    errorMessage = String("Параметр ") + valueName + " не может быть пустым.";
+    return false;
+  }
+
+  errno = 0;
+  const char* start = trimmed.c_str();
+  char* end = nullptr;
+  float parsed = strtof(start, &end);
+  if (start == end) {
+    errorMessage = String("Параметр ") + valueName + " должен содержать число (получено \"") + rawInput + "\").";
+    return false;
+  }
+  if (errno == ERANGE) {
+    errorMessage = String("Значение параметра ") + valueName + " выходит за пределы допустимого диапазона.";
+    return false;
+  }
+  while (*end != '\0' && std::isspace(static_cast<unsigned char>(*end))) {
+    ++end;
+  }
+  if (*end != '\0') {
+    errorMessage = String("Лишние символы в параметре ") + valueName + " (\"" + rawInput + "\").";
+    return false;
+  }
+  if (parsed < minValue || parsed > maxValue) {
+    String range = String(minValue, precision);
+    range += "–";
+    range += String(maxValue, precision);
+    if (units && units[0] != '\0') {
+      range += " ";
+      range += units;
+    }
+    errorMessage = String("Недопустимое значение ") + valueName + " \"" + trimmed + "\" — допустимый диапазон " + range + ".";
+    return false;
+  }
+  outValue = parsed;
+  return true;
+}
+
+// Универсальный разбор целого числа из HTTP-параметра с проверкой остатка и диапазона
+static bool parseIntArgument(const String& rawInput,
+                             long minValue,
+                             long maxValue,
+                             long& outValue,
+                             String& errorMessage,
+                             const char* valueName) {
+  String trimmed = rawInput;
+  trimmed.trim();
+  if (trimmed.length() == 0) {
+    errorMessage = String("Параметр ") + valueName + " не может быть пустым.";
+    return false;
+  }
+
+  errno = 0;
+  const char* start = trimmed.c_str();
+  char* end = nullptr;
+  long parsed = strtol(start, &end, 10);
+  if (start == end) {
+    errorMessage = String("Параметр ") + valueName + " должен содержать целое число (получено \"") + rawInput + "\").";
+    return false;
+  }
+  if (errno == ERANGE) {
+    errorMessage = String("Число в параметре ") + valueName + " выходит за пределы диапазона типа long.";
+    return false;
+  }
+  while (*end != '\0' && std::isspace(static_cast<unsigned char>(*end))) {
+    ++end;
+  }
+  if (*end != '\0') {
+    errorMessage = String("Лишние символы в параметре ") + valueName + " (\"" + rawInput + "\").";
+    return false;
+  }
+  if (parsed < minValue || parsed > maxValue) {
+    errorMessage = String("Недопустимое значение ") + valueName + " \"" + trimmed + "\" — допустимый диапазон "
+                 + String(minValue) + "–" + String(maxValue) + ".";
+    return false;
+  }
+  outValue = parsed;
+  return true;
+}
+
+// Специализация разбора ширины полосы пропускания (BW/BF)
+static bool parseBandwidthArgument(const String& rawInput, float& outValue, String& errorMessage) {
+  static constexpr float kBandwidthMinKHz = 7.81f;
+  static constexpr float kBandwidthMaxKHz = 31.25f;
+  return parseFloatArgument(rawInput, kBandwidthMinKHz, kBandwidthMaxKHz, outValue, errorMessage, "BW", "кГц");
+}
+
+// Специализация разбора spreading factor
+static bool parseSpreadingFactorArgument(const String& rawInput, int& outValue, String& errorMessage) {
+  static constexpr long kSfMin = 5;
+  static constexpr long kSfMax = 12;
+  long parsed = 0;
+  if (!parseIntArgument(rawInput, kSfMin, kSfMax, parsed, errorMessage, "SF")) {
+    return false;
+  }
+  outValue = static_cast<int>(parsed);
+  return true;
+}
+
+// Специализация разбора coding rate
+static bool parseCodingRateArgument(const String& rawInput, int& outValue, String& errorMessage) {
+  static constexpr long kCrMin = 5;
+  static constexpr long kCrMax = 8;
+  long parsed = 0;
+  if (!parseIntArgument(rawInput, kCrMin, kCrMax, parsed, errorMessage, "CR")) {
+    return false;
+  }
+  outValue = static_cast<int>(parsed);
+  return true;
+}
+
+// Специализация разбора индекса канала для текущего банка
+static bool parseChannelArgument(const String& rawInput,
+                                 uint16_t bankSize,
+                                 uint16_t& outValue,
+                                 String& errorMessage) {
+  if (bankSize == 0) {
+    errorMessage = "Текущий банк не содержит каналов.";
+    return false;
+  }
+  long parsed = 0;
+  if (!parseIntArgument(rawInput, 0, static_cast<long>(bankSize) - 1, parsed, errorMessage, "канала")) {
+    return false;
+  }
+  outValue = static_cast<uint16_t>(parsed);
+  return true;
+}
+
+// Специализация разбора индекса мощности
+static bool parsePowerPresetArgument(const String& rawInput, uint8_t& outValue, String& errorMessage) {
+  static constexpr long kPowerPresetMin = 0;
+  static constexpr long kPowerPresetMax = 9;
+  long parsed = 0;
+  if (!parseIntArgument(rawInput, kPowerPresetMin, kPowerPresetMax, parsed, errorMessage, "предустановки мощности")) {
+    return false;
+  }
+  outValue = static_cast<uint8_t>(parsed);
+  return true;
+}
+
 // Обработка HTTP-команды вида /cmd?c=PI
 void handleCmdHttp() {
   String cmd = server.arg("c");
@@ -2198,35 +2353,82 @@ void handleCmdHttp() {
   }
   String resp;
   String contentType = "text/plain";
+  int statusCode = 200;
+  auto respondBadRequest = [&](const String& message) {
+    statusCode = 400;
+    resp = message;
+    LOG_WARN("HTTP /cmd %s: %s", cmd.c_str(), message.c_str());
+    std::string line = "ERR HTTP ";
+    line += cmd.c_str();
+    line += ": ";
+    line += message.c_str();
+    SimpleLogger::logStatus(line);
+  };
   if (cmd == "PI") {
     resp = cmdPing();
   } else if (cmd == "SEAR") {
     resp = cmdSear();
   } else if (cmd == "BF" || cmd == "BW") {
     if (server.hasArg("v")) {
-      float bw = server.arg("v").toFloat();
-      resp = radio.setBandwidth(bw) ? String("BF:OK") : String("BF:ERR");
+      float bwValue = 0.0f;
+      String error;
+      const String raw = server.arg("v");
+      if (!parseBandwidthArgument(raw, bwValue, error)) {
+        respondBadRequest(error);
+      } else if (!radio.setBandwidth(bwValue)) {
+        String message = String("Не удалось применить BW=") + String(bwValue, 2) + " кГц — значение не поддерживается устройством.";
+        respondBadRequest(message);
+      } else {
+        resp = String("BF:OK");
+      }
     } else {
       resp = String(radio.getBandwidth(), 2);
     }
   } else if (cmd == "SF") {
     if (server.hasArg("v")) {
-      int sf = server.arg("v").toInt();
-      resp = radio.setSpreadingFactor(sf) ? String("SF:OK") : String("SF:ERR");
+      int sfValue = 0;
+      String error;
+      const String raw = server.arg("v");
+      if (!parseSpreadingFactorArgument(raw, sfValue, error)) {
+        respondBadRequest(error);
+      } else if (!radio.setSpreadingFactor(sfValue)) {
+        String message = String("Не удалось применить SF=") + String(sfValue) + " — значение не поддерживается устройством.";
+        respondBadRequest(message);
+      } else {
+        resp = String("SF:OK");
+      }
     } else {
       resp = String(radio.getSpreadingFactor());
     }
   } else if (cmd == "CR") {
     if (server.hasArg("v")) {
-      int cr = server.arg("v").toInt();
-      resp = radio.setCodingRate(cr) ? String("CR:OK") : String("CR:ERR");
+      int crValue = 0;
+      String error;
+      const String raw = server.arg("v");
+      if (!parseCodingRateArgument(raw, crValue, error)) {
+        respondBadRequest(error);
+      } else if (!radio.setCodingRate(crValue)) {
+        String message = String("Не удалось применить CR=") + String(crValue) + " — значение не поддерживается устройством.";
+        respondBadRequest(message);
+      } else {
+        resp = String("CR:OK");
+      }
     } else {
       resp = String(radio.getCodingRate());
     }
   } else if (cmd == "PW") {
     if (server.hasArg("v")) {
-      int pw = server.arg("v").toInt();
-      resp = radio.setPower(pw) ? String("PW:OK") : String("PW:ERR");
+      uint8_t preset = 0;
+      String error;
+      const String raw = server.arg("v");
+      if (!parsePowerPresetArgument(raw, preset, error)) {
+        respondBadRequest(error);
+      } else if (!radio.setPower(preset)) {
+        String message = String("Не удалось применить предустановку мощности ") + String(preset) + ".";
+        respondBadRequest(message);
+      } else {
+        resp = String("PW:OK");
+      }
     } else {
       resp = String(radio.getPower());
     }
@@ -2244,20 +2446,34 @@ void handleCmdHttp() {
     }
   } else if (cmd == "BANK") {
     if (server.hasArg("v")) {
-      char b = server.arg("v")[0];
-      if (!radio.setBank(parseBankChar(b))) {
-        resp = String("BANK:ERR");
+      String raw = server.arg("v");
+      raw.trim();
+      if (raw.length() == 0) {
+        respondBadRequest("Параметр BANK не может быть пустым.");
+      } else {
+        const char letter = raw[0];
+        const char upper = static_cast<char>(std::toupper(static_cast<unsigned char>(letter)));
+        const bool known = (upper == 'E' || upper == 'W' || upper == 'T' || upper == 'A' || upper == 'H');
+        if (!known) {
+          respondBadRequest(String("Неизвестный банк каналов \"") + raw + "\". Допустимые значения: E, W, T, A, H.");
+        } else if (!radio.setBank(parseBankChar(letter))) {
+          respondBadRequest(String("Не удалось применить банк \"") + raw + "\".");
+        }
       }
     }
     if (resp.length() == 0) {
       resp = bankToLetter(radio.getBank());
     }
   } else if (cmd == "CH") {
-    int ch = server.arg("v").toInt();
     if (server.hasArg("v")) {
-      if (!radio.setChannel(ch)) {
-        resp = String("CH:ERR current=");
-        resp += String(radio.getChannel());
+      uint16_t parsedChannel = 0;
+      String error;
+      const String raw = server.arg("v");
+      if (!parseChannelArgument(raw, radio.getBankSize(), parsedChannel, error)) {
+        respondBadRequest(error);
+      } else if (!radio.setChannel(static_cast<uint8_t>(parsedChannel))) {
+        String message = String("Не удалось переключиться на канал ") + String(parsedChannel) + ".";
+        respondBadRequest(message);
       }
     }
     if (resp.length() == 0) {
@@ -2266,9 +2482,24 @@ void handleCmdHttp() {
   } else if (cmd == "CHLIST") {
     ChannelBank b = radio.getBank();
     if (server.hasArg("bank")) {
-      b = parseBankChar(server.arg("bank")[0]);
+      String rawBank = server.arg("bank");
+      rawBank.trim();
+      if (rawBank.length() == 0) {
+        respondBadRequest("Параметр bank не может быть пустым.");
+      } else {
+        const char letter = rawBank[0];
+        const char upper = static_cast<char>(std::toupper(static_cast<unsigned char>(letter)));
+        const bool known = (upper == 'E' || upper == 'W' || upper == 'T' || upper == 'A' || upper == 'H');
+        if (!known) {
+          respondBadRequest(String("Неизвестный банк каналов \"") + rawBank + "\". Допустимые значения: E, W, T, A, H.");
+        } else {
+          b = parseBankChar(letter);
+        }
+      }
     }
-    resp = cmdChlist(b);
+    if (statusCode == 200) {
+      resp = cmdChlist(b);
+    }
   } else if (cmd == "INFO") {
     resp = cmdInfo();
   } else if (cmd == "VER") {
@@ -2456,7 +2687,7 @@ void handleCmdHttp() {
   } else {
     resp = "UNKNOWN";
   }
-  server.send(200, contentType, resp);
+  server.send(statusCode, contentType, resp);
 }
 
 void handleVer() {

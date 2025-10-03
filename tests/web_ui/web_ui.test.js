@@ -354,3 +354,21 @@ test('logErrorEvent объединяет одинаковые ошибки', () 
   assert(secondMessage.includes('4000'));
 });
 
+// Проверяем, что deviceFetch возвращает текст ошибки из HTTP-ответа 400
+test('deviceFetch передаёт тело ответа при ошибке 400', async () => {
+  const errorText = 'Некорректное значение BW: допустимый диапазон 7.81–31.25 кГц.';
+  const fetchMock = async () => ({
+    ok: false,
+    status: 400,
+    async text() {
+      return errorText;
+    },
+  });
+  const { context: apiCtx } = createWebContext({
+    globals: { fetch: fetchMock, URL, URLSearchParams, AbortController },
+  });
+  const result = await apiCtx.deviceFetch('BW', { v: 'bad' }, 200);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, errorText);
+});
+

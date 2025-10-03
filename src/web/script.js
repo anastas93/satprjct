@@ -2230,7 +2230,19 @@ async function deviceFetch(cmd, params, timeoutMs) {
       const res = await fetch(requestUrl, { signal: ctrl.signal });
       clearTimeout(timer);
       if (!res.ok) {
-        lastErr = "HTTP " + res.status;
+        // Считываем тело ответа, чтобы вернуть понятное описание ошибки пользователю
+        let bodyText = '';
+        try {
+          bodyText = await res.text();
+        } catch (err) {
+          bodyText = '';
+        }
+        const trimmed = typeof bodyText === 'string' ? bodyText.trim() : '';
+        if (trimmed && !/<!DOCTYPE|<html/i.test(trimmed)) {
+          lastErr = trimmed;
+        } else {
+          lastErr = 'HTTP ' + res.status;
+        }
         continue;
       }
       const text = await res.text();
