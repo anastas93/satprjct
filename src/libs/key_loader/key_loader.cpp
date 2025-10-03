@@ -113,7 +113,8 @@ void flushBufferedLogs() {
   g_buffered_logs.swap(pending);
 }
 
-// Унифицированный вывод сообщения KeyLoader.
+// Унифицированный вывод сообщения KeyLoader с безопасной буферизацией до
+// готовности Serial.
 bool logMessage(FlashMessage msg) {
   flushBufferedLogs();
   if (emitLogDirect(msg)) {
@@ -1239,10 +1240,14 @@ void setLogCallback(LogCallback callback) {
   if (!g_log_callback) {
     return;
   }
-  if (!Serial) {
-    return;
-  }
+  // Сначала пробуем выгрузить буфер через пользовательский обработчик — он
+  // может быть готов раньше Serial (например, пересылка в ring-buffer).
   flushBufferedLogs();
+  if (!g_buffered_logs.empty() && Serial) {
+    // Если что-то осталось (обработчик вернул false), а UART уже инициализован,
+    // повторяем попытку прямого вывода через Serial.
+    flushBufferedLogs();
+  }
 }
 #else
 void setLogCallback(LogCallback) {}

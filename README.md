@@ -831,6 +831,8 @@ g++ -I. tests/test_key_transfer.cpp \
   после `Serial.begin()`), чтобы накопленные сообщения KeyLoader выгрузились безопасно и не
   обращались к неинициализированному UART; обработчик должен возвращать `true` при успешной
   доставке сообщения и `false`, если попытку требуется повторить позже (например, до появления USB).
+  Тип `KeyLoader::LogCallback` на Arduino получает `const __FlashStringHelper*`, чтобы не копировать
+  строки из PROGMEM, а в хостовых сборках принимает `const char*`.
 
 ### `crypto/hkdf`
 - `Prk extract(const uint8_t* salt, size_t salt_len, const uint8_t* ikm, size_t ikm_len)` — стадия
