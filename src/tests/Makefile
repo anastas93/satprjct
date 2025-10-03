@@ -8,11 +8,12 @@ LDLIBS ?= -lsodium
 BUILD_DIR ?= build
 
 SUPPORT_SRCS := ../libs_includes.cpp \
+                ../logger.cpp \
                 ../message_buffer.cpp \
                 ../tx_module.cpp \
                 ../rx_module.cpp
 SUPPORT_OBJS := $(patsubst ../%.cpp,$(BUILD_DIR)/support/%.o,$(SUPPORT_SRCS))
-TEST_SRCS ?= test_key_transfer.cpp
+TEST_SRCS ?= test_key_transfer.cpp test_key_exchange_compat.cpp
 TEST_BINS := $(patsubst %.cpp,$(BUILD_DIR)/%,$(TEST_SRCS))
 TEST_TARGETS := $(patsubst %.cpp,%,$(TEST_SRCS))
 
