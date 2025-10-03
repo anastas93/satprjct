@@ -60,6 +60,10 @@ size_t SerialMirror::write(const uint8_t* buffer, size_t size) {
   return serial_->write(buffer, size);
 }
 
+int SerialMirror::availableForWrite() {
+  return serial_ ? static_cast<int>(serial_->availableForWrite()) : 0;
+}
+
 int SerialMirror::available() {
   return serial_ ? serial_->available() : 0;
 }
