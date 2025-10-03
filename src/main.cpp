@@ -1194,6 +1194,14 @@ bool ensureKeyStorageReady(const char* reason) {
   return ok;
 }
 
+// Пытаемся автоматически восстановить доступ к хранилищу перед выполнением команд с ключами
+bool ensureKeyOperationsAvailable(const char* reason) {
+  if (keyOperationsAllowed()) {
+    return true;
+  }
+  return ensureKeyStorageReady(reason);
+}
+
 // Генерация случайного идентификатора сообщения для обмена ключами
 uint32_t generateKeyTransferMsgId() {
   uint32_t id = 0;
@@ -1463,7 +1471,7 @@ String cmdKeyStorage(const String& mode) {
 
 String cmdKeyGenSecure() {
   DEBUG_LOG("Key: генерация нового ключа");
-  if (!keyOperationsAllowed()) {
+  if (!ensureKeyOperationsAvailable("command KEYGEN")) {
     return keySafeModeErrorJson();
   }
   if (KeyLoader::generateLocalKey()) {
@@ -1480,7 +1488,7 @@ String cmdKeyGenSecure() {
 
 String cmdKeyGenPeer() {
   DEBUG_LOG("Key: повторное применение удалённого ключа");
-  if (!keyOperationsAllowed()) {
+  if (!ensureKeyOperationsAvailable("command KEYGEN PEER")) {
     return keySafeModeErrorJson();
   }
   if (KeyLoader::regenerateFromPeer()) {
@@ -1492,7 +1500,7 @@ String cmdKeyGenPeer() {
 
 String cmdKeyRestoreSecure() {
   DEBUG_LOG("Key: восстановление ключа из резервной копии");
-  if (!keyOperationsAllowed()) {
+  if (!ensureKeyOperationsAvailable("command KEYRESTORE")) {
     return keySafeModeErrorJson();
   }
   if (KeyLoader::restorePreviousKey()) {
@@ -1508,7 +1516,7 @@ String cmdKeySendSecure() {
 
 String cmdKeyReceiveSecure(const String& hex) {
   DEBUG_LOG("Key: применение удалённого ключа");
-  if (!keyOperationsAllowed()) {
+  if (!ensureKeyOperationsAvailable("command KEYRECV")) {
     return keySafeModeErrorJson();
   }
   std::array<uint8_t,32> remote{};
@@ -1525,7 +1533,7 @@ String cmdKeyReceiveSecure(const String& hex) {
 // Отправка корневого ключа через LoRa с использованием спецключа
 String cmdKeyTransferSendLora() {
   DEBUG_LOG("Key: отправка ключа по LoRa");
-  if (!keyOperationsAllowed()) {
+  if (!ensureKeyOperationsAvailable("command KEYTRANSFER SEND")) {
     return keySafeModeErrorJson();
   }
   auto state = KeyLoader::getState();
@@ -1588,7 +1596,7 @@ String cmdKeyTransferSendLora() {
 // Ожидание и приём корневого ключа через LoRa
 String cmdKeyTransferReceiveLora(KeyTransferCommandOrigin origin) {
   DEBUG_LOG("Key: ожидание ключа по LoRa");
-  if (!keyOperationsAllowed()) {
+  if (!ensureKeyOperationsAvailable("command KEYTRANSFER RECEIVE")) {
     return keySafeModeErrorJson();
   }
 
