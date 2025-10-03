@@ -80,6 +80,7 @@ using FlashMessage = const __FlashStringHelper*;
 
 LogCallback g_log_callback = nullptr;
 std::vector<FlashMessage> g_buffered_logs;
+bool g_flush_retry_pending = false;                   // требуется повторная попытка выгрузки буфера
 
 // Прямая доставка сообщения через пользовательский колбэк либо Serial.
 bool emitLogDirect(FlashMessage msg) {
@@ -96,11 +97,13 @@ bool emitLogDirect(FlashMessage msg) {
 }
 
 // Попытка выгрузить буфер накопленных сообщений.
-void flushBufferedLogs() {
+void drainBufferedLogs() {
   if (g_buffered_logs.empty()) {
+    g_flush_retry_pending = false;
     return;
   }
   if (!g_log_callback && !Serial) {
+    g_flush_retry_pending = true;
     return;
   }
   std::vector<FlashMessage> pending;
@@ -111,16 +114,18 @@ void flushBufferedLogs() {
     }
   }
   g_buffered_logs.swap(pending);
+  g_flush_retry_pending = !g_buffered_logs.empty();
 }
 
 // Унифицированный вывод сообщения KeyLoader с безопасной буферизацией до
 // готовности Serial.
 bool logMessage(FlashMessage msg) {
-  flushBufferedLogs();
+  drainBufferedLogs();
   if (emitLogDirect(msg)) {
     return true;
   }
   g_buffered_logs.push_back(msg);
+  g_flush_retry_pending = true;
   return false;
 }
 
@@ -1238,19 +1243,26 @@ const char* backendName(StorageBackend backend) {
 void setLogCallback(LogCallback callback) {
   g_log_callback = callback;
   if (!g_log_callback) {
+    g_flush_retry_pending = false;
     return;
   }
-  // Сначала пробуем выгрузить буфер через пользовательский обработчик — он
-  // может быть готов раньше Serial (например, пересылка в ring-buffer).
+  g_flush_retry_pending = true;
   flushBufferedLogs();
+}
+
+void flushBufferedLogs() {
+  if (!g_flush_retry_pending) {
+    return;                                             // нечего выгружать прямо сейчас
+  }
+  drainBufferedLogs();
   if (!g_buffered_logs.empty() && Serial) {
-    // Если что-то осталось (обработчик вернул false), а UART уже инициализован,
-    // повторяем попытку прямого вывода через Serial.
-    flushBufferedLogs();
+    // Если коллбэк не готов, но Serial уже активен, повторяем попытку прямого вывода.
+    drainBufferedLogs();
   }
 }
 #else
 void setLogCallback(LogCallback) {}
+void flushBufferedLogs() {}
 #endif
 
 } // namespace KeyLoader

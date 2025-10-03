@@ -238,6 +238,7 @@ static bool serialLineOverflow = false;                 // флаг перепо
 static unsigned long serialLastByteAtMs = 0;            // время последнего принятого символа
 static constexpr size_t kSerialLineMaxLength = 1024;    // максимальная длина текстовой команды
 static constexpr unsigned long kSerialLineTimeoutMs = 2000; // тайм-аут ожидания завершения строки (увеличен для ручного ввода)
+static bool serialWasReady = false;                     // отслеживаем переход готовности Serial
 
 // Преобразование массива байтов в hex-строку (верхний регистр)
 template <size_t N>
@@ -2901,6 +2902,7 @@ bool setupWifi() {
 void setup() {
   Serial.begin(115200);
   bool serialReady = waitForSerial(1500);                // ждём подключения Serial, но не блокируемся
+  serialWasReady = serialReady;                          // фиксируем текущее состояние для отслеживания перехода
   // После инициализации UART привязываем KeyLoader к Serial с проверкой доступности порта.
   KeyLoader::setLogCallback([](const __FlashStringHelper* msg) -> bool {
     if (!Serial) {
@@ -3025,6 +3027,11 @@ void loop() {
     maintainPushSessions();                 // поддержка активных push-клиентов
     flushPendingLogEntries();               // передаём накопленные логи без блокировок Serial
     flushPendingIrqStatus();                // публикуем последний статус IRQ при наличии подписчиков
+    const bool serialNowReady = static_cast<bool>(Serial); // отслеживаем появление USB-подключения
+    if (serialNowReady && !serialWasReady) {
+      KeyLoader::flushBufferedLogs();       // Serial стал доступен — пробуем выгрузить буфер KeyLoader
+    }
+    serialWasReady = serialNowReady;
     radio.loop();                           // обработка входящих пакетов
     rx.tickCleanup();                       // фоновая очистка очередей RX даже без новых кадров
     tx.loop();                              // обработка очередей передачи
