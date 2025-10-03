@@ -207,6 +207,7 @@ private:
   RxCallback rx_cb_;                     // пользовательский колбэк
   IrqLogCallback irqCallback_ = nullptr; // внешнее уведомление об IRQ-логе
   static RadioSX1262* instance_;         // указатель на текущий объект
+  static bool irqLoggerStarted_;         // отметка, что стартовый лог уже выведен
   volatile bool packetReady_ = false;    // флаг готовности пакета
   volatile bool irqNeedsRead_ = false;   // требуется ли чтение IRQ-регистров в основном потоке
   volatile bool irqLogPending_ = false;  // требуется ли вывести отложенный лог IRQ

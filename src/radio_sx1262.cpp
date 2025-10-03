@@ -19,6 +19,7 @@
 #endif
 
 RadioSX1262* RadioSX1262::instance_ = nullptr; // инициализация статического указателя
+bool RadioSX1262::irqLoggerStarted_ = false;   // отметка о выводе стартового сообщения
 
 // Максимальный размер пакета для SX1262
 static constexpr size_t MAX_PACKET_SIZE = 245;
@@ -119,6 +120,10 @@ RadioSX1262::RadioSX1262() : radio_(new Module(5, 26, 27, 25)) {}
 
 bool RadioSX1262::begin() {
   instance_ = this;               // сохраняем указатель на объект
+  if (!irqLoggerStarted_) {       // выводим стартовый лог только один раз
+    DEBUG_LOG("IRQ logger started");
+    irqLoggerStarted_ = true;
+  }
   return resetToDefaults();       // применяем настройки по умолчанию
 }
 
