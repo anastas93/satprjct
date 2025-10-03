@@ -14,6 +14,9 @@ bool* gStorageReadyFlag = nullptr;
 // Резерв предыдущего состояния шифрования на момент входа в safe mode.
 bool gEncryptionBackup = false;
 bool gEncryptionBackupValid = false;
+// Последний контекст, по которому был активирован safe mode.
+std::string gLastReason;
+bool gLastReasonValid = false;
 
 // Возвращает строку контекста с подстановкой значения по умолчанию.
 std::string contextOrDefault(const char* reason) {
@@ -46,6 +49,8 @@ void configureKeySafeModeController(std::function<void(bool)> applyEncryption,
   gSafeModeFlag = safeModeFlag;
   gStorageReadyFlag = storageReadyFlag;
   gEncryptionBackupValid = false; // сбрасываем резерв на случай повторной конфигурации
+  gLastReasonValid = false;
+  gLastReason.clear();
 }
 
 void disableEncryptionForSafeMode() {
@@ -70,6 +75,8 @@ void activateKeySafeMode(const char* reason) {
     return;
   }
   const std::string context = contextOrDefault(reason);
+  gLastReason = context;
+  gLastReasonValid = true;
   if (gStorageReadyFlag) {
     *gStorageReadyFlag = false;
   }
@@ -99,6 +106,8 @@ void deactivateKeySafeMode(const char* reason) {
     *gStorageReadyFlag = true;
   }
   if (!gSafeModeFlag || !*gSafeModeFlag) {
+    gLastReasonValid = false;
+    gLastReason.clear();
     return; // режим уже снят, дополнительных действий не требуется
   }
   *gSafeModeFlag = false;
@@ -122,4 +131,10 @@ void deactivateKeySafeMode(const char* reason) {
     LOG_ERROR("Key safe mode: автоматическое восстановление шифрования не выполнено (%s)",
               context.c_str());
   }
+  gLastReasonValid = false;
+  gLastReason.clear();
 }
+
+bool keySafeModeHasReason() { return gLastReasonValid; }
+
+std::string keySafeModeReason() { return gLastReasonValid ? gLastReason : std::string(); }
