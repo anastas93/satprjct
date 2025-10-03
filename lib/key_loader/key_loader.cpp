@@ -579,6 +579,52 @@ bool readPrimary(std::vector<uint8_t>& out) {
   auto sz = static_cast<size_t>(f.tellg());
   f.seekg(0, std::ios::beg);
   if (sz == 0) return false;
+
+  // Быстрая валидация размера файла, чтобы не выделять память под заведомо
+  // повреждённый или подозрительно большой контейнер ключей.
+  constexpr size_t kRecordBlobSize = RECORD_PACKED_SIZE + DIGEST_SIZE;
+  constexpr size_t kMaxRecordCount = 2;
+  constexpr size_t kMinFileSize = STORAGE_HEADER_SIZE + DIGEST_SIZE;
+  constexpr size_t kMaxFileSize = STORAGE_HEADER_SIZE +
+                                 kMaxRecordCount * kRecordBlobSize +
+                                 DIGEST_SIZE;
+  if (sz < kMinFileSize) {
+    std::cerr << "[KeyLoader] ключевой файл '" << KEY_FILE
+              << "' имеет недопустимый размер " << sz
+              << " байт (ожидалось не менее " << kMinFileSize << ")."
+              << std::endl;
+    return false;
+  }
+  if (sz > kMaxFileSize) {
+    std::cerr << "[KeyLoader] ключевой файл '" << KEY_FILE
+              << "' имеет подозрительно большой размер " << sz
+              << " байт (лимит " << kMaxFileSize << ")."
+              << std::endl;
+    return false;
+  }
+
+  size_t payload_with_header = sz - DIGEST_SIZE;
+  if (payload_with_header < STORAGE_HEADER_SIZE) {
+    std::cerr << "[KeyLoader] ключевой файл '" << KEY_FILE
+              << "' имеет неконсистентный размер: полезная нагрузка меньше"
+              << " заголовка." << std::endl;
+    return false;
+  }
+  size_t record_region = payload_with_header - STORAGE_HEADER_SIZE;
+  if (record_region > kMaxRecordCount * kRecordBlobSize) {
+    std::cerr << "[KeyLoader] ключевой файл '" << KEY_FILE
+              << "' содержит слишком большую область записей ("
+              << record_region << " байт)." << std::endl;
+    return false;
+  }
+  if (record_region % kRecordBlobSize != 0) {
+    std::cerr << "[KeyLoader] ключевой файл '" << KEY_FILE
+              << "' имеет размер " << sz
+              << " байт, что не согласуется с длиной упаковки записи."
+              << std::endl;
+    return false;
+  }
+
   out.resize(sz);
   f.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(sz));
   return f.good();
