@@ -16,6 +16,7 @@
 #include "libs/received_buffer/received_buffer.cpp" // буфер принятых сообщений
 #include "libs/key_loader/key_loader.cpp"           // загрузка и сохранение ключа
 #include "libs/key_transfer/key_transfer.cpp"       // передача корневого ключа по LoRa
+#include "libs/key_transfer_waiter/key_transfer_waiter.cpp" // конечная автоматика ожидания KEYTRANSFER
 #include "libs/config_loader/config_loader.cpp"     // загрузка конфигурации запуска
 #include "libs/crypto/ed25519.cpp"            // проверка подписей Ed25519 через libsodium
 #include "libs/crypto/aes_ccm.cpp"            // AES-CCM шифрование

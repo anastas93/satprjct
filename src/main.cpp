@@ -26,6 +26,7 @@
 #include "libs/crypto/chacha20_poly1305.h"        // AEAD ChaCha20-Poly1305
 #include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
 #include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
+#include "libs/key_transfer_waiter/key_transfer_waiter.h" // конечная автоматика ожидания KEYTRANSFER
 #include "libs/protocol/ack_utils.h"              // обработка ACK-пакетов
 #include "sse_buffered_writer.h"                  // буферизированная отправка SSE-кадров
 
@@ -190,6 +191,7 @@ void maintainPushSessions(bool forceKeepAlive = false);
 String cmdKeyTransferSendLora();
 bool enqueueTextMessage(const String& payload, uint32_t& outId, String& err);
 bool enqueueBinaryMessage(const uint8_t* data, size_t len, uint32_t& outId, String& err);
+void processKeyTransferReceiveState();
 
 // Состояние генератора тестовых входящих сообщений
 struct TestRxmState {
@@ -230,7 +232,10 @@ struct KeyTransferRuntime {
   String error;                         // код ошибки для ответа в HTTP/Serial
   uint32_t last_msg_id = 0;             // идентификатор последнего пакета
   bool legacy_peer = false;             // последний принятый кадр был в легаси-формате
+  bool ephemeral_active = false;        // активна ли подготовленная эпемерная пара
 } keyTransferRuntime;
+
+KeyTransferWaiter keyTransferWaiter;    // автомат ожидания результатов KEYTRANSFER
 
 // --- Состояние буферизации команд из Serial ---
 static String serialLineBuffer;                         // накапливаемая строка команды
@@ -281,6 +286,11 @@ String toHex(const std::vector<uint8_t>& data) {
     out += kHex[b & 0x0F];
   }
   return out;
+}
+
+// Вспомогательная конвертация Arduino String -> std::string
+static std::string toStdString(const String& value) {
+  return std::string(value.c_str());
 }
 
 // Экранирование строки для включения в JSON
@@ -1264,6 +1274,47 @@ String readVersionFile() {
 #endif
 }
 
+enum class KeyTransferCommandOrigin {
+  Http,
+  Serial,
+};
+
+static constexpr uint32_t kKeyTransferReceiveTimeoutMs = 8000; // тайм-аут ожидания кадра KEYTRANSFER
+
+// Формирование JSON с ошибкой обмена ключами
+String makeKeyTransferErrorJson(const String& code) {
+  String response = String(F("{\"error\":\"")) + code + F("\"");
+  if (code.equalsIgnoreCase("verify")) {
+    response += F(",\"message\":\"несовпадение идентификаторов ключей\"");
+  } else if (code.equalsIgnoreCase("timeout")) {
+    response += F(",\"message\":\"истёк тайм-аут ожидания кадра\"");
+  } else if (code.equalsIgnoreCase("busy")) {
+    response += F(",\"message\":\"предыдущий результат KEYTRANSFER ещё не получен\"");
+  } else if (code.equalsIgnoreCase("ephemeral")) {
+    response += F(",\"message\":\"не удалось подготовить эпемерную пару\"");
+  }
+  response += F("}");
+  return response;
+}
+
+// Формирование JSON для состояния ожидания
+String makeKeyTransferWaitingJson() {
+  String response = F("{\"status\":\"waiting\"");
+  if (keyTransferWaiter.timeoutMs() > 0) {
+    response += F(",\"timeout\":");
+    response += String(static_cast<unsigned long>(keyTransferWaiter.timeoutMs()));
+  }
+  if (keyTransferWaiter.isWaiting()) {
+    uint32_t now = millis();
+    uint32_t started = keyTransferWaiter.startedAtMs();
+    uint32_t elapsed = started ? static_cast<uint32_t>(now - started) : 0;
+    response += F(",\"elapsed\":");
+    response += String(static_cast<unsigned long>(elapsed));
+  }
+  response += F("}");
+  return response;
+}
+
 // Обработка специального кадра KEYTRANSFER; возвращает true, если пакет потреблён
 bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
   uint32_t msg_id = 0;
@@ -1284,6 +1335,11 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
       keyTransferRuntime.error = String("cert");
       keyTransferRuntime.waiting = false;
       keyTransferRuntime.completed = false;
+      if (keyTransferRuntime.ephemeral_active) {
+        KeyLoader::endEphemeralSession();
+        keyTransferRuntime.ephemeral_active = false;
+      }
+      keyTransferWaiter.finalizeError(toStdString(makeKeyTransferErrorJson(keyTransferRuntime.error)));
       SimpleLogger::logStatus("KEYTRANSFER CERT ERR");
       Serial.print("KEYTRANSFER: ошибка проверки сертификата: ");
       Serial.println(cert_error.c_str());
@@ -1300,6 +1356,11 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
     keyTransferRuntime.error = String("apply");
     keyTransferRuntime.waiting = false;
     keyTransferRuntime.completed = false;
+    if (keyTransferRuntime.ephemeral_active) {
+      KeyLoader::endEphemeralSession();
+      keyTransferRuntime.ephemeral_active = false;
+    }
+    keyTransferWaiter.finalizeError(toStdString(makeKeyTransferErrorJson(keyTransferRuntime.error)));
     SimpleLogger::logStatus("KEYTRANSFER ERR");
     Serial.println("KEYTRANSFER: ошибка применения удалённого ключа");
     return true;
@@ -1325,6 +1386,11 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
       keyTransferRuntime.completed = false;
       keyTransferRuntime.waiting = false;
       keyTransferRuntime.error = String("verify");
+      if (keyTransferRuntime.ephemeral_active) {
+        KeyLoader::endEphemeralSession();
+        keyTransferRuntime.ephemeral_active = false;
+      }
+      keyTransferWaiter.finalizeError(toStdString(makeKeyTransferErrorJson(keyTransferRuntime.error)));
       std::string log = "KEYTRANSFER MISMATCH ";
       log += toHex(local_id).c_str();
       log += "/";
@@ -1343,6 +1409,11 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
   keyTransferRuntime.completed = true;
   keyTransferRuntime.waiting = false;
   keyTransferRuntime.error = String();
+  if (keyTransferRuntime.ephemeral_active) {
+    KeyLoader::endEphemeralSession();
+    keyTransferRuntime.ephemeral_active = false;
+  }
+  keyTransferWaiter.finalizeSuccess(toStdString(makeKeyStateJson()));
   SimpleLogger::logStatus("KEYTRANSFER OK");
   Serial.println("KEYTRANSFER: получен корневой ключ по LoRa");
   return true;
@@ -1499,56 +1570,79 @@ String cmdKeyTransferSendLora() {
 }
 
 // Ожидание и приём корневого ключа через LoRa
-String cmdKeyTransferReceiveLora() {
+String cmdKeyTransferReceiveLora(KeyTransferCommandOrigin origin) {
   DEBUG_LOG("Key: ожидание ключа по LoRa");
   if (!keyOperationsAllowed()) {
     return keySafeModeErrorJson();
   }
+
+  // Если для текущего канала уже подготовлен результат — возвращаем его.
+  if (origin == KeyTransferCommandOrigin::Http && keyTransferWaiter.httpPending()) {
+    String ready = String(keyTransferWaiter.consumeHttp().c_str());
+    return ready.length() ? ready : makeKeyTransferWaitingJson();
+  }
+  if (origin == KeyTransferCommandOrigin::Serial && keyTransferWaiter.serialPending()) {
+    String ready = String(keyTransferWaiter.consumeSerial().c_str());
+    return ready.length() ? ready : makeKeyTransferWaitingJson();
+  }
+
+  // Если ожидание уже идёт, просто сообщаем статус.
+  if (keyTransferRuntime.waiting) {
+    return makeKeyTransferWaitingJson();
+  }
+
+  // Защита от перезапуска, пока другой канал не забрал результат.
+  if (keyTransferWaiter.hasPendingResult()) {
+    return makeKeyTransferErrorJson(String("busy"));
+  }
+
   std::array<uint8_t,32> prepared_ephemeral{};
-  KeyLoader::startEphemeralSession(prepared_ephemeral, false);  // гарантируем наличие пары для обмена
+  if (!KeyLoader::startEphemeralSession(prepared_ephemeral, false)) {
+    SimpleLogger::logStatus("KEYTRANSFER ERR EPHEM");
+    Serial.println("KEYTRANSFER: не удалось подготовить эпемерную пару для ожидания");
+    return makeKeyTransferErrorJson(String("ephemeral"));
+  }
+
   keyTransferRuntime.waiting = true;
   keyTransferRuntime.completed = false;
   keyTransferRuntime.error = String();
   keyTransferRuntime.last_msg_id = 0;
+  keyTransferRuntime.ephemeral_active = true;
+  uint32_t now = millis();
+  bool serialWatcher = (origin == KeyTransferCommandOrigin::Serial);
+  bool httpWatcher = (origin == KeyTransferCommandOrigin::Http);
+  keyTransferWaiter.start(now, kKeyTransferReceiveTimeoutMs, serialWatcher, httpWatcher);
   SimpleLogger::logStatus("KEYTRANSFER WAIT");
-  unsigned long start = millis();
-  const unsigned long timeout_ms = 8000;              // тайм-аут ожидания 8 секунд
-  while (millis() - start < timeout_ms) {
-    if (keyTransferRuntime.completed) {
-      keyTransferRuntime.completed = false;           // сбрасываем флаг на будущее
-      return makeKeyStateJson();
-    }
-    if (keyTransferRuntime.error.length()) {
-      String err = keyTransferRuntime.error;
-      keyTransferRuntime.error = String();
+  if (origin == KeyTransferCommandOrigin::Serial) {
+    Serial.println("KEYTRANSFER: ожидание кадра запущено");
+  }
+  return makeKeyTransferWaitingJson();
+}
+
+// Периодический опрос автомата ожидания KEYTRANSFER из loop()
+void processKeyTransferReceiveState() {
+  if (keyTransferRuntime.waiting && keyTransferWaiter.isWaiting()) {
+    uint32_t now = millis();
+    if (keyTransferWaiter.isExpired(now)) {
       keyTransferRuntime.waiting = false;
-      KeyLoader::endEphemeralSession();
-      String response = String("{\"error\":\"") + err + "\"";
-      if (err.equalsIgnoreCase("verify")) {
-        response += ",\"message\":\"несовпадение идентификаторов ключей\"";
+      keyTransferRuntime.completed = false;
+      keyTransferRuntime.error = String("timeout");
+      if (keyTransferRuntime.ephemeral_active) {
+        KeyLoader::endEphemeralSession();
+        keyTransferRuntime.ephemeral_active = false;
       }
-      response += "}";
-      return response;
+      String timeoutJson = makeKeyTransferErrorJson(keyTransferRuntime.error);
+      keyTransferWaiter.finalizeError(toStdString(timeoutJson));
+      SimpleLogger::logStatus("KEYTRANSFER TIMEOUT");
+      Serial.println("KEYTRANSFER: истёк тайм-аут ожидания кадра");
     }
-    radio.loop();                                     // даём шанс обработать входящие пакеты
-    tx.loop();                                        // обрабатываем очередь передачи
-    delay(5);                                         // небольшая пауза, чтобы не блокировать CPU
   }
-  keyTransferRuntime.waiting = false;
-  keyTransferRuntime.completed = false;
-  if (keyTransferRuntime.error.length()) {
-    String err = keyTransferRuntime.error;
-    keyTransferRuntime.error = String();
-    KeyLoader::endEphemeralSession();
-    String response = String("{\"error\":\"") + err + "\"";
-    if (err.equalsIgnoreCase("verify")) {
-      response += ",\"message\":\"несовпадение идентификаторов ключей\"";
+  if (keyTransferWaiter.serialPending()) {
+    String ready = String(keyTransferWaiter.consumeSerial().c_str());
+    if (ready.length()) {
+      Serial.println(ready);
     }
-    response += "}";
-    return response;
   }
-  KeyLoader::endEphemeralSession();
-  return String("{\"error\":\"timeout\"}");
 }
 
 // Отдаём страницу index.html
@@ -2740,7 +2834,7 @@ void handleCmdHttp() {
       resp = cmdKeyTransferSendLora();
       contentType = "application/json"; // Ответ в формате JSON
     } else if (cmdArg == "RECEIVE") {
-      resp = cmdKeyTransferReceiveLora();
+      resp = cmdKeyTransferReceiveLora(KeyTransferCommandOrigin::Http);
       contentType = "application/json"; // Ответ в формате JSON
     } else {
       resp = String("{\"error\":\"mode\"}");
@@ -3029,6 +3123,7 @@ void loop() {
     rx.tickCleanup();                       // фоновая очистка очередей RX даже без новых кадров
     tx.loop();                              // обработка очередей передачи
     processTestRxm();                       // генерация тестовых входящих сообщений
+    processKeyTransferReceiveState();       // неблокирующий контроль ожидания KEYTRANSFER
     const unsigned long now = millis();
     if (serialLineBuffer.length() > 0 && serialLastByteAtMs != 0 &&
         (now - serialLastByteAtMs) > kSerialLineTimeoutMs) {
@@ -3309,7 +3404,7 @@ void loop() {
       } else if (line.equalsIgnoreCase("KEYTRANSFER SEND")) {
         Serial.println(cmdKeyTransferSendLora());
       } else if (line.equalsIgnoreCase("KEYTRANSFER RECEIVE")) {
-        Serial.println(cmdKeyTransferReceiveLora());
+        Serial.println(cmdKeyTransferReceiveLora(KeyTransferCommandOrigin::Serial));
       } else if (line.startsWith("KEYSTORE")) {
         String arg = line.length() > 8 ? line.substring(8) : String();
         arg.trim();
