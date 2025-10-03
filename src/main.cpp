@@ -233,9 +233,17 @@ struct KeyTransferRuntime {
   uint32_t last_msg_id = 0;             // идентификатор последнего пакета
   bool legacy_peer = false;             // последний принятый кадр был в легаси-формате
   bool ephemeral_active = false;        // активна ли подготовленная эпемерная пара
+  uint32_t waitStartedAt = 0;           // отметка запуска ожидания (millis)
+  uint32_t waitDeadlineAt = 0;          // дедлайн завершения ожидания (millis, 0 = без тайм-аута)
 } keyTransferRuntime;
 
 KeyTransferWaiter keyTransferWaiter;    // автомат ожидания результатов KEYTRANSFER
+
+// Сброс временных меток ожидания KEYTRANSFER, чтобы новый цикл начинался "с чистого листа"
+static void resetKeyTransferWaitTiming() {
+  keyTransferRuntime.waitStartedAt = 0;
+  keyTransferRuntime.waitDeadlineAt = 0;
+}
 
 // --- Состояние буферизации команд из Serial ---
 static String serialLineBuffer;                         // накапливаемая строка команды
@@ -1301,16 +1309,37 @@ String makeKeyTransferErrorJson(const String& code) {
 // Формирование JSON для состояния ожидания
 String makeKeyTransferWaitingJson() {
   String response = F("{\"status\":\"waiting\"");
-  if (keyTransferWaiter.timeoutMs() > 0) {
+  uint32_t timeout_ms = keyTransferWaiter.timeoutMs();
+  if (timeout_ms > 0) {
     response += F(",\"timeout\":");
-    response += String(static_cast<unsigned long>(keyTransferWaiter.timeoutMs()));
+    response += String(static_cast<unsigned long>(timeout_ms));
   }
+  uint32_t now = millis();
+  uint32_t elapsed_ms = 0;
+  bool have_elapsed = false;
   if (keyTransferWaiter.isWaiting()) {
-    uint32_t now = millis();
     uint32_t started = keyTransferWaiter.startedAtMs();
-    uint32_t elapsed = started ? static_cast<uint32_t>(now - started) : 0;
-    response += F(",\"elapsed\":");
-    response += String(static_cast<unsigned long>(elapsed));
+    if (started != 0) {
+      elapsed_ms = static_cast<uint32_t>(now - started);
+      have_elapsed = true;
+      response += F(",\"elapsed\":");
+      response += String(static_cast<unsigned long>(elapsed_ms));
+    }
+    if (timeout_ms == 0 && keyTransferRuntime.waitDeadlineAt != 0) {
+      uint32_t remaining = keyTransferWaiter.isExpired(now)
+                               ? 0
+                               : static_cast<uint32_t>(keyTransferRuntime.waitDeadlineAt - now);
+      response += F(",\"remaining\":");
+      response += String(static_cast<unsigned long>(remaining));
+    }
+  }
+  if (timeout_ms > 0) {
+    uint32_t remaining = timeout_ms;
+    if (have_elapsed) {
+      remaining = (elapsed_ms >= timeout_ms) ? 0 : static_cast<uint32_t>(timeout_ms - elapsed_ms);
+    }
+    response += F(",\"remaining\":");
+    response += String(static_cast<unsigned long>(remaining));
   }
   response += F("}");
   return response;
@@ -1340,6 +1369,7 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
         KeyLoader::endEphemeralSession();
         keyTransferRuntime.ephemeral_active = false;
       }
+      resetKeyTransferWaitTiming();
       keyTransferWaiter.finalizeError(toStdString(makeKeyTransferErrorJson(keyTransferRuntime.error)));
       SimpleLogger::logStatus("KEYTRANSFER CERT ERR");
       Serial.print("KEYTRANSFER: ошибка проверки сертификата: ");
@@ -1361,6 +1391,7 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
       KeyLoader::endEphemeralSession();
       keyTransferRuntime.ephemeral_active = false;
     }
+    resetKeyTransferWaitTiming();
     keyTransferWaiter.finalizeError(toStdString(makeKeyTransferErrorJson(keyTransferRuntime.error)));
     SimpleLogger::logStatus("KEYTRANSFER ERR");
     Serial.println("KEYTRANSFER: ошибка применения удалённого ключа");
@@ -1391,6 +1422,7 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
         KeyLoader::endEphemeralSession();
         keyTransferRuntime.ephemeral_active = false;
       }
+      resetKeyTransferWaitTiming();
       keyTransferWaiter.finalizeError(toStdString(makeKeyTransferErrorJson(keyTransferRuntime.error)));
       std::string log = "KEYTRANSFER MISMATCH ";
       log += toHex(local_id).c_str();
@@ -1414,6 +1446,7 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
     KeyLoader::endEphemeralSession();
     keyTransferRuntime.ephemeral_active = false;
   }
+  resetKeyTransferWaitTiming();
   keyTransferWaiter.finalizeSuccess(toStdString(makeKeyStateJson()));
   SimpleLogger::logStatus("KEYTRANSFER OK");
   Serial.println("KEYTRANSFER: получен корневой ключ по LoRa");
@@ -1604,12 +1637,17 @@ String cmdKeyTransferReceiveLora(KeyTransferCommandOrigin origin) {
     return makeKeyTransferErrorJson(String("ephemeral"));
   }
 
+  // Настраиваем новое ожидание: сохраняем отметки времени и подключаем наблюдателей.
+  const uint32_t now = millis();
   keyTransferRuntime.waiting = true;
   keyTransferRuntime.completed = false;
   keyTransferRuntime.error = String();
   keyTransferRuntime.last_msg_id = 0;
   keyTransferRuntime.ephemeral_active = true;
-  uint32_t now = millis();
+  keyTransferRuntime.waitStartedAt = now;
+  keyTransferRuntime.waitDeadlineAt = (kKeyTransferReceiveTimeoutMs > 0)
+                                          ? static_cast<uint32_t>(now + kKeyTransferReceiveTimeoutMs)
+                                          : 0;
   bool serialWatcher = (origin == KeyTransferCommandOrigin::Serial);
   bool httpWatcher = (origin == KeyTransferCommandOrigin::Http);
   keyTransferWaiter.start(now, kKeyTransferReceiveTimeoutMs, serialWatcher, httpWatcher);
@@ -1622,22 +1660,39 @@ String cmdKeyTransferReceiveLora(KeyTransferCommandOrigin origin) {
 
 // Периодический опрос автомата ожидания KEYTRANSFER из loop()
 void processKeyTransferReceiveState() {
-  if (keyTransferRuntime.waiting && keyTransferWaiter.isWaiting()) {
-    uint32_t now = millis();
-    if (keyTransferWaiter.isExpired(now)) {
-      keyTransferRuntime.waiting = false;
-      keyTransferRuntime.completed = false;
-      keyTransferRuntime.error = String("timeout");
-      if (keyTransferRuntime.ephemeral_active) {
-        KeyLoader::endEphemeralSession();
-        keyTransferRuntime.ephemeral_active = false;
+  if (keyTransferRuntime.waiting) {
+    // При активном ожидании крутим радио, TX и push-сессии, чтобы интерфейс оставался отзывчивым.
+    radio.loop();
+    rx.tickCleanup();
+    tx.loop();
+    maintainPushSessions();
+    flushPendingLogEntries();
+    flushPendingIrqStatus();
+
+    if (keyTransferWaiter.isWaiting()) {
+      uint32_t now = millis();
+      if (keyTransferWaiter.isExpired(now)) {
+        keyTransferRuntime.waiting = false;
+        keyTransferRuntime.completed = false;
+        keyTransferRuntime.error = String("timeout");
+        if (keyTransferRuntime.ephemeral_active) {
+          KeyLoader::endEphemeralSession();
+          keyTransferRuntime.ephemeral_active = false;
+        }
+        resetKeyTransferWaitTiming();
+        String timeoutJson = makeKeyTransferErrorJson(keyTransferRuntime.error);
+        keyTransferWaiter.finalizeError(toStdString(timeoutJson));
+        SimpleLogger::logStatus("KEYTRANSFER TIMEOUT");
+        Serial.println("KEYTRANSFER: истёк тайм-аут ожидания кадра");
       }
-      String timeoutJson = makeKeyTransferErrorJson(keyTransferRuntime.error);
-      keyTransferWaiter.finalizeError(toStdString(timeoutJson));
-      SimpleLogger::logStatus("KEYTRANSFER TIMEOUT");
-      Serial.println("KEYTRANSFER: истёк тайм-аут ожидания кадра");
     }
   }
+
+  // После завершения ожидания чистим отметки, чтобы JSON не сообщал устаревшие дедлайны.
+  if (!keyTransferRuntime.waiting && keyTransferRuntime.waitDeadlineAt != 0 && !keyTransferWaiter.isWaiting()) {
+    resetKeyTransferWaitTiming();
+  }
+
   if (keyTransferWaiter.serialPending()) {
     String ready = String(keyTransferWaiter.consumeSerial().c_str());
     if (ready.length()) {
@@ -3140,9 +3195,11 @@ void loop() {
       KeyLoader::flushBufferedLogs();       // Serial стал доступен — пробуем выгрузить буфер KeyLoader
     }
     serialWasReady = serialNowReady;
-    radio.loop();                           // обработка входящих пакетов
-    rx.tickCleanup();                       // фоновая очистка очередей RX даже без новых кадров
-    tx.loop();                              // обработка очередей передачи
+    if (!keyTransferRuntime.waiting) {
+      radio.loop();                         // обработка входящих пакетов
+      rx.tickCleanup();                     // фоновая очистка очередей RX даже без новых кадров
+      tx.loop();                            // обработка очередей передачи
+    }
     processTestRxm();                       // генерация тестовых входящих сообщений
     processKeyTransferReceiveState();       // неблокирующий контроль ожидания KEYTRANSFER
     const unsigned long now = millis();

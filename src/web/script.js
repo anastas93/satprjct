@@ -94,6 +94,14 @@ const UI = {
   key: {
     state: null,
     lastMessage: "",
+    wait: {
+      active: false,
+      timer: null,
+      startedAt: 0,
+      deadlineAt: 0,
+      lastElapsed: null,
+      lastRemaining: null,
+    },
   },
   state: {
     activeTab: null,
@@ -2332,6 +2340,7 @@ function logSystemCommand(cmd, payload, state) {
   addChatMessage(saved.record, saved.index);
 }
 const DEVICE_COMMAND_TIMEOUT_MS = 4000; // Базовый тайм-аут для команд и фонового опроса
+const KEYTRANSFER_POLL_INTERVAL_MS = 700; // Интервал фонового опроса состояния KEYTRANSFER
 
 async function sendCommand(cmd, params, opts) {
   const options = opts || {};
@@ -8131,42 +8140,241 @@ function setKeyReceiveWaiting(active) {
   else btn.removeAttribute("aria-busy");
 }
 
+// Отмена таймера опроса KEYTRANSFER, чтобы не запускать параллельные запросы
+function clearKeyReceivePollTimer() {
+  const wait = UI.key && UI.key.wait;
+  if (!wait) return;
+  if (wait.timer) {
+    clearTimeout(wait.timer);
+    wait.timer = null;
+  }
+}
+
+// Полный сброс состояния ожидания KEYTRANSFER на стороне интерфейса
+function resetKeyReceiveWaitState() {
+  const wait = UI.key && UI.key.wait;
+  if (!wait) return;
+  clearKeyReceivePollTimer();
+  wait.active = false;
+  wait.startedAt = 0;
+  wait.deadlineAt = 0;
+  wait.lastElapsed = null;
+  wait.lastRemaining = null;
+}
+
+// Обновление текстового статуса ожидания с учётом прошедшего и оставшегося времени
+function updateKeyReceiveWaitMessage(payload) {
+  const wait = UI.key && UI.key.wait;
+  const info = payload || {};
+  const formatSeconds = (ms) => {
+    if (!Number.isFinite(ms)) return null;
+    const clamped = Math.max(ms, 0);
+    const seconds = clamped / 1000;
+    const rounded = Math.round(seconds * 10) / 10;
+    if (Math.abs(rounded - Math.round(rounded)) < 1e-4) {
+      return String(Math.round(rounded));
+    }
+    return rounded.toFixed(1);
+  };
+  const parts = ["Ожидание ключа по LoRa"];
+  const elapsedMs = Number(info.elapsed);
+  if (Number.isFinite(elapsedMs) && elapsedMs >= 0) {
+    const formatted = formatSeconds(elapsedMs);
+    if (formatted !== null) parts.push(`прошло ${formatted} c`);
+  }
+  let remainingMs = Number(info.remaining);
+  if (!Number.isFinite(remainingMs)) {
+    const timeoutMs = Number(info.timeout);
+    if (Number.isFinite(timeoutMs) && Number.isFinite(elapsedMs)) {
+      remainingMs = Math.max(timeoutMs - elapsedMs, 0);
+    }
+  }
+  if (Number.isFinite(remainingMs) && remainingMs > 0) {
+    const formatted = formatSeconds(remainingMs);
+    if (formatted !== null) parts.push(`осталось ~${formatted} c`);
+  }
+  UI.key.lastMessage = parts.join(" · ");
+  if (wait) {
+    wait.lastElapsed = Number.isFinite(elapsedMs) ? elapsedMs : null;
+    wait.lastRemaining = Number.isFinite(remainingMs) ? remainingMs : null;
+    wait.deadlineAt = Number.isFinite(remainingMs) ? Date.now() + remainingMs : 0;
+  }
+  renderKeyState(UI.key.state);
+}
+
+// Планирование следующего опроса с адаптивным интервалом
+function scheduleKeyReceivePoll(delayMs) {
+  const wait = UI.key && UI.key.wait;
+  if (!wait || !wait.active) return;
+  clearKeyReceivePollTimer();
+  let delay = Number(delayMs);
+  if (!Number.isFinite(delay) || delay <= 0) {
+    const remaining = Number(wait.lastRemaining);
+    if (Number.isFinite(remaining) && remaining > 0) {
+      delay = Math.max(Math.min(remaining / 2, 1000), 250);
+    } else {
+      delay = KEYTRANSFER_POLL_INTERVAL_MS;
+    }
+  }
+  wait.timer = setTimeout(() => {
+    wait.timer = null;
+    pollKeyTransferReceiveStatus({ silent: true }).catch((err) => {
+      console.warn("[key] ошибка фонового опроса KEYTRANSFER:", err);
+      if (wait.active) {
+        resetKeyReceiveWaitState();
+        setKeyReceiveWaiting(false);
+        status("✗ KEYTRANSFER RECEIVE");
+        note("KEYTRANSFER RECEIVE: ошибка фонового опроса");
+      }
+    });
+  }, delay);
+}
+
 async function requestKeyReceive() {
+  const wait = UI.key && UI.key.wait;
+  if (wait && wait.active) {
+    debugLog("KEYTRANSFER RECEIVE ↻ повторный опрос состояния");
+    try {
+      await pollKeyTransferReceiveStatus({ manual: true });
+    } catch (err) {
+      console.warn("[key] ручной опрос KEYTRANSFER:", err);
+      note("KEYTRANSFER RECEIVE: не удалось обновить состояние");
+    }
+    return;
+  }
+
   status("→ KEYTRANSFER RECEIVE");
   setKeyReceiveWaiting(true);
+  if (wait) {
+    wait.active = true;
+    wait.startedAt = Date.now();
+    wait.deadlineAt = 0;
+    wait.lastElapsed = null;
+    wait.lastRemaining = null;
+    clearKeyReceivePollTimer();
+  }
   UI.key.lastMessage = "Ожидание ключа по LoRa";
   renderKeyState(UI.key.state);
-  debugLog("KEYTRANSFER RECEIVE → ожидание ключа");
+  debugLog("KEYTRANSFER RECEIVE → запуск ожидания ключа");
   try {
-    const res = await deviceFetch("KEYTRANSFER RECEIVE", {}, 8000);
+    const res = await deviceFetch("KEYTRANSFER RECEIVE", {}, 2500);
     if (!res.ok) {
       debugLog("KEYTRANSFER RECEIVE ✗ " + res.error);
       status("✗ KEYTRANSFER RECEIVE");
       note("Ошибка KEYTRANSFER RECEIVE: " + res.error);
+      resetKeyReceiveWaitState();
+      setKeyReceiveWaiting(false);
       return;
     }
-    try {
-      debugLog("KEYTRANSFER RECEIVE ← " + res.text);
-      const data = JSON.parse(res.text);
-      if (data && data.error) {
-        if (data.error === "timeout") note("KEYTRANSFER: тайм-аут ожидания ключа");
-        else if (data.error === "apply") note("KEYTRANSFER: ошибка применения ключа");
-        else note("KEYTRANSFER RECEIVE: " + data.error);
-        status("✗ KEYTRANSFER RECEIVE");
-        return;
+    debugLog("KEYTRANSFER RECEIVE ← " + res.text);
+    let data = null;
+    let parseFailed = false;
+    const raw = res.text != null ? String(res.text).trim() : "";
+    if (raw) {
+      try {
+        data = JSON.parse(raw);
+      } catch (err) {
+        parseFailed = true;
       }
-      UI.key.state = data;
-      UI.key.lastMessage = "Получен внешний ключ";
-      renderKeyState(data);
-      debugLog("KEYTRANSFER RECEIVE ✓ ключ принят");
-      status("✓ KEYTRANSFER RECEIVE");
-    } catch (err) {
-      status("✗ KEYTRANSFER RECEIVE");
-      note("Некорректный ответ KEYTRANSFER RECEIVE");
     }
-  } finally {
+    if (!data || typeof data !== "object") {
+      status("✗ KEYTRANSFER RECEIVE");
+      note(parseFailed ? "Некорректный ответ KEYTRANSFER RECEIVE" : "Пустой ответ KEYTRANSFER RECEIVE");
+      resetKeyReceiveWaitState();
+      setKeyReceiveWaiting(false);
+      return;
+    }
+    if (data && data.error) {
+      if (data.error === "timeout") note("KEYTRANSFER: тайм-аут ожидания ключа");
+      else if (data.error === "apply") note("KEYTRANSFER: ошибка применения ключа");
+      else note("KEYTRANSFER RECEIVE: " + data.error);
+      status("✗ KEYTRANSFER RECEIVE");
+      resetKeyReceiveWaitState();
+      setKeyReceiveWaiting(false);
+      return;
+    }
+    if (data && data.status === "waiting") {
+      if (wait) {
+        wait.active = true;
+        wait.startedAt = Date.now();
+      }
+      updateKeyReceiveWaitMessage(data);
+      status("… KEYTRANSFER RECEIVE");
+      scheduleKeyReceivePoll(KEYTRANSFER_POLL_INTERVAL_MS);
+      return;
+    }
+    UI.key.state = data;
+    UI.key.lastMessage = "Получен внешний ключ";
+    renderKeyState(data);
+    debugLog("KEYTRANSFER RECEIVE ✓ ключ принят");
+    status("✓ KEYTRANSFER RECEIVE");
+    resetKeyReceiveWaitState();
+    setKeyReceiveWaiting(false);
+  } catch (err) {
+    debugLog("KEYTRANSFER RECEIVE ✗ " + String(err));
+    status("✗ KEYTRANSFER RECEIVE");
+    note("Ошибка KEYTRANSFER RECEIVE: " + String(err && err.message ? err.message : err));
+    resetKeyReceiveWaitState();
     setKeyReceiveWaiting(false);
   }
+}
+
+// Фоновый поллинг состояния KEYTRANSFER пока устройство не пришлёт итоговый ответ
+async function pollKeyTransferReceiveStatus(options) {
+  const wait = UI.key && UI.key.wait;
+  if (!wait || !wait.active) return;
+  const opts = options || {};
+  const res = await deviceFetch("KEYTRANSFER RECEIVE", {}, opts.timeoutMs || 3000);
+  if (!wait.active) return;
+  if (!res.ok) {
+    debugLog("KEYTRANSFER RECEIVE ✗ " + res.error);
+    status("✗ KEYTRANSFER RECEIVE");
+    note("Ошибка KEYTRANSFER RECEIVE: " + res.error);
+    resetKeyReceiveWaitState();
+    setKeyReceiveWaiting(false);
+    return;
+  }
+  debugLog("KEYTRANSFER RECEIVE ← " + res.text);
+  let data = null;
+  let parseFailed = false;
+  const raw = res.text != null ? String(res.text).trim() : "";
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch (err) {
+      parseFailed = true;
+    }
+  }
+  if (!wait.active) return;
+  if (!data || typeof data !== "object") {
+    status("✗ KEYTRANSFER RECEIVE");
+    note(parseFailed ? "Некорректный ответ KEYTRANSFER RECEIVE" : "Пустой ответ KEYTRANSFER RECEIVE");
+    resetKeyReceiveWaitState();
+    setKeyReceiveWaiting(false);
+    return;
+  }
+  if (data.error) {
+    if (data.error === "timeout") note("KEYTRANSFER: тайм-аут ожидания ключа");
+    else if (data.error === "apply") note("KEYTRANSFER: ошибка применения ключа");
+    else note("KEYTRANSFER RECEIVE: " + data.error);
+    status("✗ KEYTRANSFER RECEIVE");
+    resetKeyReceiveWaitState();
+    setKeyReceiveWaiting(false);
+    return;
+  }
+  if (data.status === "waiting") {
+    updateKeyReceiveWaitMessage(data);
+    status("… KEYTRANSFER RECEIVE");
+    scheduleKeyReceivePoll(KEYTRANSFER_POLL_INTERVAL_MS);
+    return;
+  }
+  UI.key.state = data;
+  UI.key.lastMessage = "Получен внешний ключ";
+  renderKeyState(data);
+  debugLog("KEYTRANSFER RECEIVE ✓ ключ принят");
+  status("✓ KEYTRANSFER RECEIVE");
+  resetKeyReceiveWaitState();
+  setKeyReceiveWaiting(false);
 }
 
 /* Наведение антенны (вкладка Pointing) */
