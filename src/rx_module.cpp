@@ -10,6 +10,7 @@
 #include "libs/crypto/chacha20_poly1305.h" // AEAD ChaCha20-Poly1305
 #include "libs/protocol/ack_utils.h" // проверка ACK для фильтрации буфера
 #include "default_settings.h"         // параметры по умолчанию
+#include "libs/config_loader/config_loader.h" // доступ к конфигурации запуска
 #include <vector>
 #include <algorithm>
 #include <array>
@@ -34,7 +35,9 @@ static constexpr size_t TAG_LEN = crypto::chacha20poly1305::TAG_SIZE; // дли�
 static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
 static constexpr size_t RS_ENC_LEN = 255;      // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
-static constexpr bool USE_RS = DefaultSettings::USE_RS; // использовать RS(255,223)
+static bool rsEnabled() {
+  return ConfigLoader::getConfig().radio.useRs; // актуальное состояние использования RS
+}
 static constexpr size_t CONV_TAIL_BYTES = 1;      // «хвост» для сброса регистра свёрточного кодера
 static constexpr std::chrono::seconds PENDING_CONV_TTL(10); // максимальное время жизни незавершённого блока
 static bool isDecimal(const std::string& s) {
@@ -425,7 +428,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
       }
       result_len = result_buf_.size();
     }
-  } else if (USE_RS && payload_buf_.size() == RS_ENC_LEN * 2) {
+  } else if (rsEnabled() && payload_buf_.size() == RS_ENC_LEN * 2) {
     if (USE_BIT_INTERLEAVER)
       bit_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // деинтерливинг бит
     if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), work_buf_)) {
@@ -440,7 +443,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
         result_len = RS_DATA_LEN;
       }
     }
-  } else if (USE_RS && payload_buf_.size() == RS_ENC_LEN) {
+  } else if (rsEnabled() && payload_buf_.size() == RS_ENC_LEN) {
     byte_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // байтовый деинтерливинг
     result_buf_.resize(RS_DATA_LEN);
     if (!rs255223::decode(payload_buf_.data(), result_buf_.data())) {
@@ -448,7 +451,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     } else {
       result_len = RS_DATA_LEN;
     }
-  } else if (!USE_RS && payload_buf_.size() == RS_DATA_LEN * 2) {
+  } else if (!rsEnabled() && payload_buf_.size() == RS_DATA_LEN * 2) {
     if (USE_BIT_INTERLEAVER)
       bit_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // деинтерливинг бит
     if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), result_buf_)) {

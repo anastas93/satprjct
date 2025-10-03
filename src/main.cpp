@@ -15,6 +15,7 @@
 #include "tx_module.h"
 #include "rx_module.h" // модуль приёма
 #include "default_settings.h"
+#include "libs/config_loader/config_loader.h" // загрузка конфигурации из файла
 
 // --- Вспомогательные библиотеки ---
 #include "libs/text_converter/text_converter.h"   // конвертер UTF-8 -> CP1251
@@ -115,14 +116,15 @@ TxModule tx(radio, std::array<size_t,4>{
   DefaultSettings::TX_QUEUE_CAPACITY});
 RxModule rx;                // модуль приёма
 ReceivedBuffer recvBuf;     // буфер полученных сообщений
-bool ackEnabled = DefaultSettings::USE_ACK; // флаг автоматической отправки ACK
-bool encryptionEnabled = DefaultSettings::USE_ENCRYPTION; // режим шифрования
+static const ConfigLoader::Config& gConfig = ConfigLoader::getConfig(); // глобальная конфигурация
+bool ackEnabled = gConfig.radio.useAck; // флаг автоматической отправки ACK
+bool encryptionEnabled = gConfig.radio.useEncryption; // режим шифрования
 bool keyStorageReady = false;               // флаг успешной инициализации хранилища ключей
 bool keySafeModeActive = false;             // признак защищённого режима работы без доступа к ключам
-uint8_t ackRetryLimit = DefaultSettings::ACK_RETRY_LIMIT; // число повторов при ожидании ACK
+uint8_t ackRetryLimit = gConfig.radio.ackRetryLimit; // число повторов при ожидании ACK
 static constexpr uint32_t kAckDelayMinMs = 0;             // минимально допустимая задержка ответа ACK
 static constexpr uint32_t kAckDelayMaxMs = 5000;          // максимально допустимая задержка ответа ACK
-uint32_t ackResponseDelayMs = DefaultSettings::ACK_RESPONSE_DELAY_MS; // текущая задержка перед ACK
+uint32_t ackResponseDelayMs = gConfig.radio.ackResponseDelayMs; // текущая задержка перед ACK
 bool lightPackMode = false;             // режим прямой передачи текста без префикса
 bool testModeEnabled = false;           // флаг тестового режима SendMsg_BR/received_msg
 uint8_t testModeLocalCounter = 0;       // локальный счётчик пакетов для тестового режима
@@ -1082,7 +1084,7 @@ String makeKeyStateJson() {
     json += "\"";
   }
   json += ",\"baseKey\":\"";
-  json += toHex(DefaultSettings::DEFAULT_KEY);
+  json += toHex(gConfig.keys.defaultKey);
   json += "\"";
   json += ",\"safeMode\":";
   json += keySafeModeActive ? "true" : "false";
@@ -2725,7 +2727,7 @@ void handleLogHistory() {
 
 // Формирование SSID точки доступа с коротким уникальным идентификатором устройства
 String makeAccessPointSsid() {
-  String base = String(DefaultSettings::WIFI_SSID);
+  String base = String(gConfig.wifi.ssid.c_str());
 #if defined(ARDUINO)
   uint32_t suffix = 0;
 #if defined(ESP32)
@@ -2774,7 +2776,7 @@ bool setupWifi() {
       WiFi.mode(WIFI_AP);
       WiFi.setSleep(false);
     }
-    apStarted = WiFi.softAP(ssid.c_str(), DefaultSettings::WIFI_PASS);
+    apStarted = WiFi.softAP(ssid.c_str(), gConfig.wifi.password.c_str());
   }
   if (!apStarted) {                                      // создаём AP
     LOG_ERROR("Wi-Fi: не удалось запустить точку доступа %s", ssid.c_str());
@@ -2782,9 +2784,18 @@ bool setupWifi() {
   }
 
   // Задаём статический IP 192.168.4.1 для точки доступа
-  IPAddress local_ip(192, 168, 4, 1);
-  IPAddress gateway(192, 168, 4, 1);
-  IPAddress subnet(255, 255, 255, 0);
+  IPAddress local_ip;
+  IPAddress gateway;
+  IPAddress subnet;
+  bool ipOk = local_ip.fromString(gConfig.wifi.ip.c_str());
+  bool gatewayOk = gateway.fromString(gConfig.wifi.gateway.c_str());
+  bool subnetOk = subnet.fromString(gConfig.wifi.subnet.c_str());
+  if (!ipOk || !gatewayOk || !subnetOk) {
+    LOG_WARN("Wi-Fi: некорректные параметры IP в конфигурации, используется стандартный профиль");
+    local_ip = IPAddress(192, 168, 4, 1);
+    gateway = IPAddress(192, 168, 4, 1);
+    subnet = IPAddress(255, 255, 255, 0);
+  }
   if (!WiFi.softAPConfig(local_ip, gateway, subnet)) {
     LOG_WARN("Wi-Fi: не удалось применить статический IP, используется конфигурация по умолчанию");
   }
@@ -2870,9 +2881,9 @@ void setup() {
   }
   tx.setAckEnabled(ackEnabled);
   tx.setAckRetryLimit(ackRetryLimit);
-  tx.setSendPause(DefaultSettings::SEND_PAUSE_MS);
-  tx.setAckTimeout(DefaultSettings::ACK_TIMEOUT_MS);
-  ackResponseDelayMs = DefaultSettings::ACK_RESPONSE_DELAY_MS; // фиксируем стартовую задержку ACK
+  tx.setSendPause(gConfig.radio.sendPauseMs);
+  tx.setAckTimeout(gConfig.radio.ackTimeoutMs);
+  ackResponseDelayMs = gConfig.radio.ackResponseDelayMs; // фиксируем стартовую задержку ACK
   tx.setAckResponseDelay(ackResponseDelayMs);
   tx.setEncryptionEnabled(encryptionEnabled);
   rx.setEncryptionEnabled(encryptionEnabled);
