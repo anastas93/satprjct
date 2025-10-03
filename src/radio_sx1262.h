@@ -105,6 +105,8 @@ public:
   uint8_t randomByte();
   // Получить последний код ошибки RadioLib
   int16_t getLastErrorCode() const { return lastError_; }
+  static constexpr int16_t ERR_TIMEOUT = IRadio::ERR_TIMEOUT; // Propagated radio timeout error
+  static constexpr int16_t ERR_PING_TIMEOUT = -31999;         // Ping-specific timeout result
     // Выбор банка каналов (EAST, WEST, TEST, ALL)
     bool setBank(ChannelBank bank);
     // Выбор канала 0-166 в зависимости от банка
@@ -250,11 +252,10 @@ private:
   static const int8_t SF_[8];
   static const int8_t CR_[4];
 
-  static constexpr int16_t ERR_TIMEOUT = IRadio::ERR_TIMEOUT; // тайм-аут захвата мьютекса
-  static constexpr int16_t ERR_PING_TIMEOUT = -31999;         // истёк тайм-аут ожидания ответа
   static constexpr int16_t ERR_INVALID_ARGUMENT = -31998;     // некорректные параметры вызова
   static constexpr uint32_t LOCK_TIMEOUT_MS = 500;    // тайм-аут ожидания мьютекса, мс
 
+  friend class ScopedRadioLock;
   int16_t lockRadio(TickType_t timeout);
   void unlockRadio();
 #if defined(ARDUINO)

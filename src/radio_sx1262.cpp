@@ -24,7 +24,6 @@ bool RadioSX1262::irqLoggerStarted_ = false;   // отметка о выводе
 // Максимальный размер пакета для SX1262
 static constexpr size_t MAX_PACKET_SIZE = 245;
 
-namespace {
 // RAII-обёртка для автоматического освобождения мьютекса радиомодуля
 class ScopedRadioLock {
 public:
@@ -45,7 +44,6 @@ private:
   RadioSX1262& radio_;
   bool locked_ = false;
 };
-} // namespace
 
 // Таблицы частот приёма и передачи для всех банков
 // Восточный банк
@@ -523,7 +521,6 @@ void RadioSX1262::onDio1Static() {
   }
 }
 
-namespace {
 // Формирование человекочитаемой строки с активными IRQ-флагами без динамических аллокаций
 size_t formatIrqLogMessage(uint32_t flags, char* buffer, size_t capacity) {
   if (!buffer || capacity == 0) {
@@ -609,7 +606,6 @@ size_t formatIrqLogMessage(uint32_t flags, char* buffer, size_t capacity) {
   }
   return std::strlen(buffer);
 }
-} // namespace
 
 void RadioSX1262::logIrqFlags(uint32_t flags) {
   char message[224];
