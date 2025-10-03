@@ -351,5 +351,25 @@ int main() {
   bool nextPauseSend = txPauseAck.loop();
   assert(nextPauseSend);
   assert(radioPauseAck.history.size() == 3);
+
+  // Проверяем, что новая задержка ACK применяется к уже поставленному подтверждению
+  MockRadio radioAckDelay;
+  TxModule txAckDelay(radioAckDelay, std::array<size_t,4>{10,10,10,10}, PayloadMode::SMALL);
+  txAckDelay.setAckResponseDelay(0);
+  const uint8_t ack_payload = protocol::ack::MARKER;
+  txAckDelay.queue(&ack_payload, 1);
+  assert(!txAckDelay.ack_queue_.empty());
+  txAckDelay.setAckResponseDelay(20); // увеличиваем задержку до 20 мс
+  auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+      txAckDelay.next_ack_send_time_ - std::chrono::steady_clock::now());
+  assert(remaining.count() >= 0); // время отправки должно быть в будущем
+  bool delayed = txAckDelay.processImmediateAck();
+  assert(delayed); // ACK остался ждать своей очереди
+  assert(radioAckDelay.history.empty());
+  assert(!txAckDelay.ack_queue_.empty());
+  std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  bool sentAfterDelay = txAckDelay.processImmediateAck();
+  assert(sentAfterDelay);
+  assert(radioAckDelay.history.size() == 1);
   return 0;
 }

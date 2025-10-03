@@ -454,8 +454,11 @@ uint32_t TxModule::getAckTimeout() const {
 }
 
 void TxModule::setAckResponseDelay(uint32_t delay_ms) {
-  ack_delay_ms_ = delay_ms;                         // запоминаем новую задержку ответа
-  next_ack_send_time_ = std::chrono::steady_clock::now(); // сбрасываем таймер для последующего ACK
+  ack_delay_ms_ = delay_ms;                                             // запоминаем новую задержку ответа
+  auto now = std::chrono::steady_clock::now();                          // фиксируем текущий момент времени
+  next_ack_send_time_ = ack_delay_ms_ == 0
+                            ? now
+                            : now + std::chrono::milliseconds(ack_delay_ms_); // выдерживаем новую паузу
 }
 
 void TxModule::reloadKey() {
