@@ -463,7 +463,16 @@ size_t formatIrqLogMessage(uint32_t flags, char* buffer, size_t capacity) {
       {RADIOLIB_SX126X_IRQ_HEADER_VALID, "IRQ_HEADER_VALID", "корректный LoRa-заголовок принят"},
       {RADIOLIB_SX126X_IRQ_HEADER_ERR, "IRQ_HEADER_ERR", "ошибка заголовка (битые биты/несовпадение CRC заголовка)"},
       {RADIOLIB_SX126X_IRQ_CRC_ERR, "IRQ_CRC_ERR", "ошибка CRC полезной нагрузки"},
+#if defined(RADIOLIB_IRQ_RX_TIMEOUT) || defined(RADIOLIB_IRQ_TX_TIMEOUT)
+#ifdef RADIOLIB_IRQ_RX_TIMEOUT
+      {RADIOLIB_IRQ_RX_TIMEOUT, "IRQ_RX_TIMEOUT", "истёк таймаут ожидания приёма"},
+#endif
+#ifdef RADIOLIB_IRQ_TX_TIMEOUT
+      {RADIOLIB_IRQ_TX_TIMEOUT, "IRQ_TX_TIMEOUT", "истёк таймаут попытки передачи"},
+#endif
+#else
       {RADIOLIB_SX126X_IRQ_TIMEOUT, "IRQ_RX_TX_TIMEOUT", "сработал таймаут приёма/передачи"},
+#endif
       {RADIOLIB_SX126X_IRQ_CAD_DONE, "IRQ_CAD_DONE", "завершено сканирование канала (Channel Activity Detection)"},
       {RADIOLIB_SX126X_IRQ_CAD_DETECTED, "IRQ_CAD_DETECTED", "в канале обнаружена активность LoRa"},
   };
