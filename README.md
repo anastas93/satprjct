@@ -76,7 +76,7 @@
 ## Структура репозитория
 - `tx_module.cpp`, `rx_module.cpp`, `message_buffer.cpp` — ядро обмена сообщениями;
 - `radio_interface.h`, `radio_sx1262.*` — абстракция радиоинтерфейса и реализация для SX1262;
-- `src/main.cpp` — основной скетч PlatformIO с HTTP-интерфейсом, обработкой Serial и интеграцией всех модулей;
+- `src/main.cpp` — основной скетч PlatformIO с HTTP-интерфейсом, обработкой Serial и интеграцией всех модулей. В файле реализованы вспомогательные функции `parseFloatArgument`, `parseIntArgument`, `parseBandwidthArgument`, `parseSpreadingFactorArgument`, `parseCodingRateArgument`, `parseChannelArgument` и `parsePowerPresetArgument`, которые проверяют диапазоны числовых HTTP-параметров `/cmd` и формируют человекочитаемые сообщения об ошибках;
 - `web/` — встроенный клиент с вкладками Chat/Antenna helper/Channels/Settings/Security/Debug;
 - `key_storage/` — файлы с ключами шифрования;
 - `libs/` — сторонние и вспомогательные библиотеки (кодек, интерливинг, логгер и т.д.);

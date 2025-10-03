@@ -301,6 +301,7 @@ function createWebContext(options = {}) {
     'ACK_RETRY_MAX',
     'logErrorEvent',
     'ERROR_LOG_REPEAT_WINDOW_MS',
+    'deviceFetch',
   ];
   for (const name of exportNames) {
     try {
