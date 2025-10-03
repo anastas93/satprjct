@@ -229,7 +229,10 @@ bool TxModule::loop() {
     } else {
       auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_attempt_);
       if (elapsed.count() < static_cast<long>(ack_timeout_ms_)) {
-        radio_.ensureReceiveMode();
+        const int16_t ensureState = radio_.ensureReceiveMode();
+        if (ensureState != IRadio::ERR_NONE) {
+          DEBUG_LOG_VAL("TxModule: ensureReceiveMode в ожидании ACK вернул код=", ensureState);
+        }
         return false;
       }
       if (inflight_) {
@@ -267,9 +270,12 @@ bool TxModule::loop() {
       last_send_ = now - std::chrono::milliseconds(pause_ms_); // отматываем таймер, чтобы не ждать паузу
     } else if (now - last_send_ < std::chrono::milliseconds(pause_ms_)) {
       DEBUG_LOG("TxModule: пауза");
-      radio_.ensureReceiveMode();
-      return false;
-    }
+        const int16_t ensureState = radio_.ensureReceiveMode();
+        if (ensureState != IRadio::ERR_NONE) {
+          DEBUG_LOG_VAL("TxModule: ensureReceiveMode при повторном запуске ожидания вернул код=", ensureState);
+        }
+        return false;
+      }
   }
 
   if (!ack_enabled_ && !delayed_ && !archive_.empty() && !inflight_) {
@@ -487,7 +493,16 @@ bool TxModule::transmit(PendingMessage& message) {
   }
 
   if (message.is_plain) {
-    radio_.send(msg.data(), msg.size());
+    const int16_t sendState = radio_.send(msg.data(), msg.size());
+    if (sendState != IRadio::ERR_NONE) {
+      if (sendState == IRadio::ERR_TIMEOUT) {
+        DEBUG_LOG("TxModule: plain-пакет отложен — радио занято");
+        message.next_allowed_send = now + std::chrono::milliseconds(5);
+      } else {
+        DEBUG_LOG_VAL("TxModule: plain-пакет не отправлен, код=", sendState);
+      }
+      return false;
+    }
     last_send_ = now;
     if (pause_ms_ != 0) {
       message.next_allowed_send = now + std::chrono::milliseconds(pause_ms_);
@@ -557,7 +572,16 @@ bool TxModule::transmit(PendingMessage& message) {
     return false;
   }
 
-  radio_.send(frame_buf.data(), frame_size);
+  const int16_t sendState = radio_.send(frame_buf.data(), frame_size);
+  if (sendState != IRadio::ERR_NONE) {
+    if (sendState == IRadio::ERR_TIMEOUT) {
+      DEBUG_LOG("TxModule: фрагмент отложен — радио занято");
+      message.next_allowed_send = now + std::chrono::milliseconds(5);
+    } else {
+      DEBUG_LOG_VAL("TxModule: ошибка отправки фрагмента, код=", sendState);
+    }
+    return false;
+  }
   last_send_ = now;
   if (pause_ms_ != 0) {
     message.next_allowed_send = now + std::chrono::milliseconds(pause_ms_);
@@ -795,7 +819,10 @@ bool TxModule::canSendFragment(PendingMessage& message, const std::chrono::stead
     message.next_allowed_send = target;
   }
   if (now < target) {
-    radio_.ensureReceiveMode();
+    const int16_t ensureState = radio_.ensureReceiveMode();
+    if (ensureState != IRadio::ERR_NONE) {
+      DEBUG_LOG_VAL("TxModule: ensureReceiveMode в canSendFragment вернул код=", ensureState);
+    }
     return false;
   }
   return true;
@@ -882,7 +909,10 @@ bool TxModule::waitForPauseWindow() {
   auto target = last_send_ + std::chrono::milliseconds(pause_ms_);
   auto now = std::chrono::steady_clock::now();
   if (now >= target) return true;
-  radio_.ensureReceiveMode();
+  const int16_t ensureState = radio_.ensureReceiveMode();
+  if (ensureState != IRadio::ERR_NONE) {
+    DEBUG_LOG_VAL("TxModule: ensureReceiveMode в ожидании окна паузы вернул код=", ensureState);
+  }
   return false;
 }
 
@@ -890,7 +920,10 @@ bool TxModule::processImmediateAck() {
   if (ack_queue_.empty()) return false;            // нечего отправлять
   auto now = std::chrono::steady_clock::now();
   if (ack_delay_ms_ != 0 && now < next_ack_send_time_) {
-    radio_.ensureReceiveMode();                    // выдерживаем паузу перед ответом
+    const int16_t ensureState = radio_.ensureReceiveMode(); // выдерживаем паузу перед ответом
+    if (ensureState != IRadio::ERR_NONE) {
+      DEBUG_LOG_VAL("TxModule: ensureReceiveMode при ожидании ACK вернул код=", ensureState);
+    }
     return true;                                   // сообщаем циклу, что ACK ещё ожидает отправки
   }
   PendingMessage ack = std::move(ack_queue_.front());
