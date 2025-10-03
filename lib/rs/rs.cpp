@@ -1,6 +1,7 @@
 #include "rs.h"
 #include <array>
 #include <cstring>
+#include <stdexcept>
 
 // Поле GF(256) с примитивным полиномом x^8 + x^4 + x^3 + x^2 + 1 (0x11d)
 namespace {
@@ -46,7 +47,12 @@ namespace {
 namespace rs255 {
 
 void encode(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
+  // Проверяем корректность указателя на входные данные
+  if (len > 0 && data == nullptr) {
+    throw std::invalid_argument("rs255::encode: data == nullptr при положительной длине");
+  }
   init_gen();
+  out.clear();
   out.resize(len + 32);
   if (len) std::memcpy(out.data(), data, len);
   std::array<uint8_t,32> parity{};
@@ -61,8 +67,15 @@ void encode(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
 
 // Простая реализация декодера Берлекампа-Мэсси
 bool decode(const uint8_t* in, size_t len, std::vector<uint8_t>& out, int& corrected) {
+  // Проверяем корректность входных аргументов
+  if (len > 0 && in == nullptr) {
+    out.clear();
+    corrected = 0;
+    return false;
+  }
   init_gen();
   corrected = 0;
+  out.clear();
   if (len < 32) return false;
   size_t n = len;
   const size_t npar = 32;

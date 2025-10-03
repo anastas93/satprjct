@@ -2,6 +2,7 @@
 #include <array>
 #include <cstring>
 #include <limits>
+#include <stdexcept>
 
 namespace vit {
 namespace {
@@ -37,7 +38,12 @@ namespace {
 }
 
 void encode(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
+  // Проверяем корректность указателя на входные данные
+  if (len > 0 && data == nullptr) {
+    throw std::invalid_argument("vit::encode: data == nullptr при положительной длине");
+  }
   init();
+  out.clear();
   std::vector<uint8_t> bits; bits.reserve(len*16);
   uint8_t state=0;
   for (size_t i=0;i<len*8;i++) {
@@ -49,17 +55,25 @@ void encode(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
   }
   // упаковываем в байты
   out.resize((bits.size()+7)/8);
-  std::memset(out.data(),0,out.size());
+  if (!out.empty()) {
+    std::memset(out.data(),0,out.size());
+  }
   for (size_t i=0;i<bits.size();i++) {
     out[i>>3] |= bits[i] << (7-(i&7));
   }
 }
 
 bool decode(const uint8_t* in, size_t len, std::vector<uint8_t>& out) {
+  // Проверяем корректность входных аргументов
+  if (len > 0 && in == nullptr) {
+    out.clear();
+    return false;
+  }
   init();
   size_t total_bits = len*8;
   if (total_bits %2 !=0) return false;
   size_t steps = total_bits/2;
+  out.clear();
   std::array<uint16_t,STATES> metric, new_metric;
   metric.fill(std::numeric_limits<uint16_t>::max()/2); metric[0]=0;
   std::vector<uint8_t> decisions(steps*STATES);
@@ -94,7 +108,9 @@ bool decode(const uint8_t* in, size_t len, std::vector<uint8_t>& out) {
   }
   // упаковываем биты в байты
   out.resize((steps+7)/8);
-  std::memset(out.data(),0,out.size());
+  if (!out.empty()) {
+    std::memset(out.data(),0,out.size());
+  }
   for (size_t i=0;i<steps;i++) out[i>>3]|=bits[i]<<(7-(i&7));
   return true;
 }
