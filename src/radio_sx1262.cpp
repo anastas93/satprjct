@@ -24,6 +24,29 @@ bool RadioSX1262::irqLoggerStarted_ = false;   // отметка о выводе
 // Максимальный размер пакета для SX1262
 static constexpr size_t MAX_PACKET_SIZE = 245;
 
+namespace {
+// RAII-обёртка для автоматического освобождения мьютекса радиомодуля
+class ScopedRadioLock {
+public:
+  explicit ScopedRadioLock(RadioSX1262& radio) : radio_(radio) {}
+  int16_t acquire(TickType_t timeout) {
+    const int16_t state = radio_.lockRadio(timeout);
+    locked_ = (state == RADIOLIB_ERR_NONE);
+    return state;
+  }
+  ~ScopedRadioLock() {
+    if (locked_) {
+      radio_.unlockRadio();
+    }
+  }
+  bool locked() const { return locked_; }
+
+private:
+  RadioSX1262& radio_;
+  bool locked_ = false;
+};
+} // namespace
+
 // Таблицы частот приёма и передачи для всех банков
 // Восточный банк
 static const float fRX_east_[10] = {
@@ -124,63 +147,88 @@ bool RadioSX1262::begin() {
     DEBUG_LOG("IRQ logger started");
     irqLoggerStarted_ = true;
   }
-  return resetToDefaults();       // применяем настройки по умолчанию
+  return resetToDefaults() == RADIOLIB_ERR_NONE; // применяем настройки по умолчанию
 }
 
-void RadioSX1262::send(const uint8_t* data, size_t len) {
+int16_t RadioSX1262::send(const uint8_t* data, size_t len) {
   if (!data || len == 0) {                   // проверка указателя и длины
     DEBUG_LOG("RadioSX1262: пустая передача");
-    return;
+    lastError_ = ERR_INVALID_ARGUMENT;
+    return lastError_;
   }
   if (len > MAX_PACKET_SIZE) {               // проверка аппаратного лимита
     LOG_ERROR_VAL("RadioSX1262: превышен лимит длины=", len);
-    return;
+    lastError_ = ERR_INVALID_ARGUMENT;
+    return lastError_;
   }
+
+  ScopedRadioLock guard(*this);
+  const int16_t lockState = guard.acquire(toTicks(LOCK_TIMEOUT_MS));
+  if (lockState != RADIOLIB_ERR_NONE) {
+    LOG_WARN("RadioSX1262: отправка отклонена — радио занято");
+    lastError_ = lockState;
+    return lastError_;
+  }
+
   float freq_tx = fTX_bank_[static_cast<int>(bank_)][channel_];
   float freq_rx = fRX_bank_[static_cast<int>(bank_)][channel_];
   DEBUG_LOG_VAL("RadioSX1262: отправка длины=", len);
-  radio_.setFrequency(freq_tx);              // переключаемся на TX частоту
+  if (!setFrequency(freq_tx)) {              // переключаемся на TX частоту
+    LOG_ERROR("RadioSX1262: не удалось установить TX-частоту перед передачей");
+    return lastError_;
+  }
   int state = radio_.transmit((uint8_t*)data, len); // отправляем пакет
   if (state != RADIOLIB_ERR_NONE) {          // проверка кода ошибки
     lastError_ = state;                      // сохраняем код сбоя
     LOG_ERROR_VAL("RadioSX1262: ошибка передачи, код=", state);
-    radio_.setFrequency(freq_rx);            // возвращаемся на частоту приёма после сбоя
+    setFrequency(freq_rx);                   // возвращаемся на частоту приёма после сбоя
     startReceiveWithRetry("send: возврат к приёму после ошибки передачи");
-    return;                                  // выходим без смены частоты
+    return lastError_;
   }
   lastError_ = RADIOLIB_ERR_NONE;            // предыдущая операция прошла успешно
-  radio_.setFrequency(freq_rx);              // возвращаем частоту приёма
+  setFrequency(freq_rx);                     // возвращаем частоту приёма
   startReceiveWithRetry("send: переход к приёму после передачи");
   DEBUG_LOG("RadioSX1262: запуск приёма после завершения передачи");
   DEBUG_LOG("RadioSX1262: передача завершена");
+  return lastError_;
 }
 
-bool RadioSX1262::ping(const uint8_t* data, size_t len,
-                       uint8_t* response, size_t responseCapacity,
-                       size_t& receivedLen, uint32_t timeoutUs,
-                       uint32_t& elapsedUs) {
+int16_t RadioSX1262::ping(const uint8_t* data, size_t len,
+                          uint8_t* response, size_t responseCapacity,
+                          size_t& receivedLen, uint32_t timeoutUs,
+                          uint32_t& elapsedUs) {
   receivedLen = 0;                                        // сбрасываем длину ответа
   elapsedUs = 0;                                          // сбрасываем время
   if (!data || len == 0 || !response || responseCapacity == 0) {
-    return false;                                         // некорректные аргументы
+    lastError_ = ERR_INVALID_ARGUMENT;                    // некорректные аргументы
+    return lastError_;
+  }
+
+  ScopedRadioLock guard(*this);
+  const int16_t lockState = guard.acquire(toTicks(LOCK_TIMEOUT_MS));
+  if (lockState != RADIOLIB_ERR_NONE) {
+    LOG_WARN("RadioSX1262: пинг отклонён — радио занято");
+    lastError_ = lockState;
+    return lastError_;
   }
 
   float freq_tx = fTX_bank_[static_cast<int>(bank_)][channel_];
   float freq_rx = fRX_bank_[static_cast<int>(bank_)][channel_];
 
   if (!setFrequency(freq_tx)) {                           // не удалось установить TX
-    return false;
+    LOG_ERROR("RadioSX1262: не удалось установить TX-частоту перед пингом");
+    return lastError_;
   }
   int state = radio_.transmit((uint8_t*)data, len);       // отправляем пакет
   if (state != RADIOLIB_ERR_NONE) {                       // ошибка передачи
     lastError_ = state;                                   // фиксируем код ошибки
     setFrequency(freq_rx);
     startReceiveWithRetry("ping: возврат в RX после ошибки передачи");
-    return false;
+    return lastError_;
   }
   if (!setFrequency(freq_rx)) {                           // возвращаем RX частоту
     startReceiveWithRetry("ping: попытка приёма после ошибки установки частоты");
-    return false;
+    return lastError_;
   }
 
   packetReady_ = false;                                   // очищаем флаг готовности
@@ -200,50 +248,70 @@ bool RadioSX1262::ping(const uint8_t* data, size_t len,
       delay(1);
       continue;
     }
-    packetReady_ = false;                                 // сбрасываем флаг
-    waitingLogged = false;                                // разрешаем повторный лог
-    size_t pktLen = radio_.getPacketLength();             // длина принятого пакета
-    if (pktLen == 0 || pktLen > buf.size()) {             // защита от мусора
+    if (!radio_.available()) {                            // SX1262 пока не готов
+      DEBUG_LOG("RadioSX1262: флаг готовности установлен, но данные недоступны");
+      continue;
+    }
+    size_t lenRead = radio_.getPacketLength();            // узнаём длину принятого пакета
+    if (lenRead == 0 || lenRead > buf.size()) {           // защита от некорректного размера
+      LOG_WARN_VAL("RadioSX1262: некорректная длина принятого пинг-ответа=", lenRead);
       startReceiveWithRetry("ping: повторный запуск приёма после некорректной длины");
-      DEBUG_LOG("RadioSX1262: перезапуск приёма после некорректной длины пакета");
-      continue;
+      lastError_ = ERR_INVALID_ARGUMENT;
+      return lastError_;
     }
-    int readState = radio_.readData(buf.data(), pktLen);  // читаем данные
-    startReceiveWithRetry("ping: перезапуск после чтения ответа");
-    DEBUG_LOG("RadioSX1262: перезапуск приёма после чтения пакета");
-    if (readState != RADIOLIB_ERR_NONE) {                 // не удалось прочитать
-      lastError_ = readState;                             // фиксируем код ошибки
-      continue;
+    int rxState = radio_.readData(buf.data(), lenRead);   // читаем пакет
+    if (rxState != RADIOLIB_ERR_NONE) {                   // ошибка чтения
+      lastError_ = rxState;                               // сохраняем код ошибки чтения
+      LOG_ERROR_VAL("RadioSX1262: ошибка чтения пинг-ответа, код=", rxState);
+      startReceiveWithRetry("ping: перезапуск после чтения ответа");
+      return lastError_;
     }
-    lastError_ = RADIOLIB_ERR_NONE;                       // чтение прошло успешно
-    lastSnr_ = radio_.getSNR();                           // сохраняем параметры
+    receivedLen = lenRead;                                // сохраняем длину ответа
+    std::memcpy(response, buf.data(),                     // копируем в пользовательский буфер
+                std::min(receivedLen, responseCapacity));
+    elapsedUs = micros() - start;                         // вычисляем затраченное время
+    lastSnr_ = radio_.getSNR();
     lastRssi_ = radio_.getRSSI();
-    if (pktLen == len && std::memcmp(buf.data(), data, len) == 0) {
-      if (pktLen <= responseCapacity) {                   // помещается в буфер ответа
-        std::memcpy(response, buf.data(), pktLen);
-        receivedLen = pktLen;
-        elapsedUs = micros() - start;                     // фиксируем время пролёта
-        return true;                                      // пинг отработал
-      }
-      break;                                              // буфер мал, считаем тайм-аутом
-    }
-    if (rx_cb_) {                                         // чужой пакет передаём дальше
-      rx_cb_(buf.data(), pktLen);
-    }
+    DEBUG_LOG("RadioSX1262: пинг-ответ получен, длина=%u, время=%lu мкс",
+              static_cast<unsigned>(receivedLen),
+              static_cast<unsigned long>(elapsedUs));
+    packetReady_ = false;
+    startReceiveWithRetry("ping: ожидание ответа");
+    lastError_ = RADIOLIB_ERR_NONE;
+    return lastError_;
   }
 
-  elapsedUs = micros() - start;                           // время ожидания на выходе
-  return false;                                           // пинг не удался
+  startReceiveWithRetry("ping: ожидание ответа");
+  LOG_WARN("RadioSX1262: пинг-ответ не получен — истёк таймаут %lu мкс",
+           static_cast<unsigned long>(timeoutUs));
+  lastError_ = ERR_PING_TIMEOUT;
+  return lastError_;
 }
+
+
 
 void RadioSX1262::setReceiveCallback(RxCallback cb) { rx_cb_ = cb; }
 
-void RadioSX1262::ensureReceiveMode() {
+int16_t RadioSX1262::ensureReceiveMode() {
+  ScopedRadioLock guard(*this);
+  const int16_t lockState = guard.acquire(toTicks(LOCK_TIMEOUT_MS));
+  if (lockState != RADIOLIB_ERR_NONE) {
+    LOG_WARN("RadioSX1262: ensureReceiveMode отклонён — радио занято");
+    lastError_ = lockState;
+    return lastError_;
+  }
   const float freq_rx = fRX_bank_[static_cast<int>(bank_)][channel_];
-  radio_.setFrequency(freq_rx);
-  startReceiveWithRetry("ensureReceiveMode: переход к приёму");
+  if (!setFrequency(freq_rx)) {
+    LOG_ERROR("RadioSX1262: не удалось восстановить RX-частоту в ensureReceiveMode");
+    return lastError_;
+  }
+  if (!startReceiveWithRetry("ensureReceiveMode: переход к приёму")) {
+    return lastError_;
+  }
   DEBUG_LOG("RadioSX1262: принудительный переход в режим приёма на частоте %.3f МГц",
             static_cast<double>(freq_rx));
+  lastError_ = RADIOLIB_ERR_NONE;
+  return lastError_;
 }
 
 // Получить SNR последнего принятого пакета
@@ -270,6 +338,7 @@ bool RadioSX1262::setChannel(uint8_t ch) {
 
 bool RadioSX1262::setFrequency(float freq) {
   int state = radio_.setFrequency(freq);      // задаём частоту
+  lastError_ = state;                         // запоминаем результат операции
   return state == RADIOLIB_ERR_NONE;          // возвращаем успех
 }
 
@@ -368,11 +437,18 @@ bool RadioSX1262::setRxBoostedGainMode(bool enabled) {
   return false;
 }
 
-bool RadioSX1262::resetToDefaults() {
-  // возвращаем все параметры к значениям из файла default_settings.h
+int16_t RadioSX1262::resetToDefaults() {
+  ScopedRadioLock guard(*this);
+  const int16_t lockState = guard.acquire(toTicks(LOCK_TIMEOUT_MS));
+  if (lockState != RADIOLIB_ERR_NONE) {
+    LOG_WARN("RadioSX1262: resetToDefaults отклонён — радио занято");
+    lastError_ = lockState;
+    return lastError_;
+  }
+
   lastError_ = RADIOLIB_ERR_NONE;                // сбрасываем сохранённый код ошибки
-  const auto& cfg = ConfigLoader::getConfig(); // читаем загруженную конфигурацию
-  bank_ = cfg.radio.bank;                      // банк каналов
+  const auto& cfg = ConfigLoader::getConfig();   // читаем загруженную конфигурацию
+  bank_ = cfg.radio.bank;                        // банк каналов
   uint16_t bankSize = BANK_CHANNELS_[static_cast<int>(bank_)];
   if (bankSize == 0) {
     bankSize = 1; // защита от деления на ноль, хотя такого не ожидается
@@ -424,20 +500,22 @@ bool RadioSX1262::resetToDefaults() {
       0x18, Pwr_[pw_preset_], DefaultSettings::PREAMBLE_LENGTH, tcxo_, false);
   if (state != RADIOLIB_ERR_NONE) {
     lastError_ = state;                             // сохраняем код ошибки инициализации
-    return false;                                         // ошибка инициализации
+    return lastError_;                              // ошибка инициализации
   }
   radio_.setDio1Action(onDio1Static);                     // колбэк приёма
-  if (!setRxBoostedGainMode(cfg.radio.rxBoostedGain)) { // применение усиления по умолчанию
-    rxBoostedGainEnabled_ = false;                         // фиксируем фактическое состояние
+  if (!setRxBoostedGainMode(cfg.radio.rxBoostedGain)) {   // применение усиления по умолчанию
+    rxBoostedGainEnabled_ = false;                        // фиксируем фактическое состояние
     LOG_WARN("RadioSX1262: не удалось установить RX boosted gain");
   }
   if (!startReceiveWithRetry("resetToDefaults: запуск приёма")) {
-    return false;                                         // не удалось войти в режим RX
+    return lastError_;                                    // не удалось войти в режим RX
   }
   DEBUG_LOG("RadioSX1262: запуск приёма после применения настроек по умолчанию на частоте %.3f МГц",
             static_cast<double>(fRX_bank_[static_cast<int>(bank_)][channel_]));
-  return true;
+  lastError_ = RADIOLIB_ERR_NONE;
+  return lastError_;
 }
+
 
 void RadioSX1262::onDio1Static() {
   if (instance_) {
@@ -644,12 +722,54 @@ void RadioSX1262::loop() {
   DEBUG_LOG("RadioSX1262: перезапуск приёма после обработки пакета в loop");
 }
 
-void RadioSX1262::sendBeacon() {
+int16_t RadioSX1262::sendBeacon() {
   uint8_t beacon[15]{0};                  // буфер маяка
   beacon[1] = randomByte();               // случайный байт 1
   beacon[2] = randomByte();               // случайный байт 2
   beacon[0] = beacon[1] ^ beacon[2];      // идентификатор = XOR
   const char text[6] = {'B','E','A','C','O','N'}; // надпись "BEACON"
   memcpy(&beacon[9], text, 6);            // вставка текста
-  send(beacon, sizeof(beacon));           // отправляем как обычный пакет
+  return send(beacon, sizeof(beacon));    // отправляем как обычный пакет
+}
+
+TickType_t RadioSX1262::toTicks(uint32_t timeoutMs) const {
+#if defined(ARDUINO)
+  return pdMS_TO_TICKS(timeoutMs);
+#else
+  return static_cast<TickType_t>(timeoutMs);
+#endif
+}
+
+int16_t RadioSX1262::lockRadio(TickType_t timeout) {
+#if defined(ARDUINO)
+  if (radioMutex_ == nullptr) {
+    radioMutex_ = xSemaphoreCreateMutex();             // создаём мьютекс при первом обращении
+    if (radioMutex_ == nullptr) {
+      LOG_ERROR("RadioSX1262: не удалось создать мьютекс доступа к SX1262");
+      return ERR_TIMEOUT;
+    }
+  }
+  const BaseType_t taken = xSemaphoreTake(radioMutex_, timeout);
+  return (taken == pdTRUE) ? RADIOLIB_ERR_NONE : ERR_TIMEOUT;
+#else
+  if (timeout == portMAX_DELAY) {
+    radioMutex_.lock();
+    return RADIOLIB_ERR_NONE;
+  }
+  const auto duration = std::chrono::milliseconds(timeout);
+  if (radioMutex_.try_lock_for(duration)) {
+    return RADIOLIB_ERR_NONE;
+  }
+  return ERR_TIMEOUT;
+#endif
+}
+
+void RadioSX1262::unlockRadio() {
+#if defined(ARDUINO)
+  if (radioMutex_ != nullptr) {
+    xSemaphoreGive(radioMutex_);
+  }
+#else
+  radioMutex_.unlock();
+#endif
 }

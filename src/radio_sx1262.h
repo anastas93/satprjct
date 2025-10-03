@@ -7,6 +7,19 @@
 #include "radio_interface.h"
 #include "channel_bank.h"
 
+#if defined(ARDUINO)
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#else
+#include <mutex>
+#include <chrono>
+#include <limits>
+using TickType_t = uint32_t;                             // эквивалент FreeRTOS-типа для тестовой среды
+#ifndef portMAX_DELAY
+static constexpr TickType_t portMAX_DELAY = std::numeric_limits<TickType_t>::max();
+#endif
+#endif
+
 // Вспомогательные признаки для определения доступного варианта IRQ-API в RadioLib
 namespace radio_sx1262_detail {
 
@@ -71,20 +84,20 @@ public:
   // Инициализация модуля и установка параметров по умолчанию
   bool begin();
   // Отправка данных
-  void send(const uint8_t* data, size_t len) override;
+  int16_t send(const uint8_t* data, size_t len) override;
   // Выполнение пинга с ожиданием эха
-  bool ping(const uint8_t* data, size_t len,
-            uint8_t* response, size_t responseCapacity,
-            size_t& receivedLen, uint32_t timeoutUs,
-            uint32_t& elapsedUs);
+  int16_t ping(const uint8_t* data, size_t len,
+               uint8_t* response, size_t responseCapacity,
+               size_t& receivedLen, uint32_t timeoutUs,
+               uint32_t& elapsedUs);
   // Отправка служебного маяка
-  void sendBeacon();
+  int16_t sendBeacon();
   // Обработка готовности пакета в основном цикле
   void loop();
   // Установка колбэка приёма
   void setReceiveCallback(RxCallback cb) override;
   // Возвращение в режим приёма
-  void ensureReceiveMode() override;
+  int16_t ensureReceiveMode() override;
   // Получение параметров последнего принятого пакета
   float getLastSnr() const;  // последний SNR
   float getLastRssi() const; // последний RSSI
@@ -125,7 +138,7 @@ public:
     float getRxFrequency() const { return fRX_bank_[static_cast<int>(bank_)][channel_]; }
     float getTxFrequency() const { return fTX_bank_[static_cast<int>(bank_)][channel_]; }
   // Сброс параметров к значениям по умолчанию с перезапуском приёма
-  bool resetToDefaults();
+  int16_t resetToDefaults();
 
   // Статический вывод активных флагов IRQ SX1262 в лог
   static void logIrqFlags(uint32_t flags);
@@ -236,5 +249,19 @@ private:
   static const float BW_[5];
   static const int8_t SF_[8];
   static const int8_t CR_[4];
+
+  static constexpr int16_t ERR_TIMEOUT = IRadio::ERR_TIMEOUT; // тайм-аут захвата мьютекса
+  static constexpr int16_t ERR_PING_TIMEOUT = -31999;         // истёк тайм-аут ожидания ответа
+  static constexpr int16_t ERR_INVALID_ARGUMENT = -31998;     // некорректные параметры вызова
+  static constexpr uint32_t LOCK_TIMEOUT_MS = 500;    // тайм-аут ожидания мьютекса, мс
+
+  int16_t lockRadio(TickType_t timeout);
+  void unlockRadio();
+#if defined(ARDUINO)
+  SemaphoreHandle_t radioMutex_ = nullptr;            // мьютекс для синхронизации доступа к SX1262
+#else
+  std::timed_mutex radioMutex_;                       // хост-реализация мьютекса
+#endif
+  TickType_t toTicks(uint32_t timeoutMs) const;
 };
 

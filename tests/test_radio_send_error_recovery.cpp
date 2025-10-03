@@ -36,7 +36,8 @@ int main() {
   // Имитируем сбой передачи и проверяем восстановление режима приёма
   raw.transmitResult = -123; // произвольный код ошибки RadioLib
   const uint8_t payload[1] = {0x42};
-  radio.send(payload, sizeof(payload));
+  int16_t sendState = radio.send(payload, sizeof(payload));
+  assert(sendState == raw.transmitResult);
 
   // После ошибки модуль обязан вернуться на приёмную частоту
   assert(std::fabs(raw.lastSetFrequency - expectedRx) < 1e-3f);

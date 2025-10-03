@@ -1561,8 +1561,19 @@ String cmdKeyTransferSendLora() {
     return String("{\"error\":\"build\"}");
   }
   tx.prepareExternalSend();
-  radio.send(frame.data(), frame.size());
+  int16_t sendState = radio.send(frame.data(), frame.size());
   tx.completeExternalSend();
+  if (sendState == RadioSX1262::ERR_TIMEOUT) {
+    SimpleLogger::logStatus("KEYTRANSFER ERR RADIO BUSY");
+    Serial.println("KEYTRANSFER: радио занято, отправка отклонена");
+    return String("{\"error\":\"radio_busy\"}");
+  }
+  if (sendState != IRadio::ERR_NONE) {
+    SimpleLogger::logStatus("KEYTRANSFER ERR RADIO");
+    Serial.print("KEYTRANSFER: ошибка отправки, код=");
+    Serial.println(sendState);
+    return String("{\"error\":\"radio\"}");
+  }
   keyTransferRuntime.last_msg_id = msg_id;
   SimpleLogger::logStatus("KEYTRANSFER SEND");
   Serial.println("KEYTRANSFER: отправлен публичный корневой ключ");
@@ -2015,12 +2026,23 @@ String cmdPing() {
   size_t respLen = 0;
   uint32_t elapsed = 0;
   tx.prepareExternalSend();
-  bool ok = radio.ping(ping.data(), ping.size(),
-                       resp.data(), resp.size(),
-                       respLen, DefaultSettings::PING_WAIT_MS * 1000UL,
-                       elapsed);
+  int16_t pingState = radio.ping(ping.data(), ping.size(),
+                                 resp.data(), resp.size(),
+                                 respLen, DefaultSettings::PING_WAIT_MS * 1000UL,
+                                 elapsed);
   tx.completeExternalSend();
-  if (ok && respLen == ping.size() &&
+  if (pingState == RadioSX1262::ERR_TIMEOUT) {
+    return String("Ping: radio busy");
+  }
+  if (pingState == RadioSX1262::ERR_PING_TIMEOUT) {
+    return String("Ping: timeout");
+  }
+  if (pingState != IRadio::ERR_NONE) {
+    String out = "Ping: error=";
+    out += String(pingState);
+    return out;
+  }
+  if (respLen == ping.size() &&
       memcmp(resp.data(), ping.data(), ping.size()) == 0) {
     float dist_km = ((elapsed * 0.000001f) * 299792458.0f / 2.0f) / 1000.0f;
     String out = "Ping: RSSI ";
@@ -2034,7 +2056,7 @@ String cmdPing() {
     out += "ms";
     return out;
   } else {
-    return String("Ping: timeout");
+    return String("Ping: mismatch");
   }
 }
 
@@ -2058,19 +2080,24 @@ String cmdSear() {
     size_t respLen = 0;
     uint32_t elapsed = 0;
     tx.prepareExternalSend();
-    bool ok_ch = radio.ping(pkt.data(), pkt.size(),
-                            resp.data(), resp.size(),
-                            respLen, DefaultSettings::PING_WAIT_MS * 1000UL,
-                            elapsed);
+    int16_t pingState = radio.ping(pkt.data(), pkt.size(),
+                                   resp.data(), resp.size(),
+                                   respLen, DefaultSettings::PING_WAIT_MS * 1000UL,
+                                   elapsed);
     tx.completeExternalSend();
     (void)respLen; // длина не нужна при проверке ок
     (void)elapsed; // время в поиске не используется
-    if (ok_ch) {
+    if (pingState == IRadio::ERR_NONE) {
       out += "CH "; out += String(ch); out += ": RSSI ";
       out += String(radio.getLastRssi()); out += " SNR ";
       out += String(radio.getLastSnr()); out += "\n";
-    } else {
+    } else if (pingState == RadioSX1262::ERR_TIMEOUT) {
+      out += "CH "; out += String(ch); out += ": радио занято\n";
+    } else if (pingState == RadioSX1262::ERR_PING_TIMEOUT) {
       out += "CH "; out += String(ch); out += ": тайм-аут\n";
+    } else {
+      out += "CH "; out += String(ch); out += ": err=";
+      out += String(pingState); out += "\n";
     }
   }
   radio.setChannel(prevCh);
@@ -2254,8 +2281,16 @@ String cmdTestMode(const String& arg) {
 // Команда BCN отправляет служебный маяк
 String cmdBcn() {
   tx.prepareExternalSend();
-  radio.sendBeacon();
+  int16_t state = radio.sendBeacon();
   tx.completeExternalSend();
+  if (state == RadioSX1262::ERR_TIMEOUT) {
+    return String("BCN:BUSY");
+  }
+  if (state != IRadio::ERR_NONE) {
+    String resp = "BCN:ERR";
+    resp += state;
+    return resp;
+  }
   return String("BCN:OK");
 }
 
@@ -3297,9 +3332,16 @@ void loop() {
         }
       } else if (line.equalsIgnoreCase("BCN")) {
         tx.prepareExternalSend();
-        radio.sendBeacon();
+        int16_t state = radio.sendBeacon();
         tx.completeExternalSend();
-        Serial.println("Маяк отправлен");
+        if (state == RadioSX1262::ERR_TIMEOUT) {
+          Serial.println("Маяк не отправлен: радио занято");
+        } else if (state != IRadio::ERR_NONE) {
+          Serial.print("Ошибка отправки маяка, код=");
+          Serial.println(state);
+        } else {
+          Serial.println("Маяк отправлен");
+        }
       } else if (line.equalsIgnoreCase("INFO")) {
         // выводим текущие настройки радиомодуля
         Serial.print("Банк: ");
