@@ -393,6 +393,11 @@ Arduino IDE и вспомогательных скриптов.
 - Переключатель включает принудительное шифрование (даже для старых кадров без флага).
 - Кнопка `KEYTRANSFER SEND` копирует публичный ключ в буфер обмена (при поддержке API браузера);
   `KEYTRANSFER RECEIVE` сопровождается мигающим индикатором ожидания.
+- Неблокирующее ожидание `KEYTRANSFER RECEIVE` реализовано функциями `clearKeyReceivePollTimer`,
+  `resetKeyReceiveWaitState`, `updateKeyReceiveWaitMessage`, `scheduleKeyReceivePoll` и
+  `pollKeyTransferReceiveStatus` в `web/script.js`: первый ответ `status="waiting"` запускает
+  фоновый поллинг состояния, обновляет текст статуса и удерживает кнопку в режиме ожидания до
+  получения окончательного JSON.
 - Ответ `KEYSTATE` дополнительно содержит поля `baseKey`, `safeMode` и `storageReady`: базовый
   симметричный ключ (hex), признак защищённого режима и готовность хранилища.
 - Функция `parseJsonLenient` в `web/script.js` сначала пытается очистить и нормализовать ответ
@@ -792,6 +797,8 @@ g++ -I. tests/test_key_transfer.cpp \
 ### src/main.cpp
 - `String makeAccessPointSsid()` — формирует имя точки доступа с коротким суффиксом из уникального
   идентификатора устройства.
+- `void resetKeyTransferWaitTiming()` — сбрасывает временные отметки ожидания KEYTRANSFER, чтобы
+  повторный запрос начинался с корректных значений дедлайна после успеха, тайм-аута или ошибки.
 
 ### TextConverter
 - `std::vector<uint8_t> utf8ToCp1251(const std::string& in)` — UTF-8 → CP1251.
