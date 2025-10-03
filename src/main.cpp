@@ -114,6 +114,8 @@ RxModule rx;                // модуль приёма
 ReceivedBuffer recvBuf;     // буфер полученных сообщений
 bool ackEnabled = DefaultSettings::USE_ACK; // флаг автоматической отправки ACK
 bool encryptionEnabled = DefaultSettings::USE_ENCRYPTION; // режим шифрования
+bool keyStorageReady = false;               // флаг успешной инициализации хранилища ключей
+bool keySafeModeActive = false;             // признак защищённого режима работы без доступа к ключам
 uint8_t ackRetryLimit = DefaultSettings::ACK_RETRY_LIMIT; // число повторов при ожидании ACK
 static constexpr uint32_t kAckDelayMinMs = 0;             // минимально допустимая задержка ответа ACK
 static constexpr uint32_t kAckDelayMaxMs = 5000;          // максимально допустимая задержка ответа ACK
@@ -1079,6 +1081,10 @@ String makeKeyStateJson() {
   json += ",\"baseKey\":\"";
   json += toHex(DefaultSettings::DEFAULT_KEY);
   json += "\"";
+  json += ",\"safeMode\":";
+  json += keySafeModeActive ? "true" : "false";
+  json += ",\"storageReady\":";
+  json += keyStorageReady ? "true" : "false";
   json += "}";
   return json;
 }
@@ -1097,6 +1103,10 @@ String makeKeyStorageStatusJson() {
     json += KeyLoader::backendName(preferred);
   }
   json += "\"";
+  json += ",\"safeMode\":";
+  json += keySafeModeActive ? "true" : "false";
+  json += ",\"ready\":";
+  json += keyStorageReady ? "true" : "false";
   json += "}";
   return json;
 }
@@ -1104,6 +1114,64 @@ String makeKeyStorageStatusJson() {
 void reloadCryptoModules() {
   tx.reloadKey();
   rx.reloadKey();
+}
+
+// Унифицированный JSON-ответ при заблокированных операциях с ключами
+String keySafeModeErrorJson() {
+  return String("{\"error\":\"key-safe-mode\",\"message\":\"хранилище ключей недоступно\",\"safeMode\":true}");
+}
+
+// Проверка доступности операций с ключами (true — можно продолжать)
+bool keyOperationsAllowed() {
+  return keyStorageReady && !keySafeModeActive;
+}
+
+// Принудительно отключаем шифрование для защищённого режима
+void disableEncryptionForSafeMode() {
+  if (encryptionEnabled) {
+    encryptionEnabled = false;
+  }
+  tx.setEncryptionEnabled(false);
+  rx.setEncryptionEnabled(false);
+}
+
+// Активация защищённого режима при недоступности хранилища ключей
+void activateKeySafeMode(const char* reason) {
+  keyStorageReady = false;
+  const char* context = reason ? reason : "неизвестная причина";
+  disableEncryptionForSafeMode();
+  if (!keySafeModeActive) {
+    keySafeModeActive = true;
+    SimpleLogger::logStatus(std::string("KEY SAFE MODE ON: ") + context);
+    LOG_ERROR("CRITICAL: хранилище ключей недоступно (%s), шифрование отключено и ключевые команды заблокированы", context);
+  } else {
+    LOG_ERROR("CRITICAL: повторная ошибка доступа к хранилищу ключей (%s), защищённый режим уже активен", context);
+  }
+}
+
+// Деактивация защищённого режима после успешного восстановления
+void deactivateKeySafeMode(const char* reason) {
+  keyStorageReady = true;
+  if (!keySafeModeActive) {
+    return;
+  }
+  keySafeModeActive = false;
+  tx.setEncryptionEnabled(encryptionEnabled);
+  rx.setEncryptionEnabled(encryptionEnabled);
+  const char* context = reason ? reason : "без контекста";
+  SimpleLogger::logStatus(std::string("KEY SAFE MODE OFF: ") + context);
+  LOG_INFO("Key: хранилище ключей восстановлено (%s), защищённый режим снят", context);
+}
+
+// Переинициализация хранилища ключей с учётом защищённого режима
+bool ensureKeyStorageReady(const char* reason) {
+  bool ok = KeyLoader::ensureStorage();
+  if (ok) {
+    deactivateKeySafeMode(reason);
+  } else {
+    activateKeySafeMode(reason);
+  }
+  return ok;
 }
 
 // Генерация случайного идентификатора сообщения для обмена ключами
@@ -1262,6 +1330,11 @@ String cmdKeyStorage(const String& mode) {
   if (trimmed.length() == 0) {
     return makeKeyStorageStatusJson();
   }
+  if (trimmed.equalsIgnoreCase("RETRY")) {
+    LOG_INFO("Key: запрошена повторная проверка хранилища через команду RETRY");
+    ensureKeyStorageReady("manual retry");
+    return makeKeyStorageStatusJson();
+  }
   KeyLoader::StorageBackend backend = KeyLoader::StorageBackend::UNKNOWN;
   if (trimmed.equalsIgnoreCase("AUTO")) {
     backend = KeyLoader::StorageBackend::UNKNOWN;
@@ -1284,6 +1357,9 @@ String cmdKeyStorage(const String& mode) {
 
 String cmdKeyGenSecure() {
   DEBUG_LOG("Key: генерация нового ключа");
+  if (!keyOperationsAllowed()) {
+    return keySafeModeErrorJson();
+  }
   if (KeyLoader::generateLocalKey()) {
     const bool synced_with_peer = KeyLoader::regenerateFromPeer();
     // Если есть сохранённый ключ удалённой стороны, пересчитываем сессию сразу.
@@ -1298,6 +1374,9 @@ String cmdKeyGenSecure() {
 
 String cmdKeyGenPeer() {
   DEBUG_LOG("Key: повторное применение удалённого ключа");
+  if (!keyOperationsAllowed()) {
+    return keySafeModeErrorJson();
+  }
   if (KeyLoader::regenerateFromPeer()) {
     reloadCryptoModules();
     return makeKeyStateJson();
@@ -1307,6 +1386,9 @@ String cmdKeyGenPeer() {
 
 String cmdKeyRestoreSecure() {
   DEBUG_LOG("Key: восстановление ключа из резервной копии");
+  if (!keyOperationsAllowed()) {
+    return keySafeModeErrorJson();
+  }
   if (KeyLoader::restorePreviousKey()) {
     reloadCryptoModules();
     return makeKeyStateJson();
@@ -1320,6 +1402,9 @@ String cmdKeySendSecure() {
 
 String cmdKeyReceiveSecure(const String& hex) {
   DEBUG_LOG("Key: применение удалённого ключа");
+  if (!keyOperationsAllowed()) {
+    return keySafeModeErrorJson();
+  }
   std::array<uint8_t,32> remote{};
   if (!parseHex(hex, remote)) {
     return String("{\"error\":\"format\"}");
@@ -1334,6 +1419,9 @@ String cmdKeyReceiveSecure(const String& hex) {
 // Отправка корневого ключа через LoRa с использованием спецключа
 String cmdKeyTransferSendLora() {
   DEBUG_LOG("Key: отправка ключа по LoRa");
+  if (!keyOperationsAllowed()) {
+    return keySafeModeErrorJson();
+  }
   auto state = KeyLoader::getState();
   std::array<uint8_t,4> key_id{};
   std::array<uint8_t,32> ephemeral_public{};
@@ -1383,6 +1471,9 @@ String cmdKeyTransferSendLora() {
 // Ожидание и приём корневого ключа через LoRa
 String cmdKeyTransferReceiveLora() {
   DEBUG_LOG("Key: ожидание ключа по LoRa");
+  if (!keyOperationsAllowed()) {
+    return keySafeModeErrorJson();
+  }
   std::array<uint8_t,32> prepared_ephemeral{};
   KeyLoader::startEphemeralSession(prepared_ephemeral, false);  // гарантируем наличие пары для обмена
   keyTransferRuntime.waiting = true;
@@ -2258,14 +2349,20 @@ void handleCmdHttp() {
     }
     resp = String(ackResponseDelayMs);
   } else if (cmd == "ENC") {
-    if (server.hasArg("toggle")) {
-      encryptionEnabled = !encryptionEnabled;
-    } else if (server.hasArg("v")) {
-      encryptionEnabled = server.arg("v").toInt() != 0;
+    bool hasModifier = server.hasArg("toggle") || server.hasArg("v") || cmdArg.length() > 0;
+    if (keySafeModeActive && hasModifier) {
+      resp = keySafeModeErrorJson();
+      contentType = "application/json";
+    } else {
+      if (server.hasArg("toggle")) {
+        encryptionEnabled = !encryptionEnabled;
+      } else if (server.hasArg("v")) {
+        encryptionEnabled = server.arg("v").toInt() != 0;
+      }
+      tx.setEncryptionEnabled(encryptionEnabled);
+      rx.setEncryptionEnabled(encryptionEnabled);
+      resp = encryptionEnabled ? String("ENC:1") : String("ENC:0");
     }
-    tx.setEncryptionEnabled(encryptionEnabled);
-    rx.setEncryptionEnabled(encryptionEnabled);
-    resp = encryptionEnabled ? String("ENC:1") : String("ENC:0");
   } else if (cmd == "TESTMODE") {
     String value;
     if (server.hasArg("v")) {
@@ -2506,15 +2603,19 @@ void setup() {
   gCoreDumpClearPending = true;
   gCoreDumpClearAfterMs = millis() + 500;  // ждём старта фоновых задач
 #endif
-  KeyLoader::ensureStorage();
+  bool storageReadyNow = ensureKeyStorageReady("startup");
   LogHook::setDispatcher([](const LogHook::Entry& entry) {
     enqueueLogEntry(entry); // складываем строку в очередь для неблокирующей доставки
   });
   if (!serialReady) {
     LOG_WARN("Serial: USB-подключение не обнаружено, продолжаем запуск без ожидания ПК");
   }
-  String backendName = KeyLoader::backendName(KeyLoader::getBackend());
-  LOG_INFO("Хранилище ключей: %s", backendName.c_str());
+  if (storageReadyNow) {
+    String backendName = KeyLoader::backendName(KeyLoader::getBackend());
+    LOG_INFO("Хранилище ключей: %s", backendName.c_str());
+  } else {
+    LOG_WARN("Key: защищённый режим активен до повторного успешного ensureStorage()");
+  }
   if (!setupWifi()) {                                 // запускаем точку доступа
     LOG_ERROR("Wi-Fi: веб-интерфейс останется недоступным до перезапуска");
   }
@@ -2878,17 +2979,25 @@ void loop() {
         arg.trim();
         Serial.println(cmdKeyStorage(arg));
       } else if (line.startsWith("ENC ")) {
-        encryptionEnabled = line.substring(4).toInt() != 0;
-        tx.setEncryptionEnabled(encryptionEnabled);
-        rx.setEncryptionEnabled(encryptionEnabled);
-        Serial.print("ENC: ");
-        Serial.println(encryptionEnabled ? "включено" : "выключено");
+        if (keySafeModeActive) {
+          Serial.println("ENC: команда недоступна в защищённом режиме");
+        } else {
+          encryptionEnabled = line.substring(4).toInt() != 0;
+          tx.setEncryptionEnabled(encryptionEnabled);
+          rx.setEncryptionEnabled(encryptionEnabled);
+          Serial.print("ENC: ");
+          Serial.println(encryptionEnabled ? "включено" : "выключено");
+        }
       } else if (line.equalsIgnoreCase("ENC")) {
-        encryptionEnabled = !encryptionEnabled;
-        tx.setEncryptionEnabled(encryptionEnabled);
-        rx.setEncryptionEnabled(encryptionEnabled);
-        Serial.print("ENC: ");
-        Serial.println(encryptionEnabled ? "включено" : "выключено");
+        if (keySafeModeActive) {
+          Serial.println("ENC: команда недоступна в защищённом режиме");
+        } else {
+          encryptionEnabled = !encryptionEnabled;
+          tx.setEncryptionEnabled(encryptionEnabled);
+          rx.setEncryptionEnabled(encryptionEnabled);
+          Serial.print("ENC: ");
+          Serial.println(encryptionEnabled ? "включено" : "выключено");
+        }
       } else if (line.startsWith("ACKR")) {
         int value = ackRetryLimit;
         if (line.length() > 4) value = line.substring(5).toInt();
