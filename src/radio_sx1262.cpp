@@ -525,7 +525,7 @@ size_t formatIrqLogMessage(uint32_t flags, char* buffer, size_t capacity) {
 void RadioSX1262::logIrqFlags(uint32_t flags) {
   char message[224];
   formatIrqLogMessage(flags, message, sizeof(message));
-  LOG_INFO("%s", message);
+  DEBUG_LOG("%s", message);
 }
 
 void RadioSX1262::flushPendingIrqLog() {
@@ -577,14 +577,14 @@ void RadioSX1262::processPendingIrqLog() {
   const uint32_t eventUptime = millis();
   if (flags == RADIOLIB_SX126X_IRQ_NONE) {
     static const char kNoFlagsMsg[] = "RadioSX1262: событие DIO1 без активных флагов IRQ";
-    LOG_INFO("%s", kNoFlagsMsg);
+    DEBUG_LOG("%s", kNoFlagsMsg);
     if (irqCallback_) {
       irqCallback_(kNoFlagsMsg, eventUptime);
     }
   } else {
     char message[224];
     formatIrqLogMessage(flags, message, sizeof(message));
-    LOG_INFO("%s", message);
+    DEBUG_LOG("%s", message);
     if (irqCallback_) {
       irqCallback_(message, eventUptime);
     }
@@ -594,7 +594,7 @@ void RadioSX1262::processPendingIrqLog() {
     LOG_WARN_VAL("RadioSX1262: не удалось очистить статус IRQ, код=", clearState);
   }
 
-  LOG_INFO("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
+  DEBUG_LOG("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
 }
 
 void RadioSX1262::setIrqLogCallback(IrqLogCallback cb) {
