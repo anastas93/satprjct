@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <exception>
 #else
 #if defined(ESP32)
 #include <Preferences.h>
@@ -564,8 +565,10 @@ bool ensureDir() {
   try {
     std::filesystem::create_directories(KEY_DIR);
     return true;
-  } catch (...) {
-    return false;
+  } catch (const std::exception& ex) {
+    std::cerr << "[KeyLoader] не удалось создать каталог '" << KEY_DIR
+              << "': " << ex.what() << std::endl;
+    throw;
   }
 }
 
@@ -588,8 +591,10 @@ bool writePrimary(const std::vector<uint8_t>& data) {
     if (!f.good()) return false;
     f.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     if (!f.good()) return false;
-  } catch (...) {
-    return false;
+  } catch (const std::exception& ex) {
+    std::cerr << "[KeyLoader] ошибка при записи ключевого файла '" << KEY_FILE
+              << "': " << ex.what() << std::endl;
+    throw;
   }
   std::error_code ec;
   std::filesystem::remove(LEGACY_BACKUP_FILE, ec);
