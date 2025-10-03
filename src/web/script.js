@@ -78,6 +78,9 @@ const POINTING_COMPASS_OFFSET_DEG = 180; // отображаем юг в вер�
 const CHAT_UNREAD_STORAGE_KEY = "chatUnread"; // ключ хранения количества непрочитанных сообщений
 const CHAT_UNREAD_MAX = 999; // максимальное значение счётчика, отображаемое в бейдже
 const CHAT_HISTORY_LIMIT = 500; // максимальное количество сообщений, сохраняемых в истории чата
+const CHAT_HISTORY_STORAGE_KEY = "chatHistory"; // единый ключ localStorage для истории чата
+const KEY_STATE_STORAGE_KEY = "keyState"; // ключ localStorage для снапшота состояния ключа
+const KEY_STATE_MESSAGE_STORAGE_KEY = "keyStateMessage"; // ключ хранения последнего сообщения о ключах
 const CHANNELS_CACHE_STORAGE_KEY = "channelsCache"; // ключ localStorage для кеша списка каналов
 
 /* Состояние интерфейса */
@@ -896,6 +899,7 @@ async function init() {
   const btnKeyRestore = $("#btnKeyRestore"); if (btnKeyRestore) btnKeyRestore.addEventListener("click", () => requestKeyRestore());
   const btnKeySend = $("#btnKeySend"); if (btnKeySend) btnKeySend.addEventListener("click", () => requestKeySend());
   const btnKeyRecv = $("#btnKeyRecv"); if (btnKeyRecv) btnKeyRecv.addEventListener("click", () => requestKeyReceive());
+  hydrateStoredKeyState();
   const criticalInitTasks = [
     { name: "refreshKeyState", run: () => refreshKeyState({ silent: true }) },
     { name: "syncSettingsFromDevice", run: () => syncSettingsFromDevice() },
@@ -917,6 +921,10 @@ async function init() {
       console.warn("[init] задача инициализации завершилась ошибкой", criticalInitTasks[index].name, result.reason);
     }
   });
+
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("storage", handleExternalStorageChange);
+  }
 
   await loadVersion().catch(() => {});
   probe().catch(() => {});
@@ -1278,7 +1286,7 @@ function saveChatHistory() {
   const entries = getChatHistory();
   applyChatHistoryLimit(entries, { updateDom: false, updateProgress: false });
   try {
-    storage.set("chatHistory", JSON.stringify(entries));
+    storage.set(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(entries));
   } catch (err) {
     console.warn("[chat] не удалось сохранить историю:", err);
   }
@@ -1468,8 +1476,10 @@ function normalizeChatEntries(rawEntries) {
   }
   return out;
 }
-function loadChatHistory() {
-  const raw = storage.get("chatHistory") || "[]";
+function loadChatHistory(options) {
+  const opts = options || {};
+  const source = Object.prototype.hasOwnProperty.call(opts, "raw") ? opts.raw : storage.get(CHAT_HISTORY_STORAGE_KEY);
+  const raw = typeof source === "string" ? source : (source != null ? String(source) : "[]");
   let entries;
   try {
     entries = JSON.parse(raw);
@@ -1480,14 +1490,34 @@ function loadChatHistory() {
   const normalized = normalizeChatEntries(entries);
   applyChatHistoryLimit(normalized, { updateDom: false });
   UI.state.chatHistory = normalized;
-  if (UI.els.chatLog) UI.els.chatLog.innerHTML = "";
-  UI.state.chatHydrating = true;
-  for (let i = 0; i < normalized.length; i++) {
-    addChatMessage(normalized[i], i, { skipSound: true, skipScroll: true });
+  const wasPinned = UI.state.chatScrollPinned === true;
+  if (UI.els.chatLog) {
+    UI.els.chatLog.innerHTML = "";
+    UI.state.chatHydrating = true;
+    for (let i = 0; i < normalized.length; i++) {
+      addChatMessage(normalized[i], i, { skipSound: true, skipScroll: true });
+    }
+    UI.state.chatHydrating = false;
+    if (!opts.skipScroll) {
+      const shouldForce = opts.forceScroll === true;
+      const allowAuto = opts.forceScroll !== false && wasPinned;
+      if (shouldForce || allowAuto) {
+        scrollChatToBottom(true);
+      } else {
+        UI.state.chatScrollPinned = false;
+        updateChatScrollButton();
+      }
+    } else {
+      updateChatScrollButton();
+    }
   }
-  UI.state.chatHydrating = false;
-  scrollChatToBottom(true);
-  saveChatHistory();
+  if (!opts.skipSave) {
+    try {
+      storage.set(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(normalized));
+    } catch (err) {
+      console.warn("[chat] не удалось сохранить историю:", err);
+    }
+  }
 }
 function persistChat(message, author, meta) {
   const entries = getChatHistory();
@@ -7733,8 +7763,9 @@ async function syncSettingsFromDevice() {
 }
 
 /* Безопасность */
-function renderKeyState(state) {
-  const data = state || UI.key.state;
+function renderKeyState(state, options) {
+  const opts = options || {};
+  const data = typeof state === "undefined" ? UI.key.state : state;
   const stateEl = $("#keyState");
   const idEl = $("#keyId");
   const pubEl = $("#keyPublic");
@@ -7771,6 +7802,66 @@ function renderKeyState(state) {
     }
   }
   if (messageEl) messageEl.textContent = UI.key.lastMessage || "";
+  if (opts.persist !== false) persistKeyStateSnapshot();
+}
+
+// Сохраняем актуальное состояние ключа и сопутствующее сообщение в localStorage
+function persistKeyStateSnapshot() {
+  const snapshot = UI.key && UI.key.state ? UI.key.state : null;
+  try {
+    if (snapshot) storage.set(KEY_STATE_STORAGE_KEY, JSON.stringify(snapshot));
+    else storage.remove(KEY_STATE_STORAGE_KEY);
+  } catch (err) {
+    console.warn("[key] не удалось сохранить состояние ключа:", err);
+  }
+  const message = UI.key && typeof UI.key.lastMessage === "string" ? UI.key.lastMessage : "";
+  try {
+    if (message) storage.set(KEY_STATE_MESSAGE_STORAGE_KEY, message);
+    else storage.remove(KEY_STATE_MESSAGE_STORAGE_KEY);
+  } catch (err) {
+    console.warn("[key] не удалось сохранить сообщение о ключе:", err);
+  }
+}
+
+// Подтягиваем снапшот состояния ключей из localStorage и обновляем интерфейс без повторной записи
+function hydrateStoredKeyState() {
+  let state = null;
+  let message = "";
+  try {
+    const rawState = storage.get(KEY_STATE_STORAGE_KEY);
+    if (rawState) state = JSON.parse(rawState);
+  } catch (err) {
+    console.warn("[key] не удалось прочитать сохранённое состояние ключа:", err);
+    state = null;
+  }
+  const rawMessage = storage.get(KEY_STATE_MESSAGE_STORAGE_KEY);
+  if (typeof rawMessage === "string") message = rawMessage;
+  UI.key.state = state && typeof state === "object" ? state : null;
+  UI.key.lastMessage = message || "";
+  renderKeyState(UI.key.state, { persist: false });
+}
+
+// Обрабатываем внешние изменения localStorage, чтобы синхронизировать чат и вкладку Security между вкладками браузера
+function handleExternalStorageChange(event) {
+  if (!event) return;
+  let localStore = null;
+  if (typeof window !== "undefined") {
+    try {
+      localStore = window.localStorage;
+    } catch (err) {
+      localStore = null;
+    }
+  }
+  if (event.storageArea && localStore && event.storageArea !== localStore) {
+    return;
+  }
+  if (!event.key) return;
+  if (event.key === CHAT_HISTORY_STORAGE_KEY) {
+    const raw = typeof event.newValue === "string" ? event.newValue : "[]";
+    loadChatHistory({ raw, skipSave: true });
+  } else if (event.key === KEY_STATE_STORAGE_KEY || event.key === KEY_STATE_MESSAGE_STORAGE_KEY) {
+    hydrateStoredKeyState();
+  }
 }
 
 async function refreshKeyState(options) {
