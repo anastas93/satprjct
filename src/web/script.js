@@ -3939,6 +3939,25 @@ function handleDeviceLogPushMessage(event) {
   appendDeviceLogEntries([entry]);
 }
 
+function handleKeyStatePushMessage(event) {
+  const raw = event && typeof event.data === "string" ? event.data : "";
+  if (!raw) return;
+  let payload = null;
+  try {
+    payload = JSON.parse(raw);
+  } catch (err) {
+    payload = parseJsonLenient(raw);
+    if (!payload) {
+      console.warn("[push] не удалось разобрать keystate:", err, raw);
+      return;
+    }
+  }
+  if (!payload || typeof payload !== "object") return;
+  UI.key.state = payload;
+  renderKeyState(payload);
+}
+
+
 function handleIrqPushMessage(event) {
   const raw = event && typeof event.data === "string" ? event.data : "";
   if (!raw) return;
@@ -4070,6 +4089,12 @@ function openReceivedPushChannel() {
       push.connected = true;
       push.lastEventAt = Date.now();
       handleDeviceLogPushMessage(event);
+      updateReceivedMonitorDiagnostics();
+    });
+    source.addEventListener("keystate", (event) => {
+      push.connected = true;
+      push.lastEventAt = Date.now();
+      handleKeyStatePushMessage(event);
       updateReceivedMonitorDiagnostics();
     });
     source.addEventListener("irq", (event) => {
@@ -7740,6 +7765,18 @@ function renderKeyState(state) {
   const pubEl = $("#keyPublic");
   const peerEl = $("#keyPeer");
   const backupEl = $("#keyBackup");
+  const chatArea = UI.els.chatArea || $(".chat-area");
+  if (chatArea) {
+    const validState = data && typeof data === "object" && data.valid !== false;
+    if (validState) {
+      const typeValue = data.type === "external" ? "external" : "local";
+      chatArea.dataset.keyState = typeValue;
+      chatArea.classList.remove("key-missing");
+    } else {
+      chatArea.dataset.keyState = "missing";
+      chatArea.classList.add("key-missing");
+    }
+  }
   const messageEl = $("#keyMessage");
   const peerBtn = UI.els.keyGenPeerBtn || $("#btnKeyGenPeer");
   if (!data || typeof data !== "object") {

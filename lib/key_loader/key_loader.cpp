@@ -750,14 +750,12 @@ bool ensureFlashEncryptionEnabled() {
   bool enabled = esp_flash_encryption_enabled();
   static bool warned = false;
   if (!enabled && !warned) {
-    // При старте глобальные конструкторы вызывают KeyLoader до инициализации Serial.
-    // Чтобы избежать аварии при обращении к неготовому UART, проверяем доступность
-    // Serial перед выводом предупреждения и повторяем попытку при следующем вызове.
-    if (logMessage(F("KeyLoader: Flash Encryption выключена, доступ к NVS запрещён"))) {
+    // Inform once that NVS persists data without flash encryption.
+    if (logMessage(F("KeyLoader: Flash Encryption disabled, continuing with unencrypted NVS"))) {
       warned = true;
     }
   }
-  return enabled;
+  return true;
 }
 
 bool ensurePrefs() {
