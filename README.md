@@ -485,6 +485,8 @@ Arduino IDE и вспомогательных скриптов.
 - `GET /api/logs?n=<count>` — возвращает JSON `\"logs\"` с массивом объектов `{id, uptime, text}` для инициализации вкладки Debug.
 - Команды работы с ключами возвращают JSON (`KEYSTATE`, `KEYGEN`, `KEYRESTORE`, `KEYTRANSFER SEND`,
   `KEYTRANSFER RECEIVE`, а также совместимые `KEYSEND`/`KEYRECV`).
+- `GET /api/cmd?cmd=KEYRECV&peer=<HEX>` — передаёт публичный ключ напарника в `cmdKeyReceiveSecure`; параметр
+  `peer` заменяет устаревший псевдоним `pub`, который продолжает поддерживаться для обратной совместимости.
 - Ответ `RSTS full=1` включает список элементов с полями `name`, `type`, `len`, `text`, `hex`.
 
 ## Хранилище ключей и обмен

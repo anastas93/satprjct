@@ -3012,8 +3012,13 @@ void handleCmdHttp() {
     resp = cmdKeyTransferSendLora();
     contentType = "application/json"; //    JSON
   } else if (cmd == "KEYRECV") {
-    String hex = server.hasArg("pub") ? server.arg("pub") : String();
-    resp = cmdKeyReceiveSecure(hex);
+    String peerHex;
+    if (server.hasArg("peer")) {
+      peerHex = server.arg("peer");
+    } else if (server.hasArg("pub")) {
+      peerHex = server.arg("pub"); // устаревший псевдоним для совместимости
+    }
+    resp = cmdKeyReceiveSecure(peerHex);
     contentType = "application/json"; //    JSON
   } else if (cmd == "KEYTRANSFER") {
     if (cmdArg == "SEND") {
