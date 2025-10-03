@@ -37,14 +37,26 @@ public:
     return RADIOLIB_ERR_NONE;
   }
 
-  int16_t setFrequency(float) { return RADIOLIB_ERR_NONE; }
-  int16_t transmit(uint8_t*, size_t) { return RADIOLIB_ERR_NONE; }
+  int16_t setFrequency(float freq) {
+    previousSetFrequency = lastSetFrequency; // запоминаем предыдущую частоту
+    lastSetFrequency = freq;          // фиксируем установленную частоту
+    ++setFrequencyCalls;              // считаем вызовы смены частоты
+    return setFrequencyState;
+  }
+  int16_t transmit(uint8_t*, size_t len) {
+    lastTransmitLength = len;         // сохраняем длину последней передачи
+    ++transmitCalls;                  // считаем количество передач
+    return transmitResult;
+  }
   size_t getPacketLength(bool = true) { return testPacketLength; }
   int16_t readData(uint8_t*, size_t) { return testReadState; }
   float getSNR() const { return testSnr; }
   float getRSSI() const { return testRssi; }
   uint8_t randomByte() { return nextRandom++; }
-  int16_t startReceive() { return RADIOLIB_ERR_NONE; }
+  int16_t startReceive() {
+    ++startReceiveCalls;              // учитываем попытки запуска приёма
+    return startReceiveState;
+  }
   int16_t reset() { return RADIOLIB_ERR_NONE; }
   int16_t setBandwidth(float) { return RADIOLIB_ERR_NONE; }
   int16_t setSpreadingFactor(int) { return RADIOLIB_ERR_NONE; }
@@ -64,6 +76,15 @@ public:
   int16_t clearIrqStatus() { return testClearIrqState; }
 
   Module* module_;
+  float lastSetFrequency = 0.0f;       // последняя установленная частота
+  float previousSetFrequency = 0.0f;   // частота из предыдущего вызова setFrequency()
+  size_t setFrequencyCalls = 0;        // количество вызовов setFrequency()
+  size_t startReceiveCalls = 0;        // количество вызовов startReceive()
+  size_t transmitCalls = 0;            // количество вызовов transmit()
+  size_t lastTransmitLength = 0;       // длина последней переданной полезной нагрузки
+  int16_t transmitResult = RADIOLIB_ERR_NONE; // код возврата transmit()
+  int16_t setFrequencyState = RADIOLIB_ERR_NONE; // код возврата setFrequency()
+  int16_t startReceiveState = RADIOLIB_ERR_NONE; // код возврата startReceive()
   uint32_t testIrqFlags = 0;
   int16_t testClearIrqState = RADIOLIB_ERR_NONE;
   size_t testPacketLength = 0;

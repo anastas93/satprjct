@@ -203,6 +203,7 @@ private:
     }
   };
 
+  friend class RadioSX1262TestAccessor;       // тестовый доступ к внутренностям
   PublicSX1262 radio_;                   // экземпляр радиомодуля
   RxCallback rx_cb_;                     // пользовательский колбэк
   IrqLogCallback irqCallback_ = nullptr; // внешнее уведомление об IRQ-логе
