@@ -1,4 +1,6 @@
 #pragma once
+#ifndef LOG_HOOK_LOG_H
+#define LOG_HOOK_LOG_H
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -25,3 +27,4 @@ void clear();
 size_t size();
 
 } // namespace LogHook
+#endif // LOG_HOOK_LOG_H

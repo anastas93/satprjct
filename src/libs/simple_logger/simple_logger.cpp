@@ -2,7 +2,7 @@
 #include <array>
 #include <string_view>
 #include "default_settings.h"               // глобальные настройки логирования
-#include "libs/log_hook/log_hook.h"         // публикация в веб-журнал
+#include "logger.h"                         // асинхронная очередь логов
 
 #ifdef ARDUINO
 #  include <Arduino.h>
@@ -41,28 +41,9 @@ void logStatus(const std::string& line) {
   std::string_view prefix_view = (pos == std::string::npos)
                                    ? std::string_view(line)
                                    : std::string_view(line.data(), pos);
-  bool serialReady = false;                        // отметка готовности аппаратного Serial
-#ifdef ARDUINO
-  serialReady = static_cast<bool>(Serial);
-#endif
-
   if (LogEntry* existing = findByPrefix(prefix_view)) {
     existing->line = line;                       // обновляем строку без перевыделения
-#ifdef ARDUINO
-    if (serialReady) {                           // не пишем в неготовый порт
-      Serial.println(line.c_str());              // повторно выводим актуальную строку в Serial
-      if (DefaultSettings::SERIAL_FLUSH_AFTER_LOG) {
-        Serial.flush();
-      }
-    }
-#endif
-#if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
-    LogHook::append(line.c_str());               // дублируем в буфер push-логов
-#else
-    if (!serialReady) {                          // при отсутствии Serial отправляем через LogHook
-      LogHook::append(line.c_str());
-    }
-#endif
+    Logger::enqueue(DefaultSettings::LogLevel::INFO, line); // отправляем обновление в очередь логов
     return;
   }
 
@@ -77,21 +58,7 @@ void logStatus(const std::string& line) {
   LogEntry& entry = g_log[index];
   entry.prefix.assign(prefix_view.data(), prefix_view.size());
   entry.line = line;
-#ifdef ARDUINO
-  if (serialReady) {                             // гарантируем готовность Serial перед выводом
-    Serial.println(line.c_str());                // выводим новую запись в Serial
-    if (DefaultSettings::SERIAL_FLUSH_AFTER_LOG) {
-      Serial.flush();
-    }
-  }
-#endif
-#if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
-  LogHook::append(line.c_str());                 // передаём запись в веб-интерфейс
-#else
-  if (!serialReady) {                            // обеспечиваем доставку при отключённом Serial
-    LogHook::append(line.c_str());
-  }
-#endif
+  Logger::enqueue(DefaultSettings::LogLevel::INFO, line);   // передаём запись в асинхронный лог
 }
 
 std::vector<std::string> getLast(size_t count) {

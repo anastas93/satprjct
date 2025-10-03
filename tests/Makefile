@@ -11,11 +11,13 @@ SUPPORT_SRCS := ../src/libs_includes.cpp \
                 ../src/message_buffer.cpp \
                 ../src/tx_module.cpp \
                 ../src/rx_module.cpp \
-                ../src/radio_sx1262.cpp
+                ../src/radio_sx1262.cpp \
+                ../src/logger.cpp
 SUPPORT_OBJS := $(patsubst ../%.cpp,$(BUILD_DIR)/support/%.o,$(SUPPORT_SRCS))
 TEST_SRCS ?= test_key_transfer.cpp test_radio_irq_logging.cpp test_radio_send_error_recovery.cpp \
              test_http_image_upload.cpp test_sse_backpressure.cpp test_keytransfer_receive_async.cpp \
-             test_key_safe_mode.cpp test_rx_serial_dump.cpp
+             test_key_safe_mode.cpp test_rx_serial_dump.cpp test_logger_ring_buffer.cpp \
+             test_logger_framing.cpp
 TEST_BINS := $(patsubst %.cpp,$(BUILD_DIR)/%,$(TEST_SRCS))
 TEST_TARGETS := $(patsubst %.cpp,%,$(TEST_SRCS))
 
@@ -29,7 +31,7 @@ $(TEST_TARGETS): %: $(BUILD_DIR)/%
 # Специализированный юнит-тест safe mode не требует тяжёлых зависимостей Radio/LoRa.
 $(BUILD_DIR)/test_key_safe_mode: test_key_safe_mode.cpp test_key_safe_mode_support.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ ../src/key_safe_mode.cpp $(LDFLAGS) -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ ../src/key_safe_mode.cpp ../src/logger.cpp $(LDFLAGS) -o $@
 
 # Общее правило для остальных тестов, которым нужны поддерживающие модули.
 $(BUILD_DIR)/%: %.cpp $(SUPPORT_OBJS)

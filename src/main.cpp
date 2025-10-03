@@ -20,6 +20,7 @@
 // --- Вспомогательные библиотеки ---
 #include "libs/text_converter/text_converter.h"   // конвертер UTF-8 -> CP1251
 #include "libs/simple_logger/simple_logger.h"     // журнал статусов
+#include "logger.h"                               // асинхронный вывод логов
 #include "libs/received_buffer/received_buffer.h" // буфер принятых сообщений
 #include "libs/packetizer/packet_gatherer.h"      // собиратель пакетов для теста
 #include "libs/packetizer/packet_splitter.h"      // параметры делителя пакетов
@@ -3028,6 +3029,19 @@ bool setupWifi() {
 }
 
 void setup() {
+  Logger::init();                                        // сбрасываем очередь логов перед запуском задач
+#if defined(ARDUINO)
+  static TaskHandle_t loggerTaskHandle = nullptr;        // гарантируем одиночный запуск задачи
+  if (loggerTaskHandle == nullptr) {
+#if defined(ESP32)
+    const uint32_t stackSize = 4096;
+    xTaskCreatePinnedToCore(Logger::task, "logger", stackSize, nullptr, 2, &loggerTaskHandle, 1);
+#else
+    const uint32_t stackSize = 4096;
+    xTaskCreate(Logger::task, "logger", stackSize, nullptr, 2, &loggerTaskHandle);
+#endif
+  }
+#endif
   // Настраиваем контроллер safe mode, чтобы он управлял флагами и модулями шифрования.
   configureKeySafeModeController(
       [](bool enabled) {
