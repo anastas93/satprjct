@@ -812,8 +812,8 @@ g++ -I. tests/test_key_transfer.cpp \
   `getCodingRate`, `getPower`, `getRxFrequency`, `getTxFrequency`.
 - `bool setRxBoostedGainMode(bool enabled)`, `bool isRxBoostedGainEnabled() const` — управление
   режимом повышенного усиления приёмника.
-- `static uint16_t bankSize(ChannelBank bank)`, `static float bankRx(...)`, `static float bankTx(...)` —
-  справочные методы.
+- `static uint16_t bankSize(ChannelBank bank)`, `static float bankRx(...)`, `static float bankTx(...)`,
+  `static const char* bankDescription(...)` — справочные методы.
 - `static void logIrqFlags(uint32_t flags)` — форматированный вывод активных IRQ-флагов радиочипа
   в журнал через `DEBUG_LOG`, чтобы сообщения не поднимали общий уровень логирования.
   При наличии в RadioLib отдельных масок `RADIOLIB_IRQ_RX_TIMEOUT` и `RADIOLIB_IRQ_TX_TIMEOUT`
