@@ -2841,11 +2841,15 @@ bool setupWifi() {
 
 void setup() {
   Serial.begin(115200);
-  // Подключаем KeyLoader к Serial, чтобы выгрузить накопленные сообщения после инициализации UART.
-  KeyLoader::setLogCallback([](const __FlashStringHelper* msg) {
-    Serial.println(msg);
-  });
   bool serialReady = waitForSerial(1500);                // ждём подключения Serial, но не блокируемся
+  // После инициализации UART привязываем KeyLoader к Serial с проверкой доступности порта.
+  KeyLoader::setLogCallback([](const __FlashStringHelper* msg) -> bool {
+    if (!Serial) {
+      return false;                                      // повторим попытку, когда USB появится
+    }
+    Serial.println(msg);
+    return true;
+  });
 #if SR_HAS_ESP_COREDUMP
   gCoreDumpClearPending = true;
   gCoreDumpClearAfterMs = millis() + 500;  // ждём старта фоновых задач

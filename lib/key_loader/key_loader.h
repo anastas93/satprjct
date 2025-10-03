@@ -7,9 +7,9 @@ namespace KeyLoader {
 
 #ifdef ARDUINO
 class __FlashStringHelper;
-using LogCallback = void (*)(const __FlashStringHelper* message);
+using LogCallback = bool (*)(const __FlashStringHelper* message);
 #else
-using LogCallback = void (*)(const char* message);
+using LogCallback = bool (*)(const char* message);
 #endif
 
 // Доступные варианты хранилища ключей
