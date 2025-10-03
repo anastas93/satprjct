@@ -476,6 +476,21 @@
         <div id="keyPeer" class="mono small muted" hidden></div>
         <div id="keyBackup" class="small muted"></div>
       </div>
+      <div class="key-status-row">
+        <div id="keyStatusKey" class="key-status-chip" data-state="unknown">
+          <span class="label">Ключ</span>
+          <span id="keyStatusKeyText">—</span>
+        </div>
+        <div id="keyStatusStorage" class="key-status-chip" data-state="unknown">
+          <span class="label">Хранилище</span>
+          <span id="keyStatusStorageText">—</span>
+        </div>
+        <div id="keyStatusSafeMode" class="key-status-chip" data-state="unknown">
+          <span class="label">Safe mode</span>
+          <span id="keyStatusSafeModeText">—</span>
+        </div>
+      </div>
+      <div id="keyStatusDetails" class="small muted"></div>
       <div class="actions">
         <button id="btnKeyGen" class="btn">KEYGEN</button>
         <button id="btnKeyGenPeer" class="btn" disabled>KEYGEN PEER</button>

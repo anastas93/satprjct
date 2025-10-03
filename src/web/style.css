@@ -738,6 +738,61 @@ main {
 
 /* Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Рµ Р±Р»РѕРєРё РІ С‡Р°С‚Рµ */
 .status-row { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem; margin: .75rem 0; }
+.key-status-row { display:flex; flex-wrap:wrap; gap:.6rem; margin:.75rem 0 0; }
+.key-status-chip {
+  display:inline-flex;
+  align-items:center;
+  gap:.45rem;
+  padding:.45rem .75rem;
+  border-radius:.75rem;
+  border:1px solid color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  background: color-mix(in oklab, var(--panel-2) 90%, black 10%);
+  font-weight:600;
+  font-size:.82rem;
+  letter-spacing:.02em;
+  transition:background .2s ease, border-color .2s ease, color .2s ease;
+}
+.key-status-chip .label {
+  font-size:.68rem;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color: var(--muted);
+}
+.key-status-chip[data-state="ok"] {
+  background: color-mix(in oklab, var(--good) 22%, var(--panel-2) 78%);
+  border-color: color-mix(in oklab, var(--good) 45%, var(--panel-2) 55%);
+  color: color-mix(in oklab, var(--good) 75%, white 25%);
+}
+.key-status-chip[data-state="warn"] {
+  background: color-mix(in oklab, var(--danger) 18%, var(--panel-2) 82%);
+  border-color: color-mix(in oklab, var(--danger) 45%, var(--panel-2) 55%);
+  color: color-mix(in oklab, var(--danger) 75%, white 25%);
+}
+.key-status-chip[data-state="error"] {
+  background: color-mix(in oklab, var(--danger) 28%, var(--panel-2) 72%);
+  border-color: color-mix(in oklab, var(--danger) 60%, var(--panel-2) 40%);
+  color: color-mix(in oklab, var(--danger) 80%, white 20%);
+}
+.key-status-chip[data-state="pending"] {
+  background: color-mix(in oklab, var(--accent) 20%, var(--panel-2) 80%);
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--panel-2) 55%);
+  color: color-mix(in oklab, var(--accent) 70%, white 30%);
+}
+.key-status-chip[data-state="unknown"] {
+  background: color-mix(in oklab, var(--panel-2) 92%, black 8%);
+  border-color: color-mix(in oklab, var(--panel-2) 70%, black 30%);
+  color: var(--muted);
+}
+.key-status-chip[data-pending="true"]::after {
+  content:"…";
+  margin-left:.1rem;
+  font-size:.9em;
+  animation:key-chip-pulse 1.4s ease-in-out infinite;
+}
+@keyframes key-chip-pulse {
+  0%,100% { opacity:.45; }
+  50% { opacity:1; }
+}
 .chip.state {
   min-width: 6rem;
   justify-content: space-between;

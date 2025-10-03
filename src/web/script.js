@@ -82,6 +82,7 @@ const CHAT_HISTORY_STORAGE_KEY = "chatHistory"; // единый ключ localSt
 const KEY_STATE_STORAGE_KEY = "keyState"; // ключ localStorage для снапшота состояния ключа
 const KEY_STATE_MESSAGE_STORAGE_KEY = "keyStateMessage"; // ключ хранения последнего сообщения о ключах
 const CHANNELS_CACHE_STORAGE_KEY = "channelsCache"; // ключ localStorage для кеша списка каналов
+const KEY_BASE_ID_CACHE = new Map(); // кеш для вычисленных идентификаторов базового ключа
 
 /* Состояние интерфейса */
 const UI = {
@@ -643,6 +644,13 @@ async function init() {
   UI.els.ackText = $("#ackStateText");
   UI.els.encChip = $("#encStateChip");
   UI.els.encText = $("#encStateText");
+  UI.els.keyStatusKey = $("#keyStatusKey");
+  UI.els.keyStatusKeyText = $("#keyStatusKeyText");
+  UI.els.keyStatusStorage = $("#keyStatusStorage");
+  UI.els.keyStatusStorageText = $("#keyStatusStorageText");
+  UI.els.keyStatusSafeMode = $("#keyStatusSafeMode");
+  UI.els.keyStatusSafeModeText = $("#keyStatusSafeModeText");
+  UI.els.keyStatusDetails = $("#keyStatusDetails");
   UI.els.ackSetting = $("#ACK");
   UI.els.ackSettingWrap = $("#ackSettingControl");
   UI.els.ackSettingHint = $("#ackSettingHint");
@@ -8091,6 +8099,197 @@ async function syncSettingsFromDevice() {
   updateChannelSelectHint();
 }
 
+/* Вспомогательные функции для отображения состояния ключей */
+function normalizeHexString(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim().replace(/^0x/i, "");
+  if (!trimmed) return "";
+  const compact = trimmed.replace(/[^0-9a-fA-F]/g, "");
+  if (!compact || compact.length % 2 !== 0) return "";
+  return compact.toUpperCase();
+}
+
+function normalizeKeyId(value) {
+  const hex = normalizeHexString(value);
+  if (!hex) return "";
+  return hex.length > 8 ? hex.slice(0, 8) : hex;
+}
+
+function formatKeyId(hex) {
+  if (!hex) return "";
+  const normalized = hex.toUpperCase();
+  return normalized.replace(/(.{4})(?=.)/g, "$1\u2022");
+}
+
+function hexToUint8Array(hex) {
+  const normalized = normalizeHexString(hex);
+  if (!normalized) return null;
+  const bytes = new Uint8Array(normalized.length / 2);
+  for (let i = 0; i < normalized.length; i += 2) {
+    const byte = parseInt(normalized.slice(i, i + 2), 16);
+    if (Number.isNaN(byte)) return null;
+    bytes[i / 2] = byte;
+  }
+  return bytes;
+}
+
+function deriveKeyIdFromHex(hex) {
+  const normalized = normalizeHexString(hex);
+  if (!normalized) return "";
+  if (KEY_BASE_ID_CACHE.has(normalized)) {
+    return KEY_BASE_ID_CACHE.get(normalized) || "";
+  }
+  try {
+    const bytes = hexToUint8Array(normalized);
+    if (!bytes || typeof sha256Bytes !== "function") {
+      KEY_BASE_ID_CACHE.set(normalized, "");
+      return "";
+    }
+    const digestHex = sha256Bytes(bytes);
+    if (typeof digestHex === "string" && digestHex.length >= 8) {
+      const id = digestHex.slice(0, 8).toUpperCase();
+      KEY_BASE_ID_CACHE.set(normalized, id);
+      return id;
+    }
+  } catch (err) {
+    // Всегда оставляем комментарии на русском
+    console.warn("[key] не удалось вычислить идентификатор базового ключа:", err);
+  }
+  KEY_BASE_ID_CACHE.set(normalized, "");
+  return "";
+}
+
+function updateKeyStatusIndicators(state, meta) {
+  const opts = meta || {};
+  const effectiveState = state && typeof state === "object" ? state : null;
+  const idEl = opts.idEl || null;
+  const activeIdRaw = typeof opts.activeId === "string" ? opts.activeId : "";
+  const baseKeyIdRaw = typeof opts.baseKeyId === "string" ? opts.baseKeyId : "";
+  let effectiveId = activeIdRaw || baseKeyIdRaw;
+  if (idEl) {
+    idEl.textContent = effectiveId ? formatKeyId(effectiveId) : "";
+  }
+  const usingBaseKey = Boolean(baseKeyIdRaw && effectiveId && baseKeyIdRaw === effectiveId);
+  const valid = effectiveState ? effectiveState.valid !== false : false;
+  const safeMode = effectiveState ? effectiveState.safeMode === true : false;
+  const storageReady = effectiveState ? effectiveState.storageReady !== false : false;
+  const storageName = effectiveState && typeof effectiveState.storage === "string"
+    ? effectiveState.storage.trim()
+    : "";
+  const preferredName = effectiveState && typeof effectiveState.preferred === "string"
+    ? effectiveState.preferred.trim()
+    : "";
+  const storageLabel = storageName ? storageName.toUpperCase() : "";
+  const preferredLabel = preferredName && preferredName.toLowerCase() !== "auto"
+    ? preferredName.toUpperCase()
+    : "";
+
+  const keyChip = UI.els.keyStatusKey || $("#keyStatusKey");
+  const keyTextEl = UI.els.keyStatusKeyText || $("#keyStatusKeyText");
+  if (!UI.els.keyStatusKey) {
+    UI.els.keyStatusKey = keyChip;
+    UI.els.keyStatusKeyText = keyTextEl;
+  }
+  if (keyChip) {
+    let chipState = "unknown";
+    let chipText = "—";
+    if (!effectiveState) {
+      chipText = "нет данных";
+    } else if (!valid) {
+      chipState = "error";
+      chipText = "нет";
+    } else if (usingBaseKey) {
+      chipState = "warn";
+      chipText = "базовый";
+    } else {
+      chipState = "ok";
+      chipText = effectiveState.type === "external" ? "внешний" : "локальный";
+    }
+    keyChip.dataset.state = chipState;
+    if (keyChip.dataset.pending) delete keyChip.dataset.pending;
+    if (keyTextEl) keyTextEl.textContent = chipText;
+  }
+
+  const storageChip = UI.els.keyStatusStorage || $("#keyStatusStorage");
+  const storageTextEl = UI.els.keyStatusStorageText || $("#keyStatusStorageText");
+  if (!UI.els.keyStatusStorage) {
+    UI.els.keyStatusStorage = storageChip;
+    UI.els.keyStatusStorageText = storageTextEl;
+  }
+  if (storageChip) {
+    let chipState = "unknown";
+    let chipText = "—";
+    if (effectiveState) {
+      const preferredSuffix = preferredLabel && preferredLabel !== storageLabel
+        ? ` · pref ${preferredLabel}`
+        : "";
+      chipText = storageLabel ? storageLabel + preferredSuffix : "—";
+      if (!storageReady) chipState = "warn";
+      else if (storageLabel) chipState = "ok";
+    }
+    storageChip.dataset.state = chipState;
+    if (storageChip.dataset.pending) delete storageChip.dataset.pending;
+    if (storageTextEl) storageTextEl.textContent = chipText;
+  }
+
+  const safeModeChip = UI.els.keyStatusSafeMode || $("#keyStatusSafeMode");
+  const safeModeTextEl = UI.els.keyStatusSafeModeText || $("#keyStatusSafeModeText");
+  if (!UI.els.keyStatusSafeMode) {
+    UI.els.keyStatusSafeMode = safeModeChip;
+    UI.els.keyStatusSafeModeText = safeModeTextEl;
+  }
+  if (safeModeChip) {
+    let chipState = "unknown";
+    let chipText = "—";
+    if (effectiveState) {
+      chipState = safeMode ? "error" : "ok";
+      chipText = safeMode ? "ON" : "OFF";
+    }
+    safeModeChip.dataset.state = chipState;
+    if (safeModeChip.dataset.pending) delete safeModeChip.dataset.pending;
+    if (safeModeTextEl) safeModeTextEl.textContent = chipText;
+  }
+
+  const detailsEl = UI.els.keyStatusDetails || $("#keyStatusDetails");
+  if (!UI.els.keyStatusDetails) UI.els.keyStatusDetails = detailsEl;
+  if (detailsEl) {
+    const lines = [];
+    if (!effectiveState) {
+      lines.push("Состояние ключа недоступно.");
+    } else {
+      if (!valid) {
+        lines.push("Ключ не найден, используется базовый идентификатор из конфигурации.");
+      } else if (usingBaseKey) {
+        lines.push("Текущий ключ совпадает с базовым значением, новый ключ не принят.");
+      } else {
+        lines.push(`Активен ${effectiveState.type === "external" ? "внешний" : "локальный"} ключ.`);
+      }
+      if (effectiveId) {
+        lines.push(`ID активного ключа: ${formatKeyId(effectiveId)}.`);
+      }
+      if (baseKeyIdRaw && (!effectiveId || baseKeyIdRaw !== effectiveId)) {
+        lines.push(`ID базового ключа: ${formatKeyId(baseKeyIdRaw)}.`);
+      }
+      if (!storageReady) {
+        lines.push("Хранилище ключей недоступно: выполните KEYSTORE RETRY после устранения ошибки.");
+      } else if (storageLabel) {
+        const suffix = preferredLabel && preferredLabel !== storageLabel
+          ? ` (предпочтительно ${preferredLabel})`
+          : "";
+        lines.push(`Активное хранилище: ${storageLabel}${suffix}.`);
+      }
+      if (safeMode) {
+        lines.push(effectiveState.safeModeContext
+          ? `Safe mode активен: ${effectiveState.safeModeContext}.`
+          : "Safe mode активен." );
+      } else if (effectiveState.safeModeContext) {
+        lines.push(`Последний сбой хранилища: ${effectiveState.safeModeContext}.`);
+      }
+    }
+    detailsEl.textContent = lines.join(" ");
+  }
+}
+
 /* Безопасность */
 function renderKeyState(state, options) {
   const opts = options || {};
@@ -8116,15 +8315,16 @@ function renderKeyState(state, options) {
   const peerBtn = UI.els.keyGenPeerBtn || $("#btnKeyGenPeer");
   if (!data || typeof data !== "object") {
     if (stateEl) stateEl.textContent = "—";
-    if (idEl) idEl.textContent = "";
     if (pubEl) pubEl.textContent = "";
     if (peerEl) peerEl.textContent = "";
     if (backupEl) backupEl.textContent = "";
     if (peerBtn) peerBtn.disabled = true;
+    updateKeyStatusIndicators(null, { idEl, activeId: "", baseKeyId: "" });
   } else {
     const type = data.type === "external" ? "EXTERNAL" : "LOCAL";
     if (stateEl) stateEl.textContent = type;
-    if (idEl) idEl.textContent = data.id || "";
+    const normalizedId = normalizeKeyId(data.id || "");
+    if (idEl) idEl.textContent = normalizedId ? formatKeyId(normalizedId) : "";
     if (pubEl) pubEl.textContent = data.public ? ("PUB " + data.public) : "";
     if (peerEl) {
       if (data.peer) {
@@ -8141,6 +8341,8 @@ function renderKeyState(state, options) {
       const hasPeer = typeof data.peer === "string" && data.peer.trim().length > 0;
       peerBtn.disabled = !hasPeer;
     }
+    const baseKeyId = deriveKeyIdFromHex(data.baseKey);
+    updateKeyStatusIndicators(data, { idEl, activeId: normalizedId, baseKeyId });
   }
   if (messageEl) messageEl.textContent = UI.key.lastMessage || "";
   if (opts.persist !== false) persistKeyStateSnapshot();
