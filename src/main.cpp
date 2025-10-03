@@ -28,6 +28,7 @@
 #include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
 #include "libs/key_transfer_waiter/key_transfer_waiter.h" // конечная автоматика ожидания KEYTRANSFER
 #include "libs/protocol/ack_utils.h"              // обработка ACK-пакетов
+#include "key_safe_mode.h"                        // управление защищённым режимом и шифрованием
 #include "sse_buffered_writer.h"                  // буферизированная отправка SSE-кадров
 
 // --- Сеть и веб-интерфейс ---
@@ -1173,43 +1174,6 @@ String keySafeModeErrorJson() {
 // Проверка доступности операций с ключами (true — можно продолжать)
 bool keyOperationsAllowed() {
   return keyStorageReady && !keySafeModeActive;
-}
-
-// Принудительно отключаем шифрование для защищённого режима
-void disableEncryptionForSafeMode() {
-  if (encryptionEnabled) {
-    encryptionEnabled = false;
-  }
-  tx.setEncryptionEnabled(false);
-  rx.setEncryptionEnabled(false);
-}
-
-// Активация защищённого режима при недоступности хранилища ключей
-void activateKeySafeMode(const char* reason) {
-  keyStorageReady = false;
-  const char* context = reason ? reason : "неизвестная причина";
-  disableEncryptionForSafeMode();
-  if (!keySafeModeActive) {
-    keySafeModeActive = true;
-    SimpleLogger::logStatus(std::string("KEY SAFE MODE ON: ") + context);
-    LOG_ERROR("CRITICAL: хранилище ключей недоступно (%s), шифрование отключено и ключевые команды заблокированы", context);
-  } else {
-    LOG_ERROR("CRITICAL: повторная ошибка доступа к хранилищу ключей (%s), защищённый режим уже активен", context);
-  }
-}
-
-// Деактивация защищённого режима после успешного восстановления
-void deactivateKeySafeMode(const char* reason) {
-  keyStorageReady = true;
-  if (!keySafeModeActive) {
-    return;
-  }
-  keySafeModeActive = false;
-  tx.setEncryptionEnabled(encryptionEnabled);
-  rx.setEncryptionEnabled(encryptionEnabled);
-  const char* context = reason ? reason : "без контекста";
-  SimpleLogger::logStatus(std::string("KEY SAFE MODE OFF: ") + context);
-  LOG_INFO("Key: хранилище ключей восстановлено (%s), защищённый режим снят", context);
 }
 
 // Переинициализация хранилища ключей с учётом защищённого режима
@@ -3063,6 +3027,15 @@ bool setupWifi() {
 }
 
 void setup() {
+  // Настраиваем контроллер safe mode, чтобы он управлял флагами и модулями шифрования.
+  configureKeySafeModeController(
+      [](bool enabled) {
+        tx.setEncryptionEnabled(enabled);
+        rx.setEncryptionEnabled(enabled);
+      },
+      &encryptionEnabled,
+      &keySafeModeActive,
+      &keyStorageReady);
   Serial.begin(115200);
   bool serialReady = waitForSerial(1500);                // ждём подключения Serial, но не блокируемся
   serialWasReady = serialReady;                          // фиксируем текущее состояние для отслеживания перехода
