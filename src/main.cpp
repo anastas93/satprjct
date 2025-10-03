@@ -35,6 +35,7 @@
 #include <esp_system.h>  // доступ к уникальному идентификатору ESP32
 #endif
 #include "web/web_content.h"      // встроенные файлы веб-интерфейса
+#include "http_body_reader.h"     // потоковое чтение HTTP-тела
 #ifndef ARDUINO
 #include <fstream>
 #include <chrono>
@@ -1684,28 +1685,63 @@ void handleApiTxImage() {
       return;
     }
   }
-  String body = server.arg("plain");
-  if (body.length() == 0) {                                 // защита от пустого тела
-    server.send(400, "text/plain", "empty");
-    return;
-  }
-  const size_t len = static_cast<size_t>(body.length());
+  size_t contentLength = server.contentLength();             // длина тела из заголовка
+  constexpr size_t kContentLengthUnknown = static_cast<size_t>(-1);
   static const size_t kImageMaxPayload = []() {
     PacketSplitter splitter(PayloadMode::LARGE);
     return DefaultSettings::TX_QUEUE_CAPACITY * splitter.payloadSize();
   }();                                                     // реальный потолок для очереди
-  if (len > kImageMaxPayload) {
+  if (contentLength != kContentLengthUnknown && contentLength == 0) {
+    server.send(400, "text/plain", "empty");
+    return;
+  }
+  if (contentLength != kContentLengthUnknown && contentLength > kImageMaxPayload) {
     String reason = "image exceeds queue capacity (max ";
     reason += String(static_cast<unsigned long>(kImageMaxPayload));
     reason += " bytes)";
     server.send(413, "text/plain", reason);
-    std::string log = "IMG TX reject bytes=" + std::to_string(len) +
+    std::string log = "IMG TX reject bytes=" + std::to_string(contentLength) +
                       " limit=" + std::to_string(kImageMaxPayload);
     SimpleLogger::logStatus(log);
     return;
   }
-  std::vector<uint8_t> payload(len);
-  std::memcpy(payload.data(), body.c_str(), len);           // копируем данные в вектор
+  auto client = server.client();                            // поток байтов HTTP-запроса
+  std::vector<uint8_t> payload;
+  bool lengthExceeded = false;
+  bool incomplete = false;
+  auto delayFn = []() { delay(1); };                        // пауза между чтениями
+  if (!HttpBodyReader::readBodyToVector(client,
+                                        contentLength,
+                                        kImageMaxPayload,
+                                        payload,
+                                        delayFn,
+                                        lengthExceeded,
+                                        incomplete)) {
+    if (lengthExceeded) {
+      String reason = "image exceeds queue capacity (max ";
+      reason += String(static_cast<unsigned long>(kImageMaxPayload));
+      reason += " bytes)";
+      server.send(413, "text/plain", reason);
+      size_t reportedSize = (contentLength != kContentLengthUnknown)
+                                ? contentLength
+                                : payload.size();
+      std::string log = "IMG TX reject bytes=" + std::to_string(reportedSize) +
+                        " limit=" + std::to_string(kImageMaxPayload);
+      SimpleLogger::logStatus(log);
+      return;
+    }
+    if (payload.empty()) {
+      server.send(400, "text/plain", "empty");
+      return;
+    }
+    server.send(400, "text/plain", "short read");
+    std::string log = "IMG TX short-read bytes=" + std::to_string(payload.size());
+    if (incomplete) {
+      log += " incomplete";
+    }
+    SimpleLogger::logStatus(log);
+    return;
+  }
   if (!isLikelyJpeg(payload.data(), payload.size())) {
     server.send(415, "text/plain", "not jpeg");
     std::string log = "IMG TX reject body-sig bytes=" + std::to_string(payload.size());
