@@ -148,6 +148,47 @@ constexpr size_t progmemLength(const char (&array)[N]) {
   return N ? (N - 1) : 0;
 }
 
+// Простейший экранировщик для подстановки строк в JSON-ответы API.
+static String escapeJson(const std::string& text) {
+  String out;
+  out.reserve(text.size() + 4);
+  for (unsigned char ch : text) {
+    switch (ch) {
+      case '"':
+        out += "\\\"";
+        break;
+      case '\\':
+        out += "\\\\";
+        break;
+      case '\b':
+        out += "\\b";
+        break;
+      case '\f':
+        out += "\\f";
+        break;
+      case '\n':
+        out += "\\n";
+        break;
+      case '\r':
+        out += "\\r";
+        break;
+      case '\t':
+        out += "\\t";
+        break;
+      default:
+        if (ch < 0x20) {
+          char buf[7];
+          snprintf(buf, sizeof(buf), "\\u%04X", static_cast<unsigned>(ch));
+          out += buf;
+        } else {
+          out += static_cast<char>(ch);
+        }
+        break;
+    }
+  }
+  return out;
+}
+
 static void sendProgmemAsset(const char* contentType,
                              const uint8_t* data,
                              size_t length,
@@ -1142,6 +1183,11 @@ String makeKeyStateJson() {
   json += keySafeModeActive ? "true" : "false";
   json += ",\"storageReady\":";
   json += keyStorageReady ? "true" : "false";
+  if (keySafeModeActive && keySafeModeHasReason()) {
+    json += ",\"safeModeContext\":\"";
+    json += escapeJson(keySafeModeReason());
+    json += "\"";
+  }
   json += "}";
   return json;
 }
@@ -1164,6 +1210,11 @@ String makeKeyStorageStatusJson() {
   json += keySafeModeActive ? "true" : "false";
   json += ",\"ready\":";
   json += keyStorageReady ? "true" : "false";
+  if (keySafeModeActive && keySafeModeHasReason()) {
+    json += ",\"context\":\"";
+    json += escapeJson(keySafeModeReason());
+    json += "\"";
+  }
   json += "}";
   return json;
 }
@@ -1175,7 +1226,14 @@ void reloadCryptoModules() {
 
 // Унифицированный JSON-ответ при заблокированных операциях с ключами
 String keySafeModeErrorJson() {
-  return String("{\"error\":\"key-safe-mode\",\"message\":\"хранилище ключей недоступно\",\"safeMode\":true}");
+  String json = "{\"error\":\"key-safe-mode\",\"message\":\"хранилище ключей недоступно\",\"safeMode\":true";
+  if (keySafeModeHasReason()) {
+    json += ",\"context\":\"";
+    json += escapeJson(keySafeModeReason());
+    json += "\"";
+  }
+  json += "}";
+  return json;
 }
 
 // Проверка доступности операций с ключами (true — можно продолжать)

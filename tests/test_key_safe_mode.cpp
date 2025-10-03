@@ -24,6 +24,8 @@ int main() {
   keySafeModeActive = false;
   appliedEncryption = true;
   LogHook::clear();
+  assert(!keySafeModeHasReason());
+  assert(keySafeModeReason().empty());
 
   // Эмулируем временную недоступность хранилища: активируем safe mode.
   activateKeySafeMode("storage-missing");
@@ -31,6 +33,8 @@ int main() {
   assert(!keyStorageReady);
   assert(!encryptionEnabled);
   assert(!appliedEncryption);
+  assert(keySafeModeHasReason());
+  assert(keySafeModeReason() == "storage-missing");
 
   // Восстанавливаем хранилище: safe mode должен вернуть исходное состояние шифрования.
   encryptionEnabled = false; // имитируем обнулённый глобальный флаг.
@@ -41,6 +45,8 @@ int main() {
   assert(!keySafeModeActive);
   assert(encryptionEnabled);        // возвращено к значению до активации safe mode.
   assert(appliedEncryption);        // колбэк применил восстановленное значение.
+  assert(!keySafeModeHasReason());
+  assert(keySafeModeReason().empty());
 
   // Убеждаемся, что журнал не содержит сообщений о неудачном восстановлении.
   auto recent = LogHook::getRecent(4);
