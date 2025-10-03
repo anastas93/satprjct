@@ -144,6 +144,8 @@ void RadioSX1262::send(const uint8_t* data, size_t len) {
   if (state != RADIOLIB_ERR_NONE) {          // проверка кода ошибки
     lastError_ = state;                      // сохраняем код сбоя
     LOG_ERROR_VAL("RadioSX1262: ошибка передачи, код=", state);
+    radio_.setFrequency(freq_rx);            // возвращаемся на частоту приёма после сбоя
+    startReceiveWithRetry("send: возврат к приёму после ошибки передачи");
     return;                                  // выходим без смены частоты
   }
   lastError_ = RADIOLIB_ERR_NONE;            // предыдущая операция прошла успешно
