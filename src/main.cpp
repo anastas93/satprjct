@@ -30,6 +30,7 @@
 #include "libs/protocol/ack_utils.h"              // обработка ACK-пакетов
 #include "key_safe_mode.h"                        // управление защищённым режимом и шифрованием
 #include "sse_buffered_writer.h"                  // буферизированная отправка SSE-кадров
+#include "rx_serial_dump.h"                       // безопасный дамп RX-данных в Serial
 
 // --- Сеть и веб-интерфейс ---
 #include <WiFi.h>        // работа с Wi-Fi
@@ -3109,29 +3110,7 @@ void setup() {
     }
 #if defined(ARDUINO)
     if (rxSerialDumpEnabled && Serial) {                  // не блокируемся, если USB-хост не подключён
-      const size_t prefixNeed = 4;                        // длина строки "RX: "
-      if (Serial.availableForWrite() >= prefixNeed) {
-        Serial.print("RX: ");
-        size_t sent = 0;
-        while (sent < l) {
-          size_t writable = Serial.availableForWrite();
-          if (writable == 0) {
-            break;
-          }
-          size_t chunk = std::min(writable, l - sent);
-          size_t written = Serial.write(d + sent, chunk);
-          if (written == 0) {
-            break;
-          }
-          sent += written;
-          if (written < chunk) {
-            break;
-          }
-        }
-        if (sent == l && Serial.availableForWrite() > 0) {
-          Serial.write('\n');                            // добавляем перевод строки, только если есть место
-        }
-      }
+      (void)dumpRxToSerialWithPrefix(Serial, d, l);       // фиксируем предупреждение при усечении дампа
     }
 #else
     (void)rxSerialDumpEnabled;

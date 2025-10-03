@@ -15,7 +15,7 @@ SUPPORT_SRCS := ../src/libs_includes.cpp \
 SUPPORT_OBJS := $(patsubst ../%.cpp,$(BUILD_DIR)/support/%.o,$(SUPPORT_SRCS))
 TEST_SRCS ?= test_key_transfer.cpp test_radio_irq_logging.cpp test_radio_send_error_recovery.cpp \
              test_http_image_upload.cpp test_sse_backpressure.cpp test_keytransfer_receive_async.cpp \
-             test_key_safe_mode.cpp
+             test_key_safe_mode.cpp test_rx_serial_dump.cpp
 TEST_BINS := $(patsubst %.cpp,$(BUILD_DIR)/%,$(TEST_SRCS))
 TEST_TARGETS := $(patsubst %.cpp,%,$(TEST_SRCS))
 
@@ -40,6 +40,10 @@ $(BUILD_DIR)/%: %.cpp $(SUPPORT_OBJS)
 $(BUILD_DIR)/test_sse_backpressure: test_sse_backpressure.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< -o $@
+
+$(BUILD_DIR)/test_rx_serial_dump: test_rx_serial_dump.cpp ../src/libs/log_hook/log_hook.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ -o $@
 
 $(BUILD_DIR)/support/%.o: ../%.cpp
 	@mkdir -p $(dir $@)
