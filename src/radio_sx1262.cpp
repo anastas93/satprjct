@@ -1,5 +1,6 @@
 #include "radio_sx1262.h"
 #include "default_settings.h"
+#include "libs/config_loader/config_loader.h" // доступ к загруженной конфигурации
 #include <Arduino.h>
 #include <cmath>
 #include <array>
@@ -7,6 +8,7 @@
 #include <type_traits>
 #include <utility>
 #include <cstdio>
+#include <algorithm>
 
 #ifndef RADIOLIB_SX126X_IRQ_NONE
 #define RADIOLIB_SX126X_IRQ_NONE 0U
@@ -362,12 +364,52 @@ bool RadioSX1262::setRxBoostedGainMode(bool enabled) {
 bool RadioSX1262::resetToDefaults() {
   // возвращаем все параметры к значениям из файла default_settings.h
   lastError_ = RADIOLIB_ERR_NONE;                // сбрасываем сохранённый код ошибки
-  bank_ = DefaultSettings::BANK;       // банк каналов
-  channel_ = DefaultSettings::CHANNEL; // канал
-  pw_preset_ = DefaultSettings::POWER_PRESET; // мощность
-  bw_preset_ = DefaultSettings::BW_PRESET;    // полоса
-  sf_preset_ = DefaultSettings::SF_PRESET;    // фактор расширения
-  cr_preset_ = DefaultSettings::CR_PRESET;    // коэффициент кодирования
+  const auto& cfg = ConfigLoader::getConfig(); // читаем загруженную конфигурацию
+  bank_ = cfg.radio.bank;                      // банк каналов
+  uint16_t bankSize = BANK_CHANNELS_[static_cast<int>(bank_)];
+  if (bankSize == 0) {
+    bankSize = 1; // защита от деления на ноль, хотя такого не ожидается
+  }
+  if (cfg.radio.channel >= bankSize) {
+    channel_ = static_cast<uint8_t>(bankSize - 1);
+    LOG_WARN("RadioSX1262: канал %u вне диапазона банка, выбран %u",
+             static_cast<unsigned>(cfg.radio.channel),
+             static_cast<unsigned>(channel_));
+  } else {
+    channel_ = cfg.radio.channel; // канал
+  }
+  if (cfg.radio.powerPreset >= std::size(Pwr_)) {
+    pw_preset_ = static_cast<uint8_t>(std::size(Pwr_) - 1);
+    LOG_WARN("RadioSX1262: powerPreset %u превышает лимит, используется %u",
+             static_cast<unsigned>(cfg.radio.powerPreset),
+             static_cast<unsigned>(pw_preset_));
+  } else {
+    pw_preset_ = cfg.radio.powerPreset; // мощность
+  }
+  if (cfg.radio.bwPreset >= std::size(BW_)) {
+    bw_preset_ = static_cast<uint8_t>(std::size(BW_) - 1);
+    LOG_WARN("RadioSX1262: bwPreset %u превышает лимит, используется %u",
+             static_cast<unsigned>(cfg.radio.bwPreset),
+             static_cast<unsigned>(bw_preset_));
+  } else {
+    bw_preset_ = cfg.radio.bwPreset;    // полоса
+  }
+  if (cfg.radio.sfPreset >= std::size(SF_)) {
+    sf_preset_ = static_cast<uint8_t>(std::size(SF_) - 1);
+    LOG_WARN("RadioSX1262: sfPreset %u превышает лимит, используется %u",
+             static_cast<unsigned>(cfg.radio.sfPreset),
+             static_cast<unsigned>(sf_preset_));
+  } else {
+    sf_preset_ = cfg.radio.sfPreset;    // фактор расширения
+  }
+  if (cfg.radio.crPreset >= std::size(CR_)) {
+    cr_preset_ = static_cast<uint8_t>(std::size(CR_) - 1);
+    LOG_WARN("RadioSX1262: crPreset %u превышает лимит, используется %u",
+             static_cast<unsigned>(cfg.radio.crPreset),
+             static_cast<unsigned>(cr_preset_));
+  } else {
+    cr_preset_ = cfg.radio.crPreset;    // коэффициент кодирования
+  }
 
   int state = radio_.begin(
       fRX_bank_[static_cast<int>(bank_)][channel_],
@@ -378,7 +420,7 @@ bool RadioSX1262::resetToDefaults() {
     return false;                                         // ошибка инициализации
   }
   radio_.setDio1Action(onDio1Static);                     // колбэк приёма
-  if (!setRxBoostedGainMode(DefaultSettings::RX_BOOSTED_GAIN)) { // применение усиления по умолчанию
+  if (!setRxBoostedGainMode(cfg.radio.rxBoostedGain)) { // применение усиления по умолчанию
     rxBoostedGainEnabled_ = false;                         // фиксируем фактическое состояние
     LOG_WARN("RadioSX1262: не удалось установить RX boosted gain");
   }

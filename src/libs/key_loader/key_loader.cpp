@@ -3,6 +3,7 @@
 #include "../crypto/sha256.h"
 #include "../crypto/x25519.h"
 #include "default_settings.h"
+#include "libs/config_loader/config_loader.h" // загрузка конфигурации запуска
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -543,7 +544,7 @@ StorageSnapshot makeDefaultSnapshot() {
   StorageSnapshot snapshot;
   KeyRecord rec;
   rec.origin = KeyOrigin::LOCAL;
-  rec.session_key = DefaultSettings::DEFAULT_KEY;
+  rec.session_key = ConfigLoader::getConfig().keys.defaultKey; // используем ключ из конфигурации
   auto digest = crypto::sha256::hash(rec.session_key.data(), rec.session_key.size());
   std::copy_n(digest.begin(), rec.root_private.size(), rec.root_private.begin());
   rec.root_private[0] &= 248;

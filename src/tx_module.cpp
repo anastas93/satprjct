@@ -9,6 +9,7 @@
 #include "libs/crypto/chacha20_poly1305.h" // AEAD ChaCha20-Poly1305
 #include "libs/protocol/ack_utils.h" // проверка ACK-пакетов
 #include "default_settings.h"
+#include "libs/config_loader/config_loader.h" // доступ к параметрам конфигурации
 #include <vector>
 #include <chrono>
 #include <algorithm>
@@ -46,7 +47,9 @@ static constexpr uint8_t FRAME_VERSION_AEAD = 2;  // версия кадра с 
 static constexpr size_t TAG_LEN = crypto::chacha20poly1305::TAG_SIZE; // новый тег Poly1305
 static constexpr size_t RS_ENC_LEN = 255;         // длина закодированного блока
 static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
-static constexpr bool USE_RS = DefaultSettings::USE_RS; // включение кода RS(255,223)
+static bool rsEnabled() {
+  return ConfigLoader::getConfig().radio.useRs; // проверяем признак использования RS из конфигурации
+}
 static constexpr size_t CONV_TAIL_BYTES = 1;      // добавочные байты для сброса свёрточного кодера
 static constexpr size_t RS_DATA_PAYLOAD = RS_DATA_LEN > TAG_LEN ? RS_DATA_LEN - TAG_LEN : 0; // размер полезных данных до тега
 static constexpr size_t MAX_CONV_PLAINTEXT =
@@ -623,7 +626,7 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
     bool conv_expected = false;
     size_t payload_guess = cipher_len_guess;
     if (cipher_len_guess > 0) {
-      if (USE_RS && cipher_len_guess == RS_DATA_LEN) {
+      if (rsEnabled() && cipher_len_guess == RS_DATA_LEN) {
         size_t conv_input_len = RS_ENC_LEN + CONV_TAIL_BYTES;
         size_t conv_payload_len = conv_input_len * 2;
         if (conv_payload_len <= MAX_FRAGMENT_LEN) {
@@ -676,7 +679,7 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
 
     bool conv_applied = false;
     if (conv_expected) {
-      if (USE_RS && cipher_len == RS_DATA_LEN) {
+      if (rsEnabled() && cipher_len == RS_DATA_LEN) {
         uint8_t rs_buf[RS_ENC_LEN];
         rs255223::encode(enc.data(), rs_buf);
         byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
