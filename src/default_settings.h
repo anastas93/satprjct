@@ -11,9 +11,8 @@
 #include <string>
 #include <cstdarg>  // для работы с переменным числом аргументов
 #include <cstdio>   // для vsnprintf
-#include <memory>   // для управления буферами форматирования
+#include <sstream>  // для формирования строк логов
 #ifndef ARDUINO
-#  include <sstream>
 #  include <iostream>
 #else
 #  include <Arduino.h>
@@ -48,6 +47,8 @@ namespace DefaultSettings {
   // Уровни журналирования для фильтрации сообщений
   enum class LogLevel : uint8_t { ERROR = 0, WARN = 1, INFO = 2, DEBUG = 3 };
   constexpr LogLevel LOG_LEVEL = LogLevel::DEBUG;   // Текущий уровень вывода
+  constexpr uint32_t LOGGER_RATE_LINES_PER_SEC = 80; // Ограничение скорости вывода строк
+  constexpr uint32_t LOGGER_RATE_BURST = 40;         // Максимальный размер «пакета» до притормаживания
   constexpr uint16_t PREAMBLE_LENGTH = 16;          // Длина преамбулы LoRa (символы)
   // Ключ шифрования по умолчанию (16 байт)
   constexpr std::array<uint8_t, 16> DEFAULT_KEY{
@@ -58,120 +59,59 @@ namespace DefaultSettings {
 }
 
 #if !defined(LOG_MSG)
-// Вспомогательные функции фильтрации повторяющихся сообщений
+namespace Logger {
+  bool enqueue(DefaultSettings::LogLevel level, const std::string& line);
+  bool enqueueFromISR(DefaultSettings::LogLevel level, const std::string& line);
+  bool enqueuef(DefaultSettings::LogLevel level, const char* fmt, ...);
+  bool enqueuefFromISR(DefaultSettings::LogLevel level, const char* fmt, ...);
+}
+
 namespace LogDetail {
-#ifdef ARDUINO
-  // Проверка необходимости вывода сообщения (Arduino) без фильтрации дублей
-  inline bool shouldPrint(DefaultSettings::LogLevel level, const String& /*msg*/) {
-    if (!DefaultSettings::DEBUG || level > DefaultSettings::LOG_LEVEL) return false;
-    return true;
+  inline bool logMsg(DefaultSettings::LogLevel level, const char* msg) {
+    return Logger::enqueue(level, std::string(msg));
   }
 
-  // Вывод строки без фильтрации дублей
-  inline void logMsg(DefaultSettings::LogLevel level, const char* msg) {
-    if (!shouldPrint(level, String(msg))) return;
-    Serial.println(msg);
-    if (DefaultSettings::SERIAL_FLUSH_AFTER_LOG) {
-      Serial.flush();
-    }
-#if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
-    LogHook::append(String(msg));
-#endif
+  inline bool logMsgFromISR(DefaultSettings::LogLevel level, const char* msg) {
+    return Logger::enqueueFromISR(level, std::string(msg));
   }
 
-  // Вывод строки со значением без фильтрации дублей
   template <typename T>
-  inline void logMsgVal(DefaultSettings::LogLevel level, const char* prefix, const T& val) {
-    String full = String(prefix) + String(val);
-    if (!shouldPrint(level, full)) return;
-    Serial.print(prefix); Serial.println(val);
-    if (DefaultSettings::SERIAL_FLUSH_AFTER_LOG) {
-      Serial.flush();
-    }
-#if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
-    LogHook::append(full);
-#endif
-  }
-
-  // Форматированный вывод в стиле printf без фильтрации дублей
-  inline void logMsgFmt(DefaultSettings::LogLevel level, const char* fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    va_list copy;
-    va_copy(copy, args);
-    int required = vsnprintf(nullptr, 0, fmt, copy);
-    va_end(copy);
-    if (required < 0) {
-      va_end(args);
-      return;
-    }
-    std::unique_ptr<char[]> buffer(new char[static_cast<size_t>(required) + 1]);
-    vsnprintf(buffer.get(), static_cast<size_t>(required) + 1, fmt, args);
-    va_end(args);
-    logMsg(level, buffer.get());
-  }
-#else
-  // Проверка необходимости вывода сообщения (стандартный вывод) без фильтрации дублей
-  inline bool shouldPrint(DefaultSettings::LogLevel level, const std::string& /*msg*/) {
-    if (!DefaultSettings::DEBUG || level > DefaultSettings::LOG_LEVEL) return false;
-    return true;
-  }
-
-  // Вывод строки в стандартный поток
-  inline void logMsg(DefaultSettings::LogLevel level, const char* msg) {
-    std::string s(msg);
-    if (!shouldPrint(level, s)) return;
-    std::cout << msg << std::endl;
-#if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
-    LogHook::append(s);
-#endif
-  }
-
-  // Вывод строки с значением в стандартный поток
-  template <typename T>
-  inline void logMsgVal(DefaultSettings::LogLevel level, const char* prefix, const T& val) {
+  inline bool logMsgVal(DefaultSettings::LogLevel level, const char* prefix, const T& val) {
     std::ostringstream oss;
     oss << prefix << val;
-    std::string s = oss.str();
-    if (!shouldPrint(level, s)) return;
-    std::cout << s << std::endl;
-#if !(defined(SERIAL_MIRROR_ACTIVE) && SERIAL_MIRROR_ACTIVE)
-    LogHook::append(s);
-#endif
+    return Logger::enqueue(level, oss.str());
   }
 
-    // Форматированный вывод в стиле printf без фильтрации дублей
-  inline void logMsgFmt(DefaultSettings::LogLevel level, const char* fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    va_list copy;
-    va_copy(copy, args);
-    int required = std::vsnprintf(nullptr, 0, fmt, copy);
-    va_end(copy);
-    if (required < 0) {
-      va_end(args);
-      return;
-    }
-    std::unique_ptr<char[]> buffer(new char[static_cast<size_t>(required) + 1]);
-    std::vsnprintf(buffer.get(), static_cast<size_t>(required) + 1, fmt, args);
-    va_end(args);
-    logMsg(level, buffer.get());
+  template <typename T>
+  inline bool logMsgValFromISR(DefaultSettings::LogLevel level, const char* prefix, const T& val) {
+    std::ostringstream oss;
+    oss << prefix << val;
+    return Logger::enqueueFromISR(level, oss.str());
   }
-#endif
 } // namespace LogDetail
 
-// Макросы верхнего уровня для логирования
 #  define LOG_MSG(level, msg) LogDetail::logMsg(level, msg)
+#  define LOG_MSG_FROM_ISR(level, msg) LogDetail::logMsgFromISR(level, msg)
 #  define LOG_MSG_VAL(level, prefix, val) LogDetail::logMsgVal(level, prefix, val)
-#  define LOG_MSG_FMT(level, ...) LogDetail::logMsgFmt(level, __VA_ARGS__)
+#  define LOG_MSG_VAL_FROM_ISR(level, prefix, val) LogDetail::logMsgValFromISR(level, prefix, val)
+#  define LOG_MSG_FMT(level, ...) Logger::enqueuef(level, __VA_ARGS__)
+#  define LOG_MSG_FMT_FROM_ISR(level, ...) Logger::enqueuefFromISR(level, __VA_ARGS__)
 #  define LOG_ERROR(...) LOG_MSG_FMT(DefaultSettings::LogLevel::ERROR, __VA_ARGS__)
 #  define LOG_WARN(...)  LOG_MSG_FMT(DefaultSettings::LogLevel::WARN,  __VA_ARGS__)
 #  define LOG_INFO(...)  LOG_MSG_FMT(DefaultSettings::LogLevel::INFO,  __VA_ARGS__)
 #  define DEBUG_LOG(...) LOG_MSG_FMT(DefaultSettings::LogLevel::DEBUG, __VA_ARGS__)
+#  define LOG_ERROR_FROM_ISR(...) LOG_MSG_FMT_FROM_ISR(DefaultSettings::LogLevel::ERROR, __VA_ARGS__)
+#  define LOG_WARN_FROM_ISR(...)  LOG_MSG_FMT_FROM_ISR(DefaultSettings::LogLevel::WARN,  __VA_ARGS__)
+#  define LOG_INFO_FROM_ISR(...)  LOG_MSG_FMT_FROM_ISR(DefaultSettings::LogLevel::INFO,  __VA_ARGS__)
+#  define DEBUG_LOG_FROM_ISR(...) LOG_MSG_FMT_FROM_ISR(DefaultSettings::LogLevel::DEBUG, __VA_ARGS__)
 #  define LOG_ERROR_VAL(prefix, val) LOG_MSG_VAL(DefaultSettings::LogLevel::ERROR, prefix, val)
 #  define LOG_WARN_VAL(prefix, val)  LOG_MSG_VAL(DefaultSettings::LogLevel::WARN,  prefix, val)
 #  define LOG_INFO_VAL(prefix, val)  LOG_MSG_VAL(DefaultSettings::LogLevel::INFO,  prefix, val)
 #  define DEBUG_LOG_VAL(prefix, val) LOG_MSG_VAL(DefaultSettings::LogLevel::DEBUG, prefix, val)
+#  define LOG_ERROR_VAL_FROM_ISR(prefix, val) LOG_MSG_VAL_FROM_ISR(DefaultSettings::LogLevel::ERROR, prefix, val)
+#  define LOG_WARN_VAL_FROM_ISR(prefix, val)  LOG_MSG_VAL_FROM_ISR(DefaultSettings::LogLevel::WARN,  prefix, val)
+#  define LOG_INFO_VAL_FROM_ISR(prefix, val)  LOG_MSG_VAL_FROM_ISR(DefaultSettings::LogLevel::INFO,  prefix, val)
+#  define DEBUG_LOG_VAL_FROM_ISR(prefix, val) LOG_MSG_VAL_FROM_ISR(DefaultSettings::LogLevel::DEBUG, prefix, val)
 #endif // !defined(LOG_MSG)
 
 #endif // DEFAULT_SETTINGS_H
