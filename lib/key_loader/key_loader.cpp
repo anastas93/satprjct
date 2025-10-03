@@ -75,6 +75,50 @@ struct EphemeralState {
 EphemeralState g_ephemeral;
 
 #ifdef ARDUINO
+#include <Arduino.h>
+using FlashMessage = const __FlashStringHelper*;
+
+LogCallback g_log_callback = nullptr;
+std::vector<FlashMessage> g_buffered_logs;
+
+// Печать сообщения напрямую в Serial либо через пользовательский коллбэк.
+bool emitLogDirect(FlashMessage msg) {
+  if (g_log_callback) {
+    g_log_callback(msg);
+    return true;
+  }
+  if (Serial) {
+    Serial.println(msg);
+    return true;
+  }
+  return false;
+}
+
+// Попытка выгрузить буфер с накопленными сообщениями.
+void flushBufferedLogs() {
+  if (g_buffered_logs.empty()) {
+    return;
+  }
+  if (!g_log_callback && !Serial) {
+    return;
+  }
+  for (FlashMessage msg : g_buffered_logs) {
+    emitLogDirect(msg);
+  }
+  g_buffered_logs.clear();
+}
+
+// Унифицированный вывод сообщения KeyLoader с безопасной буферизацией до готовности Serial.
+bool logMessage(FlashMessage msg) {
+  flushBufferedLogs();
+  if (emitLogDirect(msg)) {
+    return true;
+  }
+  g_buffered_logs.push_back(msg);
+  return false;
+}
+#endif
+
 StorageBackend activeBackend() {
 #if KEY_LOADER_HAS_NVS
   return StorageBackend::NVS;
@@ -698,9 +742,8 @@ bool ensureFlashEncryptionEnabled() {
     // При старте глобальные конструкторы вызывают KeyLoader до инициализации Serial.
     // Чтобы избежать аварии при обращении к неготовому UART, проверяем доступность
     // Serial перед выводом предупреждения и повторяем попытку при следующем вызове.
-    if (Serial) {
+    if (logMessage(F("KeyLoader: Flash Encryption выключена, доступ к NVS запрещён"))) {
       warned = true;
-      Serial.println(F("KeyLoader: Flash Encryption выключена, доступ к NVS запрещён"));
     }
   }
   return enabled;
@@ -714,7 +757,7 @@ bool ensurePrefs() {
     }
     Preferences& prefs = prefsInstance();
     if (!prefs.begin("key_store", false)) {
-      Serial.println(F("KeyLoader: не удалось открыть раздел NVS"));
+      logMessage(F("KeyLoader: не удалось открыть раздел NVS"));
       return false;
     }
     opened = true;
@@ -855,7 +898,7 @@ bool writeSnapshot(const StorageSnapshot& snapshot) {
   std::vector<uint8_t> blob = serializeSnapshot(snapshot);
   if (blob.empty()) {
 #ifdef ARDUINO
-    Serial.println(F("KeyLoader: ошибка сериализации snapshot"));
+    logMessage(F("KeyLoader: ошибка сериализации snapshot"));
 #else
     std::cerr << "[KeyLoader] не удалось сериализовать snapshot" << std::endl;
 #endif
@@ -1211,11 +1254,11 @@ bool setPreferredBackend(StorageBackend backend) {
     g_preferred_backend = backend;
     return true;
   }
-  Serial.println(F("KeyLoader: доступен только бэкенд NVS"));
+  logMessage(F("KeyLoader: доступен только бэкенд NVS"));
   return false;
 #else
   (void)backend;
-  Serial.println(F("KeyLoader: на этой платформе нет доступного хранилища"));
+  logMessage(F("KeyLoader: на этой платформе нет доступного хранилища"));
   return false;
 #endif
 #else
@@ -1235,6 +1278,15 @@ const char* backendName(StorageBackend backend) {
     default: return "unknown";
   }
 }
+
+#ifdef ARDUINO
+void setLogCallback(LogCallback callback) {
+  g_log_callback = callback;
+  flushBufferedLogs();
+}
+#else
+void setLogCallback(LogCallback) {}
+#endif
 
 } // namespace KeyLoader
 
