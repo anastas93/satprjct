@@ -44,6 +44,7 @@ namespace DefaultSettings {
   constexpr const char* WIFI_PASS = "12345678";    // пароль точки доступа
   constexpr bool DEBUG = true;                    // Флаг отладочного вывода
   constexpr bool SERIAL_FLUSH_AFTER_LOG = false;  // Принудительный Serial.flush() после каждой строки
+  constexpr bool RX_SERIAL_DUMP_ENABLED = true;   // Включение текстового дампа входящих пакетов в Serial при наличии хоста
   // Уровни журналирования для фильтрации сообщений
   enum class LogLevel : uint8_t { ERROR = 0, WARN = 1, INFO = 2, DEBUG = 3 };
   constexpr LogLevel LOG_LEVEL = LogLevel::DEBUG;   // Текущий уровень вывода

@@ -128,6 +128,7 @@ uint32_t ackResponseDelayMs = gConfig.radio.ackResponseDelayMs; // текуща�
 bool lightPackMode = false;             // режим прямой передачи текста без префикса
 bool testModeEnabled = false;           // флаг тестового режима SendMsg_BR/received_msg
 uint8_t testModeLocalCounter = 0;       // локальный счётчик пакетов для тестового режима
+bool rxSerialDumpEnabled = DefaultSettings::RX_SERIAL_DUMP_ENABLED; // режим дампа RX в Serial
 
 WebServer server(80);       // HTTP-сервер для веб-интерфейса
 
@@ -2901,9 +2902,35 @@ void setup() {
     if (protocol::ack::isAckPayload(d, l)) {              // ACK уже обработан отдельным колбэком
       return;
     }
-    Serial.print("RX: ");
-    for (size_t i = 0; i < l; ++i) Serial.write(d[i]);
-    Serial.println();
+#if defined(ARDUINO)
+    if (rxSerialDumpEnabled && Serial) {                  // не блокируемся, если USB-хост не подключён
+      const size_t prefixNeed = 4;                        // длина строки "RX: "
+      if (Serial.availableForWrite() >= prefixNeed) {
+        Serial.print("RX: ");
+        size_t sent = 0;
+        while (sent < l) {
+          size_t writable = Serial.availableForWrite();
+          if (writable == 0) {
+            break;
+          }
+          size_t chunk = std::min(writable, l - sent);
+          size_t written = Serial.write(d + sent, chunk);
+          if (written == 0) {
+            break;
+          }
+          sent += written;
+          if (written < chunk) {
+            break;
+          }
+        }
+        if (sent == l && Serial.availableForWrite() > 0) {
+          Serial.write('\n');                            // добавляем перевод строки, только если есть место
+        }
+      }
+    }
+#else
+    (void)rxSerialDumpEnabled;
+#endif
     LOG_INFO("RX: пакет на %u байт", static_cast<unsigned>(l));
     if (ackEnabled) {                                     // отправляем подтверждение
       const uint8_t ack_msg[1] = {protocol::ack::MARKER};
