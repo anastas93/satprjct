@@ -14,7 +14,7 @@ SUPPORT_SRCS := ../src/libs_includes.cpp \
                 ../src/radio_sx1262.cpp
 SUPPORT_OBJS := $(patsubst ../%.cpp,$(BUILD_DIR)/support/%.o,$(SUPPORT_SRCS))
 TEST_SRCS ?= test_key_transfer.cpp test_radio_irq_logging.cpp test_radio_send_error_recovery.cpp \
-             test_http_image_upload.cpp
+             test_http_image_upload.cpp test_sse_backpressure.cpp
 TEST_BINS := $(patsubst %.cpp,$(BUILD_DIR)/%,$(TEST_SRCS))
 TEST_TARGETS := $(patsubst %.cpp,%,$(TEST_SRCS))
 
@@ -28,6 +28,11 @@ $(TEST_TARGETS): %: $(BUILD_DIR)/%
 $(BUILD_DIR)/%: %.cpp $(SUPPORT_OBJS)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< $(SUPPORT_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
+
+# Тест ограничения SSE работает автономно и не требует поддержки Radio/LoRa
+$(BUILD_DIR)/test_sse_backpressure: test_sse_backpressure.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< -o $@
 
 $(BUILD_DIR)/support/%.o: ../%.cpp
 	@mkdir -p $(dir $@)
