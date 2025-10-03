@@ -132,6 +132,8 @@ public:
   static float bankRx(ChannelBank bank, uint16_t ch);
   // Получить частоту передачи для канала в указанном банке
   static float bankTx(ChannelBank bank, uint16_t ch);
+  // Получить описание банка частот
+  static const char* bankDescription(ChannelBank bank);
   float getBandwidth() const { return BW_[bw_preset_]; }
   int getSpreadingFactor() const { return SF_[sf_preset_]; }
   int getCodingRate() const { return CR_[cr_preset_]; }
