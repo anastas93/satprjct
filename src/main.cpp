@@ -27,6 +27,7 @@
 #include "libs/key_loader/key_loader.h"           // управление ключами и ECDH
 #include "libs/key_transfer/key_transfer.h"       // обмен корневым ключом по LoRa
 #include "libs/protocol/ack_utils.h"              // обработка ACK-пакетов
+#include "sse_buffered_writer.h"                  // буферизированная отправка SSE-кадров
 
 // --- Сеть и веб-интерфейс ---
 #include <WiFi.h>        // работа с Wi-Fi
@@ -530,11 +531,14 @@ String receivedItemToJson(const ReceivedBuffer::SnapshotEntry& entry) {
 // --- Поддержка push-уведомлений через SSE ---
 static constexpr uint32_t kPushKeepAliveMs = 15000;   // интервал keep-alive для SSE клиентов
 static constexpr size_t kPushMaxClients = 4;          // максимум одновременных подключений
+static constexpr uint32_t kPushSendTimeoutMs = 1500;   // максимум ожидания освобождения окна записи
+static constexpr size_t kPushSendChunkLimit = 512;     // верхняя граница размера одного куска отправки
 
 struct PushClientSession {
   NetworkClient client;       // активное соединение SSE
   uint32_t lastActivityMs;    // время последнего успешного события
   uint32_t lastKeepAliveMs;   // время последнего keep-alive
+  SseBufferedWriter<NetworkClient, String> writer; // очередь частичных кадров для неблокирующей отправки
 };
 
 static std::vector<PushClientSession> gPushSessions;  // список подписчиков SSE
@@ -689,38 +693,57 @@ bool sendSseFrame(PushClientSession& session, const String& event, const String&
     frame += '\n';
   }
   frame += '\n';
-  const size_t expected = static_cast<size_t>(frame.length());
-  size_t written = session.client.write(reinterpret_cast<const uint8_t*>(frame.c_str()), expected);
-  if (written != expected) {
-    return false;
+  if (!session.writer.enqueueFrame(session.client,
+                                   session.lastActivityMs,
+                                   session.lastKeepAliveMs,
+                                   std::move(frame),
+                                   true,
+                                   true,
+                                   kPushSendTimeoutMs,
+                                   kPushSendChunkLimit)) {
+    return false; // зафиксирован тайм-аут ожидания окна — клиент больше не обслуживаем
   }
-  uint32_t now = millis();
-  session.lastActivityMs = now;
-  session.lastKeepAliveMs = now;
   return true;
 }
 
 // Очистка и keep-alive для всех активных клиентов
 void maintainPushSessions(bool forceKeepAlive) {
   if (gPushSessions.empty()) return;
-  const uint32_t now = millis();
   for (auto it = gPushSessions.begin(); it != gPushSessions.end(); ) {
     PushClientSession& session = *it;
     if (!session.client.connected()) {
       it = gPushSessions.erase(it);
       continue;
     }
+    if (!session.writer.flush(session.client,
+                              session.lastActivityMs,
+                              session.lastKeepAliveMs,
+                              kPushSendTimeoutMs,
+                              kPushSendChunkLimit)) {
+      session.client.stop();
+      it = gPushSessions.erase(it);
+      continue;
+    }
+    if (!session.writer.empty()) {
+      ++it;
+      continue; // дожидаемся, пока дозавершится предыдущая отправка
+    }
+    const uint32_t now = millis();
     const uint32_t elapsed = now - session.lastKeepAliveMs;
     if (forceKeepAlive || elapsed > kPushKeepAliveMs) {
-      static const char kKeepAliveLine[] = ": keep-alive\n\n";
-      const size_t expected = sizeof(kKeepAliveLine) - 1;
-      size_t written = session.client.write(reinterpret_cast<const uint8_t*>(kKeepAliveLine), expected);
-      if (written != expected) {
+      String keepAliveFrame = String(F(": keep-alive\n\n"));
+      if (!session.writer.enqueueFrame(session.client,
+                                       session.lastActivityMs,
+                                       session.lastKeepAliveMs,
+                                       std::move(keepAliveFrame),
+                                       false,
+                                       true,
+                                       kPushSendTimeoutMs,
+                                       kPushSendChunkLimit)) {
         session.client.stop();
         it = gPushSessions.erase(it);
         continue;
       }
-      session.lastKeepAliveMs = now;
     }
     ++it;
   }
