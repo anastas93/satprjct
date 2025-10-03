@@ -235,7 +235,7 @@ static String serialLineBuffer;                         // накапливае�
 static bool serialLineOverflow = false;                 // флаг переполнения буфера
 static unsigned long serialLastByteAtMs = 0;            // время последнего принятого символа
 static constexpr size_t kSerialLineMaxLength = 1024;    // максимальная длина текстовой команды
-static constexpr unsigned long kSerialLineTimeoutMs = 200; // тайм-аут ожидания завершения строки
+static constexpr unsigned long kSerialLineTimeoutMs = 2000; // тайм-аут ожидания завершения строки (увеличен для ручного ввода)
 
 // Преобразование массива байтов в hex-строку (верхний регистр)
 template <size_t N>
