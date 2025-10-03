@@ -149,6 +149,7 @@ const UI = {
     chatHistory: [],
     chatHydrating: false,
     chatScrollPinned: true,
+    debugLogPinned: true,
     chatUnread: (() => {
       const raw = storage.get(CHAT_UNREAD_STORAGE_KEY);
       const parsed = raw != null ? parseInt(raw, 10) : NaN;
@@ -185,6 +186,7 @@ const UI = {
     version: normalizeVersionText(storage.get("appVersion") || "") || null,
     pauseMs: null,
     ackTimeout: null,
+    ackDelay: null,
     encTest: null,
     autoNightTimer: null,
     autoNightActive: false,
@@ -412,6 +414,8 @@ const PAUSE_MIN_MS = 0;
 const PAUSE_MAX_MS = 60000;
 const ACK_TIMEOUT_MIN_MS = 0;
 const ACK_TIMEOUT_MAX_MS = 60000;
+const ACK_DELAY_MIN_MS = 0;
+const ACK_DELAY_MAX_MS = 5000;
 
 /* Определяем предпочитаемую тему только при наличии поддержки matchMedia */
 function detectPreferredTheme() {
@@ -449,6 +453,10 @@ async function init() {
   UI.els.toast = $("#toast");
   UI.els.settingsForm = $("#settingsForm");
   UI.els.debugLog = $("#debugLog");
+  if (UI.els.debugLog) {
+    UI.els.debugLog.addEventListener("scroll", onDebugLogScroll);
+    UI.state.debugLogPinned = debugLogIsNearBottom(UI.els.debugLog);
+  }
   UI.els.receivedDiag = {
     root: $("#recvDiag"),
     status: $("#recvDiagStatus"),
@@ -501,6 +509,8 @@ async function init() {
   UI.els.pauseHint = $("#pauseHint");
   UI.els.ackTimeout = $("#ACKT");
   UI.els.ackTimeoutHint = $("#ackTimeoutHint");
+  UI.els.ackDelay = $("#ACKD");
+  UI.els.ackDelayHint = $("#ackDelayHint");
   UI.els.rxBoostedGain = $("#RXBG");
   UI.els.rxBoostedGainHint = $("#rxBoostedGainHint");
   UI.els.testRxmMessage = $("#TESTRXMMSG");
@@ -848,6 +858,7 @@ async function init() {
   if (UI.els.ackRetry) UI.els.ackRetry.addEventListener("change", onAckRetryInput);
   if (UI.els.pauseInput) UI.els.pauseInput.addEventListener("change", onPauseInputChange);
   if (UI.els.ackTimeout) UI.els.ackTimeout.addEventListener("change", onAckTimeoutInputChange);
+  if (UI.els.ackDelay) UI.els.ackDelay.addEventListener("change", onAckDelayInputChange);
   if (UI.els.rxBoostedGain) {
     UI.els.rxBoostedGain.addEventListener("change", () => {
       UI.els.rxBoostedGain.indeterminate = false;
@@ -885,6 +896,7 @@ async function init() {
   updateTestRxmMessageHint();
   updatePauseUi();
   updateAckTimeoutUi();
+  updateAckDelayUi();
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels({ forceBank: true }));
   if (UI.els.channelSelect) UI.els.channelSelect.addEventListener("change", onChannelSelectChange);
   updateChannelSelectHint();
@@ -905,6 +917,7 @@ async function init() {
     { name: "syncSettingsFromDevice", run: () => syncSettingsFromDevice() },
     { name: "refreshAckState", run: () => refreshAckState() },
     { name: "refreshAckRetry", run: () => refreshAckRetry() },
+    { name: "refreshAckDelay", run: () => refreshAckDelay() },
     { name: "refreshLightPackState", run: () => refreshLightPackState() },
     { name: "refreshEncryptionState", run: () => refreshEncryptionState() },
   ];
@@ -1104,6 +1117,7 @@ function toggleAccent() {
 
 /* Работа чата */
 const CHAT_SCROLL_EPSILON = 32;
+const DEBUG_LOG_SCROLL_EPSILON = 32;
 
 function chatIsNearBottom(log) {
   if (!log) return true;
@@ -1134,6 +1148,37 @@ function onChatScroll() {
   if (!log) return;
   UI.state.chatScrollPinned = chatIsNearBottom(log);
   updateChatScrollButton();
+}
+
+function debugLogIsNearBottom(log) {
+  if (!log) return true;
+  const diff = log.scrollHeight - log.scrollTop - log.clientHeight;
+  return diff <= DEBUG_LOG_SCROLL_EPSILON;
+}
+
+function shouldAutoScrollDebugLog(log) {
+  if (!log) return true;
+  if (UI.state.debugLogPinned === true) return true;
+  if (UI.state.debugLogPinned === false) return false;
+  return debugLogIsNearBottom(log);
+}
+
+function scrollDebugLogToBottom(force) {
+  const log = UI.els.debugLog;
+  if (!log) return;
+  const shouldStick = force === true ? true : shouldAutoScrollDebugLog(log);
+  if (shouldStick) {
+    log.scrollTop = log.scrollHeight;
+    UI.state.debugLogPinned = true;
+  } else if (force !== true) {
+    UI.state.debugLogPinned = false;
+  }
+}
+
+function onDebugLogScroll() {
+  const log = UI.els.debugLog;
+  if (!log) return;
+  UI.state.debugLogPinned = debugLogIsNearBottom(log);
 }
 
 function shouldPlayIncomingSound(entry) {
@@ -2626,6 +2671,14 @@ function handleCommandSideEffects(cmd, text) {
       UI.state.ackTimeout = value;
       storage.set("set.ACKT", String(value));
       updateAckTimeoutUi();
+      updateAckRetryUi();
+    }
+  } else if (upper === "ACKD") {
+    const value = parseAckDelayResponse(text);
+    if (value !== null) {
+      UI.state.ackDelay = value;
+      storage.set("set.ACKD", String(value));
+      updateAckDelayUi();
       updateAckRetryUi();
     }
   } else if (upper === "ENC") {
@@ -6817,6 +6870,13 @@ function clampAckTimeoutMs(value) {
   if (num > ACK_TIMEOUT_MAX_MS) return ACK_TIMEOUT_MAX_MS;
   return Math.round(num);
 }
+function clampAckDelayMs(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return ACK_DELAY_MIN_MS;
+  if (num < ACK_DELAY_MIN_MS) return ACK_DELAY_MIN_MS;
+  if (num > ACK_DELAY_MAX_MS) return ACK_DELAY_MAX_MS;
+  return Math.round(num);
+}
 function clampTestRxmMessage(value) {
   const text = value == null ? "" : String(value);
   if (text.length > TEST_RXM_MESSAGE_MAX) {
@@ -6841,6 +6901,12 @@ function parseAckTimeoutResponse(text) {
   const token = extractNumericToken(text);
   if (token == null) return null;
   return clampAckTimeoutMs(Number(token));
+}
+function parseAckDelayResponse(text) {
+  if (!text) return null;
+  const token = extractNumericToken(text);
+  if (token == null) return null;
+  return clampAckDelayMs(Number(token));
 }
 function parseRxBoostedGainResponse(text) {
   if (!text) return null;
@@ -6891,8 +6957,18 @@ function updateAckRetryUi() {
     if (UI.state.ack === true) {
       const attempts = state != null ? state : "—";
       const timeout = UI.state.ackTimeout != null ? UI.state.ackTimeout + " мс" : "—";
+      const delay = UI.state.ackDelay != null ? UI.state.ackDelay + " мс" : "—";
       const pause = UI.state.pauseMs != null ? UI.state.pauseMs + " мс" : "—";
-      hint.textContent = "Повторные отправки: " + attempts + " раз. Пауза: " + pause + ". Ожидание ACK: " + timeout + ".";
+      const timeoutValue = UI.state.ackTimeout != null ? UI.state.ackTimeout : null;
+      const delayValue = UI.state.ackDelay != null ? UI.state.ackDelay : null;
+      const combined = timeoutValue != null || delayValue != null
+        ? String((timeoutValue || 0) + (delayValue || 0)) + " мс"
+        : "—";
+      hint.textContent = "Повторные отправки: " + attempts +
+        ". Ожидание до повтора: " + combined +
+        ". Тайм-аут ACK: " + timeout +
+        ". Задержка ответа: " + delay +
+        ". Пауза между пакетами: " + pause + ".";
     } else {
       hint.textContent = "Доступно после включения ACK.";
     }
@@ -6920,6 +6996,17 @@ function updateAckTimeoutUi() {
   const hint = UI.els.ackTimeoutHint;
   if (hint) {
     hint.textContent = value != null ? ("Время ожидания ACK: " + value + " мс.") : "Время ожидания ACK не загружено.";
+  }
+}
+function updateAckDelayUi() {
+  const input = UI.els.ackDelay;
+  const value = UI.state.ackDelay;
+  if (input && document.activeElement !== input && value != null) {
+    input.value = String(value);
+  }
+  const hint = UI.els.ackDelayHint;
+  if (hint) {
+    hint.textContent = value != null ? ("Задержка постановки ACK в очередь: " + value + " мс.") : "Задержка отправки ACK не загружена.";
   }
 }
 function updateAckUi() {
@@ -6966,6 +7053,16 @@ function onAckTimeoutInputChange() {
   UI.state.ackTimeout = num;
   storage.set("set.ACKT", String(num));
   updateAckTimeoutUi();
+  updateAckRetryUi();
+}
+function onAckDelayInputChange() {
+  if (!UI.els.ackDelay) return;
+  const raw = UI.els.ackDelay.value;
+  const num = clampAckDelayMs(parseInt(raw, 10));
+  UI.els.ackDelay.value = String(num);
+  UI.state.ackDelay = num;
+  storage.set("set.ACKD", String(num));
+  updateAckDelayUi();
   updateAckRetryUi();
 }
 async function setAck(value) {
@@ -7125,6 +7222,22 @@ async function refreshAckRetry() {
   }
   UI.state.ackRetry = null;
   updateAckRetryUi();
+  return null;
+}
+async function refreshAckDelay() {
+  const res = await deviceFetch("ACKD", {}, 2000);
+  if (res.ok) {
+    const parsed = parseAckDelayResponse(res.text);
+    if (parsed !== null) {
+      UI.state.ackDelay = parsed;
+      storage.set("set.ACKD", String(parsed));
+      updateAckDelayUi();
+      updateAckRetryUi();
+      return parsed;
+    }
+  }
+  UI.state.ackDelay = null;
+  updateAckDelayUi();
   return null;
 }
 async function refreshRxBoostedGain() {
@@ -7356,7 +7469,7 @@ async function refreshEncryptionState() {
 }
 
 /* Настройки */
-const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKR","TESTRXMMSG"];
+const SETTINGS_KEYS = ["BANK","BF","CH","CR","PW","RXBG","SF","PAUSE","ACKT","ACKD","ACKR","TESTRXMMSG"];
 function normalizePowerPreset(raw) {
   if (raw == null) return null;
   const str = String(raw).trim();
@@ -7414,6 +7527,11 @@ function loadSettings() {
       if (UI.els.ackTimeout) UI.els.ackTimeout.value = String(num);
       UI.state.ackTimeout = num;
       updateAckTimeoutUi();
+    } else if (key === "ACKD") {
+      const num = clampAckDelayMs(parseInt(v, 10));
+      if (UI.els.ackDelay) UI.els.ackDelay.value = String(num);
+      UI.state.ackDelay = num;
+      updateAckDelayUi();
     } else if (key === "TESTRXMMSG") {
       const text = clampTestRxmMessage(v);
       if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = text;
@@ -7452,6 +7570,8 @@ function saveSettingsLocal() {
       v = String(clampPauseMs(parseInt(v, 10)));
     } else if (key === "ACKT") {
       v = String(clampAckTimeoutMs(parseInt(v, 10)));
+    } else if (key === "ACKD") {
+      v = String(clampAckDelayMs(parseInt(v, 10)));
     } else if (key === "TESTRXMMSG") {
       v = clampTestRxmMessage(v);
       if (UI.els.testRxmMessage) UI.els.testRxmMessage.value = v;
@@ -7529,6 +7649,18 @@ async function applySettingsToDevice() {
         updateAckRetryUi();
         storage.set("set.ACKT", String(effective));
       }
+    } else if (key === "ACKD") {
+      const parsed = clampAckDelayMs(parseInt(value, 10));
+      const resp = await sendCommand("ACKD", { v: String(parsed) });
+      if (resp !== null) {
+        const applied = parseAckDelayResponse(resp);
+        const effective = applied != null ? applied : parsed;
+        UI.state.ackDelay = effective;
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(effective);
+        updateAckDelayUi();
+        updateAckRetryUi();
+        storage.set("set.ACKD", String(effective));
+      }
     } else {
       const resp = await sendCommand(key, { v: value });
       if (resp !== null) storage.set("set." + key, value);
@@ -7555,6 +7687,8 @@ function exportSettings() {
       obj[key] = String(clampPauseMs(parseInt(el.value, 10)));
     } else if (key === "ACKT") {
       obj[key] = String(clampAckTimeoutMs(parseInt(el.value, 10)));
+    } else if (key === "ACKD") {
+      obj[key] = String(clampAckDelayMs(parseInt(el.value, 10)));
     } else if (key === "TESTRXMMSG") {
       obj[key] = clampTestRxmMessage(el.value || "");
     } else {
@@ -7622,6 +7756,15 @@ function importSettings() {
         updateAckTimeoutUi();
         updateAckRetryUi();
         storage.set("set.ACKT", String(num));
+        continue;
+      }
+      if (key === "ACKD") {
+        const num = clampAckDelayMs(parseInt(obj[key], 10));
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(num);
+        UI.state.ackDelay = num;
+        updateAckDelayUi();
+        updateAckRetryUi();
+        storage.set("set.ACKD", String(num));
         continue;
       }
       if (key === "TESTRXMMSG") {
@@ -7781,6 +7924,21 @@ async function syncSettingsFromDevice() {
     }
   } catch (err) {
     console.warn("[settings] ACKT", err);
+  }
+  try {
+    const ackDRes = await deviceFetch("ACKD", {}, 2000);
+    if (ackDRes.ok) {
+      const parsed = parseAckDelayResponse(ackDRes.text);
+      if (parsed !== null) {
+        UI.state.ackDelay = parsed;
+        if (UI.els.ackDelay) UI.els.ackDelay.value = String(parsed);
+        storage.set("set.ACKD", String(parsed));
+        updateAckDelayUi();
+        updateAckRetryUi();
+      }
+    }
+  } catch (err) {
+    console.warn("[settings] ACKD", err);
   }
 
   updateChannelSelect();
@@ -9721,8 +9879,10 @@ function appendDeviceLogEntries(entries, opts) {
     appended += 1;
   }
   if (appended > 0) {
+    const shouldStick = shouldAutoScrollDebugLog(log);
     log.appendChild(fragment);
-    log.scrollTop = log.scrollHeight;
+    if (shouldStick) scrollDebugLogToBottom(true);
+    else UI.state.debugLogPinned = false;
     if (!replace) state.initialized = true;
   }
   if (replace) state.initialized = true;
@@ -9867,9 +10027,11 @@ function debugLog(text, opts) {
   }
 
   const target = options.fragment && typeof options.fragment.appendChild === 'function' ? options.fragment : log;
+  const shouldStick = shouldAutoScrollDebugLog(log);
   target.appendChild(card);
   if (!options.fragment) {
-    log.scrollTop = log.scrollHeight;
+    if (shouldStick) scrollDebugLogToBottom(true);
+    else UI.state.debugLogPinned = false;
   }
   return card;
 }
