@@ -939,6 +939,12 @@ rs255223::decode -> PacketGatherer -> обработка сообщения
   ./tests/build/test_key_transfer
   ```
   При необходимости можно указать другой набор исходников, передав `TEST_SRCS="test_key_transfer.cpp test_enct.cpp"`.
+- Для проверки форматирования IRQ-логов радиомодуля подготовлен отдельный тест:
+  ```bash
+  make -C tests build/test_radio_irq_logging
+  ./tests/build/test_radio_irq_logging
+  ```
+  Заглушки для Arduino/RadioLib подключаются автоматически, поэтому аппаратное окружение не требуется.
 - Комплексный тест полного цикла без радиоканала по-прежнему можно собрать напрямую:
   ```bash
   g++ -I. -I.. tests/test_processing_without_send.cpp tx_module.cpp rx_module.cpp \

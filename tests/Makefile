@@ -1,18 +1,19 @@
 # Простой Makefile для сборки тестов с учётом зависимостей модулей
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wpedantic
-CPPFLAGS ?= -I.. -I../libs
+CPPFLAGS ?= -I.. -I../libs -I./stubs -I../src
 LDFLAGS ?=
 LDLIBS ?= -lsodium
 
 BUILD_DIR ?= build
 
-SUPPORT_SRCS := ../libs_includes.cpp \
-                ../message_buffer.cpp \
-                ../tx_module.cpp \
-                ../rx_module.cpp
+SUPPORT_SRCS := ../src/libs_includes.cpp \
+                ../src/message_buffer.cpp \
+                ../src/tx_module.cpp \
+                ../src/rx_module.cpp \
+                ../src/radio_sx1262.cpp
 SUPPORT_OBJS := $(patsubst ../%.cpp,$(BUILD_DIR)/support/%.o,$(SUPPORT_SRCS))
-TEST_SRCS ?= test_key_transfer.cpp
+TEST_SRCS ?= test_key_transfer.cpp test_radio_irq_logging.cpp
 TEST_BINS := $(patsubst %.cpp,$(BUILD_DIR)/%,$(TEST_SRCS))
 TEST_TARGETS := $(patsubst %.cpp,%,$(TEST_SRCS))
 
