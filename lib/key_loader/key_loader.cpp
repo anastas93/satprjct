@@ -84,8 +84,10 @@ std::vector<FlashMessage> g_buffered_logs;
 // Печать сообщения напрямую в Serial либо через пользовательский коллбэк.
 bool emitLogDirect(FlashMessage msg) {
   if (g_log_callback) {
-    g_log_callback(msg);
-    return true;
+    // Пользовательский обработчик может сообщить об отказе (например, Serial ещё не готов).
+    if (g_log_callback(msg)) {
+      return true;
+    }
   }
   if (Serial) {
     Serial.println(msg);
@@ -102,10 +104,14 @@ void flushBufferedLogs() {
   if (!g_log_callback && !Serial) {
     return;
   }
+  std::vector<FlashMessage> pending;
+  pending.reserve(g_buffered_logs.size());
   for (FlashMessage msg : g_buffered_logs) {
-    emitLogDirect(msg);
+    if (!emitLogDirect(msg)) {
+      pending.push_back(msg);
+    }
   }
-  g_buffered_logs.clear();
+  g_buffered_logs.swap(pending);
 }
 
 // Унифицированный вывод сообщения KeyLoader с безопасной буферизацией до готовности Serial.
@@ -1282,6 +1288,13 @@ const char* backendName(StorageBackend backend) {
 #ifdef ARDUINO
 void setLogCallback(LogCallback callback) {
   g_log_callback = callback;
+  if (!g_log_callback) {
+    return;
+  }
+  if (!Serial) {
+    // UART ещё не готов — оставляем накопленные сообщения в буфере.
+    return;
+  }
   flushBufferedLogs();
 }
 #else
