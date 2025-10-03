@@ -1802,8 +1802,14 @@ void handleApiTxImage() {
       return;
     }
   }
-  size_t contentLength = server.contentLength();             // длина тела из заголовка
   constexpr size_t kContentLengthUnknown = static_cast<size_t>(-1);
+  size_t contentLength = kContentLengthUnknown;               // Body size from Content-Length header if provided
+  if (server.hasHeader("Content-Length")) {
+    long headerValue = server.header("Content-Length").toInt();
+    if (headerValue >= 0) {
+      contentLength = static_cast<size_t>(headerValue);
+    }
+  }
   static const size_t kImageMaxPayload = []() {
     PacketSplitter splitter(PayloadMode::LARGE);
     return DefaultSettings::TX_QUEUE_CAPACITY * splitter.payloadSize();
@@ -2363,7 +2369,11 @@ static bool parseFloatArgument(const String& rawInput,
   char* end = nullptr;
   float parsed = strtof(start, &end);
   if (start == end) {
-    errorMessage = String("Параметр ") + valueName + " должен содержать число (получено \"") + rawInput + "\").";
+    errorMessage = String(u8"\u041f\u0430\u0440\u0430\043c\0435\0442\0440 ");
+    errorMessage += valueName;
+    errorMessage += u8" \u0434\u043e\u043b\u0436\u0435\u043d \u0441\u043e\u0434\u0435\u0440\u0436\u0430\0442\044c \u0447\u0438\u0441\043b\043e (\u043f\u043e\u043b\u0443\0447\u0435\u043d\u043e \"";
+    errorMessage += rawInput;
+    errorMessage += u8"\").";
     return false;
   }
   if (errno == ERANGE) {
@@ -2378,9 +2388,9 @@ static bool parseFloatArgument(const String& rawInput,
     return false;
   }
   if (parsed < minValue || parsed > maxValue) {
-    String range = String(minValue, precision);
+    String range = String(minValue, static_cast<unsigned int>(precision));
     range += "–";
-    range += String(maxValue, precision);
+    range += String(maxValue, static_cast<unsigned int>(precision));
     if (units && units[0] != '\0') {
       range += " ";
       range += units;
@@ -2411,7 +2421,11 @@ static bool parseIntArgument(const String& rawInput,
   char* end = nullptr;
   long parsed = strtol(start, &end, 10);
   if (start == end) {
-    errorMessage = String("Параметр ") + valueName + " должен содержать целое число (получено \"") + rawInput + "\").";
+    errorMessage = String(u8"\u041f\u0430\u0440\u0430\043c\0435\0442\0440 ");
+    errorMessage += valueName;
+    errorMessage += u8" \u0434\u043e\u043b\u0436\u0435\u043d \u0441\u043e\u0434\u0435\u0440\u0436\0430\0442\044c \u0446\u0435\u043b\043e\0435 \u0447\u0438\0441\043b\043e (\u043f\u043e\u043b\0443\u0447\0435\043d\043e \"";
+    errorMessage += rawInput;
+    errorMessage += u8"\").";
     return false;
   }
   if (errno == ERANGE) {

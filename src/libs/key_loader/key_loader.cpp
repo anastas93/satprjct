@@ -76,7 +76,7 @@ struct EphemeralState {
 EphemeralState g_ephemeral;
 
 #ifdef ARDUINO
-using FlashMessage = const __FlashStringHelper*;
+using FlashMessage = const ::__FlashStringHelper*;
 
 LogCallback g_log_callback = nullptr;
 std::vector<FlashMessage> g_buffered_logs;
@@ -1254,4 +1254,5 @@ void setLogCallback(LogCallback) {}
 #endif
 
 } // namespace KeyLoader
+
 

@@ -3,13 +3,16 @@
 #include <cstdint>
 #include <optional>
 
+#ifdef ARDUINO
+class __FlashStringHelper;
+#endif
+
 namespace KeyLoader {
 
 #ifdef ARDUINO
-class __FlashStringHelper;
 // Тип обработчика логов KeyLoader для Arduino: принимает строку во флеше и
 // возвращает true при успешной доставке сообщения.
-using LogCallback = bool (*)(const __FlashStringHelper* message);
+using LogCallback = bool (*)(const ::__FlashStringHelper* message);
 #else
 // Хостовый обработчик логов KeyLoader, работающий со строками в обычной памяти.
 using LogCallback = bool (*)(const char* message);
@@ -130,4 +133,5 @@ void endEphemeralSession();
 void setLogCallback(LogCallback callback);
 
 }  // namespace KeyLoader
+
 

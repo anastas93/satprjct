@@ -211,6 +211,8 @@ Arduino IDE и вспомогательных скриптов.
 Для раздачи справочника частот и преобразования координат используются обработчики
 `handleFreqInfoCsv` и `handleMgrsJs` в `src/main.cpp`, чтобы документация соответствовала
 реальной реализации веб-сервера.
+Команда: python src/tools/generate_web_content.py --output src/web/web_content.h   
+
 
 ### Обновление веб-ресурсов
 - Редактируйте HTML/CSS/JS в каталоге `web/`, после чего выполните `python3 tools/generate_web_content.py`,
