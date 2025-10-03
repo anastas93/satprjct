@@ -188,7 +188,7 @@ Arduino IDE и вспомогательных скриптов.
 | `key_loader`, `crypto/aes_ccm`, `key_transfer` | Работа с ключами, AES-CCM и обмен корневым ключом. |
 | `crypto/hkdf` | HKDF-SHA256 для вывода симметричных ключей и вспомогательных параметров. |
 | `simple_logger`, `serial_program_collector`, `text_converter` | Логирование, сборка команд, преобразование текста. |
-| `serial_mirror` | Зеркалирует вывод базового `Serial` в `LogHook` и сохраняет совместимость с конструкциями вида `while (!Serial)`. |
+| `serial_mirror` | Зеркалирует вывод базового `Serial` в `LogHook`, предоставляет метод `availableForWrite()` и сохраняет совместимость с конструкциями вида `while (!Serial)`. |
 | `config_loader` | Читает файл `config/default.ini`, подставляет значения по умолчанию и предоставляет доступ к структуре настроек. |
 
 Файл `libs_includes.cpp` подключает реализации библиотек для Arduino-проекта и избавляет от
