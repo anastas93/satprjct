@@ -41,11 +41,17 @@ struct KeysConfig {
   std::array<uint8_t, 16> defaultKey; // базовый симметричный ключ
 };
 
+// Параметры безопасности для управления fallback-режимами
+struct SecurityConfig {
+  bool allowUnencryptedStartup = false; // разрешить запуск без аппаратного шифрования флеша
+};
+
 // Совокупность всех загружаемых настроек
 struct Config {
   WifiConfig wifi;   // параметры Wi-Fi точки доступа
   RadioConfig radio; // параметры радиомодуля
   KeysConfig keys;   // ключи шифрования
+  SecurityConfig security; // параметры безопасности
 };
 
 // Возвращает загруженную конфигурацию (с подстановкой значений по умолчанию).

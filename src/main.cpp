@@ -3182,6 +3182,13 @@ void setup() {
   if (storageReadyNow) {
     String backendName = KeyLoader::backendName(KeyLoader::getBackend());
     LOG_INFO("Хранилище ключей: %s", backendName.c_str());
+    if (KeyLoader::flashEncryptionFallbackInUse()) {
+      LOG_WARN("KeyLoader: ⚠️ Flash Encryption отключена, используется временный доступ к NVS по конфигурации");
+      if (!KeyLoader::flashEncryptionFallbackWarningLogged()) {
+        LOG_WARN("KeyLoader: повторное ensureStorage() выполнит ещё одно предупреждение после инициализации Serial");
+      }
+      LOG_WARN("KeyLoader: включите аппаратное шифрование флеша перед боевой эксплуатацией, иначе ключи уязвимы");
+    }
   } else {
     LOG_WARN("Key: защищённый режим активен до повторного успешного ensureStorage()");
   }

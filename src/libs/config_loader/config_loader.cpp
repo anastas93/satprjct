@@ -147,6 +147,7 @@ Config makeDefaults() {
   config.radio.useRs = DefaultSettings::USE_RS;
 
   config.keys.defaultKey = DefaultSettings::DEFAULT_KEY;
+  config.security.allowUnencryptedStartup = false;
   return config;
 }
 
@@ -282,6 +283,19 @@ void applySetting(Config& config, const std::string& section, const std::string&
       }
     } else {
       LOG_WARN("Config: неизвестный параметр %s в секции [keys]", key.c_str());
+    }
+    return;
+  }
+  if (section == "security") {
+    if (key == "allowUnencryptedStartup") {
+      bool parsed = false;
+      if (parseBool(value, parsed)) {
+        config.security.allowUnencryptedStartup = parsed;
+      } else {
+        LOG_WARN("Config: некорректный allowUnencryptedStartup=%s", value.c_str());
+      }
+    } else {
+      LOG_WARN("Config: неизвестный параметр %s в секции [security]", key.c_str());
     }
     return;
   }

@@ -135,6 +135,23 @@ void setLogCallback(LogCallback callback);
 // Принудительно выгрузить буферизированные сообщения KeyLoader после появления Serial/обработчика.
 void flushBufferedLogs();
 
+// Разрешён ли fallback без Flash Encryption согласно конфигурации.
+bool flashEncryptionFallbackAllowed();
+
+// Был ли задействован fallback из-за выключенного Flash Encryption.
+bool flashEncryptionFallbackInUse();
+
+// Зафиксировано ли предупреждение о небезопасном запуске.
+bool flashEncryptionFallbackWarningLogged();
+
+#if defined(SR_KEYLOADER_ENABLE_TEST_HOOKS)
+// Тестовый хук: включает или выключает имитацию отключённого Flash Encryption.
+void setFlashEncryptionDisabledForTests(bool disabled);
+
+// Сбрасывает тестовые параметры и состояние предупреждений.
+void resetFlashEncryptionTestState();
+#endif
+
 }  // namespace KeyLoader
 
 

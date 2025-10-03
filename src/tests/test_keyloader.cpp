@@ -6,9 +6,26 @@
 #include <iostream>
 #include <vector>
 #include "libs/key_loader/key_loader.h"
+#include "libs/config_loader/config_loader.h"
+#include "key_safe_mode.h"
 #include "libs/crypto/x25519.h"
 #include "libs/crypto/hkdf.h"
 #include "libs/crypto/sha256.h"
+
+#if defined(SR_KEYLOADER_ENABLE_TEST_HOOKS)
+namespace ConfigLoader {
+const Config& getConfig() {
+  static Config cfg = [] {
+    Config config{};
+    config.security.allowUnencryptedStartup = true;
+    return config;
+  }();
+  return cfg;
+}
+
+const Config& reload() { return getConfig(); }
+}  // namespace ConfigLoader
+#endif
 
 int main() {
   using namespace KeyLoader;
@@ -225,6 +242,23 @@ int main() {
   assert(rec5.origin == KeyOrigin::LOCAL);
   assert(rec5.peer_public == remote_pub);
   assert(rec5.root_public == rec3.root_public);
+
+#if defined(SR_KEYLOADER_ENABLE_TEST_HOOKS)
+  // Имитация отключённого Flash Encryption с разрешённым fallback.
+  KeyLoader::resetFlashEncryptionTestState();
+  KeyLoader::setFlashEncryptionDisabledForTests(true);
+  bool encryptionEnabled = true;
+  bool safeModeActive = false;
+  bool storageReadyFlag = false;
+  configureKeySafeModeController([](bool) {}, &encryptionEnabled, &safeModeActive, &storageReadyFlag);
+  bool ensureOk = KeyLoader::ensureStorage();
+  assert(ensureOk);
+  assert(!safeModeActive);
+  assert(KeyLoader::flashEncryptionFallbackInUse());
+  assert(KeyLoader::flashEncryptionFallbackWarningLogged());
+  KeyLoader::setFlashEncryptionDisabledForTests(false);
+  KeyLoader::resetFlashEncryptionTestState();
+#endif
 
   std::cout << "OK" << std::endl;
   return 0;

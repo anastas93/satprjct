@@ -75,6 +75,23 @@ struct EphemeralState {
 
 EphemeralState g_ephemeral;
 
+bool g_allow_unencrypted_startup = false;            // разрешён ли запуск без Flash Encryption
+bool g_flash_encryption_fallback_used = false;       // активирован ли fallback
+bool g_flash_encryption_fallback_warning_logged = false; // было ли доставлено предупреждение
+bool g_flash_encryption_denied_logged = false;       // выводилось ли сообщение о запрете доступа
+#if defined(SR_KEYLOADER_ENABLE_TEST_HOOKS)
+bool g_test_flash_encryption_disabled = false;       // имитация отключённого Flash Encryption для тестов
+#endif
+
+bool refreshUnencryptedStartupAllowance() {
+#if defined(KEY_LOADER_ALLOW_UNENCRYPTED_STARTUP)
+  g_allow_unencrypted_startup = (KEY_LOADER_ALLOW_UNENCRYPTED_STARTUP != 0);
+#else
+  g_allow_unencrypted_startup = ConfigLoader::getConfig().security.allowUnencryptedStartup;
+#endif
+  return g_allow_unencrypted_startup;
+}
+
 #ifdef ARDUINO
 using FlashMessage = const ::__FlashStringHelper*;
 
@@ -696,17 +713,44 @@ Preferences& prefsInstance() {
 }
 
 bool ensureFlashEncryptionEnabled() {
+  refreshUnencryptedStartupAllowance();
   bool enabled = esp_flash_encryption_enabled();
-  static bool warned = false;
-  if (!enabled && !warned) {
-    // При старте глобальные конструкторы вызывают KeyLoader до инициализации Serial.
-    // Чтобы избежать аварии при обращении к неготовому UART, проверяем доступность
-    // Serial перед выводом предупреждения и повторяем попытку при следующем вызове.
+#if defined(SR_KEYLOADER_ENABLE_TEST_HOOKS)
+  if (g_test_flash_encryption_disabled) {
+    enabled = false;
+  }
+#endif
+  static bool denied_warned = false;
+  if (enabled) {
+    return true;
+  }
+  if (g_allow_unencrypted_startup) {
+    if (!g_flash_encryption_fallback_warning_logged) {
+      if (logMessage(F("KeyLoader: ⚠️ Flash Encryption отключена, используется конфигурационный fallback"))) {
+        g_flash_encryption_fallback_warning_logged = true;
+      }
+    }
+    g_flash_encryption_fallback_used = true;
+    return true;
+  }
+  if (!denied_warned) {
     if (logMessage(F("KeyLoader: Flash Encryption выключена, доступ к NVS запрещён"))) {
-      warned = true;
+      denied_warned = true;
+      g_flash_encryption_denied_logged = true;
     }
   }
-  return enabled;
+  return false;
+}
+
+void logUnencryptedRiskOnce(FlashMessage msg, bool& flag) {
+  if (!g_flash_encryption_fallback_used) {
+    return;
+  }
+  if (!flag) {
+    if (logMessage(msg)) {
+      flag = true;
+    }
+  }
 }
 
 bool ensurePrefs() {
@@ -728,6 +772,9 @@ bool ensurePrefs() {
 BlobType readBlob(std::vector<uint8_t>& out) {
   if (!ensureFlashEncryptionEnabled()) return BlobType::kNone;
   if (!ensurePrefs()) return BlobType::kNone;
+  static bool read_warned = false;
+  logUnencryptedRiskOnce(F("KeyLoader: ⚠️ чтение NVS без Flash Encryption — ключи могут быть извлечены"),
+                         read_warned);
   Preferences& prefs = prefsInstance();
   size_t len = prefs.getBytesLength("records");
   if (len > 0) {
@@ -750,6 +797,8 @@ BlobType readBlob(std::vector<uint8_t>& out) {
 bool readLegacyBackup(KeyRecord& out) {
   if (!ensureFlashEncryptionEnabled()) return false;
   if (!ensurePrefs()) return false;
+  static bool backup_warned = false;
+  logUnencryptedRiskOnce(F("KeyLoader: ⚠️ чтение резервной копии без Flash Encryption"), backup_warned);
   Preferences& prefs = prefsInstance();
   size_t len = prefs.getBytesLength("backup");
   if (len == 0) return false;
@@ -762,6 +811,8 @@ bool readLegacyBackup(KeyRecord& out) {
 void clearLegacyBlobs() {
   if (!ensureFlashEncryptionEnabled()) return;
   if (!ensurePrefs()) return;
+  static bool clear_warned = false;
+  logUnencryptedRiskOnce(F("KeyLoader: ⚠️ очистка устаревших ключей без Flash Encryption"), clear_warned);
   Preferences& prefs = prefsInstance();
   if (prefs.isKey("current")) prefs.remove("current");
   if (prefs.isKey("backup")) prefs.remove("backup");
@@ -770,6 +821,8 @@ void clearLegacyBlobs() {
 bool writePrimary(const std::vector<uint8_t>& data) {
   if (!ensureFlashEncryptionEnabled()) return false;
   if (!ensurePrefs()) return false;
+  static bool write_warned = false;
+  logUnencryptedRiskOnce(F("KeyLoader: ⚠️ запись ключей в NVS без аппаратного шифрования"), write_warned);
   Preferences& prefs = prefsInstance();
   size_t written = prefs.putBytes("records", data.data(), data.size());
   if (written != data.size()) return false;
@@ -884,6 +937,25 @@ bool ensureBackendReady() {
   return false;
 #endif
 #else
+#if defined(SR_KEYLOADER_ENABLE_TEST_HOOKS)
+  if (g_test_flash_encryption_disabled) {
+    refreshUnencryptedStartupAllowance();
+    if (!g_allow_unencrypted_startup) {
+      if (!g_flash_encryption_denied_logged) {
+        std::cerr << "[KeyLoader] Flash Encryption выключена, доступ к NVS запрещён (fallback отключён)"
+                  << std::endl;
+        g_flash_encryption_denied_logged = true;
+      }
+      return false;
+    }
+    if (!g_flash_encryption_fallback_warning_logged) {
+      std::cerr << "[KeyLoader] ⚠️ Flash Encryption отключена, используется конфигурационный fallback"
+                << std::endl;
+      g_flash_encryption_fallback_warning_logged = true;
+    }
+    g_flash_encryption_fallback_used = true;
+  }
+#endif
   return ensureDir();
 #endif
 }
@@ -1263,6 +1335,31 @@ void flushBufferedLogs() {
 #else
 void setLogCallback(LogCallback) {}
 void flushBufferedLogs() {}
+#endif
+
+bool flashEncryptionFallbackAllowed() { return refreshUnencryptedStartupAllowance(); }
+
+bool flashEncryptionFallbackInUse() { return g_flash_encryption_fallback_used; }
+
+bool flashEncryptionFallbackWarningLogged() { return g_flash_encryption_fallback_warning_logged; }
+
+#if defined(SR_KEYLOADER_ENABLE_TEST_HOOKS)
+void setFlashEncryptionDisabledForTests(bool disabled) {
+  g_test_flash_encryption_disabled = disabled;
+  if (!disabled) {
+    g_flash_encryption_fallback_used = false;
+    g_flash_encryption_fallback_warning_logged = false;
+    g_flash_encryption_denied_logged = false;
+  }
+}
+
+void resetFlashEncryptionTestState() {
+  g_test_flash_encryption_disabled = false;
+  g_flash_encryption_fallback_used = false;
+  g_flash_encryption_fallback_warning_logged = false;
+  g_flash_encryption_denied_logged = false;
+  refreshUnencryptedStartupAllowance();
+}
 #endif
 
 } // namespace KeyLoader
