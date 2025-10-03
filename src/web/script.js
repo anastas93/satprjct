@@ -4015,7 +4015,8 @@ function openReceivedPushChannel() {
         push.lastFailureReason = "EventSource API недоступен";
       }
     }
-    startReceivedMonitor({ intervalMs: 5000, immediate: false });
+    // При переходе на режим опроса сразу инициируем обновление, чтобы чат не ждал ручного обновления
+    startReceivedMonitor({ intervalMs: 5000, immediate: true });
     updateReceivedMonitorDiagnostics();
     return;
   }
@@ -4055,7 +4056,8 @@ function openReceivedPushChannel() {
           console.warn('[debug] hydrateDeviceLog(reconnect)', err);
         });
       }
-      startReceivedMonitor({ intervalMs: 30000, immediate: false });
+      // После успешного подключения SSE держим редкий опрос, но запускаем первый сразу
+      startReceivedMonitor({ intervalMs: 30000, immediate: true });
       updateReceivedMonitorDiagnostics();
     });
     source.addEventListener("received", (event) => {
@@ -4083,7 +4085,8 @@ function openReceivedPushChannel() {
       push.retryCount = (push.retryCount || 0) + 1;
       if (push.retryCount >= 3) {
         push.mode = "poll";
-        startReceivedMonitor({ intervalMs: 5000, immediate: false });
+        // При деградации до опроса не ждём таймера и сразу тянем обновление
+        startReceivedMonitor({ intervalMs: 5000, immediate: true });
       }
       updateReceivedMonitorDiagnostics();
     });
@@ -4115,7 +4118,8 @@ function openReceivedPushChannel() {
       openReceivedPushChannel();
     }, delay);
     push.mode = "poll";
-    startReceivedMonitor({ intervalMs: 5000, immediate: false });
+    // Без SSE полагаемся на опрос и сразу инициируем первый запрос
+    startReceivedMonitor({ intervalMs: 5000, immediate: true });
     updateReceivedMonitorDiagnostics();
   }
 }
