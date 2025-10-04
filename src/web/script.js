@@ -121,6 +121,7 @@ const UI = {
     lightPackBusy: false,
     rxBoostedGain: null,
     encBusy: false,
+    keyModeBusy: false,
     encryption: null,
     infoChannel: null,
     infoChannelTx: null,
@@ -682,6 +683,9 @@ async function init() {
   UI.els.ackTimeoutHint = $("#ackTimeoutHint");
   UI.els.ackDelay = $("#ACKD");
   UI.els.ackDelayHint = $("#ackDelayHint");
+  UI.els.keyModeLocalBtn = $("#btnKeyUseLocal");
+  UI.els.keyModePeerBtn = $("#btnKeyUsePeer");
+  UI.els.keyModeHint = $("#keyModeHint");
   UI.els.rxBoostedGain = $("#RXBG");
   UI.els.rxBoostedGainHint = $("#rxBoostedGainHint");
   UI.els.testRxmMessage = $("#TESTRXMMSG");
@@ -1079,6 +1083,10 @@ async function init() {
     UI.els.keyGenPeerBtn = btnKeyGenPeer;
     btnKeyGenPeer.addEventListener("click", () => requestKeyGenPeer());
   }
+  const btnKeyUseLocal = UI.els.keyModeLocalBtn || $("#btnKeyUseLocal");
+  if (btnKeyUseLocal) btnKeyUseLocal.addEventListener("click", () => handleKeyModeChange("local"));
+  const btnKeyUsePeer = UI.els.keyModePeerBtn || $("#btnKeyUsePeer");
+  if (btnKeyUsePeer) btnKeyUsePeer.addEventListener("click", () => handleKeyModeChange("peer"));
   const btnKeyRestore = $("#btnKeyRestore"); if (btnKeyRestore) btnKeyRestore.addEventListener("click", () => requestKeyRestore());
   const btnKeySend = $("#btnKeySend"); if (btnKeySend) btnKeySend.addEventListener("click", () => requestKeySend());
   const btnKeyRecv = $("#btnKeyRecv"); if (btnKeyRecv) btnKeyRecv.addEventListener("click", () => requestKeyReceive());
@@ -8587,6 +8595,19 @@ function renderKeyState(state, options) {
     if (peerEl) peerEl.textContent = "";
     if (backupEl) backupEl.textContent = "";
     if (peerBtn) peerBtn.disabled = true;
+    const keyModeLocalBtn = UI.els.keyModeLocalBtn || $("#btnKeyUseLocal");
+    const keyModePeerBtn = UI.els.keyModePeerBtn || $("#btnKeyUsePeer");
+    const keyModeHint = UI.els.keyModeHint || $("#keyModeHint");
+    const busy = UI.state && UI.state.keyModeBusy;
+    if (keyModeLocalBtn) {
+      keyModeLocalBtn.setAttribute("aria-pressed", "false");
+      keyModeLocalBtn.disabled = !!busy;
+    }
+    if (keyModePeerBtn) {
+      keyModePeerBtn.setAttribute("aria-pressed", "false");
+      keyModePeerBtn.disabled = true;
+    }
+    if (keyModeHint) keyModeHint.textContent = "Состояние ключа не загружено.";
     updateKeyStatusIndicators(null, { idEl, activeId: "", baseKeyId: "" });
   } else {
     const type = data.type === "external" ? "EXTERNAL" : "LOCAL";
@@ -8594,8 +8615,9 @@ function renderKeyState(state, options) {
     const normalizedId = normalizeKeyId(data.id || "");
     if (idEl) idEl.textContent = normalizedId ? formatKeyId(normalizedId) : "";
     if (pubEl) pubEl.textContent = data.public ? ("PUB " + data.public) : "";
+    const hasPeer = typeof data.peer === "string" && data.peer.trim().length > 0;
     if (peerEl) {
-      if (data.peer) {
+      if (hasPeer) {
         peerEl.textContent = "PEER " + data.peer;
         peerEl.hidden = false;
       } else {
@@ -8606,11 +8628,32 @@ function renderKeyState(state, options) {
     if (backupEl) backupEl.textContent = data.hasBackup ? "Есть резерв" : "";
     if (peerBtn) {
       // Активируем кнопку KEYGEN PEER только когда известен удалённый ключ
-      const hasPeer = typeof data.peer === "string" && data.peer.trim().length > 0;
       peerBtn.disabled = !hasPeer;
     }
     const baseKeyId = deriveKeyIdFromHex(data.baseKey);
     updateKeyStatusIndicators(data, { idEl, activeId: normalizedId, baseKeyId });
+    const keyModeLocalBtn = UI.els.keyModeLocalBtn || $("#btnKeyUseLocal");
+    const keyModePeerBtn = UI.els.keyModePeerBtn || $("#btnKeyUsePeer");
+    const keyModeHint = UI.els.keyModeHint || $("#keyModeHint");
+    const busy = UI.state && UI.state.keyModeBusy;
+    const isPeerActive = data.type === "external";
+    if (keyModeLocalBtn) {
+      keyModeLocalBtn.setAttribute("aria-pressed", isPeerActive ? "false" : "true");
+      keyModeLocalBtn.disabled = !!busy;
+    }
+    if (keyModePeerBtn) {
+      keyModePeerBtn.setAttribute("aria-pressed", isPeerActive ? "true" : "false");
+      keyModePeerBtn.disabled = !!busy || !hasPeer;
+    }
+    if (keyModeHint) {
+      if (!hasPeer) {
+        keyModeHint.textContent = "Удалённый ключ отсутствует. Команда PEER станет доступна после получения ключа партнёра.";
+      } else if (isPeerActive) {
+        keyModeHint.textContent = "Активен ключ PEER. Нажмите LOCAL, чтобы вернуться к локальной паре.";
+      } else {
+        keyModeHint.textContent = "Активен локальный ключ. Нажмите PEER для повторного применения сохранённого ключа партнёра.";
+      }
+    }
   }
   if (messageEl) messageEl.textContent = UI.key.lastMessage || "";
   if (opts.persist !== false) persistKeyStateSnapshot();
@@ -8950,6 +8993,40 @@ async function handleKeyGenerationCommand(options) {
     });
   }
   return true;
+}
+
+// Устанавливаем/снимаем состояние занятости для кнопок переключения LOCAL/PEER
+function setKeyModeBusy(active) {
+  UI.state.keyModeBusy = !!active;
+  const localBtn = UI.els.keyModeLocalBtn || $("#btnKeyUseLocal");
+  const peerBtn = UI.els.keyModePeerBtn || $("#btnKeyUsePeer");
+  const buttons = [localBtn, peerBtn];
+  for (const btn of buttons) {
+    if (!btn) continue;
+    if (active) btn.setAttribute("aria-busy", "true");
+    else btn.removeAttribute("aria-busy");
+  }
+  renderKeyState(undefined, { persist: false });
+}
+
+// Обработчик смены режима ключа из меню настроек
+async function handleKeyModeChange(mode) {
+  const normalized = mode === "peer" ? "peer" : "local";
+  if (UI.state.keyModeBusy) return;
+  const peerBtn = UI.els.keyModePeerBtn || $("#btnKeyUsePeer");
+  if (normalized === "peer" && peerBtn && peerBtn.disabled && !peerBtn.hasAttribute("aria-busy")) {
+    note("PEER ключ недоступен: отсутствует сохранённый публичный ключ партнёра.");
+    return;
+  }
+  setKeyModeBusy(true);
+  try {
+    if (normalized === "local") await requestKeyGen();
+    else await requestKeyGenPeer();
+  } catch (err) {
+    console.warn(`[key] переключение режима ${normalized}:`, err);
+    note(`Key: ошибка переключения ключа (${normalized === "local" ? "LOCAL" : "PEER"})`);
+  }
+  setKeyModeBusy(false);
 }
 
 async function requestKeyGen() {
