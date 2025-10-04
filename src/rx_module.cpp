@@ -425,8 +425,38 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   std::vector<uint8_t> assembled_payload;
   std::vector<uint8_t>* payload_ptr = &payload_buf_;
 
+  auto log_conv_progress = [&](const char* stage_label,
+                               size_t chunk_size,
+                               size_t accumulated,
+                               size_t expected_total) {
+    size_t total_buffered = 0;
+    for (const auto& entry : pending_conv_) {
+      total_buffered += entry.second.data.size();
+    }
+    LOG_INFO(
+        "RxModule: %s свёрточного блока msg_id=%u frag=%u: часть=%zu байт, накоплено=%zu из %zu,"
+        " активных ключей=%zu, буфер=%zu байт",
+        stage_label,
+        static_cast<unsigned>(hdr.msg_id),
+        static_cast<unsigned>(hdr.getFragIdx()),
+        chunk_size,
+        accumulated,
+        expected_total,
+        static_cast<unsigned>(pending_conv_.size()),
+        total_buffered);
+  };
+
   if (conv_flag) {
     size_t expected_conv_len = cipher_len_hint ? static_cast<size_t>(cipher_len_hint + CONV_TAIL_BYTES) * 2 : 0;
+    const size_t header_payload_len = hdr.getPayloadLen();
+    if (expected_conv_len && expected_conv_len != header_payload_len) {
+      LOG_WARN(
+          "RxModule: длина свёрточного блока по заголовку=%u не совпала с расчётом=%zu",
+          static_cast<unsigned>(header_payload_len),
+          expected_conv_len);
+      profile_scope.markDrop("несогласованная длина свёртки");
+      return;                                          // защищаемся от рассогласованного кадра
+    }
     const uint64_t conv_key = (static_cast<uint64_t>(hdr.msg_id) << 32) | hdr.getFragIdx();
     if (expected_conv_len && payload_buf_.size() < expected_conv_len) {
       auto [it, inserted] = pending_conv_.try_emplace(conv_key);
@@ -440,12 +470,14 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
       }
       slot.data.insert(slot.data.end(), payload_buf_.begin(), payload_buf_.end());
       slot.last_update = now;
+      log_conv_progress("накопление", payload_buf_.size(), slot.data.size(), slot.expected_len);
       trimPendingConv();
       profile_scope.markDrop("ожидание продолжения свёрточного блока");
       return;                                          // ждём остальные части до полного блока
     }
     if (expected_conv_len && payload_buf_.size() > expected_conv_len) {
       pending_conv_.erase(conv_key);
+      log_conv_progress("переполнение", payload_buf_.size(), payload_buf_.size(), expected_conv_len);
       profile_scope.markDrop("переполнение свёрточного блока");
       return;
     }
@@ -453,20 +485,27 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     if (it != pending_conv_.end()) {
       it->second.data.insert(it->second.data.end(), payload_buf_.begin(), payload_buf_.end());
       it->second.last_update = now;
+      log_conv_progress("продолжение", payload_buf_.size(), it->second.data.size(),
+                       it->second.expected_len ? it->second.expected_len : expected_conv_len);
       trimPendingConv();
       if (!it->second.expected_len && expected_conv_len) {
         it->second.expected_len = expected_conv_len;  // инициализация ожидания если не было
       }
       if (it->second.expected_len && it->second.data.size() == it->second.expected_len) {
         assembled_payload.swap(it->second.data);
+        log_conv_progress("получен полный блок", payload_buf_.size(), assembled_payload.size(),
+                         it->second.expected_len);
         pending_conv_.erase(it);
         payload_ptr = &assembled_payload;
       } else {
         if (!it->second.expected_len || it->second.data.size() < it->second.expected_len) {
+          log_conv_progress("ожидание хвоста", payload_buf_.size(), it->second.data.size(),
+                           it->second.expected_len);
           profile_scope.markDrop("ожидание хвоста свёрточного блока");
           return;                                      // ждём продолжение
         }
         pending_conv_.erase(it);                       // превышение длины — ошибка
+        log_conv_progress("сбой длины", payload_buf_.size(), payload_buf_.size(), expected_conv_len);
         profile_scope.markDrop("сбой длины свёрточного блока");
         return;
       }
