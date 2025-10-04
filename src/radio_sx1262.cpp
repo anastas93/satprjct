@@ -582,6 +582,7 @@ void RadioSX1262::processPendingIrqLog() {
   bool needRead = false;
   bool shouldMarkPacketReady = false;   // итоговая оценка необходимости пометить пакет как готовый
   bool needRxRecovery = false;          // требуется ли перезапуск приёма после ошибок
+  bool hasRxErrors = false;             // отметка наличия ошибок декодирования
 
 #if defined(ARDUINO)
   noInterrupts();
@@ -617,7 +618,7 @@ void RadioSX1262::processPendingIrqLog() {
     const bool hasHeaderError = (flags & RADIOLIB_SX126X_IRQ_HEADER_ERR) != 0U;
 
     const bool hasRxIndicators = hasRxDone || hasHeaderValid || hasSyncValid; // есть признаки приёма
-    const bool hasRxErrors = hasCrcError || hasHeaderError;                   // есть ошибки декодирования
+    hasRxErrors = hasCrcError || hasHeaderError;                              // есть ошибки декодирования
 
     shouldMarkPacketReady = hasRxIndicators && !hasRxErrors;                  // считаем пакет готовым
     needRxRecovery = hasRxIndicators && hasRxErrors;                          // требуется перезапуск RX
@@ -644,6 +645,19 @@ void RadioSX1262::processPendingIrqLog() {
 
   if (clearState != RADIOLIB_ERR_NONE) {
     LOG_WARN_VAL("RadioSX1262: не удалось очистить статус IRQ, код=", clearState);
+  }
+
+  if (hasRxErrors) {
+    // Подробный лог для диагностики ошибок приёма
+    LOG_WARN(
+        "RadioSX1262: обнаружены ошибки приёма (IRQ=0x%08lX, банк=%d, канал=%u, BW=%.2f, SF=%d, CR=%d, needRxRecovery=%d)",
+        static_cast<unsigned long>(flags),                           // маска IRQ-флагов
+        static_cast<int>(bank_),                                     // текущий банк
+        static_cast<unsigned>(channel_),                             // текущий канал
+        getBandwidth(),                                              // текущая ширина полосы
+        getSpreadingFactor(),                                        // текущий фактор расширения
+        getCodingRate(),                                             // текущий коэффициент кодирования
+        needRxRecovery ? 1 : 0);                                     // необходимость восстановления RX
   }
 
   if (shouldMarkPacketReady) {
