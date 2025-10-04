@@ -563,6 +563,31 @@ bool TxModule::transmit(PendingMessage& message) {
     LOG_ERROR("TxModule: вставка пилотов не удалась");
     return false;
   }
+  size_t expected_payload_with_pilots = frag.payload_size;
+  if (frag.payload_size > 0) {
+    size_t marker_count = (frag.payload_size - 1) / PILOT_INTERVAL;
+    expected_payload_with_pilots += marker_count * PILOT_MARKER.size();
+  }
+  if (payload_bytes != expected_payload_with_pilots) {
+    LOG_ERROR("TxModule: несогласованная длина пилотов (ожидали %zu, получили %zu)",
+              expected_payload_with_pilots,
+              payload_bytes);
+  }
+  size_t payload_offset = frame_size; // смещение полезной нагрузки относительно начала кадра
+  size_t pilot_overhead = payload_bytes >= frag.payload_size
+                              ? payload_bytes - frag.payload_size
+                              : 0;
+  if (PILOT_MARKER.size() && pilot_overhead % PILOT_MARKER.size() != 0) {
+    LOG_ERROR("TxModule: остаток пилотного оверхеда=%zu не делится на размер маркера=%zu",
+              pilot_overhead,
+              PILOT_MARKER.size());
+  }
+  size_t pilot_count = PILOT_MARKER.size() ? pilot_overhead / PILOT_MARKER.size() : 0;
+  DEBUG_LOG("TxModule: полезная=%zu, с_пилотами=%zu, смещение=%zu, пилотов=%zu",
+            static_cast<size_t>(frag.payload_size),
+            payload_bytes,
+            payload_offset,
+            pilot_count);
   frame_size += payload_bytes;
   scrambler::scramble(frame_buf.data(), frame_size);
 
