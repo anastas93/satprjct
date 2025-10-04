@@ -668,6 +668,8 @@ async function init() {
   UI.els.keyStatusSafeMode = $("#keyStatusSafeMode");
   UI.els.keyStatusSafeModeText = $("#keyStatusSafeModeText");
   UI.els.keyStatusDetails = $("#keyStatusDetails");
+  UI.els.keyModeToggle = $("#keyModeToggle");
+  UI.els.keyModeHint = $("#keyModeHint");
   UI.els.ackSetting = $("#ACK");
   UI.els.ackSettingWrap = $("#ackSettingControl");
   UI.els.ackSettingHint = $("#ackSettingHint");
@@ -1078,6 +1080,9 @@ async function init() {
   if (btnKeyGenPeer) {
     UI.els.keyGenPeerBtn = btnKeyGenPeer;
     btnKeyGenPeer.addEventListener("click", () => requestKeyGenPeer());
+  }
+  if (UI.els.keyModeToggle) {
+    UI.els.keyModeToggle.addEventListener("change", onKeyModeToggleChange);
   }
   const btnKeyRestore = $("#btnKeyRestore"); if (btnKeyRestore) btnKeyRestore.addEventListener("click", () => requestKeyRestore());
   const btnKeySend = $("#btnKeySend"); if (btnKeySend) btnKeySend.addEventListener("click", () => requestKeySend());
@@ -8558,6 +8563,48 @@ function updateKeyStatusIndicators(state, meta) {
   }
 }
 
+function updateKeyModeControlState(state) {
+  const toggle = UI.els.keyModeToggle || $("#keyModeToggle");
+  const hint = UI.els.keyModeHint || $("#keyModeHint");
+  if (!toggle) return;
+
+  const data = state && typeof state === "object" ? state : null;
+  const valid = data ? data.valid !== false : false;
+  const safeMode = data ? data.safeMode === true : false;
+  const peerValue = data && typeof data.peer === "string" ? data.peer.trim() : "";
+  const hasPeer = peerValue.length > 0;
+  const baseKeyId = data ? deriveKeyIdFromHex(data.baseKey) : "";
+  const activeId = data ? normalizeKeyId(data.id || "") : "";
+  const usingBaseKey = Boolean(baseKeyId && activeId && baseKeyId === activeId);
+  const mode = data && data.type === "external" && !usingBaseKey ? "peer" : "local";
+
+  toggle.dataset.peerAvailable = hasPeer ? "1" : "0";
+  toggle.dataset.safeMode = safeMode ? "1" : "0";
+  toggle.dataset.mode = mode;
+  toggle.dataset.baseKey = usingBaseKey ? "1" : "0";
+  toggle.dataset.available = valid ? "1" : "0";
+  toggle.checked = mode === "peer";
+  if (toggle.dataset.pending === "1") {
+    toggle.disabled = true;
+  } else {
+    toggle.disabled = !valid || safeMode;
+  }
+
+  let hintText = "Состояние ключа недоступно.";
+  if (valid && safeMode) {
+    hintText = "Safe mode блокирует переключение ключа.";
+  } else if (valid && usingBaseKey) {
+    hintText = "Используется базовый ключ из конфигурации.";
+  } else if (valid && !hasPeer) {
+    hintText = "Удалённый ключ не получен, доступен только режим LOCAL.";
+  } else if (valid && mode === "peer") {
+    hintText = "Активен ключ PEER, полученный от собеседника.";
+  } else if (valid) {
+    hintText = "Активен локально сгенерированный ключ.";
+  }
+  if (hint) hint.textContent = hintText;
+}
+
 /* Безопасность */
 function renderKeyState(state, options) {
   const opts = options || {};
@@ -8588,6 +8635,7 @@ function renderKeyState(state, options) {
     if (backupEl) backupEl.textContent = "";
     if (peerBtn) peerBtn.disabled = true;
     updateKeyStatusIndicators(null, { idEl, activeId: "", baseKeyId: "" });
+    updateKeyModeControlState(null);
   } else {
     const type = data.type === "external" ? "EXTERNAL" : "LOCAL";
     if (stateEl) stateEl.textContent = type;
@@ -8611,9 +8659,89 @@ function renderKeyState(state, options) {
     }
     const baseKeyId = deriveKeyIdFromHex(data.baseKey);
     updateKeyStatusIndicators(data, { idEl, activeId: normalizedId, baseKeyId });
+    updateKeyModeControlState(data);
   }
   if (messageEl) messageEl.textContent = UI.key.lastMessage || "";
   if (opts.persist !== false) persistKeyStateSnapshot();
+}
+
+async function applyKeyMode(mode, opts) {
+  const options = opts || {};
+  const toggle = options.toggle || UI.els.keyModeToggle || $("#keyModeToggle");
+  const hint = UI.els.keyModeHint || $("#keyModeHint");
+  if (!toggle) return false;
+
+  const desired = mode === "peer" ? "peer" : "local";
+  const previous = toggle.dataset.mode === "peer" ? "peer" : "local";
+  toggle.dataset.pending = "1";
+  toggle.disabled = true;
+  if (hint) {
+    hint.textContent = desired === "peer"
+      ? "Запрос переключения на ключ PEER..."
+      : "Запрос генерации локального ключа...";
+  }
+
+  let success = false;
+  try {
+    if (desired === "peer") {
+      success = await requestKeyGenPeer();
+    } else {
+      success = await requestKeyGen();
+    }
+    if (typeof success !== "boolean") success = true;
+  } catch (err) {
+    console.warn("[key] ошибка переключения режима ключа:", err);
+    note("Ошибка переключения ключа, подробности в консоли.");
+    success = false;
+  }
+
+  delete toggle.dataset.pending;
+  if (!success) {
+    toggle.disabled = false;
+    toggle.checked = previous === "peer";
+    toggle.dataset.mode = previous;
+    if (hint) hint.textContent = "Не удалось переключить ключ. Проверьте состояние в разделе Security.";
+    return false;
+  }
+
+  // После успешной операции renderKeyState обновит UI по данным устройства
+  const nextState = UI.key && UI.key.state ? UI.key.state : null;
+  updateKeyModeControlState(nextState);
+  toggle.disabled = false;
+  return true;
+}
+
+async function onKeyModeToggleChange(event) {
+  const toggle = event && event.currentTarget ? event.currentTarget : UI.els.keyModeToggle;
+  if (!toggle) return;
+  if (toggle.dataset.pending === "1") return;
+
+  const valid = toggle.dataset.available === "1";
+  if (!valid) {
+    toggle.checked = false;
+    toggle.dataset.mode = "local";
+    note("Состояние ключа неизвестно, обновите данные во вкладке Security.");
+    return;
+  }
+
+  const safeMode = toggle.dataset.safeMode === "1";
+  if (safeMode) {
+    toggle.checked = toggle.dataset.mode === "peer";
+    note("Safe mode блокирует операции с ключами.");
+    return;
+  }
+
+  const peerAvailable = toggle.dataset.peerAvailable === "1";
+  const currentMode = toggle.dataset.mode === "peer" ? "peer" : "local";
+  const desiredMode = toggle.checked ? "peer" : "local";
+  if (desiredMode === currentMode) return;
+  if (desiredMode === "peer" && !peerAvailable) {
+    toggle.checked = false;
+    note("Удалённый ключ не получен, переключение на PEER недоступно.");
+    return;
+  }
+
+  await applyKeyMode(desiredMode, { toggle });
 }
 
 // Сохраняем актуальное состояние ключа и сопутствующее сообщение в localStorage
@@ -8953,7 +9081,7 @@ async function handleKeyGenerationCommand(options) {
 }
 
 async function requestKeyGen() {
-  await handleKeyGenerationCommand({
+  return await handleKeyGenerationCommand({
     command: "KEYGEN",
     label: "KEYGEN",
     requestLog: "запрос генерации",
@@ -8962,7 +9090,7 @@ async function requestKeyGen() {
 }
 
 async function requestKeyGenPeer() {
-  await handleKeyGenerationCommand({
+  return await handleKeyGenerationCommand({
     command: "KEYGEN PEER",
     label: "KEYGEN PEER",
     requestLog: "запрос повторного применения удалённого ключа",
