@@ -2859,9 +2859,9 @@ void handleCmdHttp() {
       } else {
         const char letter = raw[0];
         const char upper = static_cast<char>(std::toupper(static_cast<unsigned char>(letter)));
-        const bool known = (upper == 'E' || upper == 'W' || upper == 'T' || upper == 'A' || upper == 'H');
+        const bool known = (upper == 'E' || upper == 'W' || upper == 'T' || upper == 'A' || upper == 'H' || upper == 'N');
         if (!known) {
-          respondBadRequest(String("   \"") + raw + "\".  : E, W, T, A, H.");
+          respondBadRequest(String("   \"") + raw + "\".  : E, W, T, A, H, N.");
         } else if (!radio.setBank(parseBankChar(letter))) {
           respondBadRequest(String("    \"") + raw + "\".");
         }
@@ -2895,9 +2895,9 @@ void handleCmdHttp() {
       } else {
         const char letter = rawBank[0];
         const char upper = static_cast<char>(std::toupper(static_cast<unsigned char>(letter)));
-        const bool known = (upper == 'E' || upper == 'W' || upper == 'T' || upper == 'A' || upper == 'H');
+        const bool known = (upper == 'E' || upper == 'W' || upper == 'T' || upper == 'A' || upper == 'H' || upper == 'N');
         if (!known) {
-          respondBadRequest(String("   \"") + rawBank + "\".  : E, W, T, A, H.");
+          respondBadRequest(String("   \"") + rawBank + "\".  : E, W, T, A, H, N.");
         } else {
           b = parseBankChar(letter);
         }
