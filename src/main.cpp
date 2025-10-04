@@ -3,6 +3,7 @@
 #include <vector>
 #include <deque>
 #include <string>
+#include <utility> // std::pair для сортировки причин дропа
 #include <cstring> //  strlen
 #include <algorithm> //  std::equal
 #include <cstdio>    //  snprintf   JSON
@@ -2549,7 +2550,79 @@ String cmdInfo() {
   return s;
 }
 
-//   
+//   DropStats()     
+static std::vector<std::pair<std::string, uint64_t>> collectDropStagesSorted(const RxModule::DropStats& stats) {
+  std::vector<std::pair<std::string, uint64_t>> entries;
+  entries.reserve(stats.by_stage.size());
+  for (const auto& entry : stats.by_stage) {
+    entries.emplace_back(entry.first, entry.second);
+  }
+  std::sort(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
+    if (lhs.second != rhs.second) {
+      return lhs.second > rhs.second;
+    }
+    return lhs.first < rhs.first;
+  });
+  return entries;
+}
+
+//    DropStats()    ( )
+static String formatDropStatsText(size_t topLimit) {
+  if (topLimit == 0) {
+    topLimit = 5;  //   
+  }
+  auto stats = rx.dropStats();
+  auto sorted = collectDropStagesSorted(stats);
+  const size_t topCount = std::min(static_cast<size_t>(topLimit), sorted.size());
+
+  String out;
+  out.reserve(160);
+  out += "Drop total: ";
+  out += String(static_cast<unsigned long>(stats.total));
+  out += "\n";
+  if (topCount == 0) {
+    out += "Топ причин: нет данных\n";
+  } else {
+    out += "Топ причин (до ";
+    out += String(static_cast<unsigned long>(topLimit));
+    out += "):\n";
+    for (size_t i = 0; i < topCount; ++i) {
+      out += "- ";
+      out += String(sorted[i].first.c_str());
+      out += ": ";
+      out += String(static_cast<unsigned long>(sorted[i].second));
+      out += "\n";
+    }
+  }
+  return out;
+}
+
+//    DropStats()    JSON ( )
+static String formatDropStatsJson(size_t topLimit) {
+  if (topLimit == 0) {
+    topLimit = 5;  //   
+  }
+  auto stats = rx.dropStats();
+  auto sorted = collectDropStagesSorted(stats);
+  const size_t topCount = std::min(static_cast<size_t>(topLimit), sorted.size());
+
+  String out = "{\"total\":";
+  out += String(static_cast<unsigned long>(stats.total));
+  out += ",\"top\":[";
+  for (size_t i = 0; i < topCount; ++i) {
+    if (i > 0) out += ',';
+    out += "{\"stage\":";
+    out += '"';
+    out += jsonEscape(String(sorted[i].first.c_str()));
+    out += "\",\"count\":";
+    out += String(static_cast<unsigned long>(sorted[i].second));
+    out += '}';
+  }
+  out += "]}";
+  return out;
+}
+
+//
 String cmdSts(int cnt) {
   if (cnt <= 0) cnt = 10;
   auto logs = SimpleLogger::getLast(cnt);
@@ -3050,6 +3123,80 @@ void handleCmdHttp() {
     } else {
       resp = cmdRsts(cnt);
     }
+  } else if (cmd == "RXS") {
+    bool wantJson = false;
+    if (server.hasArg("json")) {
+      wantJson = server.arg("json").toInt() != 0;
+    } else if (server.hasArg("fmt")) {
+      String fmt = server.arg("fmt");
+      fmt.toLowerCase();
+      wantJson = (fmt == "json");
+    }
+
+    long limit = 5;
+    auto parseLimitArg = [&limit](const String& value) {
+      long parsed = value.toInt();
+      if (parsed > 0) {
+        limit = parsed;
+      }
+    };
+    if (server.hasArg("top")) {
+      parseLimitArg(server.arg("top"));
+    }
+    if (server.hasArg("n")) {
+      parseLimitArg(server.arg("n"));
+    }
+    if (server.hasArg("limit")) {
+      parseLimitArg(server.arg("limit"));
+    }
+
+    bool doReset = false;
+    auto parseActionArg = [&doReset, &parseLimitArg](String value) {
+      value.trim();
+      if (value.equalsIgnoreCase("RESET")) {
+        doReset = true;
+        return;
+      }
+      parseLimitArg(value);
+    };
+    if (server.hasArg("v")) {
+      parseActionArg(server.arg("v"));
+    }
+    if (server.hasArg("action")) {
+      parseActionArg(server.arg("action"));
+    }
+    if (server.hasArg("reset")) {
+      String raw = server.arg("reset");
+      raw.trim();
+      if (raw.length() == 0 || raw.toInt() != 0 || raw.equalsIgnoreCase("true") || raw.equalsIgnoreCase("on")) {
+        doReset = true;
+      }
+    }
+
+    if (limit <= 0) {
+      limit = 5;
+    }
+
+    bool resetPerformed = false;
+    if (doReset) {
+      rx.resetDropStats();
+      resetPerformed = true;
+    }
+
+    if (wantJson) {
+      String payload = formatDropStatsJson(static_cast<size_t>(limit));
+      if (resetPerformed) {
+        resp = "{\"reset\":true,\"stats\":";
+        resp += payload;
+        resp += '}';
+      } else {
+        resp = payload;
+      }
+      contentType = "application/json";
+    } else {
+      resp = resetPerformed ? String("Счётчики сброшены.\n") : String();
+      resp += formatDropStatsText(static_cast<size_t>(limit));
+    }
   } else if (cmd == "RXSTAT") {
     bool wantJson = false;
     if (server.hasArg("json")) {
@@ -3494,7 +3641,7 @@ void setup() {
     rx.onReceive(d, l);
   });
   radio.setIrqLogCallback(onRadioIrqLog);                    //  IRQ-  SSE    Serial
-  LOG_INFO(": BF <>, SF <>, CR <>, BANK <e|w|t|a|h|n>, CH <>, PW <0-9>, RXBG <0|1>, TX <>, TXL <>, BCN, INFO, STS <n>, RSTS <n>, RXSTAT, ACK [0|1], LIGHT [0|1], ACKR <>, PAUSE <>, ACKT <>, ACKD <>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
+  LOG_INFO(": BF <>, SF <>, CR <>, BANK <e|w|t|a|h|n>, CH <>, PW <0-9>, RXBG <0|1>, TX <>, TXL <>, BCN, INFO, STS <n>, RSTS <n>, RXS [n|JSON|RESET], RXSTAT, ACK [0|1], LIGHT [0|1], ACKR <>, PAUSE <>, ACKT <>, ACKD <>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
 }
 
 void loop() {
@@ -3693,7 +3840,7 @@ void loop() {
           Serial.println(s.c_str());
         }
       } else if (line.startsWith("RSTS")) {
-        String args = line.substring(4);                              //   
+        String args = line.substring(4);                              //
         args.trim();
         bool wantJson = false;                                        //   
         int cnt = 10;                                                 //    
@@ -3722,6 +3869,59 @@ void loop() {
           auto names = recvBuf.list(cnt);                             //   
           for (const auto& n : names) {
             Serial.println(n.c_str());
+          }
+        }
+      } else if (line.startsWith("RXS")) {
+        String args = line.substring(3);                                //   RXS
+        args.trim();
+        bool wantJson = false;
+        bool doReset = false;
+        long limit = 5;
+        String rest = args;
+        while (rest.length() > 0) {
+          int space = rest.indexOf(' ');
+          String token = (space >= 0) ? rest.substring(0, space) : rest;
+          rest = (space >= 0) ? rest.substring(space + 1) : String();
+          token.trim();
+          rest.trim();
+          if (token.length() == 0) {
+            continue;
+          }
+          if (token.equalsIgnoreCase("JSON")) {
+            wantJson = true;
+            continue;
+          }
+          if (token.equalsIgnoreCase("RESET")) {
+            doReset = true;
+            continue;
+          }
+          long parsed = token.toInt();
+          if (parsed > 0) {
+            limit = parsed;
+          }
+        }
+        if (limit <= 0) {
+          limit = 5;
+        }
+        bool resetPerformed = false;
+        if (doReset) {
+          rx.resetDropStats();
+          resetPerformed = true;
+        }
+        if (!wantJson) {
+          if (resetPerformed) {
+            Serial.println("RXS: счётчики сброшены");
+          }
+          Serial.print(formatDropStatsText(static_cast<size_t>(limit)));
+        } else {
+          String payload = formatDropStatsJson(static_cast<size_t>(limit));
+          if (resetPerformed) {
+            String message = "{\"reset\":true,\"stats\":";
+            message += payload;
+            message += '}';
+            Serial.println(message);
+          } else {
+            Serial.println(payload);
           }
         }
       } else if (line.startsWith("TX ")) {
