@@ -35,6 +35,8 @@ namespace DefaultSettings {
   constexpr size_t SERIAL_BUFFER_LIMIT = 500UL * 1024UL; // Максимальный размер буфера приёма по Serial (байты)
   constexpr size_t TX_QUEUE_CAPACITY = 160;        // Ёмкость очередей TxModule (до четырёх сообщений по 5000 байт)
   constexpr bool USE_RS = false;                   // использовать кодирование RS(255,223)
+  constexpr bool USE_CONV = true;                  // применять свёрточное кодирование
+  constexpr bool USE_BIT_INTERLEAVER = true;       // включить битовый интерливинг после свёртки
   constexpr bool USE_ACK = false;                  // использовать подтверждения ACK
   constexpr uint8_t ACK_RETRY_LIMIT = 3;           // Количество повторных отправок при ожидании ACK
   constexpr uint32_t ACK_RESPONSE_DELAY_MS = 20;   // Задержка перед отправкой ACK после приёма (мс)

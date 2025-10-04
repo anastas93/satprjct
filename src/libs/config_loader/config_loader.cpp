@@ -149,6 +149,8 @@ Config makeDefaults() {
   config.radio.ackTimeoutMs = DefaultSettings::ACK_TIMEOUT_MS;
   config.radio.useEncryption = DefaultSettings::USE_ENCRYPTION;
   config.radio.useRs = DefaultSettings::USE_RS;
+  config.radio.useConv = DefaultSettings::USE_CONV;
+  config.radio.useBitInterleaver = DefaultSettings::USE_BIT_INTERLEAVER;
 
   config.keys.defaultKey = DefaultSettings::DEFAULT_KEY;
   return config;
@@ -270,6 +272,20 @@ void applySetting(Config& config, const std::string& section, const std::string&
         config.radio.useRs = parsed;
       } else {
         LOG_WARN("Config: некорректный useRs=%s", value.c_str());
+      }
+    } else if (key == "useConv") {
+      bool parsed = false;
+      if (parseBool(value, parsed)) {
+        config.radio.useConv = parsed;
+      } else {
+        LOG_WARN("Config: некорректный useConv=%s", value.c_str());
+      }
+    } else if (key == "useBitInterleaver") {
+      bool parsed = false;
+      if (parseBool(value, parsed)) {
+        config.radio.useBitInterleaver = parsed;
+      } else {
+        LOG_WARN("Config: некорректный useBitInterleaver=%s", value.c_str());
       }
     } else {
       LOG_WARN("Config: неизвестный параметр %s в секции [radio]", key.c_str());

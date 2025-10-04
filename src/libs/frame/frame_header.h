@@ -18,9 +18,11 @@ struct FrameHeader {
   static constexpr uint32_t FRAG_SHIFT = 12;       // средние биты под индекс фрагмента (12 бит)
   static constexpr uint32_t FRAG_MASK = 0x00FFF000; // маска индекса фрагмента
   static constexpr uint32_t LEN_MASK = 0x00000FFF; // младшие биты под длину (12 бит)
-  static constexpr uint8_t FLAG_ENCRYPTED = 0x01;    // полезная нагрузка зашифрована
-  static constexpr uint8_t FLAG_ACK_REQUIRED = 0x02; // требуется подтверждение доставки
-  static constexpr uint8_t FLAG_CONV_ENCODED = 0x04; // полезная нагрузка прошла свёрточное кодирование
+  static constexpr uint8_t FLAG_ENCRYPTED = 0x01;        // полезная нагрузка зашифрована
+  static constexpr uint8_t FLAG_ACK_REQUIRED = 0x02;     // требуется подтверждение доставки
+  static constexpr uint8_t FLAG_CONV_ENCODED = 0x04;     // полезная нагрузка прошла свёрточное кодирование
+  static constexpr uint8_t FLAG_RS_ENCODED = 0x08;       // к кадру применён код Рида — Соломона
+  static constexpr uint8_t FLAG_BIT_INTERLEAVED = 0x10;  // к битам применён интерливинг
 
   // Доступ к упакованным полям
   uint8_t getFlags() const;        // извлечение флагов
