@@ -583,6 +583,42 @@
           <div id="recvDiagBlocked" class="debug-metrics-foot__entry" hidden>Блокировок не было</div>
         </div>
       </div>
+      <div id="memoryDiag" class="debug-metrics">
+        <div class="debug-metrics__header">
+          <h3>Использование памяти браузера</h3>
+          <span id="memoryDiagStatus" class="debug-metrics__status">Проверяем поддержку…</span>
+          <div id="memoryDiagSupport" class="debug-metrics__mode small muted">—</div>
+        </div>
+        <p class="small muted">Метрики основаны на данных API браузера и помогают выявить утечки памяти веб-клиента. Значения обновляются автоматически при открытой вкладке Debug.</p>
+        <div class="debug-metrics-grid">
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Использование JS-кучи</span>
+            <span id="memoryDiagUsed" class="debug-metrics-item__value">—</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Всего выделено</span>
+            <span id="memoryDiagTotal" class="debug-metrics-item__value">—</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Лимит</span>
+            <span id="memoryDiagLimit" class="debug-metrics-item__value">—</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Тренд</span>
+            <span id="memoryDiagTrend" class="debug-metrics-item__value">—</span>
+          </div>
+          <div class="debug-metrics-item">
+            <span class="debug-metrics-item__label">Последнее обновление</span>
+            <span id="memoryDiagUpdated" class="debug-metrics-item__value">—</span>
+          </div>
+        </div>
+        <div class="debug-metrics-foot">
+          <div id="memoryDiagFoot" class="debug-metrics-foot__entry small muted" hidden>—</div>
+        </div>
+        <div class="actions debug-actions">
+          <button id="btnMemoryRefresh" class="btn ghost small">Обновить сейчас</button>
+        </div>
+      </div>
       <div class="actions debug-actions">
         <button id="btnRstsFull" class="btn">RSTS FULL</button>
         <button id="btnRstsJson" class="btn ghost">RSTS JSON</button>

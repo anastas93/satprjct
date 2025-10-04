@@ -83,6 +83,9 @@ const KEY_STATE_STORAGE_KEY = "keyState"; // ключ localStorage для сна
 const KEY_STATE_MESSAGE_STORAGE_KEY = "keyStateMessage"; // ключ хранения последнего сообщения о ключах
 const CHANNELS_CACHE_STORAGE_KEY = "channelsCache"; // ключ localStorage для кеша списка каналов
 const KEY_BASE_ID_CACHE = new Map(); // кеш для вычисленных идентификаторов базового ключа
+const MEMORY_SAMPLE_INTERVAL_MS = 15000; // интервал опроса статистики памяти во вкладке Debug
+const MEMORY_TREND_WINDOW_MS = 180000; // окно расчёта тренда памяти (3 минуты)
+const MEMORY_HISTORY_LIMIT = 40; // максимальное количество сохранённых замеров использования памяти
 
 /* Состояние интерфейса */
 const UI = {
@@ -158,6 +161,7 @@ const UI = {
       return Math.min(Math.max(parsed, 0), CHAT_UNREAD_MAX);
     })(),
     chatSoundCtx: null,
+    memoryDiag: null,
     chatSoundLast: 0,
     chatImages: null,
     irqStatus: {
@@ -622,6 +626,19 @@ async function init() {
     blockedBox: $("#recvDiagBlocked"),
   };
   updateReceivedMonitorDiagnostics();
+  UI.els.memoryDiag = {
+    root: $("#memoryDiag"),
+    status: $("#memoryDiagStatus"),
+    support: $("#memoryDiagSupport"),
+    used: $("#memoryDiagUsed"),
+    total: $("#memoryDiagTotal"),
+    limit: $("#memoryDiagLimit"),
+    trend: $("#memoryDiagTrend"),
+    updated: $("#memoryDiagUpdated"),
+    foot: $("#memoryDiagFoot"),
+    refresh: $("#btnMemoryRefresh"),
+  };
+  initMemoryDiagnostics();
   UI.els.rstsFullBtn = $("#btnRstsFull");
   UI.els.rstsJsonBtn = $("#btnRstsJson");
   UI.els.rstsDownloadBtn = $("#btnRstsDownloadJson");
@@ -1179,6 +1196,9 @@ function setTab(tab) {
   }
   if (tab === "debug") {
     hydrateDeviceLog({ limit: 150 }).catch((err) => console.warn("[debug] hydrateDeviceLog", err));
+    startMemoryDiagnostics();
+  } else {
+    stopMemoryDiagnostics();
   }
 }
 
@@ -3938,6 +3958,254 @@ function formatRelativeTime(ts) {
   }
   const hours = Math.round(delta / 3600000);
   return `${hours} ч назад`;
+}
+
+// Форматирование байтов двоичными единицами, включая нулевые значения
+function formatBytesBinary(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value < 0) return "—";
+  if (value === 0) return "0 Б";
+  const units = ["Б", "КиБ", "МиБ", "ГиБ"];
+  let unitIndex = 0;
+  let normalized = value;
+  while (normalized >= 1024 && unitIndex < units.length - 1) {
+    normalized /= 1024;
+    unitIndex += 1;
+  }
+  const precision = unitIndex === 0 || normalized >= 100 ? 0 : normalized >= 10 ? 1 : 2;
+  return normalized.toFixed(precision) + " " + units[unitIndex];
+}
+
+// Формирование строки с процентом использования памяти
+function formatMemoryUsage(used, limit) {
+  if (!Number.isFinite(used) || used < 0) return "—";
+  const base = formatBytesBinary(used);
+  if (!Number.isFinite(limit) || limit <= 0) return base;
+  const ratio = used / limit * 100;
+  const precision = ratio >= 100 ? 0 : ratio >= 10 ? 1 : 2;
+  return `${base} (${ratio.toFixed(precision)}%)`;
+}
+
+// Подсчёт тренда использования памяти за последнее окно наблюдений
+function formatMemoryTrend(history) {
+  if (!Array.isArray(history) || history.length < 2) return "—";
+  const now = Date.now();
+  const windowStart = now - MEMORY_TREND_WINDOW_MS;
+  const samples = history.filter((item) => Number.isFinite(item.usedBytes) && item.timestamp >= windowStart);
+  if (samples.length < 2) return "—";
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  const delta = last.usedBytes - first.usedBytes;
+  const duration = Math.max(0, last.timestamp - first.timestamp);
+  if (Math.abs(delta) < 512 || duration === 0) return "без изменений";
+  const sign = delta > 0 ? "+" : "−";
+  return `${sign}${formatBytesBinary(Math.abs(delta))} за ${formatDurationMs(duration)}`;
+}
+
+// Определение доступности API измерения памяти браузера
+function detectMemorySupport() {
+  const perf = typeof performance !== "undefined" ? performance : null;
+  if (!perf) {
+    return { supported: false, api: null, message: "API performance недоступен", deviceMemoryBytes: null };
+  }
+  if (typeof perf.measureUserAgentSpecificMemory === "function") {
+    return {
+      supported: true,
+      api: "measure",
+      message: "Используется measureUserAgentSpecificMemory",
+      deviceMemoryBytes: getDeviceMemoryBytes(),
+    };
+  }
+  if (perf.memory && typeof perf.memory.usedJSHeapSize === "number") {
+    return {
+      supported: true,
+      api: "performance.memory",
+      message: "Доступен performance.memory (Chromium)",
+      deviceMemoryBytes: getDeviceMemoryBytes(),
+    };
+  }
+  return {
+    supported: false,
+    api: null,
+    message: "Браузер не предоставляет статистику JS-кучи",
+    deviceMemoryBytes: getDeviceMemoryBytes(),
+  };
+}
+
+// Возвращаем оценку доступной памяти устройства по navigator.deviceMemory
+function getDeviceMemoryBytes() {
+  if (typeof navigator === "undefined") return null;
+  const value = Number(navigator.deviceMemory);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value * 1024 * 1024 * 1024;
+}
+
+// Инициализация панели мониторинга памяти на вкладке Debug
+function initMemoryDiagnostics() {
+  const els = UI.els && UI.els.memoryDiag ? UI.els.memoryDiag : null;
+  if (!els || !els.root) return;
+  const support = detectMemorySupport();
+  UI.state.memoryDiag = {
+    support,
+    pollTimer: null,
+    pending: false,
+    history: [],
+    lastSample: null,
+    lastError: null,
+    limitGuess: Number.isFinite(support.deviceMemoryBytes) ? support.deviceMemoryBytes : null,
+  };
+  if (els.refresh) {
+    els.refresh.addEventListener("click", (event) => {
+      event.preventDefault();
+      refreshMemoryDiagnostics({ manual: true }).catch((err) => console.warn("[memory] refresh", err));
+    });
+    els.refresh.disabled = !support.supported;
+  }
+  updateMemoryDiagnosticsUi();
+  if (support.supported && UI.state.activeTab === "debug") {
+    startMemoryDiagnostics();
+  }
+}
+
+// Запускаем периодический опрос статистики памяти
+function startMemoryDiagnostics() {
+  const state = UI.state && UI.state.memoryDiag;
+  if (!state || !state.support || !state.support.supported) {
+    updateMemoryDiagnosticsUi();
+    return;
+  }
+  if (state.pollTimer) {
+    updateMemoryDiagnosticsUi();
+    return;
+  }
+  refreshMemoryDiagnostics({ manual: false }).catch((err) => console.warn("[memory] start", err));
+  state.pollTimer = setInterval(() => {
+    refreshMemoryDiagnostics({ manual: false }).catch((err) => console.warn("[memory] poll", err));
+  }, MEMORY_SAMPLE_INTERVAL_MS);
+  updateMemoryDiagnosticsUi();
+}
+
+// Останавливаем опрос памяти при уходе с вкладки Debug
+function stopMemoryDiagnostics() {
+  const state = UI.state && UI.state.memoryDiag;
+  if (!state) return;
+  if (state.pollTimer) {
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
+  }
+  updateMemoryDiagnosticsUi();
+}
+
+// Асинхронное чтение статистики памяти с обработкой ошибок
+async function refreshMemoryDiagnostics(options) {
+  const state = UI.state && UI.state.memoryDiag;
+  const els = UI.els && UI.els.memoryDiag ? UI.els.memoryDiag : null;
+  if (!state || !state.support || !state.support.supported || !els) return;
+  if (state.pending) return;
+  state.pending = true;
+  if (els.status && options && options.manual) {
+    els.status.textContent = "Обновляем…";
+  }
+  try {
+    const now = Date.now();
+    let usedBytes = NaN;
+    let totalBytes = NaN;
+    let limitBytes = NaN;
+    if (state.support.api === "measure") {
+      const measure = await performance.measureUserAgentSpecificMemory();
+      const bytes = Number(measure && measure.bytes);
+      if (Number.isFinite(bytes)) {
+        usedBytes = bytes;
+        totalBytes = bytes;
+      }
+      limitBytes = Number.isFinite(state.limitGuess) ? state.limitGuess : NaN;
+    } else {
+      const memory = performance.memory;
+      if (memory) {
+        if (Number.isFinite(memory.usedJSHeapSize)) usedBytes = memory.usedJSHeapSize;
+        if (Number.isFinite(memory.totalJSHeapSize)) totalBytes = memory.totalJSHeapSize;
+        if (Number.isFinite(memory.jsHeapSizeLimit)) limitBytes = memory.jsHeapSizeLimit;
+      }
+    }
+    if (!Number.isFinite(usedBytes)) {
+      throw new Error("Браузер не вернул значение usedJSHeapSize");
+    }
+    const sample = { timestamp: now, usedBytes, totalBytes, limitBytes };
+    state.lastSample = sample;
+    state.history.push(sample);
+    if (state.history.length > MEMORY_HISTORY_LIMIT) {
+      state.history.splice(0, state.history.length - MEMORY_HISTORY_LIMIT);
+    }
+    state.lastError = null;
+  } catch (err) {
+    state.lastError = err instanceof Error ? err : new Error(String(err));
+    console.warn("[memory] не удалось получить статистику", err);
+  } finally {
+    state.pending = false;
+    updateMemoryDiagnosticsUi();
+  }
+}
+
+// Обновляем DOM для панели памяти в зависимости от состояния
+function updateMemoryDiagnosticsUi() {
+  const els = UI.els && UI.els.memoryDiag ? UI.els.memoryDiag : null;
+  const state = UI.state && UI.state.memoryDiag;
+  if (!els || !state) return;
+  const support = state.support;
+  if (!support || !support.supported) {
+    if (els.status) els.status.textContent = "Недоступно в этом браузере";
+    if (els.support) els.support.textContent = support ? support.message : "—";
+    if (els.refresh) els.refresh.disabled = true;
+  } else {
+    if (els.status) {
+      if (state.pending) els.status.textContent = "Обновление…";
+      else if (state.pollTimer) els.status.textContent = "Мониторинг активен";
+      else els.status.textContent = "Мониторинг приостановлен";
+    }
+    if (els.support) {
+      const apiLabel = support.api === "measure" ? "API measureUserAgentSpecificMemory" : "API performance.memory";
+      els.support.textContent = support.message ? `${apiLabel} · ${support.message}` : apiLabel;
+    }
+    if (els.refresh) els.refresh.disabled = !!state.pending;
+  }
+  const sample = state.lastSample;
+  if (els.used) {
+    const limit = sample && Number.isFinite(sample.limitBytes) ? sample.limitBytes : (support && Number.isFinite(state.limitGuess) ? state.limitGuess : NaN);
+    els.used.textContent = sample ? formatMemoryUsage(sample.usedBytes, limit) : "—";
+  }
+  if (els.total) {
+    els.total.textContent = sample && Number.isFinite(sample.totalBytes) ? formatBytesBinary(sample.totalBytes) : "—";
+  }
+  if (els.limit) {
+    const limit = sample && Number.isFinite(sample.limitBytes) ? sample.limitBytes : state.limitGuess;
+    if (Number.isFinite(limit)) {
+      els.limit.textContent = state.support && state.support.api === "measure" && !Number.isFinite(sample && sample.limitBytes)
+        ? "≈" + formatBytesBinary(limit)
+        : formatBytesBinary(limit);
+    } else {
+      els.limit.textContent = "—";
+    }
+  }
+  if (els.updated) {
+    els.updated.textContent = sample ? formatRelativeTime(sample.timestamp) : "—";
+  }
+  if (els.trend) {
+    els.trend.textContent = formatMemoryTrend(state.history);
+  }
+  if (els.foot) {
+    if (state.lastError) {
+      els.foot.textContent = "Последняя ошибка: " + state.lastError.message;
+      els.foot.hidden = false;
+    } else if (support && support.supported) {
+      els.foot.textContent = "Обновление каждые " + formatDurationMs(MEMORY_SAMPLE_INTERVAL_MS) + ".";
+      els.foot.hidden = false;
+    } else if (support && support.message) {
+      els.foot.textContent = support.message;
+      els.foot.hidden = false;
+    } else {
+      els.foot.hidden = true;
+    }
+  }
 }
 
 // Обновление панели диагностики опроса RSTS во вкладке Debug
