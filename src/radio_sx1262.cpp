@@ -202,10 +202,6 @@ int16_t RadioSX1262::ping(const uint8_t* data, size_t len,
       delay(1);
       continue;
     }
-    if (!radio_.available()) {                            // SX1262 пока не готов
-      DEBUG_LOG("RadioSX1262: флаг готовности установлен, но данные недоступны");
-      continue;
-    }
     size_t lenRead = radio_.getPacketLength();            // узнаём длину принятого пакета
     if (lenRead == 0 || lenRead > buf.size()) {           // защита от некорректного размера
       LOG_WARN_VAL("RadioSX1262: некорректная длина принятого пинг-ответа=", lenRead);
@@ -577,12 +573,13 @@ void RadioSX1262::flushPendingIrqLog() {
 void RadioSX1262::handleDio1() {
   irqNeedsRead_ = true;   // отмечаем необходимость чтения IRQ-регистров в основном потоке
   irqLogPending_ = true;  // помечаем, что требуется вывод в loop()
-  packetReady_ = true;    // устанавливаем флаг готовности пакета
 }
 
 void RadioSX1262::processPendingIrqLog() {
   bool hasPending = false;
   bool needRead = false;
+  bool shouldMarkPacketReady = false;   // итоговая оценка необходимости пометить пакет как готовый
+  bool needRxRecovery = false;          // требуется ли перезапуск приёма после ошибок
 
 #if defined(ARDUINO)
   noInterrupts();
@@ -610,6 +607,18 @@ void RadioSX1262::processPendingIrqLog() {
     pendingIrqFlags_ = flags;                // сохраняем флаги для последующего логирования
     pendingIrqClearState_ = clearState;      // сохраняем код очистки IRQ
     hasPending = true;                       // гарантируем обработку свежих данных
+
+    const bool hasRxDone = (flags & RADIOLIB_SX126X_IRQ_RX_DONE) != 0U;
+    const bool hasHeaderValid = (flags & RADIOLIB_SX126X_IRQ_HEADER_VALID) != 0U;
+    const bool hasSyncValid = (flags & RADIOLIB_SX126X_IRQ_SYNC_WORD_VALID) != 0U;
+    const bool hasCrcError = (flags & RADIOLIB_SX126X_IRQ_CRC_ERR) != 0U;
+    const bool hasHeaderError = (flags & RADIOLIB_SX126X_IRQ_HEADER_ERR) != 0U;
+
+    const bool hasRxIndicators = hasRxDone || hasHeaderValid || hasSyncValid; // есть признаки приёма
+    const bool hasRxErrors = hasCrcError || hasHeaderError;                   // есть ошибки декодирования
+
+    shouldMarkPacketReady = hasRxIndicators && !hasRxErrors;                  // считаем пакет готовым
+    needRxRecovery = hasRxIndicators && hasRxErrors;                          // требуется перезапуск RX
   }
 
   const uint32_t flags = pendingIrqFlags_;
@@ -635,7 +644,22 @@ void RadioSX1262::processPendingIrqLog() {
     LOG_WARN_VAL("RadioSX1262: не удалось очистить статус IRQ, код=", clearState);
   }
 
-  DEBUG_LOG("RadioSX1262: событие DIO1, модуль сообщает о готовности пакета");
+  if (shouldMarkPacketReady) {
+#if defined(ARDUINO)
+    noInterrupts();
+#endif
+    packetReady_ = true;  // подтверждаем наличие настоящего принятого пакета
+#if defined(ARDUINO)
+    interrupts();
+#endif
+    DEBUG_LOG("RadioSX1262: событие DIO1 прошло фильтр RX-флагов, пакет готов к чтению");
+  } else {
+    DEBUG_LOG("RadioSX1262: событие DIO1 проигнорировано фильтром RX (пакет не готов)");
+  }
+
+  if (needRxRecovery) {
+    startReceiveWithRetry("processPendingIrqLog: восстановление после ошибок приёма");
+  }
 }
 
 void RadioSX1262::setIrqLogCallback(IrqLogCallback cb) {
@@ -648,7 +672,7 @@ void RadioSX1262::loop() {
   if (!packetReady_) {                      // пакет пока не готов
     return;
   }
-  size_t len = radio_.getPacketLength();
+  size_t len = radio_.getPacketLength();    // длина доступного пакета после фильтра IRQ
   // При завершении передачи длина пакета может быть мусорной и вызвать
   // выделение огромного буфера, что приводит к перезагрузке
   if (len == 0 || len > 256) {
