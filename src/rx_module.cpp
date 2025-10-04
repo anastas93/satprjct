@@ -383,6 +383,14 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     next_frag_idx_ = 0;
   }
   if (hdr.getFragIdx() != next_frag_idx_) {                // пришёл неожиданный индекс
+    const uint16_t expected_frag = next_frag_idx_;
+    const uint16_t actual_frag = hdr.getFragIdx();
+    LOG_WARN("RxModule: конфликт индексов фрагмента msg_id=%u ожидали=%u получили=%u всего=%u",
+             static_cast<unsigned>(hdr.msg_id),
+             static_cast<unsigned>(expected_frag),
+             static_cast<unsigned>(actual_frag),
+             static_cast<unsigned>(hdr.frag_cnt));
+    recordFragmentMismatch(hdr.msg_id, expected_frag, actual_frag, hdr.frag_cnt); // фиксируем конфликт
     if (hdr.getFragIdx() != 0) {
       inflight_prefix_.erase(active_msg_id_);
       gatherer_.reset();
@@ -687,6 +695,8 @@ void RxModule::tickCleanup() {
 
 void RxModule::resetDropStats() {
   drop_stats_ = DropStats{};                              // обнуляем счётчики причин дропа
+  fragment_mismatch_index_ = 0;                          // сбрасываем кольцевой буфер конфликтов
+  fragment_mismatch_count_ = 0;
 }
 
 RxModule::SplitPrefixInfo RxModule::parseSplitPrefix(const std::vector<uint8_t>& data, size_t& prefix_len) const {
@@ -793,6 +803,40 @@ void RxModule::registerDrop(const std::string& stage) {
       detail_summary.last_examples.pop_front();
     }
   }
+}
+
+void RxModule::recordFragmentMismatch(uint32_t msg_id, uint16_t expected, uint16_t actual, uint16_t frag_cnt) {
+  FragmentMismatchSlot slot;                                      // готовим запись для кольца
+  slot.msg_id = msg_id;
+  slot.expected = expected;
+  slot.actual = actual;
+  slot.frag_cnt = frag_cnt;
+  slot.timestamp = std::chrono::steady_clock::now();
+  last_fragment_mismatches_[fragment_mismatch_index_] = slot;     // перезаписываем позицию кольца
+  fragment_mismatch_index_ = (fragment_mismatch_index_ + 1) % FRAGMENT_MISMATCH_HISTORY; // сдвигаем указатель
+  if (fragment_mismatch_count_ < FRAGMENT_MISMATCH_HISTORY) {     // наращиваем счётчик до лимита
+    ++fragment_mismatch_count_;
+  }
+}
+
+std::vector<RxModule::FragmentMismatchInfo> RxModule::fragmentMismatchHistory() const {
+  std::vector<FragmentMismatchInfo> history;                      // результат для API статистики
+  history.reserve(fragment_mismatch_count_);
+  const auto now = std::chrono::steady_clock::now();
+  for (size_t i = 0; i < fragment_mismatch_count_; ++i) {
+    size_t idx = (fragment_mismatch_index_ + FRAGMENT_MISMATCH_HISTORY - fragment_mismatch_count_ + i)
+                 % FRAGMENT_MISMATCH_HISTORY;                     // восстанавливаем порядок FIFO
+    const auto& slot = last_fragment_mismatches_[idx];
+    FragmentMismatchInfo info;
+    info.msg_id = slot.msg_id;
+    info.expected = slot.expected;
+    info.actual = slot.actual;
+    info.frag_cnt = slot.frag_cnt;
+    info.age_ms = static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - slot.timestamp).count());
+    history.push_back(info);
+  }
+  return history;
 }
 
 void RxModule::enableProfiling(bool enable) {

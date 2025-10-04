@@ -2584,6 +2584,125 @@ String cmdRstsJson(int cnt) {
   return out;
 }
 
+// Статистика по приёму и конфликтам индексов фрагментов (текстовый формат)
+String cmdRxstat() {
+  auto stats = rx.dropStats();
+  auto mismatches = rx.fragmentMismatchHistory();
+  String out;
+  out.reserve(256);
+  out += "Drop total: ";
+  out += String(static_cast<unsigned long>(stats.total));
+  out += "\n";
+  if (stats.by_stage.empty()) {
+    out += "Причины: нет данных\n";
+  } else {
+    out += "Причины:\n";
+    for (const auto& entry : stats.by_stage) {
+      out += "- ";
+      out += String(entry.first.c_str());
+      out += ": ";
+      out += String(static_cast<unsigned long>(entry.second));
+      out += "\n";
+      auto detail_it = stats.details.find(entry.first);
+      if (detail_it != stats.details.end() && !detail_it->second.by_detail.empty()) {
+        out += "  детали:\n";
+        for (const auto& detail_pair : detail_it->second.by_detail) {
+          out += "    * ";
+          out += String(detail_pair.first.c_str());
+          out += " → ";
+          out += String(static_cast<unsigned long>(detail_pair.second));
+          out += "\n";
+        }
+      }
+    }
+  }
+  out += "Последние конфликты индексов:\n";
+  if (mismatches.empty()) {
+    out += "- нет\n";
+  } else {
+    for (const auto& item : mismatches) {
+      out += "- msg=";
+      out += String(static_cast<unsigned long>(item.msg_id));
+      out += " expected=";
+      out += String(static_cast<unsigned long>(item.expected));
+      out += " actual=";
+      out += String(static_cast<unsigned long>(item.actual));
+      out += " frag_cnt=";
+      out += String(static_cast<unsigned long>(item.frag_cnt));
+      out += " age_ms=";
+      out += String(static_cast<unsigned long>(item.age_ms));
+      out += "\n";
+    }
+  }
+  return out;
+}
+
+// Статистика по приёму в формате JSON для HTTP-клиентов
+String cmdRxstatJson() {
+  auto stats = rx.dropStats();
+  auto mismatches = rx.fragmentMismatchHistory();
+  String out = "{\"drop\":{\"total\":";
+  out += String(static_cast<unsigned long>(stats.total));
+  out += ",\"byStage\":{";
+  bool first_stage = true;
+  for (const auto& entry : stats.by_stage) {
+    if (!first_stage) out += ',';
+    first_stage = false;
+    out += "\"";
+    out += jsonEscape(String(entry.first.c_str()));
+    out += "\":";
+    out += String(static_cast<unsigned long>(entry.second));
+  }
+  out += "},\"details\":{";
+  bool first_detail_stage = true;
+  for (const auto& entry : stats.details) {
+    if (!first_detail_stage) out += ',';
+    first_detail_stage = false;
+    out += "\"";
+    out += jsonEscape(String(entry.first.c_str()));
+    out += "\":{\"total\":";
+    out += String(static_cast<unsigned long>(entry.second.total));
+    out += ",\"byDetail\":{";
+    bool first_detail = true;
+    for (const auto& detail_pair : entry.second.by_detail) {
+      if (!first_detail) out += ',';
+      first_detail = false;
+      out += "\"";
+      out += jsonEscape(String(detail_pair.first.c_str()));
+      out += "\":";
+      out += String(static_cast<unsigned long>(detail_pair.second));
+    }
+    out += "},\"lastExamples\":[";
+    bool first_example = true;
+    for (const auto& example : entry.second.last_examples) {
+      if (!first_example) out += ',';
+      first_example = false;
+      out += "\"";
+      out += jsonEscape(String(example.c_str()));
+      out += "\"";
+    }
+    out += "]}";
+  }
+  out += "}},\"fragmentMismatches\":[";
+  for (size_t i = 0; i < mismatches.size(); ++i) {
+    if (i > 0) out += ',';
+    const auto& item = mismatches[i];
+    out += "{\"msgId\":";
+    out += String(static_cast<unsigned long>(item.msg_id));
+    out += ",\"expected\":";
+    out += String(static_cast<unsigned long>(item.expected));
+    out += ",\"actual\":";
+    out += String(static_cast<unsigned long>(item.actual));
+    out += ",\"fragCnt\":";
+    out += String(static_cast<unsigned long>(item.frag_cnt));
+    out += ",\"ageMs\":";
+    out += String(static_cast<unsigned long>(item.age_ms));
+    out += '}';
+  }
+  out += "]}";
+  return out;
+}
+
 //        HTTP-   
 static bool parseFloatArgument(const String& rawInput,
                                float minValue,
@@ -2930,6 +3049,21 @@ void handleCmdHttp() {
       contentType = "application/json";
     } else {
       resp = cmdRsts(cnt);
+    }
+  } else if (cmd == "RXSTAT") {
+    bool wantJson = false;
+    if (server.hasArg("json")) {
+      wantJson = server.arg("json").toInt() != 0;
+    } else if (server.hasArg("fmt")) {
+      String fmt = server.arg("fmt");
+      fmt.toLowerCase();
+      wantJson = (fmt == "json");
+    }
+    if (wantJson) {
+      resp = cmdRxstatJson();
+      contentType = "application/json";
+    } else {
+      resp = cmdRxstat();
     }
   } else if (cmd == "ACK") {
     if (server.hasArg("toggle")) {
@@ -3360,7 +3494,7 @@ void setup() {
     rx.onReceive(d, l);
   });
   radio.setIrqLogCallback(onRadioIrqLog);                    //  IRQ-  SSE    Serial
-  LOG_INFO(": BF <>, SF <>, CR <>, BANK <e|w|t|a|h|n>, CH <>, PW <0-9>, RXBG <0|1>, TX <>, TXL <>, BCN, INFO, STS <n>, RSTS <n>, ACK [0|1], LIGHT [0|1], ACKR <>, PAUSE <>, ACKT <>, ACKD <>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
+  LOG_INFO(": BF <>, SF <>, CR <>, BANK <e|w|t|a|h|n>, CH <>, PW <0-9>, RXBG <0|1>, TX <>, TXL <>, BCN, INFO, STS <n>, RSTS <n>, RXSTAT, ACK [0|1], LIGHT [0|1], ACKR <>, PAUSE <>, ACKT <>, ACKD <>, ENC [0|1], PI, SEAR, TESTRXM, KEYTRANSFER SEND, KEYTRANSFER RECEIVE, KEYSTORE [auto|nvs]");
 }
 
 void loop() {
@@ -3683,6 +3817,8 @@ void loop() {
         String arg = line.length() > 8 ? line.substring(8) : String();
         arg.trim();
         Serial.println(cmdKeyStorage(arg));
+      } else if (line.equalsIgnoreCase("RXSTAT")) {
+        Serial.println(cmdRxstat());
       } else if (line.startsWith("ENC ")) {
         if (keySafeModeActive) {
           Serial.println("ENC:     ");

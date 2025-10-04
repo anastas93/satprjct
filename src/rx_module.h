@@ -53,6 +53,14 @@ public:
     std::unordered_map<std::string, DetailSummary> details; // расширенная сводка по причинам
   };
   DropStats dropStats() const { return drop_stats_; }
+  struct FragmentMismatchInfo {
+    uint32_t msg_id = 0;                 // идентификатор сообщения
+    uint16_t expected = 0;               // ожидаемый индекс фрагмента
+    uint16_t actual = 0;                 // фактический индекс
+    uint16_t frag_cnt = 0;               // заявленное количество фрагментов
+    uint32_t age_ms = 0;                 // сколько миллисекунд назад обнаружен конфликт
+  };
+  std::vector<FragmentMismatchInfo> fragmentMismatchHistory() const;
   void resetDropStats();
   // Установка пользовательского колбэка
   void setCallback(Callback cb);
@@ -116,6 +124,17 @@ private:
   std::unordered_map<uint32_t, SplitPrefixInfo> inflight_prefix_; // префиксы, ожидающие завершения
   ProfilingSnapshot last_profile_;   // последний снимок профилирования
   DropStats drop_stats_;             // накопитель причин отброса кадров
+  struct FragmentMismatchSlot {
+    uint32_t msg_id = 0;                                 // идентификатор сообщения
+    uint16_t expected = 0;                               // ожидаемый индекс фрагмента
+    uint16_t actual = 0;                                 // полученный индекс фрагмента
+    uint16_t frag_cnt = 0;                               // заявленное количество фрагментов
+    std::chrono::steady_clock::time_point timestamp{};   // момент фиксации конфликта
+  };
+  static constexpr size_t FRAGMENT_MISMATCH_HISTORY = 8; // глубина кольцевого буфера конфликтов
+  std::array<FragmentMismatchSlot, FRAGMENT_MISMATCH_HISTORY> last_fragment_mismatches_{}; // кольцо конфликтов
+  size_t fragment_mismatch_index_ = 0;                   // позиция для следующей записи
+  size_t fragment_mismatch_count_ = 0;                   // фактическое количество записей
   struct RxProfilingScope;           // внутренняя структура для RAII-профилирования
   friend struct RxProfilingScope;
   void cleanupPendingConv(std::chrono::steady_clock::time_point now);
@@ -126,4 +145,5 @@ private:
   SplitProcessResult handleSplitPart(const SplitPrefixInfo& info, const std::vector<uint8_t>& chunk,
                                      uint32_t msg_id);
   void registerDrop(const std::string& stage);
+  void recordFragmentMismatch(uint32_t msg_id, uint16_t expected, uint16_t actual, uint16_t frag_cnt);
 };

@@ -13,10 +13,38 @@
 class LoopbackRadio : public IRadio {
 public:
   RxCallback cb;                                         // сохранённый обработчик
-  void send(const uint8_t* data, size_t len) override {  // немедленная передача в RX
+  int16_t send(const uint8_t* data, size_t len) override { // немедленная передача в RX
     if (cb) cb(data, len);
+    return ERR_NONE;
   }
   void setReceiveCallback(RxCallback c) override { cb = c; }
+};
+
+// Радио, которое искажает индекс второго фрагмента
+class TamperingRadio : public IRadio {
+public:
+  RxCallback cb;                                         // пользовательский обработчик
+  size_t frame_counter = 0;                              // номер отправленного кадра
+  int16_t send(const uint8_t* data, size_t len) override {
+    std::vector<uint8_t> copy(data, data + len);         // работаем с собственной копией
+    ++frame_counter;
+    if (frame_counter == 2) {                            // портим только второй фрагмент
+      scrambler::descramble(copy.data(), copy.size());    // возвращаемся к исходным байтам
+      FrameHeader hdr;
+      bool decoded = FrameHeader::decode(copy.data(), copy.size(), hdr);
+      assert(decoded);
+      uint16_t payload_len = hdr.getPayloadLen();
+      hdr.setFragIdx(static_cast<uint16_t>(hdr.getFragIdx() + 1)); // увеличиваем индекс
+      bool encoded = hdr.encode(copy.data(), FrameHeader::SIZE,
+                                copy.data() + FrameHeader::SIZE,
+                                payload_len);
+      assert(encoded);
+      scrambler::scramble(copy.data(), copy.size());      // возвращаем скремблированный вид
+    }
+    if (cb) cb(copy.data(), copy.size());
+    return ERR_NONE;
+  }
+  void setReceiveCallback(RxCallback c) override { cb = std::move(c); }
 };
 
 int main() {
@@ -120,6 +148,34 @@ int main() {
   auto cleared_stats = rx.dropStats();
   assert(cleared_stats.total == 0);
   assert(cleared_stats.by_stage.empty());
+
+  TamperingRadio tampering_radio;                        // имитируем повреждение индексов
+  TxModule tampering_tx(tampering_radio, std::array<size_t,4>{64,64,64,64}, PayloadMode::SMALL);
+  tampering_tx.setAckEnabled(false);                     // упрощаем цикл отправки
+  RxModule mismatch_rx;
+  mismatch_rx.setEncryptionEnabled(false);
+  std::vector<uint8_t> mismatch_payload;
+  mismatch_rx.setCallback([&](const uint8_t* data, size_t len) {
+    mismatch_payload.assign(data, data + len);           // фиксируем, что доставка не произошла
+  });
+  tampering_radio.setReceiveCallback([&](const uint8_t* data, size_t len) {
+    mismatch_rx.onReceive(data, len);
+  });
+
+  std::vector<uint8_t> big_message(150, 0xAA);           // сообщение гарантирует несколько фрагментов
+  uint32_t queued = tampering_tx.queue(big_message.data(), big_message.size());
+  assert(queued != 0);
+  for (int i = 0; i < 10; ++i) {
+    tampering_tx.loop();                                 // отправляем все фрагменты
+  }
+
+  auto history = mismatch_rx.fragmentMismatchHistory();
+  assert(!history.empty());
+  auto last = history.back();
+  assert(last.expected == 1);                            // после первого фрагмента ждали индекс 1
+  assert(last.actual != last.expected);                  // получили отличное значение
+  assert(last.frag_cnt >= 2);                            // сообщение разбивалось как минимум на два фрагмента
+  assert(mismatch_payload.empty());                      // доставка не завершилась из-за конфликта
 
   return 0;
 }
