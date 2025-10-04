@@ -144,6 +144,10 @@ bool buildFrame(uint32_t msg_id,
   const bool has_ephemeral = (ephemeral_public != nullptr);
   const CertificateBundle* bundle_ptr = certificate;
   const bool has_certificate = (bundle_ptr != nullptr && bundle_ptr->valid && !bundle_ptr->chain.empty());
+  if (has_certificate && bundle_ptr->chain.size() > 255) {
+    // Цепочка сертификатов кодируется счётчиком uint8_t, поэтому не допускаем переполнения.
+    return false;
+  }
   uint8_t version = has_ephemeral ? VERSION_EPHEMERAL : VERSION_LEGACY;
   if (has_certificate) {
     version = VERSION_CERTIFICATE;
@@ -279,6 +283,17 @@ bool parseFrame(const uint8_t* frame, size_t len,
   if (!std::equal(std::begin(MAGIC), std::end(MAGIC), plain.begin())) return false;
   payload.version = plain[4];
   payload.flags = plain[5];
+  uint8_t reserved0 = plain[6];
+  uint8_t reserved1 = plain[7];
+  if (reserved0 != 0 || reserved1 != 0) {
+    // Зарезервированные байты должны быть нулевыми, иначе считаем кадр повреждённым.
+    return false;
+  }
+  constexpr uint8_t kKnownFlags = FLAG_HAS_EPHEMERAL | FLAG_HAS_CERTIFICATE;
+  if ((payload.flags & ~kKnownFlags) != 0) {
+    // Неизвестные биты флагов свидетельствуют об несовместимом формате.
+    return false;
+  }
   if (payload.version != VERSION_LEGACY &&
       payload.version != VERSION_EPHEMERAL &&
       payload.version != VERSION_CERTIFICATE) {
@@ -289,6 +304,10 @@ bool parseFrame(const uint8_t* frame, size_t len,
   size_t offset = 12 + payload.public_key.size();
   payload.has_ephemeral = false;
   if (payload.version == VERSION_EPHEMERAL || payload.version == VERSION_CERTIFICATE) {
+    if (payload.version == VERSION_EPHEMERAL && (payload.flags & FLAG_HAS_EPHEMERAL) == 0) {
+      // Версия 2 подразумевает обязательное наличие эпемерного ключа.
+      return false;
+    }
     if ((payload.flags & FLAG_HAS_EPHEMERAL) != 0) {
       if (plain.size() < offset + payload.ephemeral_public.size()) {
         return false;
@@ -316,6 +335,10 @@ bool parseFrame(const uint8_t* frame, size_t len,
       return false;
     }
     uint8_t count = plain[offset++];
+    if (count == 0) {
+      // Флаг установлен, но сертификаты отсутствуют — отклоняем кадр.
+      return false;
+    }
     size_t need = static_cast<size_t>(count) * (32 + 64);
     if (plain.size() < offset + need) {
       return false;
@@ -331,12 +354,17 @@ bool parseFrame(const uint8_t* frame, size_t len,
       offset += rec.signature.size();
       payload.certificate.chain.push_back(rec);
     }
+    payload.certificate.valid = true;
   } else {
     if (payload.flags & FLAG_HAS_CERTIFICATE) {
       return false;  // флаг установлен, но версия не поддерживает
     }
     payload.certificate.valid = false;
     payload.certificate.chain.clear();
+  }
+  if (plain.size() != offset) {
+    // Любые дополнительные байты в конце считаем ошибкой разбора.
+    return false;
   }
   msg_id_out = hdr.msg_id;
   return true;

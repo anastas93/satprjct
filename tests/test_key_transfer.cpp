@@ -17,6 +17,8 @@ constexpr size_t PILOT_INTERVAL = 64;                                      // п
 constexpr std::array<uint8_t,7> PILOT_MARKER{{0x7E,'S','A','T','P',0xD6,0x9F}}; // сигнатура маркера
 constexpr size_t PILOT_PREFIX_LEN = PILOT_MARKER.size() - 2;               // префикс без CRC
 constexpr uint16_t PILOT_MARKER_CRC = 0x9FD6;                              // эталонная CRC префикса
+constexpr std::array<uint8_t,4> MAGIC{{'K','T','R','F'}};                  // сигнатура полезной нагрузки
+constexpr size_t COMPACT_HEADER_SIZE = 7;                                  // размер компактного заголовка
 
 // Очистка полезной нагрузки кадра от вставленных пилотов
 void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
@@ -70,6 +72,120 @@ bool decodeFrameNoCrc(const std::vector<uint8_t>& frame,
                cleaned);
   payload = std::move(cleaned);
   return true;
+}
+
+// Вставка пилотов по той же схеме, что и в прошивке.
+std::vector<uint8_t> insertPilots(const std::vector<uint8_t>& in) {
+  std::vector<uint8_t> out;
+  out.reserve(in.size() + (in.size() / PILOT_INTERVAL) * PILOT_MARKER.size());
+  size_t count = 0;
+  for (uint8_t b : in) {
+    if (count && count % PILOT_INTERVAL == 0) {
+      out.insert(out.end(), PILOT_MARKER.begin(), PILOT_MARKER.end());
+    }
+    out.push_back(b);
+    ++count;
+  }
+  return out;
+}
+
+// Повтор реализации компактного заголовка и AAD для формирования тестовых кадров.
+std::array<uint8_t,COMPACT_HEADER_SIZE> makeCompactHeader(uint8_t version,
+                                                          uint16_t frag_cnt,
+                                                          uint32_t packed_meta) {
+  std::array<uint8_t,COMPACT_HEADER_SIZE> compact{};
+  compact[0] = version;
+  compact[1] = static_cast<uint8_t>(frag_cnt >> 8);
+  compact[2] = static_cast<uint8_t>(frag_cnt);
+  compact[3] = static_cast<uint8_t>(packed_meta >> 24);
+  compact[4] = static_cast<uint8_t>(packed_meta >> 16);
+  compact[5] = static_cast<uint8_t>(packed_meta >> 8);
+  compact[6] = static_cast<uint8_t>(packed_meta);
+  return compact;
+}
+
+std::array<uint8_t,COMPACT_HEADER_SIZE + 2> makeAad(uint8_t version,
+                                                    uint16_t frag_cnt,
+                                                    uint32_t packed_meta,
+                                                    uint16_t msg_id) {
+  auto compact = makeCompactHeader(version, frag_cnt, packed_meta);
+  std::array<uint8_t,COMPACT_HEADER_SIZE + 2> aad{};
+  std::copy(compact.begin(), compact.end(), aad.begin());
+  aad[COMPACT_HEADER_SIZE] = static_cast<uint8_t>(msg_id >> 8);
+  aad[COMPACT_HEADER_SIZE + 1] = static_cast<uint8_t>(msg_id);
+  return aad;
+}
+
+// Построение кастомного кадра с контролем флагов/резервов для негативных сценариев.
+std::vector<uint8_t> buildCustomFrame(uint8_t payload_version,
+                                      uint8_t flags,
+                                      uint16_t msg_id,
+                                      const std::array<uint8_t,4>& key_id,
+                                      const std::array<uint8_t,32>& public_key,
+                                      const std::array<uint8_t,32>* ephemeral,
+                                      const std::vector<KeyTransfer::CertificateRecord>* cert_chain,
+                                      uint8_t reserved0,
+                                      uint8_t reserved1) {
+  std::vector<uint8_t> plain;
+  size_t cert_bytes = cert_chain ? (1 + cert_chain->size() * (32 + 64)) : 0;
+  size_t eph_bytes = ephemeral ? ephemeral->size() : 0;
+  plain.reserve(4 + 1 + 3 + key_id.size() + public_key.size() + eph_bytes + cert_bytes);
+  plain.insert(plain.end(), MAGIC.begin(), MAGIC.end());
+  plain.push_back(payload_version);
+  plain.push_back(flags);
+  plain.push_back(reserved0);
+  plain.push_back(reserved1);
+  plain.insert(plain.end(), key_id.begin(), key_id.end());
+  plain.insert(plain.end(), public_key.begin(), public_key.end());
+  if (ephemeral) {
+    plain.insert(plain.end(), ephemeral->begin(), ephemeral->end());
+  }
+  if (cert_chain) {
+    plain.push_back(static_cast<uint8_t>(cert_chain->size()));
+    for (const auto& rec : *cert_chain) {
+      plain.insert(plain.end(), rec.issuer_public.begin(), rec.issuer_public.end());
+      plain.insert(plain.end(), rec.signature.begin(), rec.signature.end());
+    }
+  }
+
+  FrameHeader hdr;
+  hdr.ver = KeyTransfer::FRAME_VERSION_AEAD;
+  hdr.msg_id = msg_id;
+  hdr.frag_cnt = 1;
+  hdr.setFlags(FrameHeader::FLAG_ENCRYPTED);
+  hdr.setFragIdx(0);
+  hdr.setPayloadLen(static_cast<uint16_t>(plain.size() + crypto::chacha20poly1305::TAG_SIZE));
+  uint32_t packed_meta = hdr.packed;
+
+  auto nonce = KeyTransfer::makeNonce(hdr.ver, hdr.frag_cnt, packed_meta, hdr.msg_id);
+  auto aad = makeAad(hdr.ver, hdr.frag_cnt, packed_meta, hdr.msg_id);
+  std::vector<uint8_t> cipher;
+  std::vector<uint8_t> tag;
+  bool ok = crypto::chacha20poly1305::encrypt(KeyTransfer::rootKey().data(),
+                                              KeyTransfer::rootKey().size(),
+                                              nonce.data(),
+                                              nonce.size(),
+                                              aad.data(),
+                                              aad.size(),
+                                              plain.data(),
+                                              plain.size(),
+                                              cipher,
+                                              tag);
+  assert(ok);
+  cipher.insert(cipher.end(), tag.begin(), tag.end());
+
+  hdr.setPayloadLen(static_cast<uint16_t>(cipher.size()));
+  hdr.setFlags(FrameHeader::FLAG_ENCRYPTED);
+  uint8_t hdr_buf[FrameHeader::SIZE];
+  ok = hdr.encode(hdr_buf, sizeof(hdr_buf), cipher.data(), cipher.size());
+  assert(ok);
+
+  std::vector<uint8_t> frame;
+  frame.insert(frame.end(), hdr_buf, hdr_buf + FrameHeader::SIZE);
+  auto payload_with_pilots = insertPilots(cipher);
+  frame.insert(frame.end(), payload_with_pilots.begin(), payload_with_pilots.end());
+  scrambler::scramble(frame.data(), frame.size());
+  return frame;
 }
 
 } // namespace
@@ -170,13 +286,86 @@ int main() {
   assert(!KeyTransfer::verifyCertificateChain(tampered.public_key, tampered.certificate, &broken_error));
 
   // Формируем и разбираем кадр в легаси-формате
-  std::vector<uint8_t> legacy_frame;
-  assert(KeyTransfer::buildFrame(msg_id, pub, id, legacy_frame, nullptr, nullptr));
-  KeyTransfer::FramePayload legacy_payload;
-  assert(KeyTransfer::parseFrame(legacy_frame.data(), legacy_frame.size(), legacy_payload, decoded_msg));
-  assert(!legacy_payload.has_ephemeral);
-  assert(legacy_payload.version == KeyTransfer::VERSION_LEGACY);
-  std::cout << "OK" << std::endl;
-  return 0;
-}
+    std::vector<uint8_t> legacy_frame;
+    assert(KeyTransfer::buildFrame(msg_id, pub, id, legacy_frame, nullptr, nullptr));
+    KeyTransfer::FramePayload legacy_payload;
+    assert(KeyTransfer::parseFrame(legacy_frame.data(), legacy_frame.size(), legacy_payload, decoded_msg));
+    assert(!legacy_payload.has_ephemeral);
+    assert(legacy_payload.version == KeyTransfer::VERSION_LEGACY);
+
+    // Проверяем защиту от переполнения счётчика сертификатов.
+    KeyTransfer::CertificateBundle huge_bundle;
+    huge_bundle.valid = true;
+    huge_bundle.chain.resize(256);
+    std::vector<uint8_t> unused_frame;
+    assert(!KeyTransfer::buildFrame(msg_id, pub, id, unused_frame, &eph, &huge_bundle));
+
+    // Проверяем отказ при неизвестных флагах в полезной нагрузке.
+    {
+      auto bad_frame = buildCustomFrame(KeyTransfer::VERSION_EPHEMERAL,
+                                        KeyTransfer::FLAG_HAS_EPHEMERAL | 0x80,
+                                        0x2222,
+                                        id,
+                                        pub,
+                                        &eph,
+                                        nullptr,
+                                        0,
+                                        0);
+      KeyTransfer::FramePayload bad_payload{};
+      uint32_t bad_msg = 0;
+      assert(!KeyTransfer::parseFrame(bad_frame.data(), bad_frame.size(), bad_payload, bad_msg));
+    }
+
+    // Проверяем отказ при ненулевых резервных байтах.
+    {
+      auto bad_frame = buildCustomFrame(KeyTransfer::VERSION_EPHEMERAL,
+                                        KeyTransfer::FLAG_HAS_EPHEMERAL,
+                                        0x3333,
+                                        id,
+                                        pub,
+                                        &eph,
+                                        nullptr,
+                                        0x01,
+                                        0x00);
+      KeyTransfer::FramePayload bad_payload{};
+      uint32_t bad_msg = 0;
+      assert(!KeyTransfer::parseFrame(bad_frame.data(), bad_frame.size(), bad_payload, bad_msg));
+    }
+
+    // Проверяем, что версия 2 без флага эпемерного ключа отвергается.
+    {
+      auto bad_frame = buildCustomFrame(KeyTransfer::VERSION_EPHEMERAL,
+                                        0x00,
+                                        0x4444,
+                                        id,
+                                        pub,
+                                        nullptr,
+                                        nullptr,
+                                        0,
+                                        0);
+      KeyTransfer::FramePayload bad_payload{};
+      uint32_t bad_msg = 0;
+      assert(!KeyTransfer::parseFrame(bad_frame.data(), bad_frame.size(), bad_payload, bad_msg));
+    }
+
+    // Проверяем отказ при пустой цепочке сертификатов.
+    {
+      std::vector<KeyTransfer::CertificateRecord> empty_chain;
+      auto bad_frame = buildCustomFrame(KeyTransfer::VERSION_CERTIFICATE,
+                                        KeyTransfer::FLAG_HAS_CERTIFICATE,
+                                        0x5555,
+                                        id,
+                                        pub,
+                                        nullptr,
+                                        &empty_chain,
+                                        0,
+                                        0);
+      KeyTransfer::FramePayload bad_payload{};
+      uint32_t bad_msg = 0;
+      assert(!KeyTransfer::parseFrame(bad_frame.data(), bad_frame.size(), bad_payload, bad_msg));
+    }
+
+    std::cout << "OK" << std::endl;
+    return 0;
+  }
 
