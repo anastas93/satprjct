@@ -18,6 +18,7 @@
 #include <cctype>
 #include <cstddef>
 #include <utility>
+#include <sstream>
 
 static constexpr size_t PILOT_INTERVAL = 64;             // период вставки пилотов
 static constexpr std::array<uint8_t,7> PILOT_MARKER{{
@@ -276,6 +277,10 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     removePilots(payload_p, payload_len, payload_buf_);
   };
 
+  size_t last_attempted_offset = 0;                            // последнее проверенное смещение
+  size_t last_actual_payload_len = 0;                          // длина payload после удаления пилотов
+  std::string last_attempt_reason;                             // текстовое описание последней попытки
+
   auto try_payload_offset = [&](size_t offset,
                                 size_t header_len,
                                 const char* reason) -> bool {
@@ -284,6 +289,9 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
       return false;
     }
     extract_payload(offset);
+    last_attempted_offset = offset;
+    last_actual_payload_len = payload_buf_.size();
+    last_attempt_reason = reason ? reason : "";
     if (payload_buf_.size() == hdr.getPayloadLen()) {
       payload_offset = offset;
       detected_header_len = header_len;
@@ -319,10 +327,19 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   }
   profile_scope.mark(&ProfilingSnapshot::payload_extract);
   if (!payload_len_ok) {
-    LOG_WARN("RxModule: ни одно смещение заголовка не дало ожидаемую длину %u байт, фактическая %zu байт",
+    LOG_WARN("RxModule: ни одно смещение не дало ожидаемую длину %u байт, фактическая %zu байт, смещение %zu (%s)",
              hdr.getPayloadLen(),
-             payload_buf_.size());
-    profile_scope.markDrop("несовпадение длины payload");
+             last_actual_payload_len,
+             last_attempted_offset,
+             last_attempt_reason.empty() ? "нет" : last_attempt_reason.c_str());
+    std::ostringstream drop_reason;
+    drop_reason << "несовпадение длины payload (expected=" << hdr.getPayloadLen() << " got="
+                << last_actual_payload_len << " offset=" << last_attempted_offset;
+    if (!last_attempt_reason.empty()) {
+      drop_reason << " last_attempt=" << last_attempt_reason;
+    }
+    drop_reason << ')';
+    profile_scope.markDrop(drop_reason.str().c_str());
     return;
   }
 
@@ -748,9 +765,34 @@ RxModule::SplitProcessResult RxModule::handleSplitPart(const SplitPrefixInfo& in
 }
 
 void RxModule::registerDrop(const std::string& stage) {
-  std::string key = stage.empty() ? std::string("не указано") : stage; // подставляем понятный ярлык
-  ++drop_stats_.total;                                                  // суммарный счётчик
-  ++drop_stats_.by_stage[key];                                          // накопление по причинам
+  std::string normalized = stage.empty() ? std::string("не указано") : stage; // подставляем понятный ярлык
+  ++drop_stats_.total;                                                         // суммарный счётчик
+
+  std::string base_reason = normalized;
+  std::string detail;
+  auto paren_pos = normalized.find(" (");
+  if (paren_pos != std::string::npos) {
+    base_reason = normalized.substr(0, paren_pos);
+    detail = normalized.substr(paren_pos + 2);
+    if (!detail.empty() && detail.back() == ')') {
+      detail.pop_back();
+    }
+  }
+
+  ++drop_stats_.by_stage[base_reason];
+  auto& detail_summary = drop_stats_.details[base_reason];
+  ++detail_summary.total;
+  if (!detail.empty()) {
+    ++detail_summary.by_detail[detail];
+    auto it = std::find(detail_summary.last_examples.begin(), detail_summary.last_examples.end(), detail);
+    if (it != detail_summary.last_examples.end()) {
+      detail_summary.last_examples.erase(it);
+    }
+    detail_summary.last_examples.push_back(detail);
+    if (detail_summary.last_examples.size() > DropStats::MAX_DETAIL_EXAMPLES) {
+      detail_summary.last_examples.pop_front();
+    }
+  }
 }
 
 void RxModule::enableProfiling(bool enable) {
