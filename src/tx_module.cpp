@@ -10,6 +10,7 @@
 #include "libs/protocol/ack_utils.h" // проверка ACK-пакетов
 #include "default_settings.h"
 #include "libs/config_loader/config_loader.h" // доступ к параметрам конфигурации
+#include "libs/fec/fec_profile.h"             // единые параметры ФЕК
 #include <vector>
 #include <chrono>
 #include <algorithm>
@@ -42,14 +43,11 @@ static_assert(PILOT_PREFIX_LEN == 5, "Ожидается пятибайтовы�
 // Допустимая длина полезной нагрузки одного кадра с учётом заголовков и пилотов
 static constexpr size_t MAX_FRAGMENT_LEN =
     MAX_FRAME_SIZE - FrameHeader::SIZE - (MAX_FRAME_SIZE / PILOT_INTERVAL) * PILOT_MARKER.size();
-static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
+static constexpr size_t RS_DATA_LEN = fec::RS_DATA_LEN; // длина блока данных RS
 static constexpr uint8_t FRAME_VERSION_AEAD = 2;  // версия кадра с новым AEAD
 static constexpr size_t TAG_LEN = crypto::chacha20poly1305::TAG_SIZE; // новый тег Poly1305
-static constexpr size_t RS_ENC_LEN = 255;         // длина закодированного блока
-static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
-static bool rsEnabled() {
-  return ConfigLoader::getConfig().radio.useRs; // проверяем признак использования RS из конфигурации
-}
+static constexpr size_t RS_ENC_LEN = fec::RS_ENC_LEN; // длина закодированного блока
+
 static constexpr size_t CONV_TAIL_BYTES = 1;      // добавочные байты для сброса свёрточного кодера
 static constexpr size_t RS_DATA_PAYLOAD = RS_DATA_LEN > TAG_LEN ? RS_DATA_LEN - TAG_LEN : 0; // размер полезных данных до тега
 static constexpr size_t MAX_CONV_PLAINTEXT =
@@ -678,6 +676,18 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
 
   message.fragments.reserve(plain_parts.size());
 
+  const auto& radio_cfg = ConfigLoader::getConfig().radio;
+  const bool conv_config = radio_cfg.useConv;
+  const bool rs_config = radio_cfg.useRs;
+  const bool bit_config = radio_cfg.useBitInterleaver;
+  const bool rs_allowed = conv_config && rs_config;
+  const bool bit_allowed = conv_config && bit_config;
+  static bool warned_rs_without_conv = false;
+  if (rs_config && !conv_config && !warned_rs_without_conv) {
+    LOG_WARN("TxModule: useRs=true при отключённой свёртке, RS-кодирование будет игнорировано");
+    warned_rs_without_conv = true;
+  }
+
   std::vector<uint8_t> enc;
   enc.reserve(MAX_CIPHER_CHUNK);
   std::vector<uint8_t> tag;
@@ -715,22 +725,29 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
     }
 
     bool conv_expected = false;
+    bool planned_rs = false;
+    bool planned_bit_interleaver = false;
     size_t payload_guess = cipher_len_guess;
-    if (cipher_len_guess > 0) {
-      if (rsEnabled() && cipher_len_guess == RS_DATA_LEN) {
+    if (conv_config && cipher_len_guess > 0) {
+      if (rs_allowed && cipher_len_guess == RS_DATA_LEN) {
         size_t conv_input_len = RS_ENC_LEN + CONV_TAIL_BYTES;
         size_t conv_payload_len = conv_input_len * 2;
         if (conv_payload_len <= MAX_FRAGMENT_LEN) {
           conv_expected = true;
+          planned_rs = true;
           payload_guess = conv_payload_len;
         }
-      } else {
+      }
+      if (!conv_expected) {
         size_t conv_input_len = cipher_len_guess + CONV_TAIL_BYTES;
         size_t conv_payload_len = conv_input_len * 2;
         if (conv_payload_len <= MAX_FRAGMENT_LEN) {
           conv_expected = true;
           payload_guess = conv_payload_len;
         }
+      }
+      if (conv_expected && bit_allowed) {
+        planned_bit_interleaver = true;
       }
     }
 
@@ -741,6 +758,8 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
 
     uint8_t planned_flags = base_flags;
     if (conv_expected) planned_flags |= FrameHeader::FLAG_CONV_ENCODED;
+    if (planned_rs) planned_flags |= FrameHeader::FLAG_RS_ENCODED;
+    if (planned_bit_interleaver) planned_flags |= FrameHeader::FLAG_BIT_INTERLEAVED;
     uint32_t packed_meta = packMetadata(planned_flags, current_idx, static_cast<uint16_t>(payload_guess));
 
     auto nonce = KeyLoader::makeNonce(FRAME_VERSION_AEAD, total_fragments, packed_meta,
@@ -773,8 +792,10 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
     }
 
     bool conv_applied = false;
+    bool rs_applied = false;
+    bool bit_applied = false;
     if (conv_expected) {
-      if (rsEnabled() && cipher_len == RS_DATA_LEN) {
+      if (planned_rs && cipher_len == RS_DATA_LEN) {
         uint8_t rs_buf[RS_ENC_LEN];
         rs255223::encode(enc.data(), rs_buf);
         byte_interleaver::interleave(rs_buf, RS_ENC_LEN);
@@ -782,14 +803,16 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
         conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00);
         conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
         conv_applied = true;
+        rs_applied = true;
       } else if (!enc.empty()) {
         conv_input.assign(enc.begin(), enc.end());
         conv_input.insert(conv_input.end(), CONV_TAIL_BYTES, 0x00);
         conv_codec::encodeBits(conv_input.data(), conv_input.size(), conv);
         conv_applied = true;
       }
-      if (conv_applied && USE_BIT_INTERLEAVER && !conv.empty()) {
+      if (conv_applied && bit_allowed && !conv.empty()) {
         bit_interleaver::interleave(conv.data(), conv.size());
+        bit_applied = true;
       }
     }
 
@@ -809,6 +832,8 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
 
     uint8_t final_flags = base_flags;
     if (conv_applied) final_flags |= FrameHeader::FLAG_CONV_ENCODED;
+    if (rs_applied) final_flags |= FrameHeader::FLAG_RS_ENCODED;
+    if (bit_applied) final_flags |= FrameHeader::FLAG_BIT_INTERLEAVED;
     uint32_t final_meta = packMetadata(final_flags, current_idx, frag.payload_size);
     if (final_meta != packed_meta) {
       LOG_ERROR("TxModule: рассогласование метаданных AEAD и заголовка");
@@ -816,12 +841,17 @@ bool TxModule::ensureFragmentsReady(PendingMessage& message) {
     }
 
     frag.conv_encoded = conv_applied;
+    frag.rs_encoded = rs_applied;
+    frag.bit_interleaved = bit_applied;
     frag.cipher_len = static_cast<uint16_t>(cipher_len);
     frag.plain_len = static_cast<uint16_t>(plain_len);
     frag.chunk_idx = current_idx;
     frag.header_flags = final_flags;
     frag.packed_meta = final_meta;
     message.fragments.push_back(frag);
+    DEBUG_LOG("TxModule: фрагмент idx=%u rs=%u conv=%u bit=%u payload=%u", static_cast<unsigned>(current_idx),
+              rs_applied ? 1U : 0U, conv_applied ? 1U : 0U, bit_applied ? 1U : 0U,
+              static_cast<unsigned>(frag.payload_size));
   }
 
   if (message.fragments.empty()) {

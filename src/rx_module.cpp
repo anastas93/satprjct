@@ -11,6 +11,7 @@
 #include "libs/protocol/ack_utils.h" // проверка ACK для фильтрации буфера
 #include "default_settings.h"         // параметры по умолчанию
 #include "libs/config_loader/config_loader.h" // доступ к конфигурации запуска
+#include "libs/fec/fec_profile.h"             // единые настройки ФЕК
 #include <vector>
 #include <algorithm>
 #include <array>
@@ -33,12 +34,8 @@ static constexpr uint16_t PILOT_MARKER_CRC = 0x9FD6;                // CRC16(pre
 static constexpr uint8_t FRAME_VERSION_AEAD = 2;  // новая версия кадра
 static constexpr size_t TAG_LEN_V1 = 8;           // длина тега в старом формате
 static constexpr size_t TAG_LEN = crypto::chacha20poly1305::TAG_SIZE; // длина тега Poly1305
-static constexpr size_t RS_DATA_LEN = DefaultSettings::GATHER_BLOCK_SIZE; // длина блока данных RS
-static constexpr size_t RS_ENC_LEN = 255;      // длина закодированного блока
-static constexpr bool USE_BIT_INTERLEAVER = true; // включение битового интерливинга
-static bool rsEnabled() {
-  return ConfigLoader::getConfig().radio.useRs; // актуальное состояние использования RS
-}
+static constexpr size_t RS_DATA_LEN = fec::RS_DATA_LEN; // длина блока данных RS
+static constexpr size_t RS_ENC_LEN = fec::RS_ENC_LEN;   // длина закодированного блока
 static constexpr size_t CONV_TAIL_BYTES = 1;      // «хвост» для сброса регистра свёрточного кодера
 static constexpr std::chrono::seconds PENDING_CONV_TTL(10); // максимальное время жизни незавершённого блока
 static bool isDecimal(const std::string& s) {
@@ -345,8 +342,8 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
 
   LOG_INFO("RxModule: финальный заголовок %zu байт, копий %zu, payload начинается с %zu", detected_header_len, header_copies, payload_offset);
   const uint8_t hdr_flags = hdr.getFlags();
-  const bool ack_no_flags = (hdr_flags &
-                             (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0;
+  const bool ack_no_flags = (hdr_flags & (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED |
+                                          FrameHeader::FLAG_RS_ENCODED | FrameHeader::FLAG_BIT_INTERLEAVED)) == 0;
   const bool ack_single_fragment = hdr.frag_cnt == 1 && hdr.getFragIdx() == 0;
   const bool ack_marker_only = payload_buf_.size() == 1 && payload_buf_.front() == protocol::ack::MARKER;
   if (ack_no_flags && ack_single_fragment && ack_marker_only) {
@@ -408,6 +405,35 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   work_buf_.clear();
   size_t result_len = 0;
   const bool conv_flag = (hdr_flags & FrameHeader::FLAG_CONV_ENCODED) != 0;
+  const bool header_rs_flag = (hdr_flags & FrameHeader::FLAG_RS_ENCODED) != 0;
+  const bool header_bit_flag = (hdr_flags & FrameHeader::FLAG_BIT_INTERLEAVED) != 0;
+  const auto& radio_cfg = ConfigLoader::getConfig().radio;
+  const bool config_rs = radio_cfg.useRs;
+  const bool config_conv = radio_cfg.useConv;
+  const bool config_bit = radio_cfg.useBitInterleaver;
+  const bool header_explicit_fec = header_rs_flag || header_bit_flag;
+  const bool expect_rs = header_explicit_fec ? header_rs_flag : config_rs;
+  const bool expect_bit_interleaver = header_explicit_fec ? header_bit_flag : (conv_flag && config_bit);
+
+  static bool warned_rs_mismatch = false;
+  if (header_explicit_fec && header_rs_flag != config_rs && !warned_rs_mismatch) {
+    LOG_WARN("RxModule: заголовок кадра сообщает useRs=%s, локальная конфигурация=%s",
+             header_rs_flag ? "true" : "false", config_rs ? "true" : "false");
+    warned_rs_mismatch = true;
+  }
+  static bool warned_conv_mismatch = false;
+  if (conv_flag != config_conv && !warned_conv_mismatch) {
+    LOG_WARN("RxModule: конфигурация useConv=%s, но кадр помечен conv=%s",
+             config_conv ? "true" : "false", conv_flag ? "true" : "false");
+    warned_conv_mismatch = true;
+  }
+  static bool warned_bit_mismatch = false;
+  if (header_explicit_fec && (expect_bit_interleaver != config_bit) && !warned_bit_mismatch) {
+    LOG_WARN("RxModule: битовый интерливинг в кадре=%s, локально=%s",
+             expect_bit_interleaver ? "true" : "false", config_bit ? "true" : "false");
+    warned_bit_mismatch = true;
+  }
+
   profile_scope.noteConv(conv_flag);
   size_t cipher_len_hint = 0;
   if (conv_flag) {
@@ -517,7 +543,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
 
   bool decode_ok = true;
   if (conv_flag) {
-    if (!payload_ptr->empty() && USE_BIT_INTERLEAVER) {
+    if (!payload_ptr->empty() && expect_bit_interleaver) {
       bit_interleaver::deinterleave(payload_ptr->data(), payload_ptr->size());
     }
     if (!conv_codec::viterbiDecode(payload_ptr->data(), payload_ptr->size(), result_buf_)) {
@@ -537,9 +563,25 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
         }
       }
       result_len = result_buf_.size();
+      if (expect_rs) {
+        if (result_buf_.size() != RS_ENC_LEN) {
+          profile_scope.markDrop("неожиданная длина RS после свёртки");
+          return;
+        }
+        work_buf_.assign(result_buf_.begin(), result_buf_.end());
+        if (!work_buf_.empty()) {
+          byte_interleaver::deinterleave(work_buf_.data(), work_buf_.size());
+        }
+        result_buf_.resize(RS_DATA_LEN);
+        if (!rs255223::decode(work_buf_.data(), result_buf_.data())) {
+          profile_scope.markDrop("ошибка RS после свёртки");
+          return;
+        }
+        result_len = RS_DATA_LEN;
+      }
     }
-  } else if (rsEnabled() && payload_buf_.size() == RS_ENC_LEN * 2) {
-    if (USE_BIT_INTERLEAVER)
+  } else if (expect_rs && payload_buf_.size() == RS_ENC_LEN * 2) {
+    if (expect_bit_interleaver)
       bit_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // деинтерливинг бит
     if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), work_buf_)) {
       decode_ok = false;
@@ -553,7 +595,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
         result_len = RS_DATA_LEN;
       }
     }
-  } else if (rsEnabled() && payload_buf_.size() == RS_ENC_LEN) {
+  } else if (expect_rs && payload_buf_.size() == RS_ENC_LEN) {
     byte_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // байтовый деинтерливинг
     result_buf_.resize(RS_DATA_LEN);
     if (!rs255223::decode(payload_buf_.data(), result_buf_.data())) {
@@ -561,8 +603,8 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     } else {
       result_len = RS_DATA_LEN;
     }
-  } else if (!rsEnabled() && payload_buf_.size() == RS_DATA_LEN * 2) {
-    if (USE_BIT_INTERLEAVER)
+  } else if (!expect_rs && payload_buf_.size() == RS_DATA_LEN * 2) {
+    if (expect_bit_interleaver)
       bit_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // деинтерливинг бит
     if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), result_buf_)) {
       decode_ok = false;

@@ -34,6 +34,8 @@ struct RadioConfig {
   uint32_t ackTimeoutMs;   // тайм-аут ожидания ACK
   bool useEncryption;      // включить шифрование
   bool useRs;              // включить код Рида-Соломона
+  bool useConv;            // включить свёрточное кодирование
+  bool useBitInterleaver;  // включить битовый интерливинг
 };
 
 // Ключи шифрования по умолчанию

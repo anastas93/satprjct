@@ -62,6 +62,8 @@ private:
     std::vector<uint8_t> payload;               // кодированный фрагмент
     uint16_t payload_size = 0;                       // длина полезных данных фрагмента
     bool conv_encoded = false;                       // применялась ли свёртка
+    bool rs_encoded = false;                         // применялся ли код Рида — Соломона
+    bool bit_interleaved = false;                    // был ли включён битовый интерливинг
     uint16_t cipher_len = 0;                         // длина шифртекста
     uint16_t plain_len = 0;                          // длина исходного блока
     uint16_t chunk_idx = 0;                          // индекс фрагмента внутри сообщения
