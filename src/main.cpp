@@ -2067,6 +2067,7 @@ ChannelBank parseBankChar(char b) {
     case 't': case 'T': return ChannelBank::TEST;
     case 'a': case 'A': return ChannelBank::ALL;
     case 'h': case 'H': return ChannelBank::HOME;
+    case 'n': case 'N': return ChannelBank::NEW;
     default: return radio.getBank();
   }
 }
@@ -2243,6 +2244,7 @@ String bankToLetter(ChannelBank bank) {
     case ChannelBank::TEST: return "t";
     case ChannelBank::ALL:  return "a";
     case ChannelBank::HOME: return "h";
+    case ChannelBank::NEW:  return "n";
     default:                return "";
   }
 }
@@ -2467,6 +2469,7 @@ String cmdInfo() {
     case ChannelBank::TEST: s += ""; break;
     case ChannelBank::ALL: s += "All"; break;
     case ChannelBank::HOME: s += "Home"; break;
+    case ChannelBank::NEW: s += "New"; break;
   }
   s += "\nChannel: "; s += String(radio.getChannel());
   s += "\nRX: "; s += String(radio.getRxFrequency(), 3); s += " MHz";
@@ -3399,6 +3402,9 @@ void loop() {
         } else if (b == 'h' || b == 'H') {
           radio.setBank(ChannelBank::HOME);
           Serial.println(" Home");
+        } else if (b == 'n' || b == 'N') {
+          radio.setBank(ChannelBank::NEW);
+          Serial.println(" New");
         }
       } else if (line.startsWith("CH ")) {
         int ch = line.substring(3).toInt();
@@ -3466,6 +3472,7 @@ void loop() {
           case ChannelBank::TEST: Serial.println(""); break;
           case ChannelBank::ALL: Serial.println("All"); break;
           case ChannelBank::HOME: Serial.println("Home"); break;
+          case ChannelBank::NEW: Serial.println("New"); break;
         }
         Serial.print(": "); Serial.println(radio.getChannel());
         Serial.print("RX: "); Serial.print(radio.getRxFrequency(), 3); Serial.println(" MHz");
