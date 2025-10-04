@@ -108,7 +108,7 @@ inline constexpr std::size_t HOME_BANK_SIZE = 7;
 inline constexpr float RX_HOME[HOME_BANK_SIZE] = {
     263.450F, 257.700F, 257.200F, 256.450F, 267.250F, 250.090F, 249.850F};
 inline constexpr float TX_HOME[HOME_BANK_SIZE] = {
-    311.400F, 316.150F, 308.800F, 398.800F, 308.250F, 312.600F, 298.830F};
+    311.400F, 316.150F, 308.800F, 313.850F, 308.250F, 312.600F, 298.830F};
 
 inline constexpr FrequencyBank BANKS[] = {
     {RX_EAST, TX_EAST, EAST_BANK_SIZE, "Восточный банк: основной набор частот восточного сегмента"},
