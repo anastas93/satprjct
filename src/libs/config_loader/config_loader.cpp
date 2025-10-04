@@ -119,6 +119,10 @@ bool parseBank(const std::string& text, ChannelBank& outBank) {
     outBank = ChannelBank::HOME;
     return true;
   }
+  if (upper == "NEW") {
+    outBank = ChannelBank::NEW;
+    return true;
+  }
   return false;
 }
 

@@ -246,9 +246,9 @@ private:
   int16_t lastError_ = RADIOLIB_ERR_NONE; // последний код ошибки RadioLib
 
     // Таблицы частот для всех банков
-    static const float* fRX_bank_[5];
-    static const float* fTX_bank_[5];
-    static const uint16_t BANK_CHANNELS_[5];
+    static const float* fRX_bank_[6];
+    static const float* fTX_bank_[6];
+    static const uint16_t BANK_CHANNELS_[6];
   static const int8_t Pwr_[10];
   static const float BW_[5];
   static const int8_t SF_[8];
