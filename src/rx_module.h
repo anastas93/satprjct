@@ -54,6 +54,12 @@ public:
   };
   DropStats dropStats() const { return drop_stats_; }
   void resetDropStats();
+  struct DecodeErrorStats {                                  // агрегированная статистика ошибок декодирования
+    uint64_t rs_decode_errors = 0;                          // сбои корректирующего кода Рида-Соломона
+    uint64_t conv_decode_errors = 0;                        // ошибки свёрточного декодера
+    uint64_t conv_expected_len_mismatch = 0;                // несоответствие ожидаемой длины после свёртки
+  };
+  DecodeErrorStats decodeErrorStats() const { return decode_error_stats_; }
   // Установка пользовательского колбэка
   void setCallback(Callback cb);
   // Установка колбэка для уведомления о получении ACK
@@ -116,6 +122,7 @@ private:
   std::unordered_map<uint32_t, SplitPrefixInfo> inflight_prefix_; // префиксы, ожидающие завершения
   ProfilingSnapshot last_profile_;   // последний снимок профилирования
   DropStats drop_stats_;             // накопитель причин отброса кадров
+  DecodeErrorStats decode_error_stats_; // счётчики ошибок декодирования
   struct RxProfilingScope;           // внутренняя структура для RAII-профилирования
   friend struct RxProfilingScope;
   void cleanupPendingConv(std::chrono::steady_clock::time_point now);

@@ -469,17 +469,40 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   }
 
   bool decode_ok = true;
+  auto logDecodeFailure = [&](const char* reason,
+                              size_t expected_len,
+                              size_t actual_len,
+                              bool frame_conv_flag,
+                              size_t payload_len) {
+    // Подробный лог об ошибке декодирования с основными параметрами кадра
+    LOG_WARN("RxModule: сбой декодирования (%s), ожидали %zu байт, получили %zu байт, conv_flag=%d, payload=%zu",
+             reason,
+             expected_len,
+             actual_len,
+             frame_conv_flag ? 1 : 0,
+             payload_len);
+  };
   if (conv_flag) {
     if (!payload_ptr->empty() && USE_BIT_INTERLEAVER) {
       bit_interleaver::deinterleave(payload_ptr->data(), payload_ptr->size());
     }
+    const size_t expected_after_conv = cipher_len_hint ? static_cast<size_t>(cipher_len_hint) + CONV_TAIL_BYTES
+                                                      : payload_ptr->size();
     if (!conv_codec::viterbiDecode(payload_ptr->data(), payload_ptr->size(), result_buf_)) {
       decode_ok = false;
+      ++decode_error_stats_.conv_decode_errors;
+      logDecodeFailure("свёрточный декодер", expected_after_conv, 0, true, payload_ptr->size());
     } else {
       if (cipher_len_hint) {
         size_t required = static_cast<size_t>(cipher_len_hint) + CONV_TAIL_BYTES;
         if (result_buf_.size() < required) {
           decode_ok = false;                           // получили меньше, чем ожидалось
+          ++decode_error_stats_.conv_expected_len_mismatch;
+          logDecodeFailure("недостаточная длина после свёрточного декодера",
+                           required,
+                           result_buf_.size(),
+                           true,
+                           payload_ptr->size());
         } else {
           if (result_buf_.size() > required) {
             result_buf_.resize(required);             // отбрасываем лишние байты декодера
@@ -496,12 +519,16 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
       bit_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // деинтерливинг бит
     if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), work_buf_)) {
       decode_ok = false;
+      ++decode_error_stats_.conv_decode_errors;
+      logDecodeFailure("свёрточный декодер перед RS", RS_ENC_LEN, 0, conv_flag, payload_buf_.size());
     } else {
       if (!work_buf_.empty())
         byte_interleaver::deinterleave(work_buf_.data(), work_buf_.size()); // байтовый деинтерливинг
       result_buf_.resize(RS_DATA_LEN);
       if (!rs255223::decode(work_buf_.data(), result_buf_.data())) {
         decode_ok = false;
+        ++decode_error_stats_.rs_decode_errors;
+        logDecodeFailure("RS(255,223)", RS_DATA_LEN, 0, conv_flag, payload_buf_.size());
       } else {
         result_len = RS_DATA_LEN;
       }
@@ -511,6 +538,8 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     result_buf_.resize(RS_DATA_LEN);
     if (!rs255223::decode(payload_buf_.data(), result_buf_.data())) {
       decode_ok = false;
+      ++decode_error_stats_.rs_decode_errors;
+      logDecodeFailure("RS(255,223)", RS_DATA_LEN, 0, conv_flag, payload_buf_.size());
     } else {
       result_len = RS_DATA_LEN;
     }
@@ -519,6 +548,8 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
       bit_interleaver::deinterleave(payload_buf_.data(), payload_buf_.size()); // деинтерливинг бит
     if (!conv_codec::viterbiDecode(payload_buf_.data(), payload_buf_.size(), result_buf_)) {
       decode_ok = false;
+      ++decode_error_stats_.conv_decode_errors;
+      logDecodeFailure("свёрточный декодер", payload_buf_.size() / 2, 0, conv_flag, payload_buf_.size());
     } else {
       result_len = result_buf_.size();
     }

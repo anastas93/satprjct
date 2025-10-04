@@ -191,6 +191,13 @@ static String escapeJson(const std::string& text) {
   return out;
 }
 
+// Преобразование 64-битного счётчика в Arduino String
+static String formatUint64(uint64_t value) {
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%llu", static_cast<unsigned long long>(value));
+  return String(buf);
+}
+
 static void sendProgmemAsset(const char* contentType,
                              const uint8_t* data,
                              size_t length,
@@ -2546,6 +2553,15 @@ String cmdInfo() {
   s += "\nRX boosted gain: ";
   s += radio.isRxBoostedGainEnabled() ? "" : "";
   s += "\nLight pack: "; s += lightPackMode ? "" : "";
+  auto decode_stats = rx.decodeErrorStats();
+  s += "\nRS-кодирование: ";
+  s += gConfig.radio.useRs ? "включено" : "выключено";
+  s += "\nRS decode errors: ";
+  s += formatUint64(decode_stats.rs_decode_errors);
+  s += "\nConv decode errors: ";
+  s += formatUint64(decode_stats.conv_decode_errors);
+  s += "\nConv length mismatches: ";
+  s += formatUint64(decode_stats.conv_expected_len_mismatch);
   return s;
 }
 
@@ -3551,6 +3567,15 @@ void loop() {
         Serial.print("ACK timeout: "); Serial.print(tx.getAckTimeout()); Serial.println(" ms");
         Serial.print("ACK delay: "); Serial.print(ackResponseDelayMs); Serial.println(" ms");
         Serial.print("ACK: "); Serial.println(ackEnabled ? "" : "");
+        auto decode_stats = rx.decodeErrorStats();               // выводим счётчики ошибок декодирования
+        Serial.print("RS-кодирование: ");
+        Serial.println(gConfig.radio.useRs ? "включено" : "выключено");
+        Serial.print("RS decode errors: ");
+        Serial.println(formatUint64(decode_stats.rs_decode_errors));
+        Serial.print("Conv decode errors: ");
+        Serial.println(formatUint64(decode_stats.conv_decode_errors));
+        Serial.print("Conv length mismatches: ");
+        Serial.println(formatUint64(decode_stats.conv_expected_len_mismatch));
       } else if (line.startsWith("STS")) {
         int cnt = line.length() > 3 ? line.substring(4).toInt() : 10;
         if (cnt <= 0) cnt = 10;                       //   
