@@ -5,6 +5,7 @@
 #include <array>
 #include <vector>
 #include <unordered_map>
+#include <deque>
 #include <chrono>
 #include <string>
 #include "libs/packetizer/packet_gatherer.h" // сборщик пакетов
@@ -41,8 +42,15 @@ public:
   };
   ProfilingSnapshot lastProfiling() const { return last_profile_; }
   struct DropStats {
+    struct DetailSummary {
+      uint64_t total = 0;                                   // количество срабатываний причины
+      std::unordered_map<std::string, uint64_t> by_detail;  // счётчик по уникальным параметрам
+      std::deque<std::string> last_examples;                // несколько последних примеров деталей
+    };
+    static constexpr size_t MAX_DETAIL_EXAMPLES = 5;        // сохраняем до пяти свежих примеров
     uint64_t total = 0;                                     // общее число отброшенных кадров
     std::unordered_map<std::string, uint64_t> by_stage;     // статистика по причинам
+    std::unordered_map<std::string, DetailSummary> details; // расширенная сводка по причинам
   };
   DropStats dropStats() const { return drop_stats_; }
   void resetDropStats();
