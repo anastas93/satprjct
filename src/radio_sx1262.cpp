@@ -610,23 +610,17 @@ void RadioSX1262::processPendingIrqLog() {
     pendingIrqClearState_ = clearState;      // сохраняем код очистки IRQ
     hasPending = true;                       // гарантируем обработку свежих данных
 
-    const bool hasRxDone = (flags & RADIOLIB_SX126X_IRQ_RX_DONE) != 0U; // полное завершение приёма
-    const bool hasHeaderValid = (flags & RADIOLIB_SX126X_IRQ_HEADER_VALID) != 0U; // заголовок распознан
-    const bool hasSyncValid = (flags & RADIOLIB_SX126X_IRQ_SYNC_WORD_VALID) != 0U; // синхрослово подтверждено
+    const bool hasRxDone = (flags & RADIOLIB_SX126X_IRQ_RX_DONE) != 0U;
+    const bool hasHeaderValid = (flags & RADIOLIB_SX126X_IRQ_HEADER_VALID) != 0U;
+    const bool hasSyncValid = (flags & RADIOLIB_SX126X_IRQ_SYNC_WORD_VALID) != 0U;
     const bool hasCrcError = (flags & RADIOLIB_SX126X_IRQ_CRC_ERR) != 0U;
     const bool hasHeaderError = (flags & RADIOLIB_SX126X_IRQ_HEADER_ERR) != 0U;
 
-    const bool hasRxErrors = hasCrcError || hasHeaderError; // есть ошибки декодирования
+    const bool hasRxIndicators = hasRxDone || hasHeaderValid || hasSyncValid; // есть признаки приёма
+    const bool hasRxErrors = hasCrcError || hasHeaderError;                   // есть ошибки декодирования
 
-    const bool rxDataAvailable = hasRxDone && (radio_.available() > 0); // в буфере есть полезные данные
-    shouldMarkPacketReady = rxDataAvailable && !hasRxErrors;             // пакет подтверждён и готов к чтению
-
-    const bool hasEarlyIndicator = !hasRxDone && (hasHeaderValid || hasSyncValid); // есть ранние признаки приёма
-    needRxRecovery = (hasRxDone || hasEarlyIndicator) && hasRxErrors;              // требуется перезапуск RX
-
-    if (hasEarlyIndicator && !hasRxErrors) {
-      DEBUG_LOG("RadioSX1262: зафиксирован ранний индикатор приёма (header/sync), ждём RX_DONE");
-    }
+    shouldMarkPacketReady = hasRxIndicators && !hasRxErrors;                  // считаем пакет готовым
+    needRxRecovery = hasRxIndicators && hasRxErrors;                          // требуется перезапуск RX
   }
 
   const uint32_t flags = pendingIrqFlags_;
@@ -660,9 +654,9 @@ void RadioSX1262::processPendingIrqLog() {
 #if defined(ARDUINO)
     interrupts();
 #endif
-    DEBUG_LOG("RadioSX1262: RX_DONE подтверждён, пакет готов к чтению");
+    DEBUG_LOG("RadioSX1262: событие DIO1 прошло фильтр RX-флагов, пакет готов к чтению");
   } else {
-    DEBUG_LOG("RadioSX1262: событие DIO1 проигнорировано фильтром RX (пакет ещё не готов)");
+    DEBUG_LOG("RadioSX1262: событие DIO1 проигнорировано фильтром RX (пакет не готов)");
   }
 
   if (needRxRecovery) {
