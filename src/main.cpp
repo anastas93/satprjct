@@ -1425,23 +1425,31 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
     SimpleLogger::logStatus("KEYTRANSFER IGN");   //   
     return true;                                   //     RxModule
   }
-  if ((payload.flags & KeyTransfer::FLAG_HAS_CERTIFICATE) != 0 ||
-      payload.version == KeyTransfer::VERSION_CERTIFICATE) {
-    std::string cert_error;
-    if (!KeyTransfer::verifyCertificateChain(payload.public_key, payload.certificate, &cert_error)) {
-      keyTransferRuntime.error = String("cert");
-      keyTransferRuntime.waiting = false;
-      keyTransferRuntime.completed = false;
-      if (keyTransferRuntime.ephemeral_active) {
-        KeyLoader::endEphemeralSession();
-        keyTransferRuntime.ephemeral_active = false;
+  const bool certificate_supplied =
+      ((payload.flags & KeyTransfer::FLAG_HAS_CERTIFICATE) != 0) ||
+      payload.version == KeyTransfer::VERSION_CERTIFICATE;
+  if (certificate_supplied) {
+    if (KeyTransfer::hasTrustedRoot()) {
+      std::string cert_error;
+      if (!KeyTransfer::verifyCertificateChain(payload.public_key, payload.certificate, &cert_error)) {
+        keyTransferRuntime.error = String("cert");
+        keyTransferRuntime.waiting = false;
+        keyTransferRuntime.completed = false;
+        if (keyTransferRuntime.ephemeral_active) {
+          KeyLoader::endEphemeralSession();
+          keyTransferRuntime.ephemeral_active = false;
+        }
+        resetKeyTransferWaitTiming();
+        keyTransferWaiter.finalizeError(toStdString(makeKeyTransferErrorJson(keyTransferRuntime.error)));
+        SimpleLogger::logStatus("KEYTRANSFER CERT ERR");
+        Serial.print("KEYTRANSFER:   : ");
+        Serial.println(cert_error.c_str());
+        return true;
       }
-      resetKeyTransferWaitTiming();
-      keyTransferWaiter.finalizeError(toStdString(makeKeyTransferErrorJson(keyTransferRuntime.error)));
-      SimpleLogger::logStatus("KEYTRANSFER CERT ERR");
-      Serial.print("KEYTRANSFER:   : ");
-      Serial.println(cert_error.c_str());
-      return true;
+    } else if (payload.certificate.valid && !payload.certificate.chain.empty()) {
+      // Сертификат присутствует, но доверенный корень не задан — пропускаем проверку для совместимой прошивки.
+      SimpleLogger::logStatus("KEYTRANSFER CERT SKIP");
+      Serial.println("KEYTRANSFER:    ,      ");
     }
   } else if (KeyTransfer::hasTrustedRoot()) {
     Serial.println("KEYTRANSFER:        ");

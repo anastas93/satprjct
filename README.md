@@ -620,6 +620,9 @@ ENCT: успех
   `KeyTransfer::buildFrame()`.
 - `KeyTransfer::verifyCertificateChain(const std::array<uint8_t,32>&, const CertificateBundle&, std::string*)`
   — проверяет подписи Ed25519 в цепочке и подтверждает, что она восходит к доверенному корню.
+- Если доверенный корень не настроен (устройства используют одинаковую прошивку и общий стек),
+  прошивка принимает кадр с сертификатом без проверки цепочки и фиксирует предупреждение в журнале,
+  чтобы обмен ключами оставался совместимым.
 - `KeyTransfer::hasTrustedRoot()/getTrustedRoot()` и `KeyTransfer::hasLocalCertificate()/getLocalCertificate()`
   позволяют проверить наличие данных перед отправкой или обработкой кадра.
 
