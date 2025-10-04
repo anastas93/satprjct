@@ -44,6 +44,7 @@
 #ifndef ARDUINO
 #include <fstream>
 #include <chrono>
+#include <mutex>   // мьютекс для защиты очередей в хостовой сборке
 #else
 #include <FS.h>
 using NetworkClient = WiFiClient;
@@ -81,6 +82,7 @@ using NetworkClient = WiFiClient;
 #include "esp_idf_version.h"    //    ESP-IDF
 #endif
 #include "freertos/FreeRTOS.h"
+#include "freertos/portmacro.h"
 #ifndef ESP_IPC_CPU_PRO
 #define ESP_IPC_CPU_PRO 0
 #endif
@@ -608,9 +610,14 @@ struct PushClientSession {
 };
 
 static std::vector<PushClientSession> gPushSessions;  //   SSE
-static uint32_t gPushNextEventId = 1;                 //   
-static std::deque<LogHook::Entry> gPendingLogEntries; //      
-static constexpr size_t kMaxPendingLogEntries = 64;   //    
+static uint32_t gPushNextEventId = 1;                 //
+static std::deque<LogHook::Entry> gPendingLogEntries; //
+static constexpr size_t kMaxPendingLogEntries = 64;   //
+#if defined(ARDUINO)
+static portMUX_TYPE gPendingLogLock = portMUX_INITIALIZER_UNLOCKED; // спинлок очереди логов SSE на ESP32
+#else
+static std::mutex gPendingLogMutex; // мьютекс для защиты очереди логов в симуляторе
+#endif
 
 #if defined(ARDUINO)
 static uint32_t systemMillis() {
@@ -636,10 +643,20 @@ static LastIrqStatus gLastIrqStatus;                  //   IRQ  SSE
 
 //      ,    Serial   SSE
 void enqueueLogEntry(const LogHook::Entry& entry) {
+#if defined(ARDUINO)
+  portENTER_CRITICAL(&gPendingLogLock);               // защищаем доступ от Logger::task
   if (gPendingLogEntries.size() >= kMaxPendingLogEntries) {
-    gPendingLogEntries.pop_front(); //      
+    gPendingLogEntries.pop_front();                   // удаляем самый старый элемент при переполнении
+  }
+  gPendingLogEntries.push_back(entry);                // добавляем новую запись
+  portEXIT_CRITICAL(&gPendingLogLock);
+#else
+  std::lock_guard<std::mutex> lock(gPendingLogMutex); // потокобезопасно в хостовой сборке
+  if (gPendingLogEntries.size() >= kMaxPendingLogEntries) {
+    gPendingLogEntries.pop_front();
   }
   gPendingLogEntries.push_back(entry);
+#endif
 }
 
 void updateLastIrqStatus(const char* message, uint32_t uptimeMs) {
@@ -873,15 +890,51 @@ bool broadcastLogEntry(const LogHook::Entry& entry) {
 
 //       SSE-
 void flushPendingLogEntries() {
-  if (gPendingLogEntries.empty() || gPushSessions.empty()) {
-    return; //   ,    
+  if (gPushSessions.empty()) {
+    return; //   ,
   }
-  while (!gPendingLogEntries.empty() && !gPushSessions.empty()) {
-    LogHook::Entry entry = gPendingLogEntries.front();
-    gPendingLogEntries.pop_front();
+  while (!gPushSessions.empty()) {
+    LogHook::Entry entry;                              // локальная копия, чтобы не держать блокировку
+    bool hasEntry = false;
+#if defined(ARDUINO)
+    portENTER_CRITICAL(&gPendingLogLock);
+    if (!gPendingLogEntries.empty()) {
+      entry = gPendingLogEntries.front();
+      gPendingLogEntries.pop_front();
+      hasEntry = true;
+    }
+    portEXIT_CRITICAL(&gPendingLogLock);
+#else
+    {
+      std::lock_guard<std::mutex> lock(gPendingLogMutex);
+      if (!gPendingLogEntries.empty()) {
+        entry = gPendingLogEntries.front();
+        gPendingLogEntries.pop_front();
+        hasEntry = true;
+      }
+    }
+#endif
+    if (!hasEntry) {
+      return;                                         // очередь опустела
+    }
     if (!broadcastLogEntry(entry)) {
-      //     ( )       
-      gPendingLogEntries.push_front(entry);
+      // Не удалось доставить запись (например, клиенты отключились)
+#if defined(ARDUINO)
+      portENTER_CRITICAL(&gPendingLogLock);
+      if (gPendingLogEntries.size() >= kMaxPendingLogEntries) {
+        gPendingLogEntries.pop_back();               // сохраняем ограничение размера
+      }
+      gPendingLogEntries.push_front(entry);          // возвращаем запись в очередь
+      portEXIT_CRITICAL(&gPendingLogLock);
+#else
+      {
+        std::lock_guard<std::mutex> lock(gPendingLogMutex);
+        if (gPendingLogEntries.size() >= kMaxPendingLogEntries) {
+          gPendingLogEntries.pop_back();
+        }
+        gPendingLogEntries.push_front(entry);
+      }
+#endif
       break;
     }
   }
