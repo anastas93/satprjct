@@ -46,24 +46,27 @@ private:
   bool locked_ = false;
 };
 
-const float* RadioSX1262::fRX_bank_[5] = {
+const float* RadioSX1262::fRX_bank_[6] = {
     frequency_tables::RX_EAST,
     frequency_tables::RX_WEST,
     frequency_tables::RX_TEST,
     frequency_tables::RX_ALL,
-    frequency_tables::RX_HOME};
-const float* RadioSX1262::fTX_bank_[5] = {
+    frequency_tables::RX_HOME,
+    frequency_tables::RX_NEW};
+const float* RadioSX1262::fTX_bank_[6] = {
     frequency_tables::TX_EAST,
     frequency_tables::TX_WEST,
     frequency_tables::TX_TEST,
     frequency_tables::TX_ALL,
-    frequency_tables::TX_HOME};
-const uint16_t RadioSX1262::BANK_CHANNELS_[5] = {
+    frequency_tables::TX_HOME,
+    frequency_tables::TX_NEW};
+const uint16_t RadioSX1262::BANK_CHANNELS_[6] = {
     static_cast<uint16_t>(frequency_tables::EAST_BANK_SIZE),
     static_cast<uint16_t>(frequency_tables::WEST_BANK_SIZE),
     static_cast<uint16_t>(frequency_tables::TEST_BANK_SIZE),
     static_cast<uint16_t>(frequency_tables::ALL_BANK_SIZE),
-    static_cast<uint16_t>(frequency_tables::HOME_BANK_SIZE)};
+    static_cast<uint16_t>(frequency_tables::HOME_BANK_SIZE),
+    static_cast<uint16_t>(frequency_tables::NEW_BANK_SIZE)};
 
 uint16_t RadioSX1262::bankSize(ChannelBank bank) {
   // Возвращаем количество каналов для указанного банка
