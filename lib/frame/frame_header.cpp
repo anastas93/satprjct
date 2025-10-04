@@ -1,4 +1,5 @@
 #include "frame_header.h"
+#include "default_settings.h"             // макросы логирования
 uint8_t FrameHeader::getFlags() const {
   return static_cast<uint8_t>((packed & FLAGS_MASK) >> FLAGS_SHIFT);
 }
@@ -71,7 +72,18 @@ bool FrameHeader::encode(uint8_t* out, size_t out_len, const uint8_t* payload, s
 
 // Декодирование заголовка
 bool FrameHeader::decode(const uint8_t* data, size_t len, FrameHeader& out) {
-  if (!data || len < SIZE) return false;
+  if (!data) {
+    LOG_ERROR("FrameHeader::decode: получен нулевой указатель данных");
+    return false;
+  }
+  if (len < MIN_SIZE) {
+    LOG_WARN("FrameHeader::decode: длина %zu байт меньше минимального заголовка %zu байт", len, MIN_SIZE);
+    return false;
+  }
+  if (len < SIZE) {
+    LOG_WARN("FrameHeader::decode: обнаружен укороченный заголовок %zu/%zu байт, зарезервированные байты будут интерпретированы как нули", len, SIZE);
+  }
+
   out.ver = data[0];
   out.msg_id = static_cast<uint16_t>(data[1] << 8 | data[2]);
   out.frag_cnt = static_cast<uint16_t>(data[3] << 8 | data[4]);
@@ -79,5 +91,31 @@ bool FrameHeader::decode(const uint8_t* data, size_t len, FrameHeader& out) {
                (static_cast<uint32_t>(data[6]) << 16) |
                (static_cast<uint32_t>(data[7]) << 8) |
                static_cast<uint32_t>(data[8]);
+
+  uint8_t reserved[3] = {0, 0, 0};
+  if (len > 9) reserved[0] = data[9];
+  if (len > 10) reserved[1] = data[10];
+  if (len > 11) reserved[2] = data[11];
+
+  const uint8_t flags = out.getFlags();
+  const uint16_t frag_idx = out.getFragIdx();
+  const uint16_t payload_len = out.getPayloadLen();
+
+  DEBUG_LOG("FrameHeader::decode: ver=%u msg_id=0x%04X frag_cnt=%u frag_idx=%u payload_len=%u flags=0x%02X (буфер=%zu байт, резерв=%02X %02X %02X)",
+            out.ver,
+            out.msg_id,
+            out.frag_cnt,
+            frag_idx,
+            payload_len,
+            flags,
+            len,
+            reserved[0],
+            reserved[1],
+            reserved[2]);
+
+  if (len >= SIZE && (reserved[0] != 0 || reserved[1] != 0 || reserved[2] != 0)) {
+    DEBUG_LOG("FrameHeader::decode: резервные байты не равны нулю, возможен нестандартный формат выравнивания");
+  }
+
   return true;
 }
