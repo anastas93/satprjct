@@ -187,6 +187,7 @@ int16_t RadioSX1262::ping(const uint8_t* data, size_t len,
 
   packetReady_ = false;                                   // очищаем флаг готовности
   startReceiveWithRetry("ping: ожидание ответа");        // слушаем эфир
+  flushPendingIrqLog();                                   // разбираем отложенные IRQ до входа в цикл ожидания
   DEBUG_LOG("RadioSX1262: запуск ожидания ответа после пинга");
   DEBUG_LOG_VAL("RadioSX1262: таймаут ожидания, мкс=", timeoutUs);
   uint32_t start = micros();                              // стартовое время ожидания
@@ -194,6 +195,7 @@ int16_t RadioSX1262::ping(const uint8_t* data, size_t len,
   bool waitingLogged = false;                             // отметка первого ожидания
 
   while ((micros() - start) < timeoutUs) {                // ждём ответ с таймаутом
+    flushPendingIrqLog();                                 // обрабатываем накопленные IRQ перед проверкой флага готовности
     if (!packetReady_) {                                  // пакета пока нет
       if (!waitingLogged) {                               // фиксируем начало ожидания
         DEBUG_LOG("RadioSX1262: ожидание готовности пакета");
