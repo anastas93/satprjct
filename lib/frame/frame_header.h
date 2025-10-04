@@ -12,7 +12,8 @@ struct FrameHeader {
   uint16_t frag_cnt = 1;    // общее число фрагментов
   uint32_t packed = 0;      // упакованные флаги, номер фрагмента и длина
 
-  static constexpr size_t SIZE = 12; // размер заголовка в байтах
+  static constexpr size_t SIZE = 12;     // размер стандартного заголовка в байтах
+  static constexpr size_t MIN_SIZE = 9;  // минимальный размер укороченного заголовка (без выравнивания)
   static constexpr uint32_t FLAGS_SHIFT = 24;      // старшие биты под флаги
   static constexpr uint32_t FLAGS_MASK = 0xFF000000; // маска флагов (8 бит)
   static constexpr uint32_t FRAG_SHIFT = 12;       // средние биты под индекс фрагмента (12 бит)

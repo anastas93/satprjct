@@ -202,6 +202,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
 
   auto forward_raw = [&](const uint8_t* raw, size_t raw_len) {
     if (!raw || raw_len == 0) return;                  // пропускаем пустые вызовы
+    DEBUG_LOG("RxModule: сохранён сырой дамп кадра длиной %zu байт", raw_len);
     if (buf_) {                                        // сохраняем сырые пакеты по отдельному счётчику
       buf_->pushRaw(0, raw_counter_++, raw, raw_len);
     }
@@ -211,10 +212,15 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     profile_scope.mark(&ProfilingSnapshot::deliver);   // фиксируем передачу наружу
   };
 
-  if (len < FrameHeader::SIZE) {                        // недостаточно данных для заголовка
+  if (len < FrameHeader::MIN_SIZE) {                    // слишком короткий кадр, даже укороченный заголовок не поместится
+    LOG_WARN("RxModule: получен кадр длиной %zu байт, меньше минимального заголовка %zu байт", len, FrameHeader::MIN_SIZE);
     forward_raw(data, len);
-    profile_scope.markDrop("короткий кадр без заголовка");
+    profile_scope.markDrop("кадр короче минимального заголовка");
     return;
+  }
+
+  if (len < FrameHeader::SIZE) {
+    LOG_INFO("RxModule: получен кадр с укороченным заголовком (%zu/%zu байт), продолжаем разбор", len, FrameHeader::SIZE);
   }
 
   if (!cb_ && !buf_) {                                 // некому отдавать результат
@@ -236,12 +242,15 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   }
   profile_scope.mark(&ProfilingSnapshot::header);
   if (!primary_ok && !secondary_ok) {                   // заголовок не распознан
+    LOG_WARN("RxModule: оба варианта заголовка не распознаны, длина кадра %zu байт", frame_buf_.size());
     forward_raw(data, len);
     profile_scope.markDrop("заголовок повреждён");
     return;
   }
 
   FrameHeader hdr = primary_ok ? primary_hdr : secondary_hdr;
+  size_t detected_header_len = FrameHeader::SIZE;        // длина одной копии заголовка, используем для логов
+  size_t header_copies = 1;                              // количество копий заголовка до payload
   bool headers_match = false;
   if (primary_ok && secondary_ok) {
     headers_match = (primary_hdr.ver == secondary_hdr.ver) &&
@@ -258,6 +267,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   size_t payload_offset = FrameHeader::SIZE;
   if (!primary_ok && secondary_ok) {
     payload_offset = FrameHeader::SIZE * 2;                // принимаем старый формат с дублированным заголовком
+    header_copies = 2;
   }
 
   auto extract_payload = [&](size_t offset) {
@@ -266,21 +276,57 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     removePilots(payload_p, payload_len, payload_buf_);
   };
 
-  extract_payload(payload_offset);
-  bool payload_len_ok = (payload_buf_.size() == hdr.getPayloadLen());
-  if (!payload_len_ok && frame_buf_.size() >= FrameHeader::SIZE * 2) {
-    size_t alt_offset = FrameHeader::SIZE * 2;
-    extract_payload(alt_offset);
-    if (payload_buf_.size() == hdr.getPayloadLen()) {
-      payload_offset = alt_offset;                        // фиксируем смещение без дублированного заголовка
-      payload_len_ok = true;
+  auto try_payload_offset = [&](size_t offset,
+                                size_t header_len,
+                                const char* reason) -> bool {
+    if (frame_buf_.size() <= offset) {
+      DEBUG_LOG("RxModule: смещение %zu (%s) выходит за пределы кадра %zu байт", offset, reason, frame_buf_.size());
+      return false;
     }
+    extract_payload(offset);
+    if (payload_buf_.size() == hdr.getPayloadLen()) {
+      payload_offset = offset;
+      detected_header_len = header_len;
+      header_copies = header_len ? (offset / header_len) : header_copies;
+      LOG_INFO("RxModule: полезная нагрузка совпала при смещении %zu байт (%s)", offset, reason);
+      return true;
+    }
+    DEBUG_LOG("RxModule: смещение %zu (%s) дало payload %zu байт вместо %u", offset, reason, payload_buf_.size(), hdr.getPayloadLen());
+    return false;
+  };
+
+  const char* initial_reason = (payload_offset == FrameHeader::SIZE)
+                                   ? "стандартный заголовок"
+                                   : "предустановленное смещение";
+  bool payload_len_ok = try_payload_offset(payload_offset, detected_header_len, initial_reason);
+  if (!payload_len_ok && payload_offset != FrameHeader::SIZE && frame_buf_.size() >= FrameHeader::SIZE) {
+    payload_len_ok = try_payload_offset(FrameHeader::SIZE, FrameHeader::SIZE, "стандартный заголовок (повторная попытка)");
+  }
+  if (!payload_len_ok && payload_offset != FrameHeader::MIN_SIZE) {
+    payload_len_ok = try_payload_offset(FrameHeader::MIN_SIZE, FrameHeader::MIN_SIZE, "укороченный заголовок");
+  }
+  if (!payload_len_ok && frame_buf_.size() >= FrameHeader::MIN_SIZE * 2) {
+    payload_len_ok = try_payload_offset(FrameHeader::MIN_SIZE * 2,
+                                       FrameHeader::MIN_SIZE,
+                                       "двойной укороченный заголовок");
+    if (payload_len_ok) header_copies = 2;
+  }
+  if (!payload_len_ok && frame_buf_.size() >= FrameHeader::SIZE * 2) {
+    payload_len_ok = try_payload_offset(FrameHeader::SIZE * 2,
+                                       FrameHeader::SIZE,
+                                       "двойной стандартный заголовок");
+    if (payload_len_ok) header_copies = 2;
   }
   profile_scope.mark(&ProfilingSnapshot::payload_extract);
   if (!payload_len_ok) {
+    LOG_WARN("RxModule: ни одно смещение заголовка не дало ожидаемую длину %u байт, фактическая %zu байт",
+             hdr.getPayloadLen(),
+             payload_buf_.size());
     profile_scope.markDrop("несовпадение длины payload");
     return;
   }
+
+  LOG_INFO("RxModule: финальный заголовок %zu байт, копий %zu, payload начинается с %zu", detected_header_len, header_copies, payload_offset);
   const uint8_t hdr_flags = hdr.getFlags();
   const bool ack_no_flags = (hdr_flags &
                              (FrameHeader::FLAG_ENCRYPTED | FrameHeader::FLAG_CONV_ENCODED)) == 0;
