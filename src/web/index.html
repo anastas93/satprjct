@@ -429,6 +429,21 @@
           </div>
         </section>
         <section class="settings-section">
+          <h3>Ключи шифрования</h3>
+          <div class="settings-group inline">
+            <label>Активный ключ
+              <select id="keyMode">
+                <option value="local">LOCAL — локальный ключ устройства</option>
+                <option value="peer">PEER — по сохранённому удалённому ключу</option>
+              </select>
+              <div id="keyModeHint" class="field-hint">Состояние не загружено.</div>
+            </label>
+            <div class="actions">
+              <button type="button" id="btnKeyModeApply" class="btn">Переключить</button>
+            </div>
+          </div>
+        </section>
+        <section class="settings-section">
           <h3>Тестовые сообщения</h3>
           <div class="settings-group">
             <label>Сообщение для TESTRXM

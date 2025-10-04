@@ -121,6 +121,7 @@ const UI = {
     lightPackBusy: false,
     rxBoostedGain: null,
     encBusy: false,
+    keyModePending: false,
     encryption: null,
     infoChannel: null,
     infoChannelTx: null,
@@ -688,6 +689,9 @@ async function init() {
   UI.els.testRxmMessageHint = $("#testRxmMessageHint");
   UI.els.channelSelect = $("#CH");
   UI.els.channelSelectHint = $("#channelSelectHint");
+  UI.els.keyModeSelect = $("#keyMode");
+  UI.els.keyModeHint = $("#keyModeHint");
+  UI.els.keyModeApply = $("#btnKeyModeApply");
   UI.els.txlInput = $("#txlSize");
   UI.els.autoNightSwitch = $("#autoNightMode");
   UI.els.autoNightHint = $("#autoNightHint");
@@ -1071,6 +1075,14 @@ async function init() {
   const bankSel = $("#BANK"); if (bankSel) bankSel.addEventListener("change", () => refreshChannels({ forceBank: true }));
   if (UI.els.channelSelect) UI.els.channelSelect.addEventListener("change", onChannelSelectChange);
   updateChannelSelectHint();
+  if (UI.els.keyModeSelect) {
+    UI.els.keyModeSelect.addEventListener("change", () => {
+      updateKeyModeControls(UI.key.state, { preserveSelection: true });
+    });
+  }
+  if (UI.els.keyModeApply) {
+    UI.els.keyModeApply.addEventListener("click", () => applySelectedKeyMode());
+  }
 
   // Безопасность
   const btnKeyGen = $("#btnKeyGen"); if (btnKeyGen) btnKeyGen.addEventListener("click", () => requestKeyGen());
@@ -8612,6 +8624,7 @@ function renderKeyState(state, options) {
     const baseKeyId = deriveKeyIdFromHex(data.baseKey);
     updateKeyStatusIndicators(data, { idEl, activeId: normalizedId, baseKeyId });
   }
+  updateKeyModeControls(data);
   if (messageEl) messageEl.textContent = UI.key.lastMessage || "";
   if (opts.persist !== false) persistKeyStateSnapshot();
 }
@@ -8631,6 +8644,138 @@ function persistKeyStateSnapshot() {
     else storage.remove(KEY_STATE_MESSAGE_STORAGE_KEY);
   } catch (err) {
     console.warn("[key] не удалось сохранить сообщение о ключе:", err);
+  }
+}
+
+// Обновляем выпадающий список режима ключа и кнопку переключения в настройках
+function updateKeyModeControls(state, options) {
+  const select = UI.els.keyModeSelect || $("#keyMode");
+  const hint = UI.els.keyModeHint || $("#keyModeHint");
+  const applyBtn = UI.els.keyModeApply || $("#btnKeyModeApply");
+  if (!UI.els.keyModeSelect && select) UI.els.keyModeSelect = select;
+  if (!UI.els.keyModeHint && hint) UI.els.keyModeHint = hint;
+  if (!UI.els.keyModeApply && applyBtn) UI.els.keyModeApply = applyBtn;
+  if (!select && !hint && !applyBtn) return;
+
+  const preserveSelection = options && options.preserveSelection === true;
+  const data = state && typeof state === "object" ? state : null;
+  const hasState = !!data;
+  const normalizedType = data && typeof data.type === "string"
+    ? data.type.toLowerCase()
+    : "";
+  const currentMode = normalizedType === "external" ? "peer" : "local";
+  const peerAvailable = data && typeof data.peer === "string" && data.peer.trim().length > 0;
+
+  let selectedMode = currentMode;
+  if (select) {
+    if (preserveSelection) {
+      selectedMode = select.value === "peer" ? "peer" : "local";
+    } else {
+      selectedMode = currentMode;
+      if (select.value !== currentMode) select.value = currentMode;
+    }
+    const peerOption = select.querySelector('option[value="peer"]');
+    if (peerOption) peerOption.disabled = !peerAvailable;
+  }
+
+  const pending = !!(UI.state && UI.state.keyModePending);
+  if (select) {
+    select.disabled = pending || !hasState;
+  }
+
+  let hintText = hasState ? "Активен локальный ключ." : "Состояние ключа недоступно.";
+  if (hasState) {
+    if (pending) {
+      hintText = "Выполняется переключение ключа…";
+    } else if (selectedMode === "peer") {
+      if (!peerAvailable) {
+        hintText = "Удалённый ключ не сохранён — переключение на PEER недоступно.";
+      } else if (currentMode === "peer") {
+        hintText = "Активен ключ PEER (external).";
+      } else {
+        hintText = "Будет применён сохранённый удалённый ключ (PEER).";
+      }
+    } else if (currentMode === "peer") {
+      hintText = "Будет сгенерирован новый локальный ключ.";
+    } else {
+      hintText = "Активен локальный ключ.";
+    }
+  }
+
+  if (hint) hint.textContent = hintText;
+
+  if (applyBtn) {
+    if (pending) {
+      applyBtn.disabled = true;
+      applyBtn.setAttribute("aria-busy", "true");
+    } else {
+      applyBtn.removeAttribute("aria-busy");
+      const canApply = hasState
+        && selectedMode !== currentMode
+        && (selectedMode !== "peer" || peerAvailable);
+      applyBtn.disabled = !canApply;
+    }
+  }
+}
+
+// Фиксируем состояние ожидания переключения ключа, чтобы заблокировать элементы управления
+function setKeyModePending(pending, options) {
+  UI.state.keyModePending = !!pending;
+  const preserve = options && options.preserveSelection === true;
+  updateKeyModeControls(UI.key.state, { preserveSelection: pending || preserve });
+}
+
+// Выполняем переключение между локальным ключом и ключом собеседника (PEER)
+async function applySelectedKeyMode() {
+  const select = UI.els.keyModeSelect || $("#keyMode");
+  const hint = UI.els.keyModeHint || $("#keyModeHint");
+  if (!select) return;
+  if (!UI.els.keyModeSelect) UI.els.keyModeSelect = select;
+  if (!UI.els.keyModeHint && hint) UI.els.keyModeHint = hint;
+
+  const data = UI.key && typeof UI.key.state === "object" ? UI.key.state : null;
+  if (!data) {
+    updateKeyModeControls(data);
+    return;
+  }
+
+  const desiredMode = select.value === "peer" ? "peer" : "local";
+  const currentMode = typeof data.type === "string" && data.type.toLowerCase() === "external"
+    ? "peer"
+    : "local";
+  const hasPeer = typeof data.peer === "string" && data.peer.trim().length > 0;
+
+  if (desiredMode === "peer" && !hasPeer) {
+    if (hint) {
+      hint.textContent = "Удалённый ключ не сохранён — переключение на PEER недоступно.";
+    }
+    note("Переключение на ключ PEER недоступно: отсутствует сохранённый удалённый ключ");
+    updateKeyModeControls(data, { preserveSelection: false });
+    return;
+  }
+
+  if (desiredMode === currentMode) {
+    updateKeyModeControls(data, { preserveSelection: false });
+    return;
+  }
+
+  setKeyModePending(true);
+  let success = false;
+  try {
+    success = desiredMode === "peer"
+      ? await requestKeyGenPeer()
+      : await requestKeyGen();
+  } catch (err) {
+    console.error("[key] ошибка переключения режима ключа:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    note(`Ошибка переключения ключа: ${message}`);
+  }
+
+  setKeyModePending(false, { preserveSelection: !success });
+  if (!success && hint) {
+    hint.textContent = desiredMode === "peer"
+      ? "Не удалось переключиться на ключ PEER — подробности смотрите в журнале."
+      : "Не удалось сгенерировать локальный ключ — подробности смотрите в журнале.";
   }
 }
 
@@ -8953,7 +9098,7 @@ async function handleKeyGenerationCommand(options) {
 }
 
 async function requestKeyGen() {
-  await handleKeyGenerationCommand({
+  return handleKeyGenerationCommand({
     command: "KEYGEN",
     label: "KEYGEN",
     requestLog: "запрос генерации",
@@ -8962,7 +9107,7 @@ async function requestKeyGen() {
 }
 
 async function requestKeyGenPeer() {
-  await handleKeyGenerationCommand({
+  return handleKeyGenerationCommand({
     command: "KEYGEN PEER",
     label: "KEYGEN PEER",
     requestLog: "запрос повторного применения удалённого ключа",
