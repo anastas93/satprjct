@@ -454,6 +454,17 @@ int16_t RadioSX1262::resetToDefaults() {
     lastError_ = state;                             // сохраняем код ошибки инициализации
     return lastError_;                              // ошибка инициализации
   }
+  radio_.setDioIrqParams(                          // настраиваем выводы прерываний SX1262
+      RADIOLIB_SX126X_IRQ_RX_DONE |
+          RADIOLIB_SX126X_IRQ_HEADER_VALID |
+          RADIOLIB_SX126X_IRQ_HEADER_ERR |
+          RADIOLIB_SX126X_IRQ_CRC_ERR,
+      RADIOLIB_SX126X_IRQ_RX_DONE |
+          RADIOLIB_SX126X_IRQ_HEADER_VALID |
+          RADIOLIB_SX126X_IRQ_HEADER_ERR |
+          RADIOLIB_SX126X_IRQ_CRC_ERR,
+      RADIOLIB_SX126X_IRQ_NONE,
+      RADIOLIB_SX126X_IRQ_NONE);
   radio_.setDio1Action(onDio1Static);                     // колбэк приёма
   if (!setRxBoostedGainMode(cfg.radio.rxBoostedGain)) {   // применение усиления по умолчанию
     rxBoostedGainEnabled_ = false;                        // фиксируем фактическое состояние
