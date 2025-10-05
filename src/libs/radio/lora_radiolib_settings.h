@@ -1,0 +1,32 @@
+#pragma once
+
+#include <cstdint>
+
+namespace LoRaRadioLibSettings {
+
+// Структура описывает параметры драйвера SX1262, управляемые через RadioLib.
+// Все поля снабжены подробными комментариями с указанием их влияния.
+struct SX1262DriverOptions {
+  bool useDio2AsRfSwitch = true;      // Использовать ли вывод DIO2 в качестве RF-переключателя
+  bool useDio3ForTcxo = false;        // Управлять ли внешним TCXO через DIO3
+  float tcxoVoltage = 0.0f;           // Напряжение питания TCXO, В (0 — TCXO не используется)
+  bool enableRegulatorLDO = false;    // Принудительно включить LDO-регулятор питания
+  bool enableRegulatorDCDC = false;   // Принудительно включить DC-DC регулятор
+  bool autoLdro = true;               // Автоматическое управление низким коэффициентом дьюти-цикла (LDRO)
+  bool implicitHeader = false;        // Режим implicit header (без заголовка) для полезной нагрузки
+  bool enableCrc = true;              // Включение аппаратного CRC пакета
+  bool invertIq = false;              // Инверсия I/Q при приёме/передаче
+  bool publicNetwork = true;          // Использовать ли публичное LoRa-синхрослово
+  uint16_t syncWord = 0x18;           // Пользовательское синхрослово LoRa
+  uint16_t preambleLength = 16;       // Длина преамбулы в символах
+  bool rxBoostedGain = true;          // Усиленный режим LNA при приёме
+};
+
+// Набор параметров по умолчанию, применяемый при инициализации радиомодуля.
+inline constexpr SX1262DriverOptions DEFAULT{};
+
+// Удобные псевдонимы для часто используемых параметров.
+inline constexpr bool DEFAULT_RX_BOOSTED_GAIN = DEFAULT.rxBoostedGain;         // Режим усиленного приёма
+inline constexpr uint16_t DEFAULT_PREAMBLE_LENGTH = DEFAULT.preambleLength;    // Длина преамбулы по умолчанию
+
+} // namespace LoRaRadioLibSettings

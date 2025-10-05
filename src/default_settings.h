@@ -5,6 +5,7 @@
 #include <array>
 #include "channel_bank.h" // Банк каналов
 #include "libs/log_hook/log_hook.h" // буферизованный хук логирования
+#include "libs/radio/lora_radiolib_settings.h" // параметры LoRa/RadioLib по умолчанию
 #ifdef ARDUINO
 #include "libs/serial_mirror/serial_mirror.h" // зеркалирование Serial в веб-журнал
 #endif
@@ -26,13 +27,15 @@ namespace DefaultSettings {
   constexpr uint8_t BW_PRESET = 2;                // Индекс полосы (15,63 кГц)
   constexpr uint8_t SF_PRESET = 2;                // Индекс фактора расширения
   constexpr uint8_t CR_PRESET = 0;                // Индекс коэффициента кодирования
-  constexpr bool RX_BOOSTED_GAIN = true;         // Режим повышенного усиления приёмника
+  // Параметры LoRa/RadioLib вынесены в отдельный заголовок
+  constexpr bool RX_BOOSTED_GAIN = LoRaRadioLibSettings::DEFAULT_RX_BOOSTED_GAIN; // Режим повышенного усиления приёмника
   constexpr size_t GATHER_BLOCK_SIZE = 110;       // Размер блока для PacketGatherer
   constexpr uint32_t SEND_PAUSE_MS = 370;          // Ожидание между отправками и приёмом (мс)
   constexpr uint32_t ACK_TIMEOUT_MS = 320;         // Тайм-аут ожидания ACK перед повтором (мс)
   constexpr uint32_t PING_WAIT_MS = 500;           // Ожидание ответа на пинг (мс)
   constexpr size_t PING_PACKET_SIZE = 5;           // Размер пинг-пакета (байты)
   constexpr size_t SERIAL_BUFFER_LIMIT = 500UL * 1024UL; // Максимальный размер буфера приёма по Serial (байты)
+  constexpr uint16_t PREAMBLE_LENGTH = LoRaRadioLibSettings::DEFAULT_PREAMBLE_LENGTH;          // Длина преамбулы LoRa (символы)
   constexpr size_t TX_QUEUE_CAPACITY = 160;        // Ёмкость очередей TxModule (до четырёх сообщений по 5000 байт)
   constexpr bool USE_RS = false;                   // использовать кодирование RS(255,223)
   constexpr bool USE_CONV = true;                  // применять свёрточное кодирование
@@ -51,7 +54,6 @@ namespace DefaultSettings {
   constexpr LogLevel LOG_LEVEL = LogLevel::DEBUG;   // Текущий уровень вывода
   constexpr uint32_t LOGGER_RATE_LINES_PER_SEC = 80; // Ограничение скорости вывода строк
   constexpr uint32_t LOGGER_RATE_BURST = 40;         // Максимальный размер «пакета» до притормаживания
-  constexpr uint16_t PREAMBLE_LENGTH = 16;          // Длина преамбулы LoRa (символы)
   // Ключ шифрования по умолчанию (16 байт)
   constexpr std::array<uint8_t, 16> DEFAULT_KEY{
       0x00, 0x01, 0x02, 0x03,

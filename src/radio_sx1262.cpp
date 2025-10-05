@@ -1,5 +1,6 @@
 #include "radio_sx1262.h"
 #include "default_settings.h"
+#include "libs/radio/lora_radiolib_settings.h" // централизованные настройки LoRa/RadioLib
 #include "libs/config_loader/config_loader.h" // доступ к загруженной конфигурации
 #include "libs/radio/frequency_tables.h"      // таблицы частот и описания
 #include <Arduino.h>
@@ -400,6 +401,7 @@ int16_t RadioSX1262::resetToDefaults() {
 
   lastError_ = RADIOLIB_ERR_NONE;                // сбрасываем сохранённый код ошибки
   const auto& cfg = ConfigLoader::getConfig();   // читаем загруженную конфигурацию
+  const auto& radioDefaults = LoRaRadioLibSettings::DEFAULT; // Базовые настройки RadioLib/LoRa
   bank_ = cfg.radio.bank;                        // банк каналов
   uint16_t bankSize = BANK_CHANNELS_[static_cast<int>(bank_)];
   if (bankSize == 0) {
@@ -446,10 +448,13 @@ int16_t RadioSX1262::resetToDefaults() {
     cr_preset_ = cfg.radio.crPreset;    // коэффициент кодирования
   }
 
+  tcxo_ = radioDefaults.useDio3ForTcxo ? radioDefaults.tcxoVoltage : 0.0f; // используем ли внешний TCXO
+  const uint8_t syncWord = static_cast<uint8_t>(radioDefaults.syncWord & 0xFFU); // младший байт синхрослова
+
   int state = radio_.begin(
       fRX_bank_[static_cast<int>(bank_)][channel_],
       BW_[bw_preset_], SF_[sf_preset_], CR_[cr_preset_],
-      0x18, Pwr_[pw_preset_], DefaultSettings::PREAMBLE_LENGTH, tcxo_, false);
+      syncWord, Pwr_[pw_preset_], radioDefaults.preambleLength, tcxo_, radioDefaults.enableRegulatorDCDC);
   if (state != RADIOLIB_ERR_NONE) {
     lastError_ = state;                             // сохраняем код ошибки инициализации
     return lastError_;                              // ошибка инициализации
