@@ -89,6 +89,26 @@ int main() {
   assert(it_short != short_stats.by_stage.end());
   assert(it_short->second >= 1);
 
+  // Проверяем приём кадра с укороченным (9-байтовым) заголовком
+  FrameHeader short_hdr;
+  short_hdr.msg_id = 0x1234;
+  short_hdr.frag_cnt = 1;
+  short_hdr.setFragIdx(0);
+  std::vector<uint8_t> short_payload{0x11, 0x22, 0x33, 0x44};
+  short_hdr.setPayloadLen(static_cast<uint16_t>(short_payload.size()));
+  std::array<uint8_t, FrameHeader::SIZE> short_hdr_buf{};
+  bool short_encoded = short_hdr.encode(short_hdr_buf.data(), short_hdr_buf.size(),
+                                        short_payload.data(), short_payload.size());
+  assert(short_encoded);
+  std::vector<uint8_t> short_frame;
+  short_frame.insert(short_frame.end(), short_hdr_buf.begin(),
+                     short_hdr_buf.begin() + FrameHeader::MIN_SIZE); // оставляем только 9 байт
+  short_frame.insert(short_frame.end(), short_payload.begin(), short_payload.end());
+  scrambler::scramble(short_frame.data(), short_frame.size());
+  received.clear();
+  rx.onReceive(short_frame.data(), short_frame.size());
+  assert(received == short_payload);                             // полезная нагрузка восстановлена полностью
+
   // Проверяем отбрасывание кадра с несовпадающими копиями заголовка
   FrameHeader primary_hdr;
   primary_hdr.msg_id = 7;

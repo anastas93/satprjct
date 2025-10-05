@@ -105,7 +105,7 @@ private:
   std::array<uint8_t,16> key_{};                    // ключ шифрования
   uint32_t pause_ms_ = DefaultSettings::SEND_PAUSE_MS; // пауза между пакетами
   std::chrono::steady_clock::time_point last_send_; // время последней отправки
-  bool ack_enabled_ = DefaultSettings::USE_ACK;     // режим ожидания ACK
+  bool ack_enabled_ = false;                        // полностью отключаем ACK для прямого режима
   uint8_t ack_retry_limit_ = DefaultSettings::ACK_RETRY_LIMIT; // число повторов
   uint32_t ack_timeout_ms_ = DefaultSettings::ACK_TIMEOUT_MS;  // тайм-аут ожидания
   uint32_t ack_delay_ms_ = DefaultSettings::ACK_RESPONSE_DELAY_MS; // задержка перед ответным ACK
@@ -117,7 +117,7 @@ private:
   std::deque<PendingMessage> ack_queue_;            // очередь мгновенных ACK-сообщений
   uint16_t next_ack_id_ = 0x8000;                   // идентификаторы ACK вне общей очереди
   std::chrono::steady_clock::time_point next_ack_send_time_; // момент, когда ACK можно отправить
-  bool encryption_enabled_ = DefaultSettings::USE_ENCRYPTION; // текущий режим шифрования
+  bool encryption_enabled_ = false;                 // шифрование временно отключено
   std::unordered_set<uint16_t> plain_messages_;     // учёт идентификаторов «сырых» пакетов
 };
 

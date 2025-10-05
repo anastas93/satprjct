@@ -149,33 +149,18 @@ uint16_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos, bool with
   }
   if (qos > 3) qos = 3;                           // ограничение диапазона QoS
   bool is_ack_marker = protocol::ack::isAckPayload(data, len);
-  if (is_ack_marker) {
-    PendingMessage ack_msg;                       // формируем отдельную запись для ACK
-    ack_msg.id = next_ack_id_;                    // выделяем идентификатор вне общей очереди
-    ++next_ack_id_;
-    if (next_ack_id_ < 0x8000) next_ack_id_ = 0x8000; // удерживаемся в верхнем диапазоне
-    ack_msg.data.assign(1, protocol::ack::MARKER); // всегда отправляем минимальный ACK
-    ack_msg.qos = qos;                            // запоминаем исходный класс
-    ack_msg.attempts_left = 0;                    // повторы не нужны
-    ack_msg.expect_ack = false;                   // ACK никогда не ждёт подтверждения
-    ack_msg.is_ack = true;                        // помечаем быстрый кадр подтверждения
-    ack_msg.next_fragment = 0;
-    ack_msg.completed = false;
-    ack_msg.next_allowed_send = std::chrono::steady_clock::time_point::min();
-    ack_queue_.push_back(std::move(ack_msg));
-    auto now = std::chrono::steady_clock::now();
-    next_ack_send_time_ = ack_delay_ms_ == 0
-                              ? now
-                              : now + std::chrono::milliseconds(ack_delay_ms_); // выдерживаем задержку перед ответом
-    DEBUG_LOG("TxModule: ACK добавлен в быстрый буфер id=%u qos=%u",
-              static_cast<unsigned int>(ack_msg.id),
-              static_cast<unsigned int>(ack_msg.qos));
-    return ack_queue_.back().id;
-  }
+  // Полностью отключаем расширенную обработку: ACK больше не выносим в отдельную очередь,
+  // данные сразу же ставим в буфер без модификации. Это сохраняет прямую схему
+  // «данные → байты → отправка» и оставляет исходную реализацию закомментированной
+  // для последующего возврата, когда обработка будет включена снова.
+  //
+  // Старая логика формирования отдельного ACK:
+  // if (is_ack_marker) { ... }
   DEBUG_LOG_VAL("TxModule: постановка длины=", len);
-  uint16_t res = splitter_.splitAndEnqueue(buffers_[qos], data, len, with_prefix);
+  uint16_t res = buffers_[qos].enqueue(data, len);
   if (res) {
     DEBUG_LOG_VAL("TxModule: сообщение id=", res);
+    plain_messages_.insert(res);                 // принудительно помечаем кадр как «сырой»
   } else {
     DEBUG_LOG("TxModule: ошибка постановки");
   }

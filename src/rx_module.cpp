@@ -183,6 +183,16 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     return;
   }
 
+  // Временно отключаем все этапы обработки: данные сразу передаём в пользовательский
+  // колбэк без дескремблирования, декодирования и проверки. Полный конвейер сохранён
+  // ниже в закомментированном блоке, чтобы позже вернуть сложную обработку.
+  if (cb_) {
+    cb_(data, len);
+    profile_scope.mark(&ProfilingSnapshot::deliver);
+  }
+  return;
+
+#if 0
   auto now = std::chrono::steady_clock::now();          // фиксируем момент для очистки временных структур
   cleanupPendingConv(now);
   cleanupPendingSplits(now);
@@ -234,9 +244,20 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   FrameHeader secondary_hdr;
   bool primary_ok = FrameHeader::decode(frame_buf_.data(), frame_buf_.size(), primary_hdr);
   bool secondary_ok = false;
-  if (frame_buf_.size() >= FrameHeader::SIZE * 2) {
-    secondary_ok = FrameHeader::decode(frame_buf_.data() + FrameHeader::SIZE,
-                                       frame_buf_.size() - FrameHeader::SIZE, secondary_hdr);
+  size_t secondary_offset = 0;                             // смещение второй копии заголовка
+  auto try_secondary = [&](size_t offset) {
+    if (secondary_ok) return;                              // уже нашли валидную копию
+    if (frame_buf_.size() <= offset) return;
+    size_t available = frame_buf_.size() - offset;
+    if (available < FrameHeader::MIN_SIZE) return;         // нет минимальной длины копии
+    if (FrameHeader::decode(frame_buf_.data() + offset, available, secondary_hdr)) {
+      secondary_ok = true;
+      secondary_offset = offset;
+    }
+  };
+  try_secondary(FrameHeader::SIZE);                        // сперва предполагаем полный заголовок
+  if (!secondary_ok && frame_buf_.size() >= FrameHeader::MIN_SIZE * 2) {
+    try_secondary(FrameHeader::MIN_SIZE);                  // затем пробуем укороченный интервал
   }
   profile_scope.mark(&ProfilingSnapshot::header);
   if (!primary_ok && !secondary_ok) {                   // заголовок не распознан
@@ -264,7 +285,12 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
 
   size_t payload_offset = FrameHeader::SIZE;
   if (!primary_ok && secondary_ok) {
-    payload_offset = FrameHeader::SIZE * 2;                // принимаем старый формат с дублированным заголовком
+    size_t secondary_len = FrameHeader::SIZE;
+    if (frame_buf_.size() < secondary_offset + FrameHeader::SIZE) {
+      secondary_len = FrameHeader::MIN_SIZE;               // доступна только укороченная копия
+    }
+    payload_offset = secondary_offset + secondary_len;     // payload начинается сразу после последней копии
+    detected_header_len = secondary_len;
     header_copies = 2;
   }
 
@@ -718,6 +744,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
     expected_frag_cnt_ = 0;
     next_frag_idx_ = 0;
   }
+#endif  // конец временно отключённой обработки RxModule
 }
 
 void RxModule::cleanupPendingConv(std::chrono::steady_clock::time_point now) {
