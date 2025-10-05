@@ -167,6 +167,7 @@ private:
   struct PublicSX1262 : public SX1262 {
     using SX1262::SX1262;
     using SX1262::clearIrqStatus;
+    using SX1262::setDioIrqParams; // Делаем установку масок IRQ доступной снаружи
 
     // Универсальный доступ к флагам IRQ с учётом варианта API библиотеки
     uint32_t getIrqFlags() {
