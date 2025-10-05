@@ -1466,17 +1466,23 @@ String makeKeyTransferWaitingJson() {
   return response;
 }
 
-//    KEYTRANSFER;  true,   
+//  KEYTRANSFER:  hasKeyTransferMagicPrefix  handleKeyTransferFrame  (   ).
+// bool hasKeyTransferMagicPrefix(const uint8_t* data, size_t len) {
+//   return data && len >= sizeof(KeyTransfer::MAGIC) &&
+//          std::equal(std::begin(KeyTransfer::MAGIC), std::end(KeyTransfer::MAGIC), data);
+// }
+
+#if 0  // KEYTRANSFER: обработчик кадра отключён в текущей конфигурации
 bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
   uint32_t msg_id = 0;
   KeyTransfer::FramePayload payload;
   if (!KeyTransfer::parseFrame(data, len, payload, msg_id)) {
-    return false;                                  //      
+    return false;                                  //
   }
   keyTransferRuntime.last_msg_id = msg_id;
   keyTransferRuntime.legacy_peer = (payload.version == KeyTransfer::VERSION_LEGACY);
   if (!keyTransferRuntime.waiting) {
-    SimpleLogger::logStatus("KEYTRANSFER IGN");   //   
+    SimpleLogger::logStatus("KEYTRANSFER IGN");   //
     return true;                                   //     RxModule
   }
   const bool certificate_supplied =
@@ -1509,7 +1515,7 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
     Serial.println("KEYTRANSFER:        ");
   }
 
-  KeyLoader::KeyRecord previous_snapshot;          //      
+  KeyLoader::KeyRecord previous_snapshot;          //
   bool has_previous_snapshot = KeyLoader::loadKeyRecord(previous_snapshot);
   const std::array<uint8_t,32>* remote_ephemeral = payload.has_ephemeral ? &payload.ephemeral_public : nullptr;
   if (!KeyLoader::applyRemotePublic(payload.public_key, remote_ephemeral)) {
@@ -1542,7 +1548,7 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
                                       previous_snapshot.nonce_salt);
       }
       if (restored) {
-        reloadCryptoModules();                        //    
+        reloadCryptoModules();                        //
       }
       keyTransferRuntime.completed = false;
       keyTransferRuntime.waiting = false;
@@ -1567,7 +1573,7 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
       return true;
     }
   }
-  reloadCryptoModules();                          //  Tx/Rx  
+  reloadCryptoModules();                          //  Tx/Rx
   keyTransferRuntime.completed = true;
   keyTransferRuntime.waiting = false;
   keyTransferRuntime.error = String();
@@ -1583,6 +1589,7 @@ bool handleKeyTransferFrame(const uint8_t* data, size_t len) {
   Serial.println("KEYTRANSFER:     LoRa");
   return true;
 }
+#endif  // KEYTRANSFER отключён
 
 String cmdKeyState() {
   DEBUG_LOG("Key:  ");
@@ -3636,8 +3643,8 @@ void setup() {
       tx.loop();
     }
   });
-  radio.setReceiveCallback([&](const uint8_t* d, size_t l){  //  
-    if (handleKeyTransferFrame(d, l)) return;                //    
+  radio.setReceiveCallback([&](const uint8_t* d, size_t l){  //
+    // if (handleKeyTransferFrame(d, l)) return;             // KEYTRANSFER: обработка отключена
     rx.onReceive(d, l);
   });
   radio.setIrqLogCallback(onRadioIrqLog);                    //  IRQ-  SSE    Serial
