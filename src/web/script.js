@@ -643,6 +643,7 @@ async function init() {
   UI.els.rstsFullBtn = $("#btnRstsFull");
   UI.els.rstsJsonBtn = $("#btnRstsJson");
   UI.els.rstsDownloadBtn = $("#btnRstsDownloadJson");
+  UI.els.debugExportBtn = $("#btnDebugExportTxt");
   UI.els.chatLog = $("#chatLog");
   UI.els.chatInput = $("#chatInput");
   UI.els.chatScrollBtn = $("#chatScrollBottom");
@@ -1013,6 +1014,7 @@ async function init() {
   if (UI.els.rstsFullBtn) UI.els.rstsFullBtn.addEventListener("click", requestRstsFullDebug);
   if (UI.els.rstsJsonBtn) UI.els.rstsJsonBtn.addEventListener("click", requestRstsJsonDebug);
   if (UI.els.rstsDownloadBtn) UI.els.rstsDownloadBtn.addEventListener("click", downloadRstsFullJson);
+  if (UI.els.debugExportBtn) UI.els.debugExportBtn.addEventListener("click", exportDebugLogAsText);
 
   loadChatHistory();
   startReceivedMonitor({ immediate: true });
@@ -3551,6 +3553,58 @@ async function downloadRstsFullJson() {
   URL.revokeObjectURL(url);
   debugLog("RSTS FULL JSON сохранён (" + normalized.length + " элементов)");
   note("RSTS FULL JSON: файл сохранён");
+}
+
+// Экспортируем текущий debug-log в текстовый файл с человекочитаемыми метаданными
+function exportDebugLogAsText() {
+  const log = UI.els && UI.els.debugLog ? UI.els.debugLog : null;
+  if (!log) return;
+  const cards = Array.from(log.querySelectorAll('.debug-card'));
+  if (cards.length === 0) {
+    note("Экспорт Debug: журнал пуст");
+    return;
+  }
+  const lines = [];
+  for (const card of cards) {
+    if (!card) continue;
+    const stamp = card.dataset && card.dataset.stamp ? String(card.dataset.stamp).trim() : "";
+    const type = card.dataset && card.dataset.type ? String(card.dataset.type).toUpperCase() : "";
+    const origin = card.dataset && card.dataset.origin ? String(card.dataset.origin).toUpperCase() : "";
+    const repeatRaw = card.dataset && card.dataset.repeatCount != null ? Number(card.dataset.repeatCount) : NaN;
+    const message = card.dataset && card.dataset.message
+      ? String(card.dataset.message)
+      : (card.__messageEl && card.__messageEl.textContent)
+        ? String(card.__messageEl.textContent)
+        : card.textContent || "";
+    const metaParts = [];
+    if (stamp) metaParts.push(stamp);
+    if (type) metaParts.push(type);
+    if (origin) metaParts.push(origin);
+    if (Number.isFinite(repeatRaw) && repeatRaw > 1) metaParts.push("повтор×" + repeatRaw);
+    const meta = metaParts.join(" ").trim();
+    const line = meta ? (meta + " " + message).trim() : String(message).trim();
+    if (line) lines.push(line.replace(/\s+$/u, ""));
+  }
+  if (lines.length === 0) {
+    note("Экспорт Debug: нечего выгружать");
+    return;
+  }
+  const content = lines.join("\n") + "\n";
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const now = new Date();
+  const stampIso = now.toISOString().replace(/[:]/g, "-");
+  const filename = "debug-log-" + stampIso + ".txt";
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+    link.remove();
+  }, 0);
+  note("Экспорт Debug: TXT сформирован");
 }
 
 function parseReceivedNumericId(name) {
@@ -10651,6 +10705,7 @@ function debugLog(text, opts) {
   const type = classifyDebugMessage(text);
   const card = document.createElement('article');
   card.className = 'debug-card debug-card--' + type;
+  card.dataset.type = type;
   if (options.origin) card.dataset.origin = options.origin;
   if (options.id != null) card.dataset.id = String(options.id);
   if (options.uptimeMs != null && Number.isFinite(options.uptimeMs)) {
