@@ -1,4 +1,5 @@
 #include "frame_header.h"
+#include <cstring>  // memcpy
 uint8_t FrameHeader::getFlags() const {
   return static_cast<uint8_t>((packed & FLAGS_MASK) >> FLAGS_SHIFT);
 }
@@ -71,13 +72,18 @@ bool FrameHeader::encode(uint8_t* out, size_t out_len, const uint8_t* payload, s
 
 // Декодирование заголовка
 bool FrameHeader::decode(const uint8_t* data, size_t len, FrameHeader& out) {
-  if (!data || len < SIZE) return false;
-  out.ver = data[0];
-  out.msg_id = static_cast<uint16_t>(data[1] << 8 | data[2]);
-  out.frag_cnt = static_cast<uint16_t>(data[3] << 8 | data[4]);
-  out.packed = (static_cast<uint32_t>(data[5]) << 24) |
-               (static_cast<uint32_t>(data[6]) << 16) |
-               (static_cast<uint32_t>(data[7]) << 8) |
-               static_cast<uint32_t>(data[8]);
+  if (!data || len < MIN_SIZE) return false;  // защита от чтения короче минимального заголовка
+
+  uint8_t local_buf[SIZE]{};                 // дополняем нулями, чтобы не выйти за пределы входного буфера
+  const size_t copy_len = len < SIZE ? len : SIZE;
+  std::memcpy(local_buf, data, copy_len);
+
+  out.ver = local_buf[0];
+  out.msg_id = static_cast<uint16_t>(local_buf[1] << 8 | local_buf[2]);
+  out.frag_cnt = static_cast<uint16_t>(local_buf[3] << 8 | local_buf[4]);
+  out.packed = (static_cast<uint32_t>(local_buf[5]) << 24) |
+               (static_cast<uint32_t>(local_buf[6]) << 16) |
+               (static_cast<uint32_t>(local_buf[7]) << 8) |
+               static_cast<uint32_t>(local_buf[8]);
   return true;
 }
