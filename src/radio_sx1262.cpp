@@ -401,7 +401,7 @@ int16_t RadioSX1262::resetToDefaults() {
 
   lastError_ = RADIOLIB_ERR_NONE;                // сбрасываем сохранённый код ошибки
   const auto& cfg = ConfigLoader::getConfig();   // читаем загруженную конфигурацию
-  const auto& radioDefaults = LoRaRadioLibSettings::DEFAULT; // Базовые настройки RadioLib/LoRa
+  const auto& radioDefaults = LoRaRadioLibSettings::DEFAULT_OPTIONS; // Базовые настройки RadioLib/LoRa
   bank_ = cfg.radio.bank;                        // банк каналов
   uint16_t bankSize = BANK_CHANNELS_[static_cast<int>(bank_)];
   if (bankSize == 0) {
