@@ -117,6 +117,26 @@ int16_t RadioSX1262::send(const uint8_t* data, size_t len) {
     return lastError_;
   }
 
+  const bool enforceImplicit = implicitHeaderEnabled_ && implicitHeaderLength_ > 0; // требуется ли подгонка длины
+  const uint8_t* payloadPtr = data;          // фактический указатель для передачи
+  size_t payloadLen = len;                   // фактическая длина
+  std::array<uint8_t, MAX_PACKET_SIZE> padded{}; // буфер для дополнения нулями
+  if (enforceImplicit) {
+    if (len > implicitHeaderLength_) {       // защита от переполнения фиксированного кадра
+      LOG_ERROR("RadioSX1262: длина %u превышает фиксированный размер %u байт",
+                static_cast<unsigned>(len),
+                static_cast<unsigned>(implicitHeaderLength_));
+      lastError_ = ERR_INVALID_ARGUMENT;
+      return lastError_;
+    }
+    if (len < implicitHeaderLength_) {       // дополняем до фиксированной длины
+      std::memcpy(padded.data(), data, len);
+      std::fill(padded.begin() + len, padded.begin() + implicitHeaderLength_, 0);
+      payloadPtr = padded.data();
+    }
+    payloadLen = implicitHeaderLength_;      // LoRa в implicit-режиме ждёт ровно заданную длину
+  }
+
   ScopedRadioLock guard(*this);
   const int16_t lockState = guard.acquire(toTicks(LOCK_TIMEOUT_MS));
   if (lockState != RADIOLIB_ERR_NONE) {
@@ -132,7 +152,7 @@ int16_t RadioSX1262::send(const uint8_t* data, size_t len) {
     LOG_ERROR("RadioSX1262: не удалось установить TX-частоту перед передачей");
     return lastError_;
   }
-  int state = radio_.transmit((uint8_t*)data, len); // отправляем пакет
+  int state = radio_.transmit(const_cast<uint8_t*>(payloadPtr), payloadLen); // отправляем пакет
   if (state != RADIOLIB_ERR_NONE) {          // проверка кода ошибки
     lastError_ = state;                      // сохраняем код сбоя
     LOG_ERROR_VAL("RadioSX1262: ошибка передачи, код=", state);
@@ -154,6 +174,7 @@ int16_t RadioSX1262::ping(const uint8_t* data, size_t len,
                           uint32_t& elapsedUs) {
   receivedLen = 0;                                        // сбрасываем длину ответа
   elapsedUs = 0;                                          // сбрасываем время
+  int16_t result = ERR_INVALID_ARGUMENT;                  // код возврата по умолчанию
   if (!data || len == 0 || !response || responseCapacity == 0) {
     lastError_ = ERR_INVALID_ARGUMENT;                    // некорректные аргументы
     return lastError_;
@@ -167,23 +188,43 @@ int16_t RadioSX1262::ping(const uint8_t* data, size_t len,
     return lastError_;
   }
 
+  const bool needRestoreImplicit = implicitHeaderEnabled_ && implicitHeaderLength_ > 0; // нужно ли вернуть implicit-режим
+  const size_t implicitLen = implicitHeaderLength_;       // сохраняем ожидаемую длину
+  bool headerTemporarilyExplicit = false;                 // отметка временного переключения
+
+  if (needRestoreImplicit) {                              // временно включаем явный заголовок для пинга
+    const int16_t headerState = radio_.explicitHeader();
+    if (headerState != RADIOLIB_ERR_NONE) {
+      LOG_WARN_VAL("RadioSX1262: не удалось выключить implicit header перед ping, код=", headerState);
+      lastError_ = headerState;
+      return lastError_;
+    }
+    implicitHeaderEnabled_ = false;
+    headerTemporarilyExplicit = true;
+  }
+
   float freq_tx = fTX_bank_[static_cast<int>(bank_)][channel_];
   float freq_rx = fRX_bank_[static_cast<int>(bank_)][channel_];
 
   if (!setFrequency(freq_tx)) {                           // не удалось установить TX
     LOG_ERROR("RadioSX1262: не удалось установить TX-частоту перед пингом");
-    return lastError_;
+    result = lastError_;
+    goto ping_cleanup;
   }
-  int state = radio_.transmit((uint8_t*)data, len);       // отправляем пакет
-  if (state != RADIOLIB_ERR_NONE) {                       // ошибка передачи
-    lastError_ = state;                                   // фиксируем код ошибки
-    setFrequency(freq_rx);
-    startReceiveWithRetry("ping: возврат в RX после ошибки передачи");
-    return lastError_;
+  {
+    int state = radio_.transmit(const_cast<uint8_t*>(data), len); // отправляем пакет
+    if (state != RADIOLIB_ERR_NONE) {                     // ошибка передачи
+      lastError_ = state;                                 // фиксируем код ошибки
+      setFrequency(freq_rx);
+      startReceiveWithRetry("ping: возврат в RX после ошибки передачи");
+      result = lastError_;
+      goto ping_cleanup;
+    }
   }
   if (!setFrequency(freq_rx)) {                           // возвращаем RX частоту
     startReceiveWithRetry("ping: попытка приёма после ошибки установки частоты");
-    return lastError_;
+    result = lastError_;
+    goto ping_cleanup;
   }
 
   packetReady_ = false;                                   // очищаем флаг готовности
@@ -210,14 +251,16 @@ int16_t RadioSX1262::ping(const uint8_t* data, size_t len,
       LOG_WARN_VAL("RadioSX1262: некорректная длина принятого пинг-ответа=", lenRead);
       startReceiveWithRetry("ping: повторный запуск приёма после некорректной длины");
       lastError_ = ERR_INVALID_ARGUMENT;
-      return lastError_;
+      result = lastError_;
+      goto ping_cleanup;
     }
     int rxState = radio_.readData(buf.data(), lenRead);   // читаем пакет
     if (rxState != RADIOLIB_ERR_NONE) {                   // ошибка чтения
       lastError_ = rxState;                               // сохраняем код ошибки чтения
       LOG_ERROR_VAL("RadioSX1262: ошибка чтения пинг-ответа, код=", rxState);
       startReceiveWithRetry("ping: перезапуск после чтения ответа");
-      return lastError_;
+      result = lastError_;
+      goto ping_cleanup;
     }
     receivedLen = lenRead;                                // сохраняем длину ответа
     std::memcpy(response, buf.data(),                     // копируем в пользовательский буфер
@@ -231,14 +274,35 @@ int16_t RadioSX1262::ping(const uint8_t* data, size_t len,
     packetReady_ = false;
     startReceiveWithRetry("ping: ожидание ответа");
     lastError_ = RADIOLIB_ERR_NONE;
-    return lastError_;
+    result = lastError_;
+    goto ping_cleanup;
   }
 
   startReceiveWithRetry("ping: ожидание ответа");
   LOG_WARN("RadioSX1262: пинг-ответ не получен — истёк таймаут %lu мкс",
            static_cast<unsigned long>(timeoutUs));
   lastError_ = ERR_PING_TIMEOUT;
-  return lastError_;
+  result = lastError_;
+
+ping_cleanup:
+  if (headerTemporarilyExplicit) {                        // восстанавливаем implicit-режим
+    if (implicitLen > 0) {
+      const int16_t restoreState = radio_.implicitHeader(implicitLen);
+      if (restoreState != RADIOLIB_ERR_NONE) {
+        LOG_WARN_VAL("RadioSX1262: не удалось вернуть implicit header после ping, код=", restoreState);
+        implicitHeaderEnabled_ = false;
+        implicitHeaderLength_ = 0;
+      } else {
+        implicitHeaderEnabled_ = true;
+        implicitHeaderLength_ = implicitLen;
+      }
+    } else {
+      implicitHeaderEnabled_ = false;
+      implicitHeaderLength_ = 0;
+    }
+  }
+
+  return result;
 }
 
 
@@ -459,6 +523,10 @@ int16_t RadioSX1262::resetToDefaults() {
     lastError_ = state;                             // сохраняем код ошибки инициализации
     return lastError_;                              // ошибка инициализации
   }
+  const int16_t dio2State = radio_.setDio2AsRfSwitch(radioDefaults.useDio2AsRfSwitch);
+  if (dio2State != RADIOLIB_ERR_NONE) {
+    LOG_WARN_VAL("RadioSX1262: не удалось установить режим DIO2 как RF switch, код=", dio2State);
+  }
   radio_.setDioIrqParams(                          // настраиваем выводы прерываний SX1262
       RADIOLIB_SX126X_IRQ_RX_DONE |
           RADIOLIB_SX126X_IRQ_HEADER_VALID |
@@ -471,6 +539,37 @@ int16_t RadioSX1262::resetToDefaults() {
       RADIOLIB_SX126X_IRQ_NONE,
       RADIOLIB_SX126X_IRQ_NONE);
   radio_.setDio1Action(onDio1Static);                     // колбэк приёма
+
+  const uint8_t crcLen = radioDefaults.enableCrc ? 2 : 0; // CRC LoRa: 2 байта или отключено
+  const int16_t crcState = radio_.setCRC(crcLen);
+  if (crcState != RADIOLIB_ERR_NONE) {
+    LOG_WARN_VAL("RadioSX1262: не удалось применить настройку CRC, код=", crcState);
+  }
+  const int16_t iqState = radio_.invertIQ(radioDefaults.invertIq);
+  if (iqState != RADIOLIB_ERR_NONE) {
+    LOG_WARN_VAL("RadioSX1262: не удалось применить инверсию IQ, код=", iqState);
+  }
+
+  implicitHeaderEnabled_ = false;
+  implicitHeaderLength_ = 0;
+  if (radioDefaults.implicitHeader && radioDefaults.implicitPayloadLength > 0) {
+    const int16_t hdrState = radio_.implicitHeader(radioDefaults.implicitPayloadLength);
+    if (hdrState != RADIOLIB_ERR_NONE) {
+      LOG_WARN_VAL("RadioSX1262: не удалось включить implicit header длиной ", radioDefaults.implicitPayloadLength);
+      LOG_WARN_VAL("RadioSX1262: код ошибки implicit header=", hdrState);
+    } else {
+      implicitHeaderEnabled_ = true;
+      implicitHeaderLength_ = radioDefaults.implicitPayloadLength;
+      DEBUG_LOG("RadioSX1262: включён режим фиксированной длины %u байт",
+                static_cast<unsigned>(implicitHeaderLength_));
+    }
+  } else {
+    const int16_t hdrState = radio_.explicitHeader();
+    if (hdrState != RADIOLIB_ERR_NONE) {
+      LOG_WARN_VAL("RadioSX1262: не удалось включить explicit header, код=", hdrState);
+    }
+  }
+
   if (!setRxBoostedGainMode(cfg.radio.rxBoostedGain)) {   // применение усиления по умолчанию
     rxBoostedGainEnabled_ = false;                        // фиксируем фактическое состояние
     LOG_WARN("RadioSX1262: не удалось установить RX boosted gain");
@@ -703,6 +802,12 @@ void RadioSX1262::loop() {
   flushPendingIrqLog();                    // отложенный вывод статусов IRQ
   if (!packetReady_) {                      // пакет пока не готов
     return;
+  }
+  ScopedRadioLock guard(*this);             // защищаем доступ к радиомодулю из фонового цикла
+  const int16_t lockState = guard.acquire(toTicks(0));
+  if (lockState != RADIOLIB_ERR_NONE) {     // другой поток (ping/отправка) удерживает мьютекс
+    DEBUG_LOG("RadioSX1262: loop пропущен — радио занято внешней операцией");
+    return;                                 // повторим обработку, когда передача завершится
   }
   size_t len = radio_.getPacketLength();    // длина доступного пакета после фильтра IRQ
   // При завершении передачи длина пакета может быть мусорной и вызвать
