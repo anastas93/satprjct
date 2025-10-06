@@ -241,6 +241,8 @@ private:
   int cr_preset_ = 0;
   float tcxo_ = 0;
   bool rxBoostedGainEnabled_ = false;
+  bool implicitHeaderEnabled_ = false;   // активен ли режим фиксированной длины пакета
+  size_t implicitHeaderLength_ = 0;      // ожидаемая длина полезной нагрузки в implicit-режиме
 
   float lastSnr_ = 0.0f;     // SNR последнего пакета
   float lastRssi_ = 0.0f;    // RSSI последнего пакета
