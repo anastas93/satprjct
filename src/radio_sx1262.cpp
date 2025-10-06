@@ -754,7 +754,27 @@ void RadioSX1262::processPendingIrqLog() {
     const bool hasHeaderError = (flags & RADIOLIB_SX126X_IRQ_HEADER_ERR) != 0U;
 
     const bool hasRxIndicators = hasRxDone || hasHeaderValid || hasSyncValid; // есть признаки приёма
-    hasRxErrors = hasCrcError || hasHeaderError;                              // есть ошибки декодирования
+
+    bool recoverableImplicitHeaderError = false;
+    if (hasHeaderError && hasRxDone && implicitHeaderEnabled_) {
+      recoverableImplicitHeaderError = true; // событие характерно для длинного кадра в implicit-режиме
+      LOG_WARN("RadioSX1262: обнаружен пакет длиннее implicit-лимита %u байт — переключаемся на явный заголовок", 
+               static_cast<unsigned>(implicitHeaderLength_));
+      ScopedRadioLock guard(*this);
+      if (guard.acquire(toTicks(0)) == RADIOLIB_ERR_NONE) {
+        const int16_t headerState = radio_.explicitHeader();
+        if (headerState == RADIOLIB_ERR_NONE) {
+          implicitHeaderEnabled_ = false; // сбрасываем implicit, чтобы принимать переменную длину
+          implicitHeaderLength_ = 0;
+        } else {
+          LOG_WARN_VAL("RadioSX1262: не удалось отключить implicit header, код=", headerState);
+        }
+      } else {
+        LOG_WARN("RadioSX1262: не удалось захватить мьютекс радио для переключения режима заголовка");
+      }
+    }
+
+    hasRxErrors = hasCrcError || (hasHeaderError && !recoverableImplicitHeaderError); // есть ошибки декодирования
 
     shouldMarkPacketReady = hasRxIndicators && !hasRxErrors;                  // считаем пакет готовым
     needRxRecovery = hasRxIndicators && hasRxErrors;                          // требуется перезапуск RX
