@@ -651,15 +651,37 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
 
   // Дешифрование и сборка сообщения
   size_t tag_len = (hdr.ver >= FRAME_VERSION_AEAD) ? TAG_LEN : TAG_LEN_V1;
-  if (result_len < tag_len) {
-    profile_scope.markDrop("payload короче тега");
-    return;                                          // недостаточно данных
-  }
   const uint8_t* cipher = result_buf_.data();
-  size_t cipher_len = result_len - tag_len;
-  const uint8_t* tag = result_buf_.data() + cipher_len;
+  const uint8_t* tag = nullptr;
+  size_t cipher_len = result_len;
   bool encrypted = (hdr_flags & FrameHeader::FLAG_ENCRYPTED) != 0;
   bool should_decrypt = encrypted || encryption_forced_;
+  auto tail_all_zero = [&](size_t tail) {
+    if (tail == 0 || result_len < tail) {
+      return false;
+    }
+    const uint8_t* tail_begin = result_buf_.data() + (result_len - tail);
+    for (size_t i = 0; i < tail; ++i) {
+      if (tail_begin[i] != 0) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  if (should_decrypt) {
+    if (result_len < tag_len) {
+      profile_scope.markDrop("payload короче тега");
+      return;                                        // зашифрованный фрагмент без тега невалиден
+    }
+    cipher_len = result_len - tag_len;
+    tag = result_buf_.data() + cipher_len;
+  } else if (tag_len > 0 && tail_all_zero(tag_len)) {
+    // В открытых кадрах старые прошивки добавляют нулевой «тег»,
+    // чтобы сохранить совместимость с конвейером. Обрезаем его.
+    cipher_len = result_len - tag_len;
+  }
+
   bool decrypt_ok = false;
   if (should_decrypt) {
     nonce_ = KeyLoader::makeNonce(hdr.ver, hdr.frag_cnt, hdr.packed, hdr.msg_id); // packed содержит флаги, индекс и длину
@@ -688,7 +710,7 @@ void RxModule::onReceive(const uint8_t* data, size_t len) {
   }
   profile_scope.noteDecrypt(should_decrypt);
   if (!should_decrypt || (!decrypt_ok && !encrypted)) {
-    plain_buf_.assign(result_buf_.begin(), result_buf_.begin() + cipher_len); // принимаем открытый текст
+    plain_buf_.assign(result_buf_.begin(), result_buf_.begin() + static_cast<std::ptrdiff_t>(cipher_len));
   }
   profile_scope.mark(&ProfilingSnapshot::decrypt);
 
