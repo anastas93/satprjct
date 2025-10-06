@@ -1640,8 +1640,8 @@ tbody tr.selected-info td { font-weight:600; }
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: .5rem;
-  padding: .6rem .7rem;
+  gap: .25rem;
+  padding: .38rem .45rem;
   border-radius: .85rem;
   background: color-mix(in oklab, var(--panel-2) 82%, black 18%);
   border: 1px solid color-mix(in oklab, var(--panel-2) 60%, black 40%);
@@ -1652,16 +1652,16 @@ tbody tr.selected-info td { font-weight:600; }
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: .3rem;
-  padding: .55rem .65rem;
+  gap: .18rem;
+  padding: .32rem .45rem;
   border-radius: .7rem;
   background: color-mix(in oklab, var(--panel) 88%, black 12%);
   border: 1px solid color-mix(in oklab, var(--panel-2) 58%, black 42%);
-  box-shadow: 0 4px 14px rgba(0,0,0,.2);
+  box-shadow: 0 3px 10px rgba(0,0,0,.18);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: .82rem;
+  font-size: .78rem;
   color: var(--text);
-  border-left: 4px solid transparent;
+  border-left: 3px solid transparent;
   transition: box-shadow .2s ease, transform .2s ease;
 }
 
@@ -1684,9 +1684,9 @@ tbody tr.selected-info td { font-weight:600; }
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: .4rem;
-  row-gap: .2rem;
-  font-size: .7rem;
+  gap: .25rem;
+  row-gap: .12rem;
+  font-size: .65rem;
   color: color-mix(in oklab, var(--muted) 80%, white 20%);
   text-transform: uppercase;
   letter-spacing: .06em;
@@ -1698,7 +1698,7 @@ tbody tr.selected-info td { font-weight:600; }
 
 .debug-card__time {
   font-weight: 600;
-  font-size: .75rem;
+  font-size: .7rem;
   color: color-mix(in oklab, var(--muted) 65%, var(--text) 35%);
 }
 
@@ -1714,7 +1714,7 @@ tbody tr.selected-info td { font-weight:600; }
 
 .debug-card__origin {
   margin-left: auto;
-  padding: .1rem .45rem;
+  padding: .08rem .38rem;
   border-radius: .5rem;
   background: color-mix(in oklab, var(--accent) 22%, transparent 78%);
   color: color-mix(in oklab, var(--accent) 65%, white 35%);
@@ -1728,20 +1728,20 @@ tbody tr.selected-info td { font-weight:600; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: .08rem .38rem;
+  padding: .06rem .32rem;
   border-radius: 999px;
   background: color-mix(in oklab, var(--danger) 25%, transparent 75%);
   color: color-mix(in oklab, var(--danger) 65%, white 35%);
   border: 1px solid color-mix(in oklab, var(--danger) 42%, transparent 58%);
   font-weight: 700;
-  font-size: .68rem;
+  font-size: .64rem;
 }
 
 .debug-card__message {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
-  line-height: 1.35;
+  line-height: 1.18;
 }
 
 .debug-card--info {
