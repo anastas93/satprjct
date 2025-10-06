@@ -206,101 +206,119 @@ int16_t RadioSX1262::ping(const uint8_t* data, size_t len,
   float freq_tx = fTX_bank_[static_cast<int>(bank_)][channel_];
   float freq_rx = fRX_bank_[static_cast<int>(bank_)][channel_];
 
-  if (!setFrequency(freq_tx)) {                           // не удалось установить TX
-    LOG_ERROR("RadioSX1262: не удалось установить TX-частоту перед пингом");
-    result = lastError_;
-    goto ping_cleanup;
-  }
-  {
-    int state = radio_.transmit(const_cast<uint8_t*>(data), len); // отправляем пакет
+  auto restoreImplicit = [&]() {
+    if (headerTemporarilyExplicit) {                      // восстанавливаем implicit-режим
+      if (implicitLen > 0) {
+        const int16_t restoreState = radio_.implicitHeader(implicitLen);
+        if (restoreState != RADIOLIB_ERR_NONE) {
+          LOG_WARN_VAL("RadioSX1262: не удалось вернуть implicit header после ping, код=", restoreState);
+          implicitHeaderEnabled_ = false;
+          implicitHeaderLength_ = 0;
+        } else {
+          implicitHeaderEnabled_ = true;
+          implicitHeaderLength_ = implicitLen;
+        }
+      } else {
+        implicitHeaderEnabled_ = false;
+        implicitHeaderLength_ = 0;
+      }
+    }
+  };
+
+  do {
+    if (!setFrequency(freq_tx)) {                         // не удалось установить TX
+      LOG_ERROR("RadioSX1262: не удалось установить TX-частоту перед пингом");
+      result = lastError_;
+      break;
+    }
+
+    const int state = radio_.transmit(const_cast<uint8_t*>(data), len); // отправляем пакет
     if (state != RADIOLIB_ERR_NONE) {                     // ошибка передачи
       lastError_ = state;                                 // фиксируем код ошибки
       setFrequency(freq_rx);
       startReceiveWithRetry("ping: возврат в RX после ошибки передачи");
       result = lastError_;
-      goto ping_cleanup;
+      break;
     }
-  }
-  if (!setFrequency(freq_rx)) {                           // возвращаем RX частоту
-    startReceiveWithRetry("ping: попытка приёма после ошибки установки частоты");
-    result = lastError_;
-    goto ping_cleanup;
-  }
 
-  packetReady_ = false;                                   // очищаем флаг готовности
-  startReceiveWithRetry("ping: ожидание ответа");        // слушаем эфир
-  flushPendingIrqLog();                                   // разбираем отложенные IRQ до входа в цикл ожидания
-  DEBUG_LOG("RadioSX1262: запуск ожидания ответа после пинга");
-  DEBUG_LOG_VAL("RadioSX1262: таймаут ожидания, мкс=", timeoutUs);
-  uint32_t start = micros();                              // стартовое время ожидания
-  std::array<uint8_t, 256> buf{};                         // временный буфер
-  bool waitingLogged = false;                             // отметка первого ожидания
+    if (!setFrequency(freq_rx)) {                         // возвращаем RX частоту
+      startReceiveWithRetry("ping: попытка приёма после ошибки установки частоты");
+      result = lastError_;
+      break;
+    }
 
-  while ((micros() - start) < timeoutUs) {                // ждём ответ с таймаутом
-    flushPendingIrqLog();                                 // обрабатываем накопленные IRQ перед проверкой флага готовности
-    if (!packetReady_) {                                  // пакета пока нет
-      if (!waitingLogged) {                               // фиксируем начало ожидания
-        DEBUG_LOG("RadioSX1262: ожидание готовности пакета");
-        waitingLogged = true;
+    packetReady_ = false;                                 // очищаем флаг готовности
+    startReceiveWithRetry("ping: ожидание ответа");      // слушаем эфир
+    flushPendingIrqLog();                                 // разбираем отложенные IRQ до входа в цикл ожидания
+    DEBUG_LOG("RadioSX1262: запуск ожидания ответа после пинга");
+    DEBUG_LOG_VAL("RadioSX1262: таймаут ожидания, мкс=", timeoutUs);
+
+    const uint32_t start = micros();                      // стартовое время ожидания
+    std::array<uint8_t, 256> buf{};                       // временный буфер
+    bool waitingLogged = false;                           // отметка первого ожидания
+    bool success = false;                                 // отметка успешного чтения ответа
+    bool errorOccurred = false;                           // отметка выхода из цикла по ошибке
+
+    while ((micros() - start) < timeoutUs) {              // ждём ответ с таймаутом
+      flushPendingIrqLog();                               // обрабатываем накопленные IRQ перед проверкой флага готовности
+      if (!packetReady_) {                                // пакета пока нет
+        if (!waitingLogged) {                             // фиксируем начало ожидания
+          DEBUG_LOG("RadioSX1262: ожидание готовности пакета");
+          waitingLogged = true;
+        }
+        delay(1);
+        continue;
       }
-      delay(1);
-      continue;
-    }
-    size_t lenRead = radio_.getPacketLength();            // узнаём длину принятого пакета
-    if (lenRead == 0 || lenRead > buf.size()) {           // защита от некорректного размера
-      LOG_WARN_VAL("RadioSX1262: некорректная длина принятого пинг-ответа=", lenRead);
-      startReceiveWithRetry("ping: повторный запуск приёма после некорректной длины");
-      lastError_ = ERR_INVALID_ARGUMENT;
+
+      const size_t lenRead = radio_.getPacketLength();    // узнаём длину принятого пакета
+      if (lenRead == 0 || lenRead > buf.size()) {         // защита от некорректного размера
+        LOG_WARN_VAL("RadioSX1262: некорректная длина принятого пинг-ответа=", lenRead);
+        startReceiveWithRetry("ping: повторный запуск приёма после некорректной длины");
+        lastError_ = ERR_INVALID_ARGUMENT;
+        result = lastError_;
+        errorOccurred = true;
+        break;
+      }
+
+      const int rxState = radio_.readData(buf.data(), lenRead); // читаем пакет
+      if (rxState != RADIOLIB_ERR_NONE) {                 // ошибка чтения
+        lastError_ = rxState;                             // сохраняем код ошибки чтения
+        LOG_ERROR_VAL("RadioSX1262: ошибка чтения пинг-ответа, код=", rxState);
+        startReceiveWithRetry("ping: перезапуск после чтения ответа");
+        result = lastError_;
+        errorOccurred = true;
+        break;
+      }
+
+      receivedLen = lenRead;                              // сохраняем длину ответа
+      std::memcpy(response, buf.data(),                   // копируем в пользовательский буфер
+                  std::min(receivedLen, responseCapacity));
+      elapsedUs = micros() - start;                       // вычисляем затраченное время
+      lastSnr_ = radio_.getSNR();
+      lastRssi_ = radio_.getRSSI();
+      DEBUG_LOG("RadioSX1262: пинг-ответ получен, длина=%u, время=%lu мкс",
+                static_cast<unsigned>(receivedLen),
+                static_cast<unsigned long>(elapsedUs));
+      packetReady_ = false;
+      startReceiveWithRetry("ping: ожидание ответа");
+      lastError_ = RADIOLIB_ERR_NONE;
       result = lastError_;
-      goto ping_cleanup;
+      success = true;
+      break;
     }
-    int rxState = radio_.readData(buf.data(), lenRead);   // читаем пакет
-    if (rxState != RADIOLIB_ERR_NONE) {                   // ошибка чтения
-      lastError_ = rxState;                               // сохраняем код ошибки чтения
-      LOG_ERROR_VAL("RadioSX1262: ошибка чтения пинг-ответа, код=", rxState);
-      startReceiveWithRetry("ping: перезапуск после чтения ответа");
-      result = lastError_;
-      goto ping_cleanup;
+
+    if (success || errorOccurred) {                       // либо получили ответ, либо поймали ошибку
+      break;
     }
-    receivedLen = lenRead;                                // сохраняем длину ответа
-    std::memcpy(response, buf.data(),                     // копируем в пользовательский буфер
-                std::min(receivedLen, responseCapacity));
-    elapsedUs = micros() - start;                         // вычисляем затраченное время
-    lastSnr_ = radio_.getSNR();
-    lastRssi_ = radio_.getRSSI();
-    DEBUG_LOG("RadioSX1262: пинг-ответ получен, длина=%u, время=%lu мкс",
-              static_cast<unsigned>(receivedLen),
-              static_cast<unsigned long>(elapsedUs));
-    packetReady_ = false;
+
     startReceiveWithRetry("ping: ожидание ответа");
-    lastError_ = RADIOLIB_ERR_NONE;
+    LOG_WARN("RadioSX1262: пинг-ответ не получен — истёк таймаут %lu мкс",
+             static_cast<unsigned long>(timeoutUs));
+    lastError_ = ERR_PING_TIMEOUT;
     result = lastError_;
-    goto ping_cleanup;
-  }
+  } while (false);
 
-  startReceiveWithRetry("ping: ожидание ответа");
-  LOG_WARN("RadioSX1262: пинг-ответ не получен — истёк таймаут %lu мкс",
-           static_cast<unsigned long>(timeoutUs));
-  lastError_ = ERR_PING_TIMEOUT;
-  result = lastError_;
-
-ping_cleanup:
-  if (headerTemporarilyExplicit) {                        // восстанавливаем implicit-режим
-    if (implicitLen > 0) {
-      const int16_t restoreState = radio_.implicitHeader(implicitLen);
-      if (restoreState != RADIOLIB_ERR_NONE) {
-        LOG_WARN_VAL("RadioSX1262: не удалось вернуть implicit header после ping, код=", restoreState);
-        implicitHeaderEnabled_ = false;
-        implicitHeaderLength_ = 0;
-      } else {
-        implicitHeaderEnabled_ = true;
-        implicitHeaderLength_ = implicitLen;
-      }
-    } else {
-      implicitHeaderEnabled_ = false;
-      implicitHeaderLength_ = 0;
-    }
-  }
+  restoreImplicit();
 
   return result;
 }
