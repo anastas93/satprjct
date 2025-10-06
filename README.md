@@ -140,8 +140,6 @@
   пауза между отправками, размер блока для `PacketGatherer` и значение `PING_WAIT_MS`.
 
 ### Вспомогательные библиотеки
-- **SerialProgramCollector** (`libs/serial_program_collector/`) — собирает многострочные команды из
-  Serial в единый буфер с контролем переполнения.
 - **TextConverter** (`libs/text_converter/`) — преобразует текст между UTF-8 и CP1251, что
   используется при отправке сообщений и отображении входящих пакетов.
 - **SimpleLogger** (`libs/simple_logger/`) — журнал статусов `ERR/PROG/GO` с кольцевым буфером
@@ -224,7 +222,7 @@ Arduino IDE и вспомогательных скриптов.
 | `frame` | Структуры заголовков кадров (`FrameHeader`). |
 | `key_loader`, `crypto/aes_ccm`, `key_transfer` | Работа с ключами, AES-CCM и обмен корневым ключом. |
 | `crypto/hkdf` | HKDF-SHA256 для вывода симметричных ключей и вспомогательных параметров. |
-| `simple_logger`, `serial_program_collector`, `text_converter` | Логирование, сборка команд, преобразование текста. |
+| `simple_logger`, `text_converter` | Логирование, преобразование текста. |
 | `serial_mirror` | Зеркалирует вывод базового `Serial` в `LogHook`, предоставляет метод `availableForWrite()`, который напрямую делегирует `HardwareSerial::availableForWrite()` и сохраняет совместимость с конструкциями вида `while (!Serial)`. |
 | `config_loader` | Читает файл `config/default.ini`, подставляет значения по умолчанию и предоставляет доступ к структуре настроек. |
 
