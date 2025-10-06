@@ -620,25 +620,28 @@ size_t formatIrqLogMessage(uint32_t flags, char* buffer, size_t capacity) {
     const char* name;
     const char* description;
   } kIrqMap[] = {
-      {RADIOLIB_SX126X_IRQ_TX_DONE, "IRQ_TX_DONE", "передача пакета завершена"},
-      {RADIOLIB_SX126X_IRQ_RX_DONE, "IRQ_RX_DONE", "пакет принят"},
-      {RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED, "IRQ_PREAMBLE_DETECTED", "найдена преамбула"},
-      {RADIOLIB_SX126X_IRQ_SYNC_WORD_VALID, "IRQ_SYNCWORD_VALID", "синхрослово совпало"},
-      {RADIOLIB_SX126X_IRQ_HEADER_VALID, "IRQ_HEADER_VALID", "корректный LoRa-заголовок принят"},
-      {RADIOLIB_SX126X_IRQ_HEADER_ERR, "IRQ_HEADER_ERR", "ошибка заголовка (битые биты/несовпадение CRC заголовка)"},
-      {RADIOLIB_SX126X_IRQ_CRC_ERR, "IRQ_CRC_ERR", "ошибка CRC полезной нагрузки"},
+      {RADIOLIB_SX126X_IRQ_TX_DONE, "IRQ_TX_DONE", "TX завершена"},
+      {RADIOLIB_SX126X_IRQ_RX_DONE, "IRQ_RX_DONE", "RX завершён"},
+      {RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED, "IRQ_PREAMBLE_DETECTED", "преамбула"},
+      {RADIOLIB_SX126X_IRQ_SYNC_WORD_VALID, "IRQ_SYNCWORD_VALID", "sync совпал"},
+      {RADIOLIB_SX126X_IRQ_HEADER_VALID, "IRQ_HEADER_VALID", "заголовок OK"},
+      {RADIOLIB_SX126X_IRQ_HEADER_ERR, "IRQ_HEADER_ERR", "ошибка заголовка"},
+      {RADIOLIB_SX126X_IRQ_CRC_ERR, "IRQ_CRC_ERR", "ошибка CRC"},
 #if defined(RADIOLIB_IRQ_RX_TIMEOUT) || defined(RADIOLIB_IRQ_TX_TIMEOUT)
 #ifdef RADIOLIB_IRQ_RX_TIMEOUT
-      {RADIOLIB_IRQ_RX_TIMEOUT, "IRQ_RX_TIMEOUT", "истёк таймаут ожидания приёма"},
+      {RADIOLIB_IRQ_RX_TIMEOUT, "IRQ_RX_TIMEOUT", "таймаут RX"},
 #endif
 #ifdef RADIOLIB_IRQ_TX_TIMEOUT
-      {RADIOLIB_IRQ_TX_TIMEOUT, "IRQ_TX_TIMEOUT", "истёк таймаут попытки передачи"},
+      {RADIOLIB_IRQ_TX_TIMEOUT, "IRQ_TX_TIMEOUT", "таймаут TX"},
 #endif
 #else
-      {RADIOLIB_SX126X_IRQ_TIMEOUT, "IRQ_RX_TX_TIMEOUT", "сработал таймаут приёма/передачи"},
+      {RADIOLIB_SX126X_IRQ_TIMEOUT, "IRQ_RX_TX_TIMEOUT", "таймаут RX/TX"},
 #endif
-      {RADIOLIB_SX126X_IRQ_CAD_DONE, "IRQ_CAD_DONE", "завершено сканирование канала (Channel Activity Detection)"},
-      {RADIOLIB_SX126X_IRQ_CAD_DETECTED, "IRQ_CAD_DETECTED", "в канале обнаружена активность LoRa"},
+      {RADIOLIB_SX126X_IRQ_CAD_DONE, "IRQ_CAD_DONE", "CAD завершён"},
+      {RADIOLIB_SX126X_IRQ_CAD_DETECTED, "IRQ_CAD_DETECTED", "CAD обнаружил передачу"},
+#ifdef RADIOLIB_SX126X_IRQ_LR_FHSS_HOP
+      {RADIOLIB_SX126X_IRQ_LR_FHSS_HOP, "IRQ_LR_FHSS_HOP", "LR-FHSS hop"},
+#endif
   };
 
   const uint32_t effectiveMask = flags & 0xFFFFU;
@@ -841,6 +844,42 @@ void RadioSX1262::loop() {
   if (state == RADIOLIB_ERR_NONE) {
     lastSnr_ = radio_.getSNR();             // сохраняем SNR
     lastRssi_ = radio_.getRSSI();           // сохраняем RSSI
+    // Формируем шестнадцатеричный дамп полезной нагрузки для отладочного лога
+    std::array<char, 3 * 256 + 1> hexDump{};
+    size_t hexOffset = 0;
+    bool truncated = false;
+    for (size_t i = 0; i < len; ++i) {
+      const size_t remaining = hexDump.size() - hexOffset;
+      if (remaining <= 4) {                 // оставляем место под завершающий нуль
+        truncated = true;
+        break;
+      }
+      const int written = std::snprintf(hexDump.data() + hexOffset,
+                                        remaining,
+                                        (i == 0) ? "%02X" : " %02X",
+                                        static_cast<unsigned>(buf[i]));
+      if (written <= 0) {
+        truncated = true;
+        break;
+      }
+      const size_t writtenSize = static_cast<size_t>(written);
+      if (writtenSize >= remaining) {
+        truncated = true;
+        hexOffset = hexDump.size() - 1;
+        break;
+      }
+      hexOffset += writtenSize;
+    }
+    const char* dumpText = hexDump.data();
+    if (truncated) {
+      DEBUG_LOG("RadioSX1262: принят пакет длиной %u байт, дамп усечён: %s",
+                static_cast<unsigned>(len),
+                dumpText);
+    } else {
+      DEBUG_LOG("RadioSX1262: принят пакет длиной %u байт: %s",
+                static_cast<unsigned>(len),
+                dumpText);
+    }
     if (rx_cb_) {
       rx_cb_(buf.data(), len);              // передаём данные пользователю
     }
