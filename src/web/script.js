@@ -620,6 +620,7 @@ async function init() {
     avg: $("#recvDiagAvg"),
     gap: $("#recvDiagGap"),
     runningSince: $("#recvDiagRunning"),
+    acceptedBytes: $("#recvDiagAcceptedBytes"),
     totals: $("#recvDiagTotals"),
     timeouts: $("#recvDiagTimeouts"),
     overlaps: $("#recvDiagOverlaps"),
@@ -1787,7 +1788,7 @@ function addChatMessage(entry, index, options) {
   const time = document.createElement("time");
   const stamp = data.t ? new Date(data.t) : new Date();
   time.dateTime = stamp.toISOString();
-  time.textContent = stamp.toLocaleTimeString();
+  time.textContent = formatTimeOfDay(stamp);
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   applyChatBubbleContent(bubble, data);
@@ -3737,6 +3738,25 @@ function logReceivedMessage(entry, opts) {
   if (isImage && bytes && bytes.length) length = bytes.length;
   if (!Number.isFinite(length) || length < 0) length = null;
   if (length == null && messageBody) length = messageBody.length;
+  // Накапливаем суммарный объём принятых байтов в диагностике Debug
+  const monitor = getReceivedMonitorState();
+  const metrics = monitor && monitor.metrics ? monitor.metrics : null;
+  if (metrics) {
+    if (!(metrics.acceptedKeys instanceof Set)) metrics.acceptedKeys = new Set();
+    const keyPayload = entry && entry.hex ? String(entry.hex).toLowerCase() : (messageBody || "");
+    const keyLength = Number.isFinite(length) && length > 0 ? String(length) : "";
+    const identifier = `${name}|${keyPayload}|${keyLength}`;
+    if (identifier && identifier !== "||") {
+      if (!metrics.acceptedKeys.has(identifier)) {
+        metrics.acceptedKeys.add(identifier);
+        if (Number.isFinite(length) && length > 0) {
+          metrics.totalAcceptedBytes += length;
+        }
+        metrics.acceptedMessages += 1;
+        updateReceivedMonitorDiagnostics();
+      }
+    }
+  }
   const rxMeta = {
     name,
     type: entryType,
@@ -3909,7 +3929,19 @@ function getReceivedMonitorState() {
       lastBlockedReason: null,
       consecutiveErrors: 0,
       runningSince: null,
+      totalAcceptedBytes: 0,
+      acceptedMessages: 0,
+      acceptedKeys: new Set(),
     };
+  }
+  if (!(state.metrics.acceptedKeys instanceof Set)) {
+    state.metrics.acceptedKeys = new Set(state.metrics.acceptedKeys ? Array.from(state.metrics.acceptedKeys) : []);
+  }
+  if (!Number.isFinite(state.metrics.totalAcceptedBytes) || state.metrics.totalAcceptedBytes < 0) {
+    state.metrics.totalAcceptedBytes = 0;
+  }
+  if (!Number.isFinite(state.metrics.acceptedMessages) || state.metrics.acceptedMessages < 0) {
+    state.metrics.acceptedMessages = 0;
   }
   if (!state.push || typeof state.push !== "object") {
     state.push = {
@@ -3998,6 +4030,30 @@ function formatDurationMs(ms) {
   const hours = Math.floor(minutes / 60);
   const restMin = minutes - hours * 60;
   return `${hours} ч ${restMin} мин`;
+}
+
+// Форматируем отметку времени в 24-часовом формате с секундами
+function formatTimeOfDay(value) {
+  let date;
+  if (value instanceof Date) {
+    date = value;
+  } else {
+    const ts = Number(value);
+    if (Number.isFinite(ts)) {
+      date = new Date(ts);
+    }
+  }
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    date = new Date();
+  }
+  const options = { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' };
+  try {
+    return date.toLocaleTimeString('ru-RU', options);
+  } catch (err) {
+    // На случай отсутствия локали ru-RU возвращаем ISO-фрагмент
+    const iso = date.toISOString();
+    return iso.slice(11, 19);
+  }
 }
 
 // Форматируем аппаратное uptime устройства с префиксом «+»
@@ -4365,6 +4421,13 @@ function updateReceivedMonitorDiagnostics() {
       if (metrics.lastGapMs > intervalMs * 2.5) els.gap.classList.add("error");
       else if (metrics.lastGapMs > intervalMs * 1.5) els.gap.classList.add("warn");
     }
+  }
+  if (els.acceptedBytes) {
+    const bytes = Number(metrics.totalAcceptedBytes) || 0;
+    const messages = Number(metrics.acceptedMessages) || 0;
+    const formatted = formatBytesBinary(bytes);
+    const suffix = messages === 1 ? " · 1 сообщение" : ` · ${messages} сообщений`;
+    els.acceptedBytes.textContent = formatted !== "—" ? formatted + suffix : `0 Б${suffix}`;
   }
   if (els.runningSince) {
     els.runningSince.textContent = state.running && metrics.runningSince ? formatRelativeTime(metrics.runningSince) : "—";
@@ -10528,7 +10591,7 @@ function renderChatIrqStatus() {
   if (metaEl) {
     const parts = [];
     if (Number.isFinite(state.uptimeMs)) parts.push(formatDeviceUptime(state.uptimeMs));
-    if (Number.isFinite(state.timestamp)) parts.push(new Date(state.timestamp).toLocaleTimeString());
+    if (Number.isFinite(state.timestamp)) parts.push(formatTimeOfDay(state.timestamp));
     if (parts.length) {
       metaEl.hidden = false;
       metaEl.textContent = parts.join(" · ");
@@ -10715,8 +10778,8 @@ function debugLog(text, opts) {
   const timestampValue = options.timestamp != null ? Number(options.timestamp) : NaN;
   const hasTimestamp = Number.isFinite(timestampValue);
   const stampValue = hasTimestamp
-    ? new Date(timestampValue).toLocaleTimeString()
-    : new Date().toLocaleTimeString();
+    ? formatTimeOfDay(timestampValue)
+    : formatTimeOfDay(Date.now());
   card.dataset.stamp = '[' + stampValue + ']';
   if (hasTimestamp) {
     card.dataset.timestamp = String(timestampValue);
