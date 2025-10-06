@@ -1,6 +1,5 @@
 #include "simple_logger.h"
 #include <array>
-#include <string_view>
 #include "default_settings.h"               // глобальные настройки логирования
 #include "logger.h"                         // асинхронная очередь логов
 
@@ -12,53 +11,35 @@ namespace {
 // Максимальный размер кольцевого буфера
 constexpr size_t MAX_LOG_RECORDS = 64;
 
-// Запись журнала с сохранённым префиксом
-struct LogEntry {
-  std::string prefix;   // префикс до первого пробела
-  std::string line;     // полная строка журнала
-};
+// Кольцевой буфер строк статуса
+std::array<std::string, MAX_LOG_RECORDS> g_log{}; // локальное хранилище сообщений
+size_t g_head = 0;                                // индекс старейшей записи
+size_t g_size = 0;                                // текущее количество строк
 
-std::array<LogEntry, MAX_LOG_RECORDS> g_log{}; // кольцевой буфер записей
-size_t g_head = 0;                             // индекс старейшей записи
-size_t g_size = 0;                             // текущее количество строк
-
-// Поиск записи по префиксу для замены
-LogEntry* findByPrefix(std::string_view prefix) {
-  for (size_t i = 0; i < g_size; ++i) {
-    size_t idx = (g_head + i) % g_log.size();
-    if (g_log[idx].prefix == prefix) {
-      return &g_log[idx];
-    }
+// Резервирование следующей позиции в буфере
+size_t reserveSlot() {
+  if (g_size < g_log.size()) {
+    size_t idx = (g_head + g_size) % g_log.size();
+    ++g_size;
+    return idx;
   }
-  return nullptr;
+  size_t idx = g_head;
+  g_head = (g_head + 1) % g_log.size();
+  return idx;
+}
+
+// Единая точка отправки сообщений в системный debug-лог
+void dispatchToDebug(const std::string& line) {
+  // Все статусы идут через Logger::enqueue, чтобы избежать наложения вывода
+  Logger::enqueue(DefaultSettings::LogLevel::INFO, line);
 }
 } // namespace
 
 namespace SimpleLogger {
 void logStatus(const std::string& line) {
-  // Выделяем префикс до первого пробела
-  auto pos = line.find(' ');
-  std::string_view prefix_view = (pos == std::string::npos)
-                                   ? std::string_view(line)
-                                   : std::string_view(line.data(), pos);
-  if (LogEntry* existing = findByPrefix(prefix_view)) {
-    existing->line = line;                       // обновляем строку без перевыделения
-    Logger::enqueue(DefaultSettings::LogLevel::INFO, line); // отправляем обновление в очередь логов
-    return;
-  }
-
-  size_t index;
-  if (g_size < g_log.size()) {
-    index = (g_head + g_size) % g_log.size();    // используем свободный слот
-    ++g_size;
-  } else {
-    index = g_head;                              // перезаписываем самую старую запись
-    g_head = (g_head + 1) % g_log.size();
-  }
-  LogEntry& entry = g_log[index];
-  entry.prefix.assign(prefix_view.data(), prefix_view.size());
-  entry.line = line;
-  Logger::enqueue(DefaultSettings::LogLevel::INFO, line);   // передаём запись в асинхронный лог
+  const size_t slot = reserveSlot();             // резервируем позицию в кольцевом буфере
+  g_log[slot] = line;                            // сохраняем исходную строку
+  dispatchToDebug(line);                         // единый вывод в debug без дублирования
 }
 
 std::vector<std::string> getLast(size_t count) {
@@ -68,7 +49,7 @@ std::vector<std::string> getLast(size_t count) {
   size_t start = g_size - count;
   for (size_t i = start; i < g_size; ++i) {
     size_t idx = (g_head + i) % g_log.size();
-    out.push_back(g_log[idx].line);
+    out.push_back(g_log[idx]);
   }
   return out;
 }
