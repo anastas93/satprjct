@@ -41,7 +41,7 @@ static constexpr float TX_HOME[HOME_BANK_SIZE] = {
 
 // --- Глобальные объекты периферии ---
 SPIClass radioSPI(VSPI);                          // аппаратный SPI-порт, обслуживающий радиомодуль
-SX1262 radio = new Module(5, 26, 27, 25);         // пины SX1262: NSS=5, DIO1=26, NRST=27, BUSY=25
+SX1262 radio = new Module(5, 26, 27, 25, radioSPI); // используем VSPI сразу при создании объекта Module
 WebServer server(80);                             // встроенный HTTP-сервер ESP32
 
 // --- Константы проекта ---
@@ -102,7 +102,6 @@ void setup() {
 
   // Настройка SPI для радиомодуля SX1262
   radioSPI.begin(18, 19, 23, 5); // VSPI: SCK=18, MISO=19, MOSI=23, SS=5
-  radio.setSPI(&radioSPI);
 
   // Подключаем обработчик прерывания по DIO1 для асинхронного приёма
   radio.setDio1Action(onRadioDio1Rise);
@@ -121,20 +120,19 @@ void setup() {
 
     const auto& opts = LoRaRadioLibSettings::DEFAULT_OPTIONS;
     radio.setDio2AsRfSwitch(opts.useDio2AsRfSwitch);
-    if (opts.useDio3ForTcxo) {
-      radio.setDio3AsTcxoCtrl(true, opts.tcxoVoltage);
+    if (opts.useDio3ForTcxo && opts.tcxoVoltage > 0.0f) {
+      radio.setTCXO(opts.tcxoVoltage); // включаем внешний TCXO с указанным напряжением
     }
     if (opts.implicitHeader) {
       radio.implicitHeader(kImplicitPayloadLength);
     } else {
       radio.explicitHeader();
     }
-    radio.setCRC(opts.enableCrc);
-    radio.setIQInversion(opts.invertIq);
+    radio.setCRC(opts.enableCrc ? 2 : 0);          // длина CRC в байтах: 2 либо 0
+    radio.invertIQ(opts.invertIq);                 // включаем или выключаем инверсию IQ
     radio.setPreambleLength(opts.preambleLength);
-    radio.setRxGain(opts.rxBoostedGain);
+    radio.setRxBoostedGainMode(opts.rxBoostedGain); // режим усиленного приёма SX1262
     radio.setSyncWord(opts.syncWord);
-    radio.setPublicNetwork(opts.publicNetwork);
 
     if (!applyRadioChannel(state.channelIndex)) {
       addEvent("Ошибка инициализации канала — проверьте модуль SX1262");
@@ -209,7 +207,7 @@ void addEvent(const String& message) {
 
 // --- Вспомогательная функция: дописываем событие и ограничиваем историю ---
 void appendEventBuffer(const String& message, unsigned long id) {
-  state.events.push_back({id, message});
+  state.events.push_back(ChatEvent{id, message}); // явно создаём структуру для совместимости со старыми стандартами C++
   if (state.events.size() > kMaxEventHistory) {
     state.events.erase(state.events.begin());
   }

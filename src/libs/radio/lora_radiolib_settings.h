@@ -25,10 +25,10 @@ struct SX1262DriverOptions {
 
 // Набор параметров по умолчанию, применяемый при инициализации радиомодуля.
 // Имя константы содержит суффикс OPTIONS, чтобы избежать конфликта с макросами Arduino (DEFAULT).
-inline constexpr SX1262DriverOptions DEFAULT_OPTIONS{};
+constexpr SX1262DriverOptions DEFAULT_OPTIONS{};
 
 // Удобные псевдонимы для часто используемых параметров.
-inline constexpr bool DEFAULT_RX_BOOSTED_GAIN = DEFAULT_OPTIONS.rxBoostedGain;         // Режим усиленного приёма
-inline constexpr uint16_t DEFAULT_PREAMBLE_LENGTH = DEFAULT_OPTIONS.preambleLength;    // Длина преамбулы по умолчанию
+constexpr bool DEFAULT_RX_BOOSTED_GAIN = DEFAULT_OPTIONS.rxBoostedGain;         // Режим усиленного приёма
+constexpr uint16_t DEFAULT_PREAMBLE_LENGTH = DEFAULT_OPTIONS.preambleLength;    // Длина преамбулы по умолчанию
 
 } // namespace LoRaRadioLibSettings
