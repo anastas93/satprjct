@@ -14,8 +14,8 @@ struct SX1262DriverOptions {
   bool enableRegulatorDCDC = false;   // Принудительно включить DC-DC регулятор
   bool autoLdro = true;               // Автоматическое управление низким коэффициентом дьюти-цикла (LDRO)
   bool implicitHeader = true;         // Режим implicit header (фиксированная длина полезной нагрузки)
-  uint8_t implicitPayloadLength = 64; // Длина полезной нагрузки в режиме implicit header
-  bool enableCrc = true;             // Включение аппаратного CRC пакета
+  uint8_t implicitPayloadLength = 32; // Длина полезной нагрузки в режиме implicit header
+  bool enableCrc = false;             // Включение аппаратного CRC пакета
   bool invertIq = false;              // Инверсия I/Q при приёме/передаче
   bool publicNetwork = true;          // Использовать ли публичное LoRa-синхрослово
   uint16_t syncWord = 0x34;           // Пользовательское синхрослово LoRa
