@@ -622,12 +622,12 @@ String buildIndexHtml() {
   html += F("<section><h2>Управление радиомодулем</h2><label>Канал банка HOME:</label><select id=\"channel\">");
   html += buildChannelOptions(state.channelIndex);
   html += F("</select>");
-  html += "<label><input type=\\\"checkbox\\\" id=\\\"power\\\"";
+  html += "<label><input type='checkbox' id='power'";
   if (state.highPower) {
     html += " checked";
   }
   html += "> Мощность 22 dBm (выкл — -5 dBm)</label>";
-  html += "<label><input type=\\\"checkbox\\\" id=\\\"sf5\\\"";
+  html += "<label><input type='checkbox' id='sf5'";
   if (state.useSf5) {
     html += " checked";
   }
