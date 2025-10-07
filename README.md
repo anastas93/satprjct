@@ -1195,6 +1195,9 @@ rs255223::decode -> PacketGatherer -> обработка сообщения
 - `addEvent()` / `appendEventBuffer()` — формирование сообщений веб-чата и ограничение истории событий.
 - `handleRoot()`, `handleLog()`, `handleChannelChange()`, `handlePowerToggle()`, `handleSpreadingFactorToggle()`, `handleSendLongPacket()`, `handleSendRandomPacket()`, `handleSendCustom()`, `handleNotFound()` — обработчики HTTP-маршрутов веб-интерфейса.
 - `buildIndexHtml()` / `buildChannelOptions()` — генерация основной HTML-страницы и выпадающего списка каналов.
+- JavaScript-хелперы веб-интерфейса `encodeForm()`, `postForm()`, `refreshLog()`, `handleError()` и `sendCustom()` реализованы в 
+  максимально совместимом стиле без `fetch`, `async/await`, `let/const` и стрелочных функций, чтобы страница корректно работала
+  даже в старых браузерах контроллеров и встроенных планшетов.
 - `escapeJson()` — экранирование строк для корректной передачи в JSON.
 - `applyRadioChannel()`, `applyRadioPower()`, `applySpreadingFactor()`, `ensureReceiveMode()` — настройки частоты, мощности и фактора расширения SX1262 и перевод в режим приёма.
 - `sendPayload()`, `splitPayloadIntoFrames()`, `transmitFrame()`, `processIncomingFrame()` — новый стек отправки и приёма фиксированных кадров по 8 байт с буферизацией и разбором по управляющим маркерам.

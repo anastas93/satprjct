@@ -640,16 +640,22 @@ String buildIndexHtml() {
   html += F("</div></section>");
 
   html += F("<section><h2>Журнал событий</h2><div id=\"log\"></div></section></main><script>");
-  html += F("const logEl=document.getElementById('log');const channelSel=document.getElementById('channel');const powerCb=document.getElementById('power');const sfCb=document.getElementById('sf5');const statusEl=document.getElementById('status');let lastId=0;");
-  html += F("function appendLog(entry){const div=document.createElement('div');div.className='message';div.textContent=entry.text;if(entry.color){div.style.color=entry.color;}logEl.appendChild(div);logEl.scrollTop=logEl.scrollHeight;}");
-  html += F("async function refreshLog(){try{const resp=await fetch(`/api/log?after=${lastId}`);if(!resp.ok)return;const data=await resp.json();data.events.forEach(evt=>{appendLog(evt);lastId=evt.id;});}catch(e){console.error(e);}}");
-  html += F("async function postForm(url,body){const resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(body)});if(!resp.ok){const err=await resp.json().catch(()=>({error:'Неизвестная ошибка'}));throw new Error(err.error||'Ошибка');}}");
-  html += F("channelSel.addEventListener('change',async()=>{try{await postForm('/api/channel',{channel:channelSel.value});statusEl.textContent='Канал применён';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
-  html += F("powerCb.addEventListener('change',async()=>{try{await postForm('/api/power',{high:powerCb.checked?'1':'0'});statusEl.textContent='Мощность обновлена';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
-  html += F("sfCb.addEventListener('change',async()=>{try{await postForm('/api/sf',{sf5:sfCb.checked?'1':'0'});statusEl.textContent='Фактор расширения обновлён';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
-  html += F("document.getElementById('sendLong').addEventListener('click',async()=>{try{await postForm('/api/send/long',{});statusEl.textContent='Длинный пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
-  html += F("document.getElementById('sendRandom').addEventListener('click',async()=>{try{await postForm('/api/send/random',{});statusEl.textContent='Полный пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
-  html += F("document.getElementById('sendCustom').addEventListener('click',async()=>{const input=document.getElementById('custom');const payload=input.value;if(!payload.trim()){statusEl.textContent='Введите сообщение';return;}try{await postForm('/api/send/custom',{payload});statusEl.textContent='Пользовательский пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
+  // Используем максимально совместимый JavaScript без современных конструкций, чтобы UI работал в старых браузерах.
+  html += F("var logEl=document.getElementById('log');var channelSel=document.getElementById('channel');var powerCb=document.getElementById('power');var sfCb=document.getElementById('sf5');var statusEl=document.getElementById('status');var lastId=0;");
+  html += F("function appendLog(entry){var div=document.createElement('div');div.className='message';div.textContent=entry.text||'';if(entry.color){div.style.color=entry.color;}logEl.appendChild(div);logEl.scrollTop=logEl.scrollHeight;}");
+  html += F("function encodeForm(body){var pairs=[];for(var key in body){if(Object.prototype.hasOwnProperty.call(body,key)){pairs.push(encodeURIComponent(key)+'='+encodeURIComponent(body[key]));}}return pairs.join('&');}");
+  html += F("function postForm(url,body,onOk,onError){var xhr=new XMLHttpRequest();xhr.open('POST',url,true);xhr.setRequestHeader('Content-Type','application/x-www-form-urlencoded');xhr.onreadystatechange=function(){if(xhr.readyState!==4){return;}if(xhr.status>=200&&xhr.status<300){if(onOk){onOk();}}else{var message='Ошибка';try{var resp=JSON.parse(xhr.responseText||'{}');if(resp&&resp.error){message=resp.error;}}catch(err){}if(onError){onError(message);}else{console.error(message);}}};xhr.send(encodeForm(body||{}));}");
+  html += F("function refreshLog(){var xhr=new XMLHttpRequest();xhr.open('GET','/api/log?after='+encodeURIComponent(lastId),true);xhr.onreadystatechange=function(){if(xhr.readyState!==4){return;}if(xhr.status>=200&&xhr.status<300){try{var data=JSON.parse(xhr.responseText||'{}');if(data&&data.events){for(var i=0;i<data.events.length;i++){appendLog(data.events[i]);if(data.events[i].id){lastId=data.events[i].id;}}}}catch(err){console.error(err);}}};xhr.send();}");
+  html += F("function handleError(message){statusEl.textContent=message||'Ошибка';}");
+  html += F("channelSel.addEventListener('change',function(){postForm('/api/channel',{channel:channelSel.value},function(){statusEl.textContent='Канал применён';refreshLog();},handleError);});");
+  html += F("powerCb.addEventListener('change',function(){postForm('/api/power',{high:powerCb.checked?'1':'0'},function(){statusEl.textContent='Мощность обновлена';refreshLog();},handleError);});");
+  html += F("sfCb.addEventListener('change',function(){postForm('/api/sf',{sf5:sfCb.checked?'1':'0'},function(){statusEl.textContent='Фактор расширения обновлён';refreshLog();},handleError);});");
+  html += F("document.getElementById('sendLong').addEventListener('click',function(){postForm('/api/send/long',{},function(){statusEl.textContent='Длинный пакет отправлен';refreshLog();},handleError);});");
+  html += F("document.getElementById('sendRandom').addEventListener('click',function(){postForm('/api/send/random',{},function(){statusEl.textContent='Полный пакет отправлен';refreshLog();},handleError);});");
+  html += F("var customInput=document.getElementById('custom');");
+  html += F("function sendCustom(){var payload=customInput.value||'';if(!payload.replace(/\\s+/g,'').length){statusEl.textContent='Введите сообщение';return;}postForm('/api/send/custom',{payload:payload},function(){statusEl.textContent='Пользовательский пакет отправлен';refreshLog();},handleError);}");
+  html += F("document.getElementById('sendCustom').addEventListener('click',sendCustom);");
+  html += F("customInput.addEventListener('keydown',function(evt){evt=evt||window.event;if(evt.keyCode===13){evt.preventDefault();sendCustom();}});");
   html += F("setInterval(refreshLog,1500);refreshLog();");
   html += F("</script></body></html>");
   return html;
