@@ -207,7 +207,10 @@ void addEvent(const String& message) {
 
 // --- Вспомогательная функция: дописываем событие и ограничиваем историю ---
 void appendEventBuffer(const String& message, unsigned long id) {
-  state.events.push_back(ChatEvent{id, message}); // явно создаём структуру для совместимости со старыми стандартами C++
+  ChatEvent event;
+  event.id = id;
+  event.text = message;
+  state.events.push_back(event); // явное построение объекта для совместимости со старыми стандартами C++
   if (state.events.size() > kMaxEventHistory) {
     state.events.erase(state.events.begin());
   }
