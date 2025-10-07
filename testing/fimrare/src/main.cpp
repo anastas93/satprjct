@@ -76,7 +76,7 @@ constexpr uint8_t kSingleFrameMarker = 0;         // метка одиночно
 constexpr uint8_t kFinalFrameMarker = 1;          // метка завершающего кадра последовательности
 constexpr uint8_t kFirstChunkMarker = 2;          // минимальный маркер для кусочных пакетов
 constexpr uint8_t kMaxChunkMarker = 253;          // максимальный маркер для кусочных пакетов
-constexpr unsigned long kInterFrameDelayMs = 15;  // пауза между кадрами
+constexpr unsigned long kInterFrameDelayMs = 50;  // пауза между кадрами
 constexpr size_t kLongPacketSize = 124;           // длина длинного пакета с буквами A-Z
 constexpr const char* kIncomingColor = "#5CE16A"; // цвет отображения принятых сообщений
 
@@ -85,6 +85,7 @@ struct ChatEvent {
   unsigned long id = 0;   // уникальный идентификатор сообщения
   String text;            // сам текст события
   String color;           // цвет текста в веб-интерфейсе
+  bool visible = true;    // признак отображения события в веб-журнале
 };
 
 // --- Текущее состояние приложения ---
@@ -172,8 +173,8 @@ int16_t clearIrqFlags(Radio& radio, uint32_t mask) {
 // --- Вспомогательные функции объявления ---
 void IRAM_ATTR onRadioDio1Rise();
 String formatSx1262IrqFlags(uint32_t flags);
-void addEvent(const String& message, const String& color = String());
-void appendEventBuffer(const String& message, unsigned long id, const String& color = String());
+void addEvent(const String& message, const String& color = String(), bool visible = true);
+void appendEventBuffer(const String& message, unsigned long id, const String& color = String(), bool visible = true);
 void handleRoot();
 void handleLog();
 void handleChannelChange();
@@ -452,17 +453,18 @@ String formatSx1262IrqFlags(uint32_t flags) {
 }
 
 // --- Добавление события в лог ---
-void addEvent(const String& message, const String& color) {
-  appendEventBuffer(message, state.nextEventId++, color);
+void addEvent(const String& message, const String& color, bool visible) {
+  appendEventBuffer(message, state.nextEventId++, color, visible);
   Serial.println(message);
 }
 
 // --- Вспомогательная функция: дописываем событие и ограничиваем историю ---
-void appendEventBuffer(const String& message, unsigned long id, const String& color) {
+void appendEventBuffer(const String& message, unsigned long id, const String& color, bool visible) {
   ChatEvent event;
   event.id = id;
   event.text = message;
   event.color = color;
+  event.visible = visible;
   state.events.push_back(event); // явное построение объекта для совместимости со старыми стандартами C++
   if (state.events.size() > kMaxEventHistory) {
     state.events.erase(state.events.begin());
@@ -488,6 +490,10 @@ void handleLog() {
     if (evt.id <= after) {
       continue;
     }
+    lastId = evt.id;
+    if (!evt.visible) {
+      continue;                                                // пропускаем события, скрытые для веб-лога
+    }
     if (!first) {
       payload += ',';
     }
@@ -497,9 +503,8 @@ void handleLog() {
     }
     payload += "}";
     first = false;
-    lastId = evt.id;
   }
-  payload += "],\"lastId\":" + String(lastId) + "}";
+  payload += "],\"lastId\":" + String(lastId) + "}"; 
 
   server.send(200, "application/json", payload);
 }
@@ -928,14 +933,16 @@ void processIncomingFrame(const std::vector<uint8_t>& frame) {
     return;
   }
 
-  addEvent(String("Принят кадр ") + describeFrameMarker(frame[0]) + ": " + formatByteArray(frame));
+  const uint8_t marker = frame[0];
+  const bool showFrameInWebLog = (marker == kSingleFrameMarker);  // отображаем только одиночные кадры
+
+  addEvent(String("Принят кадр ") + describeFrameMarker(marker) + ": " + formatByteArray(frame), String(), showFrameInWebLog);
 
   std::vector<uint8_t> payload;
   if (frame.size() > 1) {
     payload.assign(frame.begin() + 1, frame.end());
   }
 
-  const uint8_t marker = frame[0];
   if (marker == kSingleFrameMarker) {
     trimTrailingZeros(payload);
     resetReceiveAssembly();
