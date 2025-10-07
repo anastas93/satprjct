@@ -8,10 +8,11 @@
 #include <cstddef>
 #include <algorithm>
 #include <cstring>
-#include <sstream>
-#include <iomanip>
-#include <cctype>
 #include <cstdio>
+#include <chrono>
+#if !defined(ARDUINO)
+#include <thread>
+#endif
 
 #include "libs/radio/lora_radiolib_settings.h"     // дефолтные настройки драйвера SX1262
 
@@ -59,24 +60,35 @@ WebServer server(80);                             // встроенный HTTP-�
 constexpr uint8_t kHomeBankSize = static_cast<uint8_t>(frequency_tables::HOME_BANK_SIZE); // число каналов банка HOME
 constexpr size_t kMaxEventHistory = 120;          // ограничение истории событий для веб-чата
 constexpr size_t kFullPacketSize = 245;           // максимальная длина пакета SX1262
-constexpr std::array<size_t, 5> kFixedPacketOptions = {4, 8, 16, 32, 64}; // доступные размеры фиксированного пакета
-constexpr size_t kDefaultFixedPacketSize = kFixedPacketOptions.front();   // размер фиксированного пакета по умолчанию
+constexpr size_t kFixedFrameSize = 8;             // фиксированная длина кадра LoRa
+constexpr size_t kFramePayloadSize = kFixedFrameSize - 1; // полезная часть кадра без управляющего байта
+constexpr uint8_t kSingleFrameMarker = 0;         // метка одиночного кадра
+constexpr uint8_t kFinalFrameMarker = 1;          // метка завершающего кадра последовательности
+constexpr uint8_t kFirstChunkMarker = 2;          // минимальный маркер для кусочных пакетов
+constexpr uint8_t kMaxChunkMarker = 253;          // максимальный маркер для кусочных пакетов
+constexpr unsigned long kInterFrameDelayMs = 15;  // пауза между кадрами
+constexpr size_t kLongPacketSize = 124;           // длина длинного пакета с буквами A-Z
+constexpr const char* kIncomingColor = "#5CE16A"; // цвет отображения принятых сообщений
 
 // --- Структура, описывающая событие в веб-чате ---
 struct ChatEvent {
   unsigned long id = 0;   // уникальный идентификатор сообщения
   String text;            // сам текст события
+  String color;           // цвет текста в веб-интерфейсе
 };
 
 // --- Текущее состояние приложения ---
 struct AppState {
   uint8_t channelIndex = 0;            // выбранный канал банка HOME
   bool highPower = false;              // признак использования мощности 22 dBm (иначе -5 dBm)
+  bool useSf5 = false;                 // признак использования SF5 (false => SF7)
   float currentRxFreq = frequency_tables::RX_HOME[0]; // текущая частота приёма
   float currentTxFreq = frequency_tables::TX_HOME[0]; // текущая частота передачи
   unsigned long nextEventId = 1;       // счётчик идентификаторов для событий
   std::vector<ChatEvent> events;       // журнал событий для веб-интерфейса
-  size_t fixedPacketSize = kDefaultFixedPacketSize; // выбранный размер фиксированного пакета
+  std::vector<uint8_t> rxAssembly;     // буфер сборки принятого сообщения из частей
+  bool assemblingMessage = false;      // активен ли режим сборки многочастного сообщения
+  uint8_t expectedChunkMarker = kFirstChunkMarker; // ожидаемый маркер следующего куска
 } state;
 
 // --- Флаги приёма LoRa ---
@@ -87,29 +99,38 @@ volatile bool irqStatusPending = false;     // есть ли необработ�
 // --- Вспомогательные функции объявления ---
 void IRAM_ATTR onRadioDio1Rise();
 String formatSx1262IrqFlags(uint32_t flags);
-void addEvent(const String& message);
-void appendEventBuffer(const String& message, unsigned long id);
+void addEvent(const String& message, const String& color = String());
+void appendEventBuffer(const String& message, unsigned long id, const String& color = String());
 void handleRoot();
 void handleLog();
 void handleChannelChange();
 void handlePowerToggle();
-void handleSendFixedPacket();
+void handleSendLongPacket();
 void handleSendRandomPacket();
 void handleSendCustom();
 void handleNotFound();
 String buildIndexHtml();
 String buildChannelOptions(uint8_t selected);
-String buildFixedPacketOptions(size_t current);
 String escapeJson(const String& value);
 String makeAccessPointSsid();
 bool applyRadioChannel(uint8_t newIndex);
 bool applyRadioPower(bool highPower);
+bool applySpreadingFactor(bool useSf5);
 bool ensureReceiveMode();
-bool sendBuffer(const std::vector<uint8_t>& buffer, const String& context);
-std::vector<uint8_t> parseHexString(const String& raw, bool& ok, String& errorMessage);
+bool sendPayload(const std::vector<uint8_t>& payload, const String& context);
+bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t index, size_t total);
+std::vector<std::array<uint8_t, kFixedFrameSize>> splitPayloadIntoFrames(const std::vector<uint8_t>& payload);
+void processIncomingFrame(const std::vector<uint8_t>& frame);
+void resetReceiveAssembly();
+void appendReceiveChunk(const std::vector<uint8_t>& chunk, bool finalChunk);
 String formatByteArray(const std::vector<uint8_t>& data);
+String formatTextPayload(const std::vector<uint8_t>& data);
+String describeFrameMarker(uint8_t marker);
+void logReceivedMessage(const std::vector<uint8_t>& payload);
 void logRadioError(const String& context, int16_t code);
-void handleFixedPacketSizeChange();
+void handleSpreadingFactorToggle();
+void waitInterFrameDelay();
+void trimTrailingZeros(std::vector<uint8_t>& buffer);
 
 // --- Формирование имени Wi-Fi сети ---
 String makeAccessPointSsid() {
@@ -173,7 +194,8 @@ void setup() {
     addEvent("Радиомодуль успешно инициализирован");
 
     // Применяем настройки LoRa согласно требованиям задачи
-    radio.setSpreadingFactor(kDefaultSpreadingFactor);
+    state.useSf5 = (kDefaultSpreadingFactor == 5);
+    applySpreadingFactor(state.useSf5);
     radio.setBandwidth(kDefaultBandwidthKhz);
     radio.setCodingRate(kDefaultCodingRate);
 
@@ -216,11 +238,12 @@ void setup() {
   server.on("/api/log", HTTP_GET, handleLog);
   server.on("/api/channel", HTTP_POST, handleChannelChange);
   server.on("/api/power", HTTP_POST, handlePowerToggle);
-  server.on("/api/send/five", HTTP_POST, handleSendFixedPacket); // совместимость с прежним маршрутом
-  server.on("/api/send/fixed", HTTP_POST, handleSendFixedPacket);
+  server.on("/api/send/five", HTTP_POST, handleSendLongPacket); // совместимость с прежним маршрутом
+  server.on("/api/send/fixed", HTTP_POST, handleSendLongPacket);
+  server.on("/api/send/long", HTTP_POST, handleSendLongPacket);
   server.on("/api/send/random", HTTP_POST, handleSendRandomPacket);
   server.on("/api/send/custom", HTTP_POST, handleSendCustom);
-  server.on("/api/fixed-size", HTTP_POST, handleFixedPacketSizeChange);
+  server.on("/api/sf", HTTP_POST, handleSpreadingFactorToggle);
   server.onNotFound(handleNotFound);
   server.begin();
   addEvent("HTTP-сервер запущен на порту 80");
@@ -260,7 +283,7 @@ void loop() {
         actualLength = buffer.size();
       }
       buffer.resize(actualLength);
-      addEvent(String("Принят пакет (" + String(buffer.size()) + " байт): ") + formatByteArray(buffer));
+      processIncomingFrame(buffer);
     } else {
       logRadioError("readData", stateCode);
     }
@@ -356,16 +379,17 @@ String formatSx1262IrqFlags(uint32_t flags) {
 }
 
 // --- Добавление события в лог ---
-void addEvent(const String& message) {
-  appendEventBuffer(message, state.nextEventId++);
+void addEvent(const String& message, const String& color) {
+  appendEventBuffer(message, state.nextEventId++, color);
   Serial.println(message);
 }
 
 // --- Вспомогательная функция: дописываем событие и ограничиваем историю ---
-void appendEventBuffer(const String& message, unsigned long id) {
+void appendEventBuffer(const String& message, unsigned long id, const String& color) {
   ChatEvent event;
   event.id = id;
   event.text = message;
+  event.color = color;
   state.events.push_back(event); // явное построение объекта для совместимости со старыми стандартами C++
   if (state.events.size() > kMaxEventHistory) {
     state.events.erase(state.events.begin());
@@ -394,7 +418,11 @@ void handleLog() {
     if (!first) {
       payload += ',';
     }
-    payload += "{\"id\":" + String(evt.id) + ",\"text\":\"" + escapeJson(evt.text) + "\"}";
+    payload += "{\"id\":" + String(evt.id) + ",\"text\":\"" + escapeJson(evt.text) + "\"";
+    if (evt.color.length() > 0) {
+      payload += ",\"color\":\"" + escapeJson(evt.color) + "\"";
+    }
+    payload += "}";
     first = false;
     lastId = evt.id;
   }
@@ -435,46 +463,24 @@ void handlePowerToggle() {
   }
 }
 
-// --- API: изменение длины фиксированного пакета ---
-void handleFixedPacketSizeChange() {
-  if (!server.hasArg("size")) {
-    server.send(400, "application/json", "{\"error\":\"Не указан параметр size\"}");
-    return;
+// --- API: переключение фактора расширения ---
+void handleSpreadingFactorToggle() {
+  bool newSf5 = server.hasArg("sf5") && server.arg("sf5") == "1";
+  if (applySpreadingFactor(newSf5)) {
+    addEvent(String("Фактор расширения установлен: SF") + String(static_cast<unsigned long>(newSf5 ? 5 : kDefaultSpreadingFactor)));
+    server.send(200, "application/json", "{\"ok\":true}");
+  } else {
+    server.send(500, "application/json", "{\"error\":\"Ошибка установки SF\"}");
   }
-
-  const String raw = server.arg("size");
-  char* endPtr = nullptr;
-  unsigned long parsed = strtoul(raw.c_str(), &endPtr, 10);
-  if (endPtr == raw.c_str() || (endPtr && *endPtr != '\0')) {
-    server.send(400, "application/json", "{\"error\":\"Размер должен быть целым числом\"}");
-    return;
-  }
-
-  size_t requested = static_cast<size_t>(parsed);
-  bool allowed = std::find(kFixedPacketOptions.begin(), kFixedPacketOptions.end(), requested) != kFixedPacketOptions.end();
-  if (!allowed) {
-    server.send(400, "application/json", "{\"error\":\"Недопустимый размер пакета\"}");
-    return;
-  }
-
-  state.fixedPacketSize = requested;
-  addEvent(String("Размер фиксированного пакета установлен: ") + String(static_cast<unsigned long>(requested)) + " байт");
-
-  String response = String("{\"ok\":true,\"size\":") + String(static_cast<unsigned long>(requested)) + "}";
-  server.send(200, "application/json", response);
 }
 
-// --- API: отправка фиксированного пакета выбранной длины ---
-void handleSendFixedPacket() {
-  const uint8_t pattern[] = {0xDE, 0xAD, 0xBE, 0xEF}; // базовый шаблон содержимого пакета
-  std::vector<uint8_t> data(state.fixedPacketSize, 0);
+// --- API: отправка длинного пакета с буквами A-Z ---
+void handleSendLongPacket() {
+  std::vector<uint8_t> data(kLongPacketSize, 0);
   for (size_t i = 0; i < data.size(); ++i) {
-    data[i] = pattern[i % (sizeof(pattern) / sizeof(pattern[0]))];
+    data[i] = static_cast<uint8_t>('A' + (i % 26));
   }
-  if (!data.empty()) {
-    data.back() = 0x01; // завершаем пакет маркером для удобства проверки
-  }
-  if (sendBuffer(data, String("Фиксированный пакет (") + String(static_cast<unsigned long>(data.size())) + " байт")) {
+  if (sendPayload(data, String("Длинный пакет (") + String(static_cast<unsigned long>(data.size())) + " байт)")) {
     server.send(200, "application/json", "{\"ok\":true}");
   } else {
     server.send(500, "application/json", "{\"error\":\"Отправка не удалась\"}");
@@ -489,7 +495,7 @@ void handleSendRandomPacket() {
   for (size_t i = 0; i < data.size(); ++i) {
     data[i] = (i % 2 == 0) ? evenByte : oddByte;
   }
-  if (sendBuffer(data, "Полный пакет с чередованием случайных байт")) {
+  if (sendPayload(data, "Полный пакет с чередованием случайных байт")) {
     server.send(200, "application/json", "{\"ok\":true}");
   } else {
     server.send(500, "application/json", "{\"error\":\"Отправка не удалась\"}");
@@ -502,18 +508,14 @@ void handleSendCustom() {
     server.send(400, "application/json", "{\"error\":\"Не передано поле payload\"}");
     return;
   }
-  bool ok = false;
-  String errorText;
-  std::vector<uint8_t> data = parseHexString(server.arg("payload"), ok, errorText);
-  if (!ok) {
-    server.send(400, "application/json", String("{\"error\":\"") + errorText + "\"}");
+  const String text = server.arg("payload");
+  if (text.length() == 0) {
+    server.send(400, "application/json", "{\"error\":\"Введите сообщение\"}");
     return;
   }
-  if (data.empty()) {
-    server.send(400, "application/json", "{\"error\":\"Нужно указать хотя бы один байт\"}");
-    return;
-  }
-  if (sendBuffer(data, String("Пользовательский пакет (" + String(data.size()) + " байт)"))) {
+  std::vector<uint8_t> data(text.length());
+  std::memcpy(data.data(), text.c_str(), text.length());
+  if (sendPayload(data, String("Пользовательский пакет (" + String(data.size()) + " байт)"))) {
     server.send(200, "application/json", "{\"ok\":true}");
   } else {
     server.send(500, "application/json", "{\"error\":\"Отправка не удалась\"}");
@@ -546,28 +548,35 @@ String buildIndexHtml() {
 
   html += F("<section><h2>Управление радиомодулем</h2><label>Канал банка HOME:</label><select id=\"channel\">");
   html += buildChannelOptions(state.channelIndex);
-  html += F("</select><label><input type=\"checkbox\" id=\"power\"> Мощность 22 dBm (выкл — -5 dBm)</label>");
-  html += F("<label>Длина фиксированного пакета:</label><select id=\"fixedSize\">");
-  html += buildFixedPacketOptions(state.fixedPacketSize);
   html += F("</select>");
+  html += "<label><input type=\\\"checkbox\\\" id=\\\"power\\\"";
+  if (state.highPower) {
+    html += " checked";
+  }
+  html += "> Мощность 22 dBm (выкл — -5 dBm)</label>";
+  html += "<label><input type=\\\"checkbox\\\" id=\\\"sf5\\\"";
+  if (state.useSf5) {
+    html += " checked";
+  }
+  html += "> Фактор расширения SF5 (выкл — SF7)</label>";
   html += F("<div class=\"status\" id=\"status\"></div><div class=\"controls\">");
-  html += F("<button id=\"sendFixed\">Отправить фиксированный пакет</button>");
+  html += F("<button id=\"sendLong\">Отправить длинный пакет 124 байта</button>");
   html += F("<button id=\"sendRandom\">Отправить полный пакет</button>");
-  html += F("<label>Пользовательский пакет (HEX, например \'DE AD BE EF\'):</label><input type=\"text\" id=\"custom\" placeholder=\"Введите байты через пробел\">");
+  html += F("<label>Пользовательский пакет (текст):</label><input type=\"text\" id=\"custom\" placeholder=\"Введите сообщение\">");
   html += F("<button id=\"sendCustom\">Отправить пользовательский пакет</button>");
   html += F("</div></section>");
 
   html += F("<section><h2>Журнал событий</h2><div id=\"log\"></div></section></main><script>");
-  html += F("const logEl=document.getElementById('log');const channelSel=document.getElementById('channel');const powerCb=document.getElementById('power');const fixedSizeSel=document.getElementById('fixedSize');const statusEl=document.getElementById('status');let lastId=0;");
-  html += F("function appendLog(text){const div=document.createElement('div');div.className='message';div.textContent=text;logEl.appendChild(div);logEl.scrollTop=logEl.scrollHeight;}");
-  html += F("async function refreshLog(){try{const resp=await fetch(`/api/log?after=${lastId}`);if(!resp.ok)return;const data=await resp.json();data.events.forEach(evt=>{appendLog(evt.text);lastId=evt.id;});}catch(e){console.error(e);}}");
+  html += F("const logEl=document.getElementById('log');const channelSel=document.getElementById('channel');const powerCb=document.getElementById('power');const sfCb=document.getElementById('sf5');const statusEl=document.getElementById('status');let lastId=0;");
+  html += F("function appendLog(entry){const div=document.createElement('div');div.className='message';div.textContent=entry.text;if(entry.color){div.style.color=entry.color;}logEl.appendChild(div);logEl.scrollTop=logEl.scrollHeight;}");
+  html += F("async function refreshLog(){try{const resp=await fetch(`/api/log?after=${lastId}`);if(!resp.ok)return;const data=await resp.json();data.events.forEach(evt=>{appendLog(evt);lastId=evt.id;});}catch(e){console.error(e);}}");
   html += F("async function postForm(url,body){const resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(body)});if(!resp.ok){const err=await resp.json().catch(()=>({error:'Неизвестная ошибка'}));throw new Error(err.error||'Ошибка');}}");
   html += F("channelSel.addEventListener('change',async()=>{try{await postForm('/api/channel',{channel:channelSel.value});statusEl.textContent='Канал применён';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
   html += F("powerCb.addEventListener('change',async()=>{try{await postForm('/api/power',{high:powerCb.checked?'1':'0'});statusEl.textContent='Мощность обновлена';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
-  html += F("fixedSizeSel.addEventListener('change',async()=>{try{await postForm('/api/fixed-size',{size:fixedSizeSel.value});statusEl.textContent='Размер фиксированного пакета обновлён';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
-  html += F("document.getElementById('sendFixed').addEventListener('click',async()=>{try{await postForm('/api/send/fixed',{});statusEl.textContent='Фиксированный пакет ('+fixedSizeSel.value+' байт) отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
+  html += F("sfCb.addEventListener('change',async()=>{try{await postForm('/api/sf',{sf5:sfCb.checked?'1':'0'});statusEl.textContent='Фактор расширения обновлён';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
+  html += F("document.getElementById('sendLong').addEventListener('click',async()=>{try{await postForm('/api/send/long',{});statusEl.textContent='Длинный пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
   html += F("document.getElementById('sendRandom').addEventListener('click',async()=>{try{await postForm('/api/send/random',{});statusEl.textContent='Полный пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
-  html += F("document.getElementById('sendCustom').addEventListener('click',async()=>{const payload=document.getElementById('custom').value.trim();try{await postForm('/api/send/custom',{payload});statusEl.textContent='Пользовательский пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
+  html += F("document.getElementById('sendCustom').addEventListener('click',async()=>{const input=document.getElementById('custom');const payload=input.value;if(!payload.trim()){statusEl.textContent='Введите сообщение';return;}try{await postForm('/api/send/custom',{payload});statusEl.textContent='Пользовательский пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
   html += F("setInterval(refreshLog,1500);refreshLog();");
   html += F("</script></body></html>");
   return html;
@@ -582,19 +591,6 @@ String buildChannelOptions(uint8_t selected) {
       html += " selected";
     }
     html += ">#" + String(i) + " — RX " + String(frequency_tables::RX_HOME[i], 3) + " МГц / TX " + String(frequency_tables::TX_HOME[i], 3) + " МГц</option>";
-  }
-  return html;
-}
-
-// --- Формирование HTML-опций для выбора длины фиксированного пакета ---
-String buildFixedPacketOptions(size_t current) {
-  String html;
-  for (size_t value : kFixedPacketOptions) {
-    html += "<option value=\"" + String(static_cast<unsigned long>(value)) + "\"";
-    if (value == current) {
-      html += " selected";
-    }
-    html += ">" + String(static_cast<unsigned long>(value)) + " байт</option>";
   }
   return html;
 }
@@ -656,6 +652,18 @@ bool applyRadioPower(bool highPower) {
   return true;
 }
 
+// --- Настройка фактора расширения SF ---
+bool applySpreadingFactor(bool useSf5) {
+  uint8_t targetSf = useSf5 ? 5 : kDefaultSpreadingFactor;
+  int16_t result = radio.setSpreadingFactor(targetSf);
+  if (result != RADIOLIB_ERR_NONE) {
+    logRadioError("setSpreadingFactor", result);
+    return false;
+  }
+  state.useSf5 = useSf5;
+  return true;
+}
+
 // --- Гарантируем, что радио ожидает приём ---
 bool ensureReceiveMode() {
   int16_t stateCode = radio.startReceive();
@@ -667,16 +675,48 @@ bool ensureReceiveMode() {
 }
 
 // --- Отправка подготовленного буфера ---
-bool sendBuffer(const std::vector<uint8_t>& buffer, const String& context) {
-  addEvent(context + ": " + formatByteArray(buffer));
+bool sendPayload(const std::vector<uint8_t>& payload, const String& context) {
+  if (payload.empty()) {
+    addEvent(context + ": пустой буфер");
+    return false;
+  }
 
+  addEvent(context + ": " + formatByteArray(payload) + " | \"" + formatTextPayload(payload) + "\"");
+
+  auto frames = splitPayloadIntoFrames(payload);
+  if (frames.empty()) {
+    addEvent("Не удалось подготовить кадры для отправки");
+    return false;
+  }
+
+  if (frames.size() > 1) {
+    addEvent(String("Сообщение разбито на ") + String(static_cast<unsigned long>(frames.size())) + " кадров");
+  }
+
+  for (size_t i = 0; i < frames.size(); ++i) {
+    const auto& frame = frames[i];
+    std::vector<uint8_t> frameVec(frame.begin(), frame.end());
+    addEvent(String("→ Кадр #") + String(static_cast<unsigned long>(i + 1)) + " (" + describeFrameMarker(frame[0]) + "): " + formatByteArray(frameVec));
+    if (!transmitFrame(frame, i, frames.size())) {
+      return false;
+    }
+    if (i + 1 < frames.size()) {
+      waitInterFrameDelay();
+    }
+  }
+
+  return true;
+}
+
+// --- Непосредственная передача одного кадра ---
+bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t /*index*/, size_t /*total*/) {
   int16_t freqState = radio.setFrequency(state.currentTxFreq);
   if (freqState != RADIOLIB_ERR_NONE) {
     logRadioError("setFrequency(TX)", freqState);
     return false;
   }
 
-  int16_t result = radio.transmit(const_cast<uint8_t*>(buffer.data()), buffer.size());
+  int16_t result = radio.transmit(const_cast<uint8_t*>(frame.data()), kFixedFrameSize);
   if (result != RADIOLIB_ERR_NONE) {
     logRadioError("transmit", result);
     radio.setFrequency(state.currentRxFreq);
@@ -693,48 +733,155 @@ bool sendBuffer(const std::vector<uint8_t>& buffer, const String& context) {
   return ensureReceiveMode();
 }
 
-// --- Разбор пользовательского ввода (HEX) ---
-std::vector<uint8_t> parseHexString(const String& raw, bool& ok, String& errorMessage) {
-  std::vector<uint8_t> result;
-  ok = false;
-  errorMessage = "";
+// --- Разбиение сообщения на кадры по 8 байт ---
+std::vector<std::array<uint8_t, kFixedFrameSize>> splitPayloadIntoFrames(const std::vector<uint8_t>& payload) {
+  std::vector<std::array<uint8_t, kFixedFrameSize>> frames;
+  if (payload.empty()) {
+    return frames;
+  }
 
-  String sanitized;
-  sanitized.reserve(raw.length());
-  for (size_t i = 0; i < raw.length(); ++i) {
-    char c = raw.charAt(i);
-    if (isxdigit(static_cast<unsigned char>(c))) {
-      sanitized += static_cast<char>(toupper(c));
-    } else if (c == ' ' || c == ',' || c == '-') {
-      sanitized += ' ';
+  if (payload.size() <= kFramePayloadSize) {
+    std::array<uint8_t, kFixedFrameSize> frame{};
+    frame[0] = kSingleFrameMarker;
+    std::copy(payload.begin(), payload.end(), frame.begin() + 1);
+    frames.push_back(frame);
+    return frames;
+  }
+
+  size_t offset = 0;
+  uint8_t marker = kFirstChunkMarker;
+  while (offset < payload.size()) {
+    std::array<uint8_t, kFixedFrameSize> frame{};
+    size_t chunk = std::min(kFramePayloadSize, payload.size() - offset);
+    bool last = (offset + chunk) >= payload.size();
+    frame[0] = last ? kFinalFrameMarker : marker;
+    std::copy_n(payload.begin() + offset, chunk, frame.begin() + 1);
+    frames.push_back(frame);
+    offset += chunk;
+    if (!last && marker < kMaxChunkMarker) {
+      ++marker;
+    }
+  }
+
+  return frames;
+}
+
+// --- Пауза между кадрами ---
+void waitInterFrameDelay() {
+#if defined(ARDUINO)
+  delay(kInterFrameDelayMs);
+#else
+  std::this_thread::sleep_for(std::chrono::milliseconds(kInterFrameDelayMs));
+#endif
+}
+
+// --- Обрезка завершающих нулей (для последнего кадра) ---
+void trimTrailingZeros(std::vector<uint8_t>& buffer) {
+  while (!buffer.empty() && buffer.back() == 0) {
+    buffer.pop_back();
+  }
+}
+
+// --- Формирование текстового представления полезной нагрузки ---
+String formatTextPayload(const std::vector<uint8_t>& data) {
+  String out;
+  out.reserve(data.size() + 8);
+  for (uint8_t byte : data) {
+    if (byte == '\n') {
+      out += "\\n";
+    } else if (byte == '\r') {
+      out += "\\r";
+    } else if (byte == '\t') {
+      out += "\\t";
+    } else if (byte >= 0x20 && byte <= 0x7E) {
+      out += static_cast<char>(byte);
     } else {
-      errorMessage = "Допустимы только шестнадцатеричные символы и пробелы";
-      return result;
+      char buf[5];
+      std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<unsigned>(byte));
+      out += buf;
     }
   }
+  return out;
+}
 
-  std::istringstream iss(sanitized.c_str());
-  std::string token;
-  while (iss >> token) {
-    if (token.length() > 2) {
-      errorMessage = "Каждый байт должен состоять из 1-2 HEX символов";
-      return result;
-    }
-    uint8_t value = static_cast<uint8_t>(strtoul(token.c_str(), nullptr, 16));
-    result.push_back(value);
-    if (result.size() > kFullPacketSize) {
-      errorMessage = "Превышен максимальный размер пакета";
-      return {};
-    }
+// --- Человекочитаемое описание маркера кадра ---
+String describeFrameMarker(uint8_t marker) {
+  if (marker == kSingleFrameMarker) {
+    return F("одиночный");
+  }
+  if (marker == kFinalFrameMarker) {
+    return F("последний");
+  }
+  if (marker >= kFirstChunkMarker && marker <= kMaxChunkMarker) {
+    return String("часть #") + String(static_cast<unsigned long>(marker - 1));
+  }
+  char buf[16];
+  std::snprintf(buf, sizeof(buf), "маркер 0x%02X", static_cast<unsigned>(marker));
+  return String(buf);
+}
+
+// --- Добавление части в буфер сборки ---
+void appendReceiveChunk(const std::vector<uint8_t>& chunk, bool finalChunk) {
+  state.rxAssembly.insert(state.rxAssembly.end(), chunk.begin(), chunk.end());
+  if (finalChunk) {
+    logReceivedMessage(state.rxAssembly);
+    resetReceiveAssembly();
+  } else {
+    state.assemblingMessage = true;
+  }
+}
+
+// --- Сброс состояния сборки ---
+void resetReceiveAssembly() {
+  state.rxAssembly.clear();
+  state.assemblingMessage = false;
+  state.expectedChunkMarker = kFirstChunkMarker;
+}
+
+// --- Логирование принятого сообщения ---
+void logReceivedMessage(const std::vector<uint8_t>& payload) {
+  addEvent(String("Принято сообщение (") + String(static_cast<unsigned long>(payload.size())) + " байт): " + formatByteArray(payload) + " | \"" + formatTextPayload(payload) + "\"", kIncomingColor);
+}
+
+// --- Обработка принятого кадра ---
+void processIncomingFrame(const std::vector<uint8_t>& frame) {
+  if (frame.empty()) {
+    return;
   }
 
-  if (result.empty()) {
-    errorMessage = "Введите хотя бы один байт";
-    return result;
+  addEvent(String("Принят кадр ") + describeFrameMarker(frame[0]) + ": " + formatByteArray(frame));
+
+  std::vector<uint8_t> payload;
+  if (frame.size() > 1) {
+    payload.assign(frame.begin() + 1, frame.end());
   }
 
-  ok = true;
-  return result;
+  const uint8_t marker = frame[0];
+  if (marker == kSingleFrameMarker) {
+    trimTrailingZeros(payload);
+    resetReceiveAssembly();
+    appendReceiveChunk(payload, true);
+    return;
+  }
+
+  if (marker == kFinalFrameMarker) {
+    trimTrailingZeros(payload);
+    if (!state.assemblingMessage) {
+      resetReceiveAssembly();
+    }
+    appendReceiveChunk(payload, true);
+    return;
+  }
+
+  if (!state.assemblingMessage) {
+    resetReceiveAssembly();
+  } else if (marker != state.expectedChunkMarker) {
+    addEvent("Получен неожиданный маркер последовательности, буфер сборки сброшен");
+    resetReceiveAssembly();
+  }
+
+  appendReceiveChunk(payload, false);
+  state.expectedChunkMarker = (marker < kMaxChunkMarker) ? static_cast<uint8_t>(marker + 1) : kMaxChunkMarker;
 }
 
 // --- Форматирование массива байт для вывода ---
