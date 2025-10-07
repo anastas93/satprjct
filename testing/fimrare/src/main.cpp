@@ -50,6 +50,8 @@ constexpr uint8_t kHomeBankSize = static_cast<uint8_t>(frequency_tables::HOME_BA
 constexpr uint16_t kImplicitPayloadLength = LoRaRadioLibSettings::DEFAULT_OPTIONS.implicitPayloadLength; // длина implicit-пакета
 constexpr size_t kMaxEventHistory = 120;          // ограничение истории событий для веб-чата
 constexpr size_t kFullPacketSize = 245;           // максимальная длина пакета SX1262
+constexpr std::array<size_t, 5> kFixedPacketOptions = {4, 8, 16, 32, 64}; // доступные размеры фиксированного пакета
+constexpr size_t kDefaultFixedPacketSize = kFixedPacketOptions.front();   // размер фиксированного пакета по умолчанию
 
 // --- Структура, описывающая событие в веб-чате ---
 struct ChatEvent {
@@ -65,6 +67,7 @@ struct AppState {
   float currentTxFreq = frequency_tables::TX_HOME[0]; // текущая частота передачи
   unsigned long nextEventId = 1;       // счётчик идентификаторов для событий
   std::vector<ChatEvent> events;       // журнал событий для веб-интерфейса
+  size_t fixedPacketSize = kDefaultFixedPacketSize; // выбранный размер фиксированного пакета
 } state;
 
 // --- Флаги приёма LoRa ---
@@ -79,12 +82,13 @@ void handleRoot();
 void handleLog();
 void handleChannelChange();
 void handlePowerToggle();
-void handleSendFiveBytes();
+void handleSendFixedPacket();
 void handleSendRandomPacket();
 void handleSendCustom();
 void handleNotFound();
 String buildIndexHtml();
 String buildChannelOptions(uint8_t selected);
+String buildFixedPacketOptions(size_t current);
 String escapeJson(const String& value);
 String makeAccessPointSsid();
 bool applyRadioChannel(uint8_t newIndex);
@@ -94,6 +98,7 @@ bool sendBuffer(const std::vector<uint8_t>& buffer, const String& context);
 std::vector<uint8_t> parseHexString(const String& raw, bool& ok, String& errorMessage);
 String formatByteArray(const std::vector<uint8_t>& data);
 void logRadioError(const String& context, int16_t code);
+void handleFixedPacketSizeChange();
 
 // --- Формирование имени Wi-Fi сети ---
 String makeAccessPointSsid() {
@@ -199,9 +204,11 @@ void setup() {
   server.on("/api/log", HTTP_GET, handleLog);
   server.on("/api/channel", HTTP_POST, handleChannelChange);
   server.on("/api/power", HTTP_POST, handlePowerToggle);
-  server.on("/api/send/five", HTTP_POST, handleSendFiveBytes);
+  server.on("/api/send/five", HTTP_POST, handleSendFixedPacket); // совместимость с прежним маршрутом
+  server.on("/api/send/fixed", HTTP_POST, handleSendFixedPacket);
   server.on("/api/send/random", HTTP_POST, handleSendRandomPacket);
   server.on("/api/send/custom", HTTP_POST, handleSendCustom);
+  server.on("/api/fixed-size", HTTP_POST, handleFixedPacketSizeChange);
   server.onNotFound(handleNotFound);
   server.begin();
   addEvent("HTTP-сервер запущен на порту 80");
@@ -321,10 +328,46 @@ void handlePowerToggle() {
   }
 }
 
-// --- API: отправка фиксированного пакета из пяти байт ---
-void handleSendFiveBytes() {
-  std::vector<uint8_t> data = {0xDE, 0xAD, 0xBE, 0xEF, 0x01};
-  if (sendBuffer(data, "Пакет из пяти байт")) {
+// --- API: изменение длины фиксированного пакета ---
+void handleFixedPacketSizeChange() {
+  if (!server.hasArg("size")) {
+    server.send(400, "application/json", "{\"error\":\"Не указан параметр size\"}");
+    return;
+  }
+
+  const String raw = server.arg("size");
+  char* endPtr = nullptr;
+  unsigned long parsed = strtoul(raw.c_str(), &endPtr, 10);
+  if (endPtr == raw.c_str() || (endPtr && *endPtr != '\0')) {
+    server.send(400, "application/json", "{\"error\":\"Размер должен быть целым числом\"}");
+    return;
+  }
+
+  size_t requested = static_cast<size_t>(parsed);
+  bool allowed = std::find(kFixedPacketOptions.begin(), kFixedPacketOptions.end(), requested) != kFixedPacketOptions.end();
+  if (!allowed) {
+    server.send(400, "application/json", "{\"error\":\"Недопустимый размер пакета\"}");
+    return;
+  }
+
+  state.fixedPacketSize = requested;
+  addEvent(String("Размер фиксированного пакета установлен: ") + String(static_cast<unsigned long>(requested)) + " байт");
+
+  String response = String("{\"ok\":true,\"size\":") + String(static_cast<unsigned long>(requested)) + "}";
+  server.send(200, "application/json", response);
+}
+
+// --- API: отправка фиксированного пакета выбранной длины ---
+void handleSendFixedPacket() {
+  const uint8_t pattern[] = {0xDE, 0xAD, 0xBE, 0xEF}; // базовый шаблон содержимого пакета
+  std::vector<uint8_t> data(state.fixedPacketSize, 0);
+  for (size_t i = 0; i < data.size(); ++i) {
+    data[i] = pattern[i % (sizeof(pattern) / sizeof(pattern[0]))];
+  }
+  if (!data.empty()) {
+    data.back() = 0x01; // завершаем пакет маркером для удобства проверки
+  }
+  if (sendBuffer(data, String("Фиксированный пакет (") + String(static_cast<unsigned long>(data.size())) + " байт")) {
     server.send(200, "application/json", "{\"ok\":true}");
   } else {
     server.send(500, "application/json", "{\"error\":\"Отправка не удалась\"}");
@@ -397,21 +440,25 @@ String buildIndexHtml() {
   html += F("<section><h2>Управление радиомодулем</h2><label>Канал банка HOME:</label><select id=\"channel\">");
   html += buildChannelOptions(state.channelIndex);
   html += F("</select><label><input type=\"checkbox\" id=\"power\"> Мощность 22 dBm (выкл — -5 dBm)</label>");
+  html += F("<label>Длина фиксированного пакета:</label><select id=\"fixedSize\">");
+  html += buildFixedPacketOptions(state.fixedPacketSize);
+  html += F("</select>");
   html += F("<div class=\"status\" id=\"status\"></div><div class=\"controls\">");
-  html += F("<button id=\"sendFive\">Отправить 5 байт</button>");
+  html += F("<button id=\"sendFixed\">Отправить фиксированный пакет</button>");
   html += F("<button id=\"sendRandom\">Отправить полный пакет</button>");
   html += F("<label>Пользовательский пакет (HEX, например \'DE AD BE EF\'):</label><input type=\"text\" id=\"custom\" placeholder=\"Введите байты через пробел\">");
   html += F("<button id=\"sendCustom\">Отправить пользовательский пакет</button>");
   html += F("</div></section>");
 
   html += F("<section><h2>Журнал событий</h2><div id=\"log\"></div></section></main><script>");
-  html += F("const logEl=document.getElementById('log');const channelSel=document.getElementById('channel');const powerCb=document.getElementById('power');const statusEl=document.getElementById('status');let lastId=0;");
+  html += F("const logEl=document.getElementById('log');const channelSel=document.getElementById('channel');const powerCb=document.getElementById('power');const fixedSizeSel=document.getElementById('fixedSize');const statusEl=document.getElementById('status');let lastId=0;");
   html += F("function appendLog(text){const div=document.createElement('div');div.className='message';div.textContent=text;logEl.appendChild(div);logEl.scrollTop=logEl.scrollHeight;}");
   html += F("async function refreshLog(){try{const resp=await fetch(`/api/log?after=${lastId}`);if(!resp.ok)return;const data=await resp.json();data.events.forEach(evt=>{appendLog(evt.text);lastId=evt.id;});}catch(e){console.error(e);}}");
   html += F("async function postForm(url,body){const resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(body)});if(!resp.ok){const err=await resp.json().catch(()=>({error:'Неизвестная ошибка'}));throw new Error(err.error||'Ошибка');}}");
   html += F("channelSel.addEventListener('change',async()=>{try{await postForm('/api/channel',{channel:channelSel.value});statusEl.textContent='Канал применён';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
   html += F("powerCb.addEventListener('change',async()=>{try{await postForm('/api/power',{high:powerCb.checked?'1':'0'});statusEl.textContent='Мощность обновлена';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
-  html += F("document.getElementById('sendFive').addEventListener('click',async()=>{try{await postForm('/api/send/five',{});statusEl.textContent='Пакет из 5 байт отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
+  html += F("fixedSizeSel.addEventListener('change',async()=>{try{await postForm('/api/fixed-size',{size:fixedSizeSel.value});statusEl.textContent='Размер фиксированного пакета обновлён';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
+  html += F("document.getElementById('sendFixed').addEventListener('click',async()=>{try{await postForm('/api/send/fixed',{});statusEl.textContent='Фиксированный пакет ('+fixedSizeSel.value+' байт) отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
   html += F("document.getElementById('sendRandom').addEventListener('click',async()=>{try{await postForm('/api/send/random',{});statusEl.textContent='Полный пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
   html += F("document.getElementById('sendCustom').addEventListener('click',async()=>{const payload=document.getElementById('custom').value.trim();try{await postForm('/api/send/custom',{payload});statusEl.textContent='Пользовательский пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
   html += F("setInterval(refreshLog,1500);refreshLog();");
@@ -428,6 +475,19 @@ String buildChannelOptions(uint8_t selected) {
       html += " selected";
     }
     html += ">#" + String(i) + " — RX " + String(frequency_tables::RX_HOME[i], 3) + " МГц / TX " + String(frequency_tables::TX_HOME[i], 3) + " МГц</option>";
+  }
+  return html;
+}
+
+// --- Формирование HTML-опций для выбора длины фиксированного пакета ---
+String buildFixedPacketOptions(size_t current) {
+  String html;
+  for (size_t value : kFixedPacketOptions) {
+    html += "<option value=\"" + String(static_cast<unsigned long>(value)) + "\"";
+    if (value == current) {
+      html += " selected";
+    }
+    html += ">" + String(static_cast<unsigned long>(value)) + " байт</option>";
   }
   return html;
 }
