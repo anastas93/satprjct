@@ -11,8 +11,8 @@
 #include <iomanip>
 #include <cctype>
 
-#include "../../src/libs/radio/frequency_tables.h"           // таблицы частот из основного проекта
-#include "../../src/libs/radio/lora_radiolib_settings.h"     // дефолтные настройки драйвера SX1262
+#include "libs/radio/frequency_tables.h"           // таблицы частот из основного проекта
+#include "libs/radio/lora_radiolib_settings.h"     // дефолтные настройки драйвера SX1262
 
 // --- Проверка наличия обязательных макросов для Wi-Fi ---
 #ifndef LOTEST_WIFI_SSID
