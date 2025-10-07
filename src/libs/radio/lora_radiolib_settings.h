@@ -5,22 +5,30 @@
 namespace LoRaRadioLibSettings {
 
 // Структура описывает параметры драйвера SX1262, управляемые через RadioLib.
-// Все поля снабжены подробными комментариями с указанием их влияния.
+// Для каждого поля приведено краткое описание его назначения.
 struct SX1262DriverOptions {
-  bool useDio2AsRfSwitch = true;      // Использовать ли вывод DIO2 в качестве RF-переключателя
-  bool useDio3ForTcxo = false;        // Управлять ли внешним TCXO через DIO3
-  float tcxoVoltage = 0.0f;           // Напряжение питания TCXO, В (0 — TCXO не используется)
-  bool enableRegulatorLDO = true;    // Принудительно включить LDO-регулятор питания
-  bool enableRegulatorDCDC = false;   // Принудительно включить DC-DC регулятор
-  bool autoLdro = true;               // Автоматическое управление низким коэффициентом дьюти-цикла (LDRO)
-  bool implicitHeader = true;         // Режим implicit header (фиксированная длина полезной нагрузки)
-  uint8_t implicitPayloadLength = 32; // Длина полезной нагрузки в режиме implicit header
-  bool enableCrc = false;             // Включение аппаратного CRC пакета
-  bool invertIq = false;              // Инверсия I/Q при приёме/передаче
-  bool publicNetwork = true;          // Использовать ли публичное LoRa-синхрослово
-  uint16_t syncWord = 0x34;           // Пользовательское синхрослово LoRa
-  uint16_t preambleLength = 24;      // Длина преамбулы в символах
-  bool rxBoostedGain = true;          // Усиленный режим LNA при приёме
+  float bandwidthKhz = 15.63f;        // Ширина полосы пропускания (кГц).
+                                      // Меньшая полоса повышает чувствительность и увеличивает время передачи.
+  uint8_t spreadingFactor = 7;        // Фактор расширения SF (5..12).
+                                      // Увеличение повышает устойчивость, но снижает скорость.
+  uint8_t codingRateDenom = 5;        // Делитель коэффициента кодирования CR (5..8).
+                                      // CR=4/denom, задаёт избыточность и помехоустойчивость.
+  int8_t lowPowerDbm = -5;            // Низкий уровень мощности передачи (dBm) для щадящего режима.
+  int8_t highPowerDbm = 22;           // Высокий уровень мощности передачи (dBm) для максимальной дальности.
+  bool useDio2AsRfSwitch = true;      // Включение аппаратного RF-переключателя на выводе DIO2.
+  bool useDio3ForTcxo = false;        // Разрешение питания внешнего TCXO через вывод DIO3.
+  float tcxoVoltage = 0.0f;           // Напряжение питания TCXO (В). Значение 0 отключает управление TCXO.
+  bool enableRegulatorLDO = true;     // Принудительный перевод радиочасти в режим LDO-регулятора.
+  bool enableRegulatorDCDC = false;   // Принудительный перевод радиочасти в режим DC-DC (если поддерживается аппаратно).
+  bool autoLdro = true;               // Автоматический выбор оптимизации для низких скоростей передачи (LDRO).
+  bool implicitHeader = true;         // Использовать фиксированный размер пакета (implicit header) вместо стандартного заголовка.
+  uint8_t implicitPayloadLength = 32; // Размер полезной нагрузки при implicit header (байты).
+  bool enableCrc = false;             // Добавлять ли аппаратный CRC в конец LoRa-пакета.
+  bool invertIq = false;              // Инверсия фаз (I/Q) для совместимости с определёнными сетями.
+  bool publicNetwork = true;          // Использовать стандартное публичное синхрослово LoRa (true) либо приватное (false).
+  uint16_t syncWord = 0x34;           // Значение синхрослова LoRa (8 или 16 бит в зависимости от режима).
+  uint16_t preambleLength = 24;       // Длина преамбулы в символах — влияет на время пробуждения приёмника.
+  bool rxBoostedGain = true;          // Режим усиленного каскада LNA при приёме для повышения чувствительности.
 };
 
 // Набор параметров по умолчанию, применяемый при инициализации радиомодуля.

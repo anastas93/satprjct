@@ -15,6 +15,16 @@
 
 #include "libs/radio/lora_radiolib_settings.h"     // дефолтные настройки драйвера SX1262
 
+namespace {
+constexpr auto kRadioDefaults = LoRaRadioLibSettings::DEFAULT_OPTIONS; // Статический набор настроек RadioLib
+constexpr size_t kImplicitPayloadLength = static_cast<size_t>(kRadioDefaults.implicitPayloadLength); // размер implicit-пакета
+constexpr float kDefaultBandwidthKhz = kRadioDefaults.bandwidthKhz;    // полоса пропускания LoRa по умолчанию
+constexpr uint8_t kDefaultSpreadingFactor = kRadioDefaults.spreadingFactor; // фактор расширения SF
+constexpr uint8_t kDefaultCodingRate = kRadioDefaults.codingRateDenom;      // делитель коэффициента кодирования CR
+constexpr int8_t kLowPowerDbm = kRadioDefaults.lowPowerDbm;                 // низкий уровень мощности
+constexpr int8_t kHighPowerDbm = kRadioDefaults.highPowerDbm;               // высокий уровень мощности
+} // namespace
+
 // --- Константы частот банка HOME ---
 namespace frequency_tables {
 
@@ -47,7 +57,6 @@ WebServer server(80);                             // встроенный HTTP-�
 
 // --- Константы проекта ---
 constexpr uint8_t kHomeBankSize = static_cast<uint8_t>(frequency_tables::HOME_BANK_SIZE); // число каналов банка HOME
-constexpr uint16_t kImplicitPayloadLength = LoRaRadioLibSettings::DEFAULT_OPTIONS.implicitPayloadLength; // длина implicit-пакета
 constexpr size_t kMaxEventHistory = 120;          // ограничение истории событий для веб-чата
 constexpr size_t kFullPacketSize = 245;           // максимальная длина пакета SX1262
 constexpr std::array<size_t, 5> kFixedPacketOptions = {4, 8, 16, 32, 64}; // доступные размеры фиксированного пакета
@@ -141,44 +150,45 @@ void setup() {
   radio.setDio1Action(onRadioDio1Rise);
 
   // Стартуем радиомодуль и применяем параметры, аналогичные основной прошивке
-  const auto& opts = LoRaRadioLibSettings::DEFAULT_OPTIONS;
   const float initialRxFreq = frequency_tables::RX_HOME[state.channelIndex];
-  const uint8_t syncWord = static_cast<uint8_t>(opts.syncWord & 0xFFU);
-  const float tcxoVoltage = (opts.useDio3ForTcxo && opts.tcxoVoltage > 0.0f) ? opts.tcxoVoltage : 0.0f;
-  const int8_t initialPowerDbm = state.highPower ? 22 : -5; // в Lotest стартуем с мощности по умолчанию
+  const uint8_t syncWord = static_cast<uint8_t>(kRadioDefaults.syncWord & 0xFFU);
+  const float tcxoVoltage = (kRadioDefaults.useDio3ForTcxo && kRadioDefaults.tcxoVoltage > 0.0f)
+                               ? kRadioDefaults.tcxoVoltage
+                               : 0.0f;
+  const int8_t initialPowerDbm = state.highPower ? kHighPowerDbm : kLowPowerDbm; // стартовая мощность
   int16_t beginState = radio.begin(initialRxFreq,
-                                   15.63f,
-                                   7,
-                                   5,
+                                   kDefaultBandwidthKhz,
+                                   kDefaultSpreadingFactor,
+                                   kDefaultCodingRate,
                                    syncWord,
                                    initialPowerDbm,
-                                   opts.preambleLength,
+                                   kRadioDefaults.preambleLength,
                                    tcxoVoltage,
-                                   opts.enableRegulatorDCDC);
+                                   kRadioDefaults.enableRegulatorDCDC);
   if (beginState != RADIOLIB_ERR_NONE) {
     logRadioError("radio.begin", beginState);
   } else {
     addEvent("Радиомодуль успешно инициализирован");
 
     // Применяем настройки LoRa согласно требованиям задачи
-    radio.setSpreadingFactor(7);
-    radio.setBandwidth(15.63);
-    radio.setCodingRate(5);
+    radio.setSpreadingFactor(kDefaultSpreadingFactor);
+    radio.setBandwidth(kDefaultBandwidthKhz);
+    radio.setCodingRate(kDefaultCodingRate);
 
-    radio.setDio2AsRfSwitch(opts.useDio2AsRfSwitch);
-    if (opts.useDio3ForTcxo && opts.tcxoVoltage > 0.0f) {
-      radio.setTCXO(opts.tcxoVoltage); // включаем внешний TCXO с указанным напряжением
+    radio.setDio2AsRfSwitch(kRadioDefaults.useDio2AsRfSwitch);
+    if (kRadioDefaults.useDio3ForTcxo && kRadioDefaults.tcxoVoltage > 0.0f) {
+      radio.setTCXO(kRadioDefaults.tcxoVoltage); // включаем внешний TCXO с указанным напряжением
     }
-    if (opts.implicitHeader) {
+    if (kRadioDefaults.implicitHeader) {
       radio.implicitHeader(kImplicitPayloadLength);
     } else {
       radio.explicitHeader();
     }
-    radio.setCRC(opts.enableCrc ? 2 : 0);          // длина CRC в байтах: 2 либо 0
-    radio.invertIQ(opts.invertIq);                 // включаем или выключаем инверсию IQ
-    radio.setPreambleLength(opts.preambleLength);
-    radio.setRxBoostedGainMode(opts.rxBoostedGain); // режим усиленного приёма SX1262
-    radio.setSyncWord(opts.syncWord);
+    radio.setCRC(kRadioDefaults.enableCrc ? 2 : 0);          // длина CRC в байтах: 2 либо 0
+    radio.invertIQ(kRadioDefaults.invertIq);                 // включаем или выключаем инверсию IQ
+    radio.setPreambleLength(kRadioDefaults.preambleLength);
+    radio.setRxBoostedGainMode(kRadioDefaults.rxBoostedGain); // режим усиленного приёма SX1262
+    radio.setSyncWord(kRadioDefaults.syncWord);
 
     if (!applyRadioChannel(state.channelIndex)) {
       addEvent("Ошибка инициализации канала — проверьте модуль SX1262");
@@ -540,7 +550,7 @@ bool applyRadioChannel(uint8_t newIndex) {
 
 // --- Настройка мощности передачи ---
 bool applyRadioPower(bool highPower) {
-  int8_t targetDbm = highPower ? 22 : -5;
+  int8_t targetDbm = highPower ? kHighPowerDbm : kLowPowerDbm;
   int16_t result = radio.setOutputPower(targetDbm);
   if (result != RADIOLIB_ERR_NONE) {
     logRadioError("setOutputPower", result);
