@@ -5,14 +5,28 @@
 #include <RadioLib.h>
 #include <vector>
 #include <array>
+#include <cstddef>
 #include <algorithm>
 #include <cstring>
 #include <sstream>
 #include <iomanip>
 #include <cctype>
 
-#include "libs/radio/frequency_tables.h"           // таблицы частот из основного проекта
 #include "libs/radio/lora_radiolib_settings.h"     // дефолтные настройки драйвера SX1262
+
+// --- Константы частот банка HOME ---
+namespace frequency_tables {
+
+// Локальный набор частот банка HOME, продублированный здесь, чтобы проект был самодостаточным
+static constexpr std::size_t HOME_BANK_SIZE = 13;
+static constexpr float RX_HOME[HOME_BANK_SIZE] = {
+    263.450F, 257.700F, 257.200F, 256.450F, 267.250F, 250.090F, 249.850F,
+    257.250F, 255.100F, 246.700F, 260.250F, 263.400F, 263.500F};
+static constexpr float TX_HOME[HOME_BANK_SIZE] = {
+    311.400F, 316.150F, 308.800F, 313.850F, 308.250F, 312.600F, 298.830F,
+    316.900F, 318.175F, 297.700F, 314.400F, 316.400F, 315.200F};
+
+} // namespace frequency_tables
 
 // --- Проверка наличия обязательных макросов для Wi-Fi ---
 #ifndef LOTEST_WIFI_SSID
