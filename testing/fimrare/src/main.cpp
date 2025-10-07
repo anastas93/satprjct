@@ -10,6 +10,8 @@
 #include <cstring>
 #include <cstdio>
 #include <chrono>
+#include <type_traits>
+#include <utility>
 #if !defined(ARDUINO)
 #include <thread>
 #endif
@@ -95,6 +97,69 @@ struct AppState {
 volatile bool packetReceivedFlag = false;   // устанавливается обработчиком DIO1 при приёме
 volatile bool packetProcessingEnabled = true; // защита от повторного входа в обработчик
 volatile bool irqStatusPending = false;     // есть ли необработанные IRQ-флаги SX1262
+
+// --- Совместимость с различными версиями API RadioLib ---
+namespace radiolib_compat {
+
+// Проверяем доступность старого API getIrqFlags()/clearIrqFlags()
+template <typename T, typename = void>
+struct HasIrqFlagsApi : std::false_type {};
+
+template <typename T>
+struct HasIrqFlagsApi<
+    T,
+    std::void_t<decltype(std::declval<T&>().getIrqFlags()),
+                decltype(std::declval<T&>().clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL))>>
+    : std::true_type {};
+
+// Проверяем наличие современного варианта getIrqStatus() без аргументов
+template <typename T, typename = void>
+struct HasZeroArgIrqStatusApi : std::false_type {};
+
+template <typename T>
+struct HasZeroArgIrqStatusApi<
+    T,
+    std::void_t<decltype(std::declval<T&>().getIrqStatus())>> : std::true_type {};
+
+// Проверяем наличие варианта getIrqStatus(uint16_t*)
+template <typename T, typename = void>
+struct HasPointerIrqStatusApi : std::false_type {};
+
+template <typename T>
+struct HasPointerIrqStatusApi<
+    T,
+    std::void_t<decltype(
+        std::declval<T&>().getIrqStatus(static_cast<uint16_t*>(nullptr)))>>
+    : std::true_type {};
+
+// Унифицированное чтение IRQ-флагов SX1262
+template <typename Radio>
+uint32_t readIrqFlags(Radio& radio) {
+  if constexpr (HasIrqFlagsApi<Radio>::value) {
+    return radio.getIrqFlags();                                  // старый API RadioLib
+  } else if constexpr (HasZeroArgIrqStatusApi<Radio>::value) {
+    return static_cast<uint32_t>(radio.getIrqStatus());          // новый API без аргументов
+  } else if constexpr (HasPointerIrqStatusApi<Radio>::value) {
+    uint16_t legacyFlags = 0;
+    const int16_t state = radio.getIrqStatus(&legacyFlags);      // fallback через указатель
+    return (state == RADIOLIB_ERR_NONE) ? legacyFlags : 0U;
+  } else {
+    return 0U;                                                   // неподдерживаемый вариант API
+  }
+}
+
+// Унифицированная очистка IRQ-флагов SX1262
+template <typename Radio>
+int16_t clearIrqFlags(Radio& radio, uint32_t mask) {
+  if constexpr (HasIrqFlagsApi<Radio>::value) {
+    return radio.clearIrqFlags(mask);                            // старый API
+  } else {
+    (void)mask;
+    return radio.clearIrqStatus();                               // современный API без аргументов
+  }
+}
+
+} // namespace radiolib_compat
 
 // --- Вспомогательные функции объявления ---
 void IRAM_ATTR onRadioDio1Rise();
@@ -266,9 +331,9 @@ void loop() {
 #endif
 
   if (processIrq) {
-    const uint32_t irqFlags = radio.getIrqFlags();                   // считываем активные флаги
-    radio.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);                    // сбрасываем регистр IRQ
-    addEvent(formatSx1262IrqFlags(irqFlags));                        // публикуем расшифровку событий
+    const uint32_t irqFlags = radiolib_compat::readIrqFlags(radio);   // считываем активные флаги независимо от версии API
+    radiolib_compat::clearIrqFlags(radio, RADIOLIB_SX126X_IRQ_ALL);   // сбрасываем регистр IRQ в доступном варианте
+    addEvent(formatSx1262IrqFlags(irqFlags));                         // публикуем расшифровку событий
   }
 
   if (packetReceivedFlag) {
