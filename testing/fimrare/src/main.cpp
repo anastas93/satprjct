@@ -82,9 +82,11 @@ struct AppState {
 // --- Флаги приёма LoRa ---
 volatile bool packetReceivedFlag = false;   // устанавливается обработчиком DIO1 при приёме
 volatile bool packetProcessingEnabled = true; // защита от повторного входа в обработчик
+volatile bool irqStatusPending = false;     // есть ли необработанные IRQ-флаги SX1262
 
 // --- Вспомогательные функции объявления ---
 void IRAM_ATTR onRadioDio1Rise();
+String formatSx1262IrqFlags(uint32_t flags);
 void addEvent(const String& message);
 void appendEventBuffer(const String& message, unsigned long id);
 void handleRoot();
@@ -228,6 +230,24 @@ void setup() {
 void loop() {
   server.handleClient();
 
+  bool processIrq = false;                    // требуется ли перенос IRQ-статуса в основной поток
+#if defined(ARDUINO)
+  noInterrupts();                              // защищаем флаг от изменения в ISR
+#endif
+  if (irqStatusPending) {                     // фиксируем запрос на логирование IRQ
+    irqStatusPending = false;
+    processIrq = true;
+  }
+#if defined(ARDUINO)
+  interrupts();                               // возвращаем обработку прерываний
+#endif
+
+  if (processIrq) {
+    const uint32_t irqFlags = radio.getIrqFlags();                   // считываем активные флаги
+    radio.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);                    // сбрасываем регистр IRQ
+    addEvent(formatSx1262IrqFlags(irqFlags));                        // публикуем расшифровку событий
+  }
+
   if (packetReceivedFlag) {
     packetProcessingEnabled = false;
     packetReceivedFlag = false;
@@ -252,10 +272,87 @@ void loop() {
 
 // --- Обработчик линии DIO1 радиомодуля ---
 void IRAM_ATTR onRadioDio1Rise() {
+  irqStatusPending = true;                   // отмечаем необходимость чтения IRQ-статуса
   if (!packetProcessingEnabled) {
     return;
   }
   packetReceivedFlag = true;
+}
+
+// --- Формирование человекочитаемого описания IRQ SX1262 ---
+String formatSx1262IrqFlags(uint32_t flags) {
+  const uint32_t effectiveMask = flags & 0xFFFFU;                  // интересуют только младшие 16 бит
+  if (effectiveMask == RADIOLIB_SX126X_IRQ_NONE) {
+    return F("SX1262 IRQ: флаги отсутствуют (маска=0x0000)");
+  }
+
+  struct IrqEntry {
+    uint32_t mask;                                                  // битовая маска события
+    const char* name;                                               // краткое имя IRQ
+    const char* description;                                        // пояснение для оператора
+  };
+
+  static const IrqEntry kIrqMap[] = {
+      {RADIOLIB_SX126X_IRQ_TX_DONE, "IRQ_TX_DONE", "передача завершена"},
+      {RADIOLIB_SX126X_IRQ_RX_DONE, "IRQ_RX_DONE", "приём завершён"},
+      {RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED, "IRQ_PREAMBLE_DETECTED", "обнаружена преамбула"},
+      {RADIOLIB_SX126X_IRQ_SYNC_WORD_VALID, "IRQ_SYNCWORD_VALID", "сошёлся sync word"},
+      {RADIOLIB_SX126X_IRQ_HEADER_VALID, "IRQ_HEADER_VALID", "валидный заголовок"},
+      {RADIOLIB_SX126X_IRQ_HEADER_ERR, "IRQ_HEADER_ERR", "ошибка заголовка"},
+      {RADIOLIB_SX126X_IRQ_CRC_ERR, "IRQ_CRC_ERR", "ошибка CRC"},
+#if defined(RADIOLIB_IRQ_RX_TIMEOUT)
+      {RADIOLIB_IRQ_RX_TIMEOUT, "IRQ_RX_TIMEOUT", "тайм-аут приёма"},
+#endif
+#if defined(RADIOLIB_IRQ_TX_TIMEOUT)
+      {RADIOLIB_IRQ_TX_TIMEOUT, "IRQ_TX_TIMEOUT", "тайм-аут передачи"},
+#endif
+#if !defined(RADIOLIB_IRQ_RX_TIMEOUT) && !defined(RADIOLIB_IRQ_TX_TIMEOUT)
+      {RADIOLIB_SX126X_IRQ_TIMEOUT, "IRQ_RX_TX_TIMEOUT", "тайм-аут RX/TX"},
+#endif
+      {RADIOLIB_SX126X_IRQ_CAD_DONE, "IRQ_CAD_DONE", "CAD завершён"},
+      {RADIOLIB_SX126X_IRQ_CAD_DETECTED, "IRQ_CAD_DETECTED", "CAD обнаружил передачу"},
+#ifdef RADIOLIB_SX126X_IRQ_LR_FHSS_HOP
+      {RADIOLIB_SX126X_IRQ_LR_FHSS_HOP, "IRQ_LR_FHSS_HOP", "LR-FHSS hop"},
+#endif
+  };
+
+  String decoded;
+  decoded.reserve(192);                                             // предотвращаем повторные аллокации
+  uint32_t knownMask = 0U;                                          // известные биты
+  bool first = true;
+  for (const auto& entry : kIrqMap) {
+    if ((effectiveMask & entry.mask) == 0U) {
+      continue;                                                     // пропускаем неактивные события
+    }
+    if (!first) {
+      decoded += F(" | ");
+    }
+    decoded += entry.name;
+    decoded += F(" — ");
+    decoded += entry.description;
+    first = false;
+    knownMask |= entry.mask;
+  }
+
+  String result;
+  result.reserve(224);
+  char buffer[64];
+  std::snprintf(buffer, sizeof(buffer), "SX1262 IRQ=0x%04lX", static_cast<unsigned long>(effectiveMask));
+  result += buffer;
+
+  if (decoded.length() > 0) {
+    result += F(", расшифровка: [");
+    result += decoded;
+    result += ']';
+  }
+
+  const uint32_t unknownMask = effectiveMask & ~knownMask;
+  if (unknownMask != 0U) {
+    std::snprintf(buffer, sizeof(buffer), ", неизвестные биты=0x%04lX", static_cast<unsigned long>(unknownMask));
+    result += buffer;
+  }
+
+  return result;
 }
 
 // --- Добавление события в лог ---
