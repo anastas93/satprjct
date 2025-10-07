@@ -1807,7 +1807,11 @@ function addChatMessage(entry, index, options) {
 }
 function setBubbleText(node, text) {
   const value = text == null ? "" : String(text);
-  const parts = value.split(/\r?\n/);
+  const normalized = value
+    .replace(/\r\n/g, "\n")                     // приводим CRLF к единым переводам строк
+    .replace(/\r/g, "\n")                        // одиночные CR тоже превращаем в LF
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " "); // управляющие символы заменяем пробелом
+  const parts = normalized.split("\n");
   node.innerHTML = "";
   for (let i = 0; i < parts.length; i++) {
     if (i > 0) node.appendChild(document.createElement("br"));
