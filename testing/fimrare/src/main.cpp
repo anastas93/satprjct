@@ -11,6 +11,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cctype>
+#include <cstdio>
 
 #include "libs/radio/lora_radiolib_settings.h"     // дефолтные настройки драйвера SX1262
 
@@ -85,6 +86,7 @@ void handleNotFound();
 String buildIndexHtml();
 String buildChannelOptions(uint8_t selected);
 String escapeJson(const String& value);
+String makeAccessPointSsid();
 bool applyRadioChannel(uint8_t newIndex);
 bool applyRadioPower(bool highPower);
 bool ensureReceiveMode();
@@ -92,6 +94,33 @@ bool sendBuffer(const std::vector<uint8_t>& buffer, const String& context);
 std::vector<uint8_t> parseHexString(const String& raw, bool& ok, String& errorMessage);
 String formatByteArray(const std::vector<uint8_t>& data);
 void logRadioError(const String& context, int16_t code);
+
+// --- Формирование имени Wi-Fi сети ---
+String makeAccessPointSsid() {
+  String base = LOTEST_WIFI_SSID;              // базовый SSID из настроек теста
+#if defined(ARDUINO)
+  uint32_t suffix = 0;                         // уникальный суффикс для совпадения с основной прошивкой
+#  if defined(ESP32)
+  uint64_t mac = ESP.getEfuseMac();            // используем eFuse MAC для воспроизведения поведения оригинала
+  suffix = static_cast<uint32_t>(mac & 0xFFFFFFULL);
+#  elif defined(ESP8266)
+  suffix = ESP.getChipId() & 0xFFFFFFU;        // совместимая логика для других платформ
+#  else
+  uint8_t mac[6] = {0};
+  WiFi.macAddress(mac);                        // fallback: читаем MAC из Wi-Fi интерфейса
+  suffix = (static_cast<uint32_t>(mac[3]) << 16) |
+           (static_cast<uint32_t>(mac[4]) << 8) |
+           static_cast<uint32_t>(mac[5]);
+#  endif
+  char buf[8];
+  std::snprintf(buf, sizeof(buf), "%06X", static_cast<unsigned>(suffix));
+  base += "-";
+  base += buf;
+#else
+  base += "-000000";                           // стабы для хостовых тестов без Arduino
+#endif
+  return base;
+}
 
 // --- Инициализация оборудования ---
 void setup() {
@@ -144,9 +173,10 @@ void setup() {
 
   // Поднимаем точку доступа для веб-интерфейса
   WiFi.mode(WIFI_MODE_AP);
-  bool apStarted = WiFi.softAP(LOTEST_WIFI_SSID, LOTEST_WIFI_PASS);
+  String ssid = makeAccessPointSsid();
+  bool apStarted = WiFi.softAP(ssid.c_str(), LOTEST_WIFI_PASS);
   if (apStarted) {
-    addEvent(String("Точка доступа запущена: ") + LOTEST_WIFI_SSID);
+    addEvent(String("Точка доступа запущена: ") + ssid);
     addEvent(String("IP адрес веб-интерфейса: ") + WiFi.softAPIP().toString());
   } else {
     addEvent("Не удалось запустить точку доступа Wi-Fi");
