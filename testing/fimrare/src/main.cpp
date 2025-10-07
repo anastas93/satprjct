@@ -135,8 +135,21 @@ void setup() {
   // Подключаем обработчик прерывания по DIO1 для асинхронного приёма
   radio.setDio1Action(onRadioDio1Rise);
 
-  // Стартуем радиомодуль и применяем параметры
-  int16_t beginState = radio.begin();
+  // Стартуем радиомодуль и применяем параметры, аналогичные основной прошивке
+  const auto& opts = LoRaRadioLibSettings::DEFAULT_OPTIONS;
+  const float initialRxFreq = frequency_tables::RX_HOME[state.channelIndex];
+  const uint8_t syncWord = static_cast<uint8_t>(opts.syncWord & 0xFFU);
+  const float tcxoVoltage = (opts.useDio3ForTcxo && opts.tcxoVoltage > 0.0f) ? opts.tcxoVoltage : 0.0f;
+  const int8_t initialPowerDbm = state.highPower ? 22 : -5; // в Lotest стартуем с мощности по умолчанию
+  int16_t beginState = radio.begin(initialRxFreq,
+                                   15.63f,
+                                   7,
+                                   5,
+                                   syncWord,
+                                   initialPowerDbm,
+                                   opts.preambleLength,
+                                   tcxoVoltage,
+                                   opts.enableRegulatorDCDC);
   if (beginState != RADIOLIB_ERR_NONE) {
     logRadioError("radio.begin", beginState);
   } else {
@@ -147,7 +160,6 @@ void setup() {
     radio.setBandwidth(15.63);
     radio.setCodingRate(5);
 
-    const auto& opts = LoRaRadioLibSettings::DEFAULT_OPTIONS;
     radio.setDio2AsRfSwitch(opts.useDio2AsRfSwitch);
     if (opts.useDio3ForTcxo && opts.tcxoVoltage > 0.0f) {
       radio.setTCXO(opts.tcxoVoltage); // включаем внешний TCXO с указанным напряжением
@@ -577,5 +589,13 @@ String formatByteArray(const std::vector<uint8_t>& data) {
 
 // --- Вывод кодов ошибок RadioLib в лог ---
 void logRadioError(const String& context, int16_t code) {
-  addEvent(String("RadioLib ошибка ") + context + " => " + String(code));
+  String message = String("RadioLib ошибка ") + context + " => " + String(code);
+  switch (code) {
+    case RADIOLIB_ERR_SPI_CMD_FAILED:
+      message += " (SPI команда не выполнена — проверьте питание и линии CS/CLK/MISO/MOSI/BUSY)";
+      break;
+    default:
+      break;
+  }
+  addEvent(message);
 }
