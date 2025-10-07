@@ -53,9 +53,17 @@ static constexpr float TX_HOME[HOME_BANK_SIZE] = {
 #  define LOTEST_PROJECT_NAME "Lotest"
 #endif
 
+// --- Вспомогательная обёртка для доступа к protected-методам SX1262 ---
+class PublicSX1262 : public SX1262 {
+ public:
+  using SX1262::SX1262;             // пробрасываем конструктор базового класса
+  using SX1262::clearIrqStatus;     // делаем очистку IRQ-статуса публичной
+  using SX1262::getIrqStatus;       // раскрываем оба варианта чтения IRQ-статуса
+};
+
 // --- Глобальные объекты периферии ---
 SPIClass radioSPI(VSPI);                          // аппаратный SPI-порт, обслуживающий радиомодуль
-SX1262 radio = new Module(5, 26, 27, 25, radioSPI); // используем VSPI сразу при создании объекта Module
+PublicSX1262 radio = new Module(5, 26, 27, 25, radioSPI); // используем VSPI сразу при создании объекта Module
 WebServer server(80);                             // встроенный HTTP-сервер ESP32
 
 // --- Константы проекта ---
