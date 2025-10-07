@@ -177,7 +177,7 @@ const UI = {
     received: {
       timer: null,
       running: false,
-      known: new Set(),
+      known: new Map(),
       limit: null,
       awaiting: false,
       progress: new Map(),
@@ -3897,11 +3897,30 @@ function getReceivedMonitorState() {
   if (!UI.state || typeof UI.state !== "object") UI.state = {};
   let state = UI.state.received;
   if (!state || typeof state !== "object") {
-    state = { timer: null, metricsTimer: null, running: false, known: new Set(), limit: null, awaiting: false, progress: new Map() };
+    state = { timer: null, metricsTimer: null, running: false, known: new Map(), limit: null, awaiting: false, progress: new Map() };
     UI.state.received = state;
   }
-  if (!(state.known instanceof Set)) {
-    state.known = new Set(state.known ? Array.from(state.known) : []);
+  if (!(state.known instanceof Map)) {
+    if (state.known instanceof Set) {
+      const map = new Map();
+      state.known.forEach((value) => {
+        if (value == null) return;
+        const key = String(value);
+        const prev = map.get(key) || 0;
+        map.set(key, prev > 0 ? prev : 1);
+      });
+      state.known = map;
+    } else if (Array.isArray(state.known)) {
+      const map = new Map();
+      state.known.forEach((value) => {
+        if (value == null) return;
+        const key = String(value);
+        map.set(key, (map.get(key) || 0) + 1);
+      });
+      state.known = map;
+    } else {
+      state.known = new Map();
+    }
   }
   if (!(state.progress instanceof Map)) {
     // Карта отслеживания промежуточных сообщений (SP-xxxxx → индекс в истории чата)
@@ -4489,18 +4508,50 @@ function updateChatReceivingIndicatorFromRsts(items) {
 
 function handleReceivedSnapshot(items) {
   const state = getReceivedMonitorState();
-  const prev = state.known;
-  const next = new Set();
   const list = Array.isArray(items) ? items : [];
   const firstLoad = !state.snapshotReady;
+  const prevCounts = state.known instanceof Map ? state.known : new Map();
+
+  const currentTotals = new Map();
+  for (let i = 0; i < list.length; i += 1) {
+    const entry = list[i];
+    if (!entry) continue;
+    const name = entry.name != null ? String(entry.name).trim() : "";
+    if (!name) continue;
+    const nextCount = (currentTotals.get(name) || 0) + 1;
+    currentTotals.set(name, nextCount);
+  }
+
+  const newBudgets = new Map();
+  if (!firstLoad) {
+    currentTotals.forEach((total, name) => {
+      const prev = prevCounts instanceof Map ? prevCounts.get(name) || 0 : 0;
+      const diff = total - prev;
+      if (diff > 0) newBudgets.set(name, diff);
+    });
+  }
+
+  const seenByName = new Map();
   for (let i = 0; i < list.length; i += 1) {
     const entry = list[i];
     const name = entry && entry.name ? String(entry.name).trim() : "";
-    if (name) next.add(name);
-    const isNew = !firstLoad && !!(name && !prev.has(name));
-    logReceivedMessage(entry, { isNew });
+    let isNew = false;
+    if (name) {
+      const used = seenByName.get(name) || 0;
+      seenByName.set(name, used + 1);
+      if (!firstLoad) {
+        const remaining = newBudgets.get(name) || 0;
+        if (remaining > 0) {
+          isNew = true;
+          if (remaining <= 1) newBudgets.delete(name);
+          else newBudgets.set(name, remaining - 1);
+        }
+      }
+    }
+    logReceivedMessage(entry, { isNew: !!(isNew && name) });
   }
-  state.known = next;
+
+  state.known = currentTotals;
   state.snapshotReady = true;
   updateChatReceivingIndicatorFromRsts(list);
 }
@@ -11002,7 +11053,7 @@ async function resyncAfterEndpointChange() {
     await loadVersion().catch(() => {});
     probe().catch(() => {});
     const monitor = getReceivedMonitorState();
-    if (monitor && monitor.known) monitor.known = new Set();
+    if (monitor && monitor.known) monitor.known = new Map();
     if (monitor && monitor.push) {
       // После смены адреса обнуляем состояние переподключения, чтобы гарантировать новую попытку SSE
       const push = monitor.push;
