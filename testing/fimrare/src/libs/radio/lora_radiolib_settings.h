@@ -22,12 +22,12 @@ struct SX1262DriverOptions {
   bool enableRegulatorDCDC = false;   // Принудительный перевод радиочасти в режим DC-DC (если поддерживается аппаратно).
   bool autoLdro = true;               // Автоматический выбор оптимизации для низких скоростей передачи (LDRO).
   bool implicitHeader = true;         // Использовать фиксированный размер пакета (implicit header) вместо стандартного заголовка.
-  uint8_t implicitPayloadLength = 32; // Размер полезной нагрузки при implicit header (байты).
+  uint8_t implicitPayloadLength = 8;  // Размер полезной нагрузки при implicit header (байты).
   bool enableCrc = false;             // Добавлять ли аппаратный CRC в конец LoRa-пакета.
   bool invertIq = false;              // Инверсия фаз (I/Q) для совместимости с определёнными сетями.
   bool publicNetwork = true;          // Использовать стандартное публичное синхрослово LoRa (true) либо приватное (false).
   uint16_t syncWord = 0x34;           // Значение синхрослова LoRa (8 или 16 бит в зависимости от режима).
-  uint16_t preambleLength = 24;       // Длина преамбулы в символах — влияет на время пробуждения приёмника.
+  uint16_t preambleLength = 12;       // Длина преамбулы в символах — влияет на время пробуждения приёмника.
   bool rxBoostedGain = true;          // Режим усиленного каскада LNA при приёме для повышения чувствительности.
 };
 
