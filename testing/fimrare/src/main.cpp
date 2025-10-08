@@ -855,14 +855,25 @@ bool applyBandwidth(float bandwidthKhz) {
   }
 
   const float targetBandwidth = *match;
+  const float previousBandwidth = state.bandwidthKhz;
+
+  // SX1262 требует перевода в standby перед изменением модуляционных параметров.
+  int16_t standbyState = radio.standby();
+  if (standbyState != RADIOLIB_ERR_NONE) {
+    logRadioError("standby перед сменой полосы", standbyState);
+    return false;
+  }
+
   int16_t result = radio.setBandwidth(targetBandwidth);
   if (result != RADIOLIB_ERR_NONE) {
     logRadioError("setBandwidth", result);
+    ensureReceiveMode();
     return false;
   }
 
   state.bandwidthKhz = targetBandwidth;
   if (!ensureReceiveMode()) {
+    state.bandwidthKhz = previousBandwidth;
     return false;
   }
   return true;
@@ -878,14 +889,25 @@ bool applyCodingRate(uint8_t codingRateDenom) {
   }
 
   const uint8_t targetCr = *match;
+  const uint8_t previousCr = state.codingRateDenom;
+
+  // Аналогично полосе, перед сменой CR переводим радио в standby.
+  int16_t standbyState = radio.standby();
+  if (standbyState != RADIOLIB_ERR_NONE) {
+    logRadioError("standby перед сменой CR", standbyState);
+    return false;
+  }
+
   int16_t result = radio.setCodingRate(targetCr);
   if (result != RADIOLIB_ERR_NONE) {
     logRadioError("setCodingRate", result);
+    ensureReceiveMode();
     return false;
   }
 
   state.codingRateDenom = targetCr;
   if (!ensureReceiveMode()) {
+    state.codingRateDenom = previousCr;
     return false;
   }
   return true;
