@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cstdio>
 #include <chrono>
+#include <cmath>
 #include <type_traits>
 #include <utility>
 #if !defined(ARDUINO)
@@ -26,6 +27,9 @@ constexpr uint8_t kDefaultSpreadingFactor = kRadioDefaults.spreadingFactor; // �
 constexpr uint8_t kDefaultCodingRate = kRadioDefaults.codingRateDenom;      // делитель коэффициента кодирования CR
 constexpr int8_t kLowPowerDbm = kRadioDefaults.lowPowerDbm;                 // низкий уровень мощности
 constexpr int8_t kHighPowerDbm = kRadioDefaults.highPowerDbm;               // высокий уровень мощности
+constexpr std::array<float, 4> kSupportedBandwidths = {7.81f, 10.42f, 15.63f, 20.83f}; // допустимые полосы (кГц)
+constexpr std::array<uint8_t, 4> kSupportedCodingRates = {5, 6, 7, 8};       // допустимые делители CR
+constexpr float kBandwidthTolerance = 0.02f;                                 // допуск сравнения полосы в кГц
 } // namespace
 
 // --- Константы частот банка HOME ---
@@ -93,6 +97,8 @@ struct AppState {
   uint8_t channelIndex = 0;            // выбранный канал банка HOME
   bool highPower = false;              // признак использования мощности 22 dBm (иначе -5 dBm)
   bool useSf5 = false;                 // признак использования SF5 (false => SF7)
+  float bandwidthKhz = kDefaultBandwidthKhz; // текущая ширина полосы пропускания LoRa
+  uint8_t codingRateDenom = kDefaultCodingRate; // текущий делитель коэффициента кодирования CR
   float currentRxFreq = frequency_tables::RX_HOME[0]; // текущая частота приёма
   float currentTxFreq = frequency_tables::TX_HOME[0]; // текущая частота передачи
   unsigned long nextEventId = 1;       // счётчик идентификаторов для событий
@@ -190,6 +196,8 @@ String makeAccessPointSsid();
 bool applyRadioChannel(uint8_t newIndex);
 bool applyRadioPower(bool highPower);
 bool applySpreadingFactor(bool useSf5);
+bool applyBandwidth(float bandwidthKhz);
+bool applyCodingRate(uint8_t codingRateDenom);
 bool ensureReceiveMode();
 bool sendPayload(const std::vector<uint8_t>& payload, const String& context);
 bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t index, size_t total);
@@ -203,6 +211,8 @@ String describeFrameMarker(uint8_t marker);
 void logReceivedMessage(const std::vector<uint8_t>& payload);
 void logRadioError(const String& context, int16_t code);
 void handleSpreadingFactorToggle();
+void handleBandwidthChange();
+void handleCodingRateChange();
 void waitInterFrameDelay();
 void trimTrailingZeros(std::vector<uint8_t>& buffer);
 
@@ -270,8 +280,8 @@ void setup() {
     // Применяем настройки LoRa согласно требованиям задачи
     state.useSf5 = (kDefaultSpreadingFactor == 5);
     applySpreadingFactor(state.useSf5);
-    radio.setBandwidth(kDefaultBandwidthKhz);
-    radio.setCodingRate(kDefaultCodingRate);
+    applyBandwidth(state.bandwidthKhz);
+    applyCodingRate(state.codingRateDenom);
 
     radio.setDio2AsRfSwitch(kRadioDefaults.useDio2AsRfSwitch);
     if (kRadioDefaults.useDio3ForTcxo && kRadioDefaults.tcxoVoltage > 0.0f) {
@@ -318,6 +328,8 @@ void setup() {
   server.on("/api/send/random", HTTP_POST, handleSendRandomPacket);
   server.on("/api/send/custom", HTTP_POST, handleSendCustom);
   server.on("/api/sf", HTTP_POST, handleSpreadingFactorToggle);
+  server.on("/api/bw", HTTP_POST, handleBandwidthChange);
+  server.on("/api/cr", HTTP_POST, handleCodingRateChange);
   server.onNotFound(handleNotFound);
   server.begin();
   addEvent("HTTP-сервер запущен на порту 80");
@@ -552,6 +564,72 @@ void handleSpreadingFactorToggle() {
   }
 }
 
+// --- API: установка полосы пропускания ---
+void handleBandwidthChange() {
+  if (!server.hasArg("bw")) {
+    server.send(400, "application/json", "{\"error\":\"Не передано поле bw\"}");
+    return;
+  }
+  const String raw = server.arg("bw");
+  const float parsed = raw.toFloat();
+  bool matched = false;
+  float target = state.bandwidthKhz;
+  for (float candidate : kSupportedBandwidths) {
+    if (std::fabs(candidate - parsed) <= kBandwidthTolerance) {
+      matched = true;
+      target = candidate;
+      break;
+    }
+  }
+  if (!matched) {
+    server.send(400, "application/json", "{\"error\":\"Недопустимая полоса\"}");
+    return;
+  }
+  if (!applyBandwidth(target)) {
+    server.send(500, "application/json", "{\"error\":\"Ошибка установки полосы\"}");
+    return;
+  }
+  if (!ensureReceiveMode()) {
+    server.send(500, "application/json", "{\"error\":\"Режим приёма не активирован\"}");
+    return;
+  }
+  addEvent(String("Полоса пропускания установлена: ") + String(target, 2) + " кГц");
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+// --- API: установка коэффициента кодирования ---
+void handleCodingRateChange() {
+  if (!server.hasArg("cr")) {
+    server.send(400, "application/json", "{\"error\":\"Не передано поле cr\"}");
+    return;
+  }
+  const String raw = server.arg("cr");
+  long parsed = raw.toInt();
+  bool matched = false;
+  uint8_t target = state.codingRateDenom;
+  for (uint8_t candidate : kSupportedCodingRates) {
+    if (parsed == candidate) {
+      matched = true;
+      target = candidate;
+      break;
+    }
+  }
+  if (!matched) {
+    server.send(400, "application/json", "{\"error\":\"Недопустимый CR\"}");
+    return;
+  }
+  if (!applyCodingRate(target)) {
+    server.send(500, "application/json", "{\"error\":\"Ошибка установки CR\"}");
+    return;
+  }
+  if (!ensureReceiveMode()) {
+    server.send(500, "application/json", "{\"error\":\"Режим приёма не активирован\"}");
+    return;
+  }
+  addEvent(String("Коэффициент кодирования установлен: 4/") + String(static_cast<unsigned long>(target)));
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 // --- API: отправка длинного пакета с буквами A-Z ---
 void handleSendLongPacket() {
   std::vector<uint8_t> data(kLongPacketSize, 0);
@@ -627,6 +705,24 @@ String buildIndexHtml() {
   html += F("<section><h2>Управление радиомодулем</h2><label>Канал банка HOME:</label><select id=\"channel\">");
   html += buildChannelOptions(state.channelIndex);
   html += F("</select>");
+  html += F("<label>Полоса (кГц):</label><select id=\"bw\">");
+  for (float bw : kSupportedBandwidths) {
+    html += "<option value=\\\"" + String(bw, 2) + "\\\"";
+    if (std::fabs(state.bandwidthKhz - bw) <= kBandwidthTolerance) {
+      html += " selected";
+    }
+    html += ">" + String(bw, 2) + "</option>";
+  }
+  html += F("</select>");
+  html += F("<label>Коэффициент кодирования:</label><select id=\"cr\">");
+  for (uint8_t cr : kSupportedCodingRates) {
+    html += "<option value=\\\"" + String(static_cast<unsigned long>(cr)) + "\\\"";
+    if (state.codingRateDenom == cr) {
+      html += " selected";
+    }
+    html += ">4/" + String(static_cast<unsigned long>(cr)) + "</option>";
+  }
+  html += F("</select>");
   html += "<label><input type='checkbox' id='power'";
   if (state.highPower) {
     html += " checked";
@@ -646,7 +742,7 @@ String buildIndexHtml() {
 
   html += F("<section><h2>Журнал событий</h2><div id=\"log\"></div></section></main><script>");
   // Используем максимально совместимый JavaScript без современных конструкций, чтобы UI работал в старых браузерах.
-  html += F("var logEl=document.getElementById('log');var channelSel=document.getElementById('channel');var powerCb=document.getElementById('power');var sfCb=document.getElementById('sf5');var statusEl=document.getElementById('status');var lastId=0;");
+  html += F("var logEl=document.getElementById('log');var channelSel=document.getElementById('channel');var bwSel=document.getElementById('bw');var crSel=document.getElementById('cr');var powerCb=document.getElementById('power');var sfCb=document.getElementById('sf5');var statusEl=document.getElementById('status');var lastId=0;");
   html += F("function appendLog(entry){var div=document.createElement('div');div.className='message';div.textContent=entry.text||'';if(entry.color){div.style.color=entry.color;}logEl.appendChild(div);logEl.scrollTop=logEl.scrollHeight;}");
   html += F("function encodeForm(body){var pairs=[];for(var key in body){if(Object.prototype.hasOwnProperty.call(body,key)){pairs.push(encodeURIComponent(key)+'='+encodeURIComponent(body[key]));}}return pairs.join('&');}");
   html += F("function postForm(url,body,onOk,onError){var xhr=new XMLHttpRequest();xhr.open('POST',url,true);xhr.setRequestHeader('Content-Type','application/x-www-form-urlencoded');xhr.onreadystatechange=function(){if(xhr.readyState!==4){return;}if(xhr.status>=200&&xhr.status<300){if(onOk){onOk();}}else{var message='Ошибка';try{var resp=JSON.parse(xhr.responseText||'{}');if(resp&&resp.error){message=resp.error;}}catch(err){}if(onError){onError(message);}else{console.error(message);}}};xhr.send(encodeForm(body||{}));}");
@@ -655,6 +751,8 @@ String buildIndexHtml() {
   html += F("channelSel.addEventListener('change',function(){postForm('/api/channel',{channel:channelSel.value},function(){statusEl.textContent='Канал применён';refreshLog();},handleError);});");
   html += F("powerCb.addEventListener('change',function(){postForm('/api/power',{high:powerCb.checked?'1':'0'},function(){statusEl.textContent='Мощность обновлена';refreshLog();},handleError);});");
   html += F("sfCb.addEventListener('change',function(){postForm('/api/sf',{sf5:sfCb.checked?'1':'0'},function(){statusEl.textContent='Фактор расширения обновлён';refreshLog();},handleError);});");
+  html += F("bwSel.addEventListener('change',function(){postForm('/api/bw',{bw:bwSel.value},function(){statusEl.textContent='Полоса обновлена';refreshLog();},handleError);});");
+  html += F("crSel.addEventListener('change',function(){postForm('/api/cr',{cr:crSel.value},function(){statusEl.textContent='Коэффициент кодирования обновлён';refreshLog();},handleError);});");
   html += F("document.getElementById('sendLong').addEventListener('click',function(){postForm('/api/send/long',{},function(){statusEl.textContent='Длинный пакет отправлен';refreshLog();},handleError);});");
   html += F("document.getElementById('sendRandom').addEventListener('click',function(){postForm('/api/send/random',{},function(){statusEl.textContent='Полный пакет отправлен';refreshLog();},handleError);});");
   html += F("var customInput=document.getElementById('custom');");
@@ -745,6 +843,28 @@ bool applySpreadingFactor(bool useSf5) {
     return false;
   }
   state.useSf5 = useSf5;
+  return true;
+}
+
+// --- Настройка полосы пропускания LoRa ---
+bool applyBandwidth(float bandwidthKhz) {
+  int16_t result = radio.setBandwidth(bandwidthKhz);
+  if (result != RADIOLIB_ERR_NONE) {
+    logRadioError("setBandwidth", result);
+    return false;
+  }
+  state.bandwidthKhz = bandwidthKhz;
+  return true;
+}
+
+// --- Настройка коэффициента кодирования ---
+bool applyCodingRate(uint8_t codingRateDenom) {
+  int16_t result = radio.setCodingRate(codingRateDenom);
+  if (result != RADIOLIB_ERR_NONE) {
+    logRadioError("setCodingRate", result);
+    return false;
+  }
+  state.codingRateDenom = codingRateDenom;
   return true;
 }
 
