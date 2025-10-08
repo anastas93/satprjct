@@ -11,6 +11,7 @@
 #include <utility>
 #include <cstdio>
 #include <algorithm>
+#include <limits>
 
 #ifndef RADIOLIB_SX126X_IRQ_NONE
 #define RADIOLIB_SX126X_IRQ_NONE 0U
@@ -424,14 +425,49 @@ bool RadioSX1262::startReceiveWithRetry(const char* context) {
 }
 
 bool RadioSX1262::setBandwidth(float bw) {
+  static constexpr float kToleranceKhz = 0.2f; // допустимое отклонение входного значения
   int idx = -1;
+  float bestDiff = std::numeric_limits<float>::max();
   for (int i = 0; i < 5; ++i) {
-    if (std::fabs(BW_[i] - bw) < 0.01f) { idx = i; break; }
+    const float diff = std::fabs(BW_[i] - bw);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      idx = i;
+    }
   }
-  if (idx < 0) return false;                           // значение не из таблицы
-  bw_preset_ = idx;
-  int state = radio_.setBandwidth(bw);                 // задаём полосу пропускания
-  return state == RADIOLIB_ERR_NONE;                   // возвращаем успех
+  if (idx < 0 || bestDiff > kToleranceKhz) {           // значение вне допустимого диапазона
+    return false;
+  }
+
+  const float presetBw = BW_[idx];
+  bool applied = false;
+  {
+    ScopedRadioLock guard(*this);
+    const int16_t lockState = guard.acquire(toTicks(LOCK_TIMEOUT_MS));
+    if (lockState != RADIOLIB_ERR_NONE) {
+      LOG_WARN("RadioSX1262: setBandwidth отклонён — радио занято");
+      lastError_ = lockState;
+      return false;
+    }
+    const int state = radio_.setBandwidth(presetBw);    // задаём полосу пропускания
+    if (state != RADIOLIB_ERR_NONE) {
+      LOG_WARN_VAL("RadioSX1262: setBandwidth не выполнен, код=", state);
+      lastError_ = state;
+      return false;
+    }
+    bw_preset_ = idx;
+    lastError_ = RADIOLIB_ERR_NONE;
+    applied = true;
+  }
+
+  if (applied) {
+    // После смены полосы обязательно переводим модуль обратно в режим приёма
+    const int16_t rxState = ensureReceiveMode();
+    if (rxState != RADIOLIB_ERR_NONE) {
+      LOG_WARN_VAL("RadioSX1262: приём после setBandwidth не восстановлен, код=", rxState);
+    }
+  }
+  return true;
 }
 
 bool RadioSX1262::setSpreadingFactor(int sf) {
@@ -440,9 +476,33 @@ bool RadioSX1262::setSpreadingFactor(int sf) {
     if (SF_[i] == sf) { idx = i; break; }
   }
   if (idx < 0) return false;                           // недопустимое значение
-  sf_preset_ = idx;
-  int state = radio_.setSpreadingFactor(sf);           // задаём фактор расширения
-  return state == RADIOLIB_ERR_NONE;                   // возвращаем успех
+  bool applied = false;
+  {
+    ScopedRadioLock guard(*this);
+    const int16_t lockState = guard.acquire(toTicks(LOCK_TIMEOUT_MS));
+    if (lockState != RADIOLIB_ERR_NONE) {
+      LOG_WARN("RadioSX1262: setSpreadingFactor отклонён — радио занято");
+      lastError_ = lockState;
+      return false;
+    }
+    const int state = radio_.setSpreadingFactor(sf);    // задаём фактор расширения
+    if (state != RADIOLIB_ERR_NONE) {
+      LOG_WARN_VAL("RadioSX1262: setSpreadingFactor не выполнен, код=", state);
+      lastError_ = state;
+      return false;
+    }
+    sf_preset_ = idx;
+    lastError_ = RADIOLIB_ERR_NONE;
+    applied = true;
+  }
+
+  if (applied) {
+    const int16_t rxState = ensureReceiveMode();
+    if (rxState != RADIOLIB_ERR_NONE) {
+      LOG_WARN_VAL("RadioSX1262: приём после setSpreadingFactor не восстановлен, код=", rxState);
+    }
+  }
+  return true;
 }
 
 bool RadioSX1262::setCodingRate(int cr) {
@@ -451,9 +511,33 @@ bool RadioSX1262::setCodingRate(int cr) {
     if (CR_[i] == cr) { idx = i; break; }
   }
   if (idx < 0) return false;                           // недопустимое значение
-  cr_preset_ = idx;
-  int state = radio_.setCodingRate(cr);                // задаём коэффициент кодирования
-  return state == RADIOLIB_ERR_NONE;                   // возвращаем успех
+  bool applied = false;
+  {
+    ScopedRadioLock guard(*this);
+    const int16_t lockState = guard.acquire(toTicks(LOCK_TIMEOUT_MS));
+    if (lockState != RADIOLIB_ERR_NONE) {
+      LOG_WARN("RadioSX1262: setCodingRate отклонён — радио занято");
+      lastError_ = lockState;
+      return false;
+    }
+    const int state = radio_.setCodingRate(cr);         // задаём коэффициент кодирования
+    if (state != RADIOLIB_ERR_NONE) {
+      LOG_WARN_VAL("RadioSX1262: setCodingRate не выполнен, код=", state);
+      lastError_ = state;
+      return false;
+    }
+    cr_preset_ = idx;
+    lastError_ = RADIOLIB_ERR_NONE;
+    applied = true;
+  }
+
+  if (applied) {
+    const int16_t rxState = ensureReceiveMode();
+    if (rxState != RADIOLIB_ERR_NONE) {
+      LOG_WARN_VAL("RadioSX1262: приём после setCodingRate не восстановлен, код=", rxState);
+    }
+  }
+  return true;
 }
 
 bool RadioSX1262::setPower(uint8_t preset) {

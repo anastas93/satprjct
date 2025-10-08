@@ -9,7 +9,9 @@
 #include <cstdio>    //  snprintf   JSON
 #include <cstdlib>   //  strtol/strtof   HTTP-
 #include <cerrno>    //    strtol/strtof
-#include <cctype>    //  std::isspace    
+#include <cctype>    //  std::isspace
+#include <limits>    //  std::numeric_limits
+#include <cmath>     //  std::fabs
 
 // ---    ---
 #include "radio_sx1262.h"
@@ -2887,7 +2889,33 @@ static bool parseIntArgument(const String& rawInput,
 static bool parseBandwidthArgument(const String& rawInput, float& outValue, String& errorMessage) {
   static constexpr float kBandwidthMinKHz = 7.81f;
   static constexpr float kBandwidthMaxKHz = 31.25f;
-  return parseFloatArgument(rawInput, kBandwidthMinKHz, kBandwidthMaxKHz, outValue, errorMessage, "BW", "");
+  if (!parseFloatArgument(rawInput, kBandwidthMinKHz, kBandwidthMaxKHz, outValue, errorMessage, "BW", "")) {
+    return false;
+  }
+
+  static constexpr std::array<float, 5> kSupportedBandwidths = {7.81f, 10.42f, 15.63f, 20.83f, 31.25f};
+  static constexpr float kMatchTolerance = 0.2f;
+  float bestDiff = std::numeric_limits<float>::max();
+  size_t bestIndex = 0;
+  for (size_t i = 0; i < kSupportedBandwidths.size(); ++i) {
+    const float diff = std::fabs(kSupportedBandwidths[i] - outValue);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIndex = i;
+    }
+  }
+  if (bestDiff > kMatchTolerance) {
+    String supported = String(kSupportedBandwidths[0], 2);
+    for (size_t i = 1; i < kSupportedBandwidths.size(); ++i) {
+      supported += ", ";
+      supported += String(kSupportedBandwidths[i], 2);
+    }
+    errorMessage = String(u8"Недопустимая полоса: поддерживаются значения ") + supported + u8" кГц.";
+    return false;
+  }
+
+  outValue = kSupportedBandwidths[bestIndex];
+  return true;
 }
 
 //   spreading factor
@@ -2906,8 +2934,34 @@ static bool parseSpreadingFactorArgument(const String& rawInput, int& outValue, 
 static bool parseCodingRateArgument(const String& rawInput, int& outValue, String& errorMessage) {
   static constexpr long kCrMin = 5;
   static constexpr long kCrMax = 8;
+  String trimmed = rawInput;
+  trimmed.trim();
+  if (trimmed.length() == 0) {
+    errorMessage = String(" CR    .");
+    return false;
+  }
+
+  String numericPart = trimmed;
+  int slashPos = trimmed.lastIndexOf('/');
+  if (slashPos >= 0) {
+    numericPart = trimmed.substring(slashPos + 1);
+    numericPart.trim();
+    if (numericPart.length() == 0) {
+      errorMessage = String(u8"Недопустимый коэффициент кодирования: ожидается формат 4/x, получено \"")
+                   + trimmed + u8"\".";
+      return false;
+    }
+    String numerator = trimmed.substring(0, slashPos);
+    numerator.trim();
+    if (numerator.length() > 0 && numerator != String("4")) {
+      errorMessage = String(u8"Недопустимый коэффициент кодирования: ожидается формат 4/x, получено \"")
+                   + trimmed + u8"\".";
+      return false;
+    }
+  }
+
   long parsed = 0;
-  if (!parseIntArgument(rawInput, kCrMin, kCrMax, parsed, errorMessage, "CR")) {
+  if (!parseIntArgument(numericPart, kCrMin, kCrMax, parsed, errorMessage, "CR")) {
     return false;
   }
   outValue = static_cast<int>(parsed);
