@@ -27,7 +27,8 @@ constexpr uint8_t kDefaultSpreadingFactor = kRadioDefaults.spreadingFactor; // �
 constexpr uint8_t kDefaultCodingRate = kRadioDefaults.codingRateDenom;      // делитель коэффициента кодирования CR
 constexpr int8_t kLowPowerDbm = kRadioDefaults.lowPowerDbm;                 // низкий уровень мощности
 constexpr int8_t kHighPowerDbm = kRadioDefaults.highPowerDbm;               // высокий уровень мощности
-constexpr std::array<float, 4> kSupportedBandwidths = {7.81f, 10.42f, 15.63f, 20.83f}; // допустимые полосы (кГц)
+constexpr std::array<float, 10> kSupportedBandwidths = {
+    7.81f, 10.42f, 15.63f, 20.83f, 31.25f, 41.67f, 62.50f, 125.00f, 250.00f, 500.00f}; // допустимые полосы (кГц)
 constexpr std::array<uint8_t, 4> kSupportedCodingRates = {5, 6, 7, 8};       // допустимые делители CR
 constexpr float kBandwidthTolerance = 0.02f;                                 // допуск сравнения полосы в кГц
 } // namespace
@@ -603,8 +604,12 @@ void handleCodingRateChange() {
     server.send(400, "application/json", "{\"error\":\"Не передано поле cr\"}");
     return;
   }
-  const String raw = server.arg("cr");
-  long parsed = raw.toInt();
+  String raw = server.arg("cr");
+  raw.trim();
+  int slashPos = raw.lastIndexOf('/');
+  String numericPart = slashPos >= 0 ? raw.substring(slashPos + 1) : raw;
+  numericPart.trim();
+  long parsed = numericPart.toInt();
   bool matched = false;
   uint8_t target = state.codingRateDenom;
   for (uint8_t candidate : kSupportedCodingRates) {
