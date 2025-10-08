@@ -571,8 +571,46 @@ void handleBandwidthChange() {
     server.send(400, "application/json", "{\"error\":\"Не передано поле bw\"}");
     return;
   }
-  const String raw = server.arg("bw");
-  const float parsed = raw.toFloat();
+
+  String raw = server.arg("bw");
+  raw.trim();
+
+  // Расширенно разбираем значение: допускаем запятую как разделитель, наличие единиц измерения и пробелов
+  String sanitized = raw;
+  sanitized.replace(',', '.');
+  sanitized.toLowerCase();
+  // удаляем нечисловые символы в конце (например, "кгц", "khz", двоеточия и т.д.)
+  while (sanitized.length() > 0) {
+    const char last = sanitized.charAt(sanitized.length() - 1);
+    const bool numericTail = (last >= '0' && last <= '9') || last == '.' || last == '-';
+    if (numericTail) {
+      break;
+    }
+    sanitized.remove(sanitized.length() - 1);
+  }
+  // и в начале, чтобы поддержать формы вроде "BW=31.25"
+  while (sanitized.length() > 0) {
+    const char first = sanitized.charAt(0);
+    const bool numericHead = (first >= '0' && first <= '9') || first == '.' || first == '-';
+    if (numericHead) {
+      break;
+    }
+    sanitized.remove(0, 1);
+  }
+
+  if (sanitized.length() == 0) {
+    addEvent(String("Получено пустое значение полосы: ") + raw);
+    server.send(400, "application/json", "{\"error\":\"Недопустимая полоса\"}");
+    return;
+  }
+
+  const bool hasDecimalSeparator = sanitized.indexOf('.') >= 0;
+  float parsed = sanitized.toFloat();
+  // Если разделителя нет, а число похоже на значение в Гц (например, 31250), переводим в кГц
+  if (!hasDecimalSeparator && sanitized.indexOf('e') < 0 && parsed > 1000.0f) {
+    parsed /= 1000.0f;
+  }
+
   bool matched = false;
   float target = state.bandwidthKhz;
   for (float candidate : kSupportedBandwidths) {
@@ -583,6 +621,7 @@ void handleBandwidthChange() {
     }
   }
   if (!matched) {
+    addEvent(String("Недопустимое значение полосы из запроса: ") + raw);
     server.send(400, "application/json", "{\"error\":\"Недопустимая полоса\"}");
     return;
   }
@@ -600,12 +639,53 @@ void handleCodingRateChange() {
     server.send(400, "application/json", "{\"error\":\"Не передано поле cr\"}");
     return;
   }
+
   String raw = server.arg("cr");
   raw.trim();
-  int slashPos = raw.lastIndexOf('/');
-  String numericPart = slashPos >= 0 ? raw.substring(slashPos + 1) : raw;
-  numericPart.trim();
+
+  // Поддерживаем варианты вроде "4/5", "CR4/6", "0.8", "4:7" и т.д.
+  String normalized = raw;
+  normalized.replace(',', '.');
+  normalized.toUpperCase();
+
+  int slashPos = normalized.lastIndexOf('/');
+  if (slashPos < 0) {
+    slashPos = normalized.lastIndexOf(':'); // допускаем «4:5»
+  }
+  String numericPart = slashPos >= 0 ? normalized.substring(slashPos + 1) : normalized;
+
+  // Удаляем префиксы/суффиксы вокруг числа
+  while (numericPart.length() > 0) {
+    const char last = numericPart.charAt(numericPart.length() - 1);
+    const bool digitTail = (last >= '0' && last <= '9') || last == '.';
+    if (digitTail) {
+      break;
+    }
+    numericPart.remove(numericPart.length() - 1);
+  }
+  while (numericPart.length() > 0) {
+    const char first = numericPart.charAt(0);
+    const bool digitHead = (first >= '0' && first <= '9') || first == '.';
+    if (digitHead) {
+      break;
+    }
+    numericPart.remove(0, 1);
+  }
+
+  if (numericPart.length() == 0) {
+    addEvent(String("Не удалось разобрать CR из строки: ") + raw);
+    server.send(400, "application/json", "{\"error\":\"Недопустимый CR\"}");
+    return;
+  }
+
   long parsed = numericPart.toInt();
+  if (parsed == 0 && numericPart.indexOf('.') >= 0) {
+    const float ratio = numericPart.toFloat();
+    if (ratio > 0.0f) {
+      parsed = static_cast<long>((4.0f / ratio) + 0.5f); // преобразуем долю в знаменатель, округляя к ближайшему целому
+    }
+  }
+
   bool matched = false;
   uint8_t target = state.codingRateDenom;
   for (uint8_t candidate : kSupportedCodingRates) {
@@ -616,6 +696,7 @@ void handleCodingRateChange() {
     }
   }
   if (!matched) {
+    addEvent(String("Недопустимое значение CR из запроса: ") + raw);
     server.send(400, "application/json", "{\"error\":\"Недопустимый CR\"}");
     return;
   }
