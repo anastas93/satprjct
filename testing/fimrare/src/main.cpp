@@ -13,6 +13,8 @@
 #include <cmath>
 #include <type_traits>
 #include <utility>
+#include <cstdlib>
+#include <cctype>
 #if !defined(ARDUINO)
 #include <thread>
 #endif
@@ -216,6 +218,8 @@ void handleBandwidthChange();
 void handleCodingRateChange();
 void waitInterFrameDelay();
 void trimTrailingZeros(std::vector<uint8_t>& buffer);
+bool tryParseBandwidth(const String& raw, float& target);
+bool tryParseCodingRate(const String& raw, uint8_t& target);
 
 // --- Формирование имени Wi-Fi сети ---
 String makeAccessPointSsid() {
@@ -572,17 +576,8 @@ void handleBandwidthChange() {
     return;
   }
   const String raw = server.arg("bw");
-  const float parsed = raw.toFloat();
-  bool matched = false;
-  float target = state.bandwidthKhz;
-  for (float candidate : kSupportedBandwidths) {
-    if (std::fabs(candidate - parsed) <= kBandwidthTolerance) {
-      matched = true;
-      target = candidate;
-      break;
-    }
-  }
-  if (!matched) {
+  float target = 0.0f;
+  if (!tryParseBandwidth(raw, target)) {
     server.send(400, "application/json", "{\"error\":\"Недопустимая полоса\"}");
     return;
   }
@@ -604,22 +599,9 @@ void handleCodingRateChange() {
     server.send(400, "application/json", "{\"error\":\"Не передано поле cr\"}");
     return;
   }
-  String raw = server.arg("cr");
-  raw.trim();
-  int slashPos = raw.lastIndexOf('/');
-  String numericPart = slashPos >= 0 ? raw.substring(slashPos + 1) : raw;
-  numericPart.trim();
-  long parsed = numericPart.toInt();
-  bool matched = false;
-  uint8_t target = state.codingRateDenom;
-  for (uint8_t candidate : kSupportedCodingRates) {
-    if (parsed == candidate) {
-      matched = true;
-      target = candidate;
-      break;
-    }
-  }
-  if (!matched) {
+  const String raw = server.arg("cr");
+  uint8_t target = 0;
+  if (!tryParseCodingRate(raw, target)) {
     server.send(400, "application/json", "{\"error\":\"Недопустимый CR\"}");
     return;
   }
@@ -686,6 +668,157 @@ void handleSendCustom() {
 // --- API: ответ на неизвестный маршрут ---
 void handleNotFound() {
   server.send(404, "application/json", "{\"error\":\"Маршрут не найден\"}");
+}
+
+// --- Унифицированный парсер значения полосы ---
+bool tryParseBandwidth(const String& raw, float& target) {
+  auto endsWithIgnoreCase = [](const String& value, const char* suffix) -> bool {
+    const size_t valueLen = static_cast<size_t>(value.length());
+    const size_t suffixLen = std::strlen(suffix);
+    if (suffixLen == 0 || valueLen < suffixLen) {
+      return false;
+    }
+    for (size_t i = 0; i < suffixLen; ++i) {
+      const char lhs = value[valueLen - suffixLen + i];
+      const char rhs = suffix[i];
+      if (std::tolower(static_cast<unsigned char>(lhs)) != std::tolower(static_cast<unsigned char>(rhs))) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  String trimmed = raw;
+  trimmed.trim();
+  if (!trimmed.length()) {
+    return false; // пустое значение
+  }
+
+  // Пробуем прямое совпадение с форматированными значениями ("125.00" и т.п.)
+  for (float candidate : kSupportedBandwidths) {
+    String candidateStr = String(candidate, 2);
+    if (trimmed.equals(candidateStr) || trimmed.equalsIgnoreCase(candidateStr)) {
+      target = candidate;
+      return true;
+    }
+    candidateStr = String(candidate, 0);
+    if (trimmed.equals(candidateStr) || trimmed.equalsIgnoreCase(candidateStr)) {
+      target = candidate;
+      return true;
+    }
+  }
+
+  String normalized = trimmed;
+  normalized.replace(',', '.');
+
+  bool valueInHz = false;
+  if (endsWithIgnoreCase(normalized, "khz")) {
+    normalized.remove(normalized.length() - 3);
+    normalized.trim();
+  } else if (endsWithIgnoreCase(normalized, "hz")) {
+    normalized.remove(normalized.length() - 2);
+    normalized.trim();
+    valueInHz = true;
+  } else if (endsWithIgnoreCase(normalized, "k")) {
+    normalized.remove(normalized.length() - 1);
+    normalized.trim();
+  }
+
+  const char* begin = normalized.c_str();
+  if (begin == nullptr) {
+    return false;
+  }
+
+  char* endPtr = nullptr;
+  const double parsed = std::strtod(begin, &endPtr);
+  if (begin == endPtr) {
+    return false; // не удалось разобрать число
+  }
+
+  while (endPtr && *endPtr != '\0' && std::isspace(static_cast<unsigned char>(*endPtr))) {
+    ++endPtr;
+  }
+  if (endPtr && *endPtr != '\0') {
+    return false; // обнаружены лишние символы
+  }
+
+  double bandwidthKhz = parsed;
+  if (valueInHz || bandwidthKhz > 1000.0) {
+    bandwidthKhz /= 1000.0; // поддержка значений в Гц
+  }
+
+  for (float candidate : kSupportedBandwidths) {
+    if (std::fabs(candidate - static_cast<float>(bandwidthKhz)) <= kBandwidthTolerance) {
+      target = candidate;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// --- Унифицированный парсер коэффициента кодирования ---
+bool tryParseCodingRate(const String& raw, uint8_t& target) {
+  String trimmed = raw;
+  trimmed.trim();
+  if (!trimmed.length()) {
+    return false;
+  }
+
+  // Удаляем все пробелы и нормализуем разделитель
+  String normalized;
+  normalized.reserve(trimmed.length());
+  for (size_t i = 0; i < static_cast<size_t>(trimmed.length()); ++i) {
+    char ch = trimmed.charAt(static_cast<unsigned int>(i));
+    if (ch == '\\') {
+      ch = '/';
+    }
+    if (ch == ' ') {
+      continue;
+    }
+    normalized += ch;
+  }
+
+  for (uint8_t candidate : kSupportedCodingRates) {
+    String crLabel = "4/" + String(static_cast<unsigned long>(candidate));
+    if (normalized.equalsIgnoreCase(crLabel)) {
+      target = candidate;
+      return true;
+    }
+  }
+
+  int slashPos = normalized.lastIndexOf('/');
+  String numericPart = slashPos >= 0 ? normalized.substring(slashPos + 1) : normalized;
+  numericPart.trim();
+  if (!numericPart.length()) {
+    return false;
+  }
+
+  long parsed = numericPart.toInt();
+  if (parsed == 0) {
+    // Варианты вида "45" без разделителя
+    long altParsed = normalized.toInt();
+    if (altParsed > 0 && altParsed < 100) {
+      parsed = altParsed % 10;
+    }
+  }
+
+  if (parsed == 0) {
+    return false;
+  }
+
+  if (parsed > 10) {
+    parsed = parsed % 10; // поддержка форматов "45", "48" и т.п.
+  }
+
+  for (uint8_t candidate : kSupportedCodingRates) {
+    if (parsed == candidate) {
+      target = candidate;
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // --- Построение HTML главной страницы ---

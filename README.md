@@ -1194,6 +1194,7 @@ rs255223::decode -> PacketGatherer -> обработка сообщения
 - `onRadioDio1Rise()` — обработчик прерывания DIO1, переводящий приём в асинхронный режим.
 - `addEvent()` / `appendEventBuffer()` — формирование сообщений веб-чата и ограничение истории событий.
 - `handleRoot()`, `handleLog()`, `handleChannelChange()`, `handlePowerToggle()`, `handleSpreadingFactorToggle()`, `handleBandwidthChange()`, `handleCodingRateChange()`, `handleSendLongPacket()`, `handleSendRandomPacket()`, `handleSendCustom()`, `handleNotFound()` — обработчики HTTP-маршрутов веб-интерфейса.
+- `tryParseBandwidth()` и `tryParseCodingRate()` — нормализация пользовательских значений полосы/CR из HTTP-запросов (поддержка чисел с точкой/запятой, суффиксов `Hz`/`kHz`, записи в герцах и форматов `4/5`, `45`, `CR4/6`), чтобы радиопараметры надёжно применялись даже при нестандартном вводе.
 - `buildIndexHtml()` / `buildChannelOptions()` — генерация основной HTML-страницы и выпадающего списка каналов.
 - JavaScript-хелперы веб-интерфейса `encodeForm()`, `postForm()`, `refreshLog()`, `handleError()` и `sendCustom()` реализованы в 
   максимально совместимом стиле без `fetch`, `async/await`, `let/const` и стрелочных функций, чтобы страница корректно работала
