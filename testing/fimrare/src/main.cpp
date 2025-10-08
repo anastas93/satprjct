@@ -590,10 +590,6 @@ void handleBandwidthChange() {
     server.send(500, "application/json", "{\"error\":\"Ошибка установки полосы\"}");
     return;
   }
-  if (!ensureReceiveMode()) {
-    server.send(500, "application/json", "{\"error\":\"Режим приёма не активирован\"}");
-    return;
-  }
   addEvent(String("Полоса пропускания установлена: ") + String(target, 2) + " кГц");
   server.send(200, "application/json", "{\"ok\":true}");
 }
@@ -625,10 +621,6 @@ void handleCodingRateChange() {
   }
   if (!applyCodingRate(target)) {
     server.send(500, "application/json", "{\"error\":\"Ошибка установки CR\"}");
-    return;
-  }
-  if (!ensureReceiveMode()) {
-    server.send(500, "application/json", "{\"error\":\"Режим приёма не активирован\"}");
     return;
   }
   addEvent(String("Коэффициент кодирования установлен: 4/") + String(static_cast<unsigned long>(target)));
@@ -853,23 +845,49 @@ bool applySpreadingFactor(bool useSf5) {
 
 // --- Настройка полосы пропускания LoRa ---
 bool applyBandwidth(float bandwidthKhz) {
-  int16_t result = radio.setBandwidth(bandwidthKhz);
+  // проверяем, что запрошенная полоса совпадает с одной из поддерживаемых, как в основной прошивке
+  auto match = std::find_if(kSupportedBandwidths.begin(), kSupportedBandwidths.end(), [bandwidthKhz](float candidate) {
+    return std::fabs(candidate - bandwidthKhz) <= kBandwidthTolerance;
+  });
+  if (match == kSupportedBandwidths.end()) {
+    addEvent(String("Недопустимое значение полосы: ") + String(bandwidthKhz, 2) + " кГц");
+    return false;
+  }
+
+  const float targetBandwidth = *match;
+  int16_t result = radio.setBandwidth(targetBandwidth);
   if (result != RADIOLIB_ERR_NONE) {
     logRadioError("setBandwidth", result);
     return false;
   }
-  state.bandwidthKhz = bandwidthKhz;
+
+  state.bandwidthKhz = targetBandwidth;
+  if (!ensureReceiveMode()) {
+    return false;
+  }
   return true;
 }
 
 // --- Настройка коэффициента кодирования ---
 bool applyCodingRate(uint8_t codingRateDenom) {
-  int16_t result = radio.setCodingRate(codingRateDenom);
+  // допускаем только те значения CR, которые задействованы в основной прошивке
+  auto match = std::find(kSupportedCodingRates.begin(), kSupportedCodingRates.end(), codingRateDenom);
+  if (match == kSupportedCodingRates.end()) {
+    addEvent(String("Недопустимое значение CR: 4/") + String(static_cast<unsigned long>(codingRateDenom)));
+    return false;
+  }
+
+  const uint8_t targetCr = *match;
+  int16_t result = radio.setCodingRate(targetCr);
   if (result != RADIOLIB_ERR_NONE) {
     logRadioError("setCodingRate", result);
     return false;
   }
-  state.codingRateDenom = codingRateDenom;
+
+  state.codingRateDenom = targetCr;
+  if (!ensureReceiveMode()) {
+    return false;
+  }
   return true;
 }
 
