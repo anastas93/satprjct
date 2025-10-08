@@ -72,6 +72,7 @@ constexpr size_t kMaxEventHistory = 120;          // ограничение ис
 constexpr size_t kFullPacketSize = 245;           // максимальная длина пакета SX1262
 constexpr size_t kPacketSize = 8;                 // фиксированная длина кадра протокола
 constexpr size_t kDataPayloadSize = 5;            // полезная часть DATA-пакета
+constexpr uint16_t kMaxTransferSize = 4096;       // максимальный размер файла в байтах
 constexpr unsigned long kInterFrameDelayMs = 50;  // пауза между пакетами
 constexpr uint8_t kProtocolVersion = 0;           // версия протокола Lotest File Transfer
 constexpr uint8_t kHeaderVersionMask = 0b11000000;// маска для извлечения версии
@@ -1023,7 +1024,8 @@ void processIncomingPacket(const std::vector<uint8_t>& packet) {
   if (type == PacketType::Start) {
     state.rxSession.active = true;
     state.rxSession.sid = sid;
-    state.rxSession.expectedSize = static_cast<uint16_t>((raw[2] << 8) | raw[3]);
+    const uint16_t advertisedSize = static_cast<uint16_t>((raw[2] << 8) | raw[3]);
+    state.rxSession.expectedSize = std::min<uint16_t>(advertisedSize, kMaxTransferSize);
     state.rxSession.expectedCrc = static_cast<uint16_t>((raw[4] << 8) | raw[5]);
     state.rxSession.fileIdHash = raw[6];
     state.rxSession.expectedSeq = 0;
@@ -1031,6 +1033,10 @@ void processIncomingPacket(const std::vector<uint8_t>& packet) {
     state.rxSession.finReceived = false;
     state.rxSession.buffer.clear();
     state.rxSession.buffer.reserve(state.rxSession.expectedSize);
+    if (advertisedSize > kMaxTransferSize) {
+      addEvent(String("Размер START превышает 4096 байт, ограничиваем до ") +
+               String(static_cast<unsigned long>(state.rxSession.expectedSize)));
+    }
     addEvent(String("START принят: размер=") + String(state.rxSession.expectedSize) +
              ", CRC=0x" + String(static_cast<unsigned long>(state.rxSession.expectedCrc), 16) +
              ", hash=" + String(state.rxSession.fileIdHash));
