@@ -152,26 +152,52 @@ int16_t RadioSX1262::send(const uint8_t* data, size_t len) {
     LOG_ERROR("RadioSX1262: не удалось установить TX-частоту перед передачей");
     return lastError_;
   }
-  int state = radio_.transmit(const_cast<uint8_t*>(payloadPtr), payloadLen); // отправляем пакет
-  if (state == RADIOLIB_ERR_TX_TIMEOUT) {
-    const uint32_t irqFlags = radio_.getIrqFlags();
-    if ((irqFlags & RADIOLIB_SX126X_IRQ_TX_DONE) != 0U) {
-      // На части плат SX1262 IRQ "TX_DONE" успевает выставиться, но RadioLib
-      // всё равно возвращает timeout. В этом случае считаем передачу успешной
-      // и вручную очищаем флаг, чтобы не мешал дальнейшей работе.
-      const int16_t clearState = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_TX_DONE);
-      if (clearState != RADIOLIB_ERR_NONE) {
-        LOG_WARN_VAL("RadioSX1262: очистка TX_DONE после таймаута вернула код=", clearState);
+  // Выполняем передачу с обработкой ложных таймаутов и повторной попыткой
+  auto transmitWithRecovery = [&](const uint8_t* buffer, size_t length,
+                                  const char* context) -> int16_t {
+    constexpr uint8_t kMaxAttempts = 2;                       // ограничиваем количество повторов
+    const char* ctx = (context && context[0] != '\0') ? context : "без контекста";
+    for (uint8_t attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+      int16_t state = radio_.transmit(const_cast<uint8_t*>(buffer), length); // отправляем пакет
+      if (state != RADIOLIB_ERR_TX_TIMEOUT) {                // передача завершилась не таймаутом
+        return state;                                        // возвращаем исходный код
       }
-      LOG_WARN("RadioSX1262: transmit вернул timeout, но TX_DONE установлен — считаем передачу успешной");
-      state = RADIOLIB_ERR_NONE;
+
+      const uint32_t irqFlags = radio_.getIrqFlags();        // читаем IRQ для диагностики
+      if ((irqFlags & RADIOLIB_SX126X_IRQ_TX_DONE) != 0U) {  // TX_DONE установлен — передача завершена
+        const int16_t clearState = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_TX_DONE);
+        if (clearState != RADIOLIB_ERR_NONE) {               // логируем сбой очистки флага
+          LOG_WARN_VAL("RadioSX1262: очистка TX_DONE после таймаута вернула код=", clearState);
+        }
+        LOG_WARN("RadioSX1262: transmit вернул timeout, но TX_DONE установлен — считаем передачу успешной");
+        return RADIOLIB_ERR_NONE;                            // считаем передачу успешной
+      }
+
+      if (attempt < kMaxAttempts) {                          // пробуем ещё раз после очистки IRQ
+        LOG_WARN("RadioSX1262: transmit вернул timeout (попытка %u, %s) — выполняем повтор",
+                 static_cast<unsigned>(attempt), ctx);
+        const int16_t clearState = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
+        if (clearState != RADIOLIB_ERR_NONE) {               // сообщаем о проблеме очистки
+          LOG_WARN_VAL("RadioSX1262: очистка IRQ после таймаута вернула код=", clearState);
+        }
+        delay(1);                                            // даём радиомодулю время восстановиться
+        continue;                                            // повторяем передачу
+      }
+
+      return state;                                          // достигнут лимит попыток — отдаём таймаут
     }
-  }
+
+    return RADIOLIB_ERR_TX_TIMEOUT;                          // защита от выхода из цикла
+  };
+
+  const int16_t state = transmitWithRecovery(payloadPtr, payloadLen, "send");
   if (state != RADIOLIB_ERR_NONE) {          // проверка кода ошибки
-    lastError_ = state;                      // сохраняем код сбоя
+    const int16_t errorState = state;        // сохраняем исходный код сбоя
+    lastError_ = errorState;                 // фиксируем код ошибки для внешнего запроса
     LOG_ERROR_VAL("RadioSX1262: ошибка передачи, код=", state);
     setFrequency(freq_rx);                   // возвращаемся на частоту приёма после сбоя
     startReceiveWithRetry("send: возврат к приёму после ошибки передачи");
+    lastError_ = errorState;                 // восстанавливаем исходный код после перехода в RX
     return lastError_;
   }
   lastError_ = RADIOLIB_ERR_NONE;            // предыдущая операция прошла успешно
@@ -239,6 +265,44 @@ int16_t RadioSX1262::ping(const uint8_t* data, size_t len,
     }
   };
 
+  // Унифицированная отправка с обработкой таймаута и повторной попыткой для ping()
+  auto transmitWithRecovery = [&](const uint8_t* buffer, size_t length,
+                                  const char* context) -> int16_t {
+    constexpr uint8_t kMaxAttempts = 2;                       // ограничиваем количество повторов
+    const char* ctx = (context && context[0] != '\0') ? context : "без контекста";
+    for (uint8_t attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+      int16_t state = radio_.transmit(const_cast<uint8_t*>(buffer), length); // передаём запрос пинга
+      if (state != RADIOLIB_ERR_TX_TIMEOUT) {                // выход при отсутствии таймаута
+        return state;
+      }
+
+      const uint32_t irqFlags = radio_.getIrqFlags();        // читаем IRQ для проверки завершения
+      if ((irqFlags & RADIOLIB_SX126X_IRQ_TX_DONE) != 0U) {  // TX_DONE установлен — передача завершена
+        const int16_t clearState = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_TX_DONE);
+        if (clearState != RADIOLIB_ERR_NONE) {               // логируем код ошибки очистки
+          LOG_WARN_VAL("RadioSX1262: очистка TX_DONE после таймаута вернула код=", clearState);
+        }
+        LOG_WARN("RadioSX1262: transmit (ping) вернул timeout, но TX_DONE установлен — считаем передачу успешной");
+        return RADIOLIB_ERR_NONE;                            // считаем попытку удачной
+      }
+
+      if (attempt < kMaxAttempts) {                          // выполняем повтор после очистки IRQ
+        LOG_WARN("RadioSX1262: transmit (ping) вернул timeout (попытка %u, %s) — повторяем",
+                 static_cast<unsigned>(attempt), ctx);
+        const int16_t clearState = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
+        if (clearState != RADIOLIB_ERR_NONE) {               // информируем о сбое очистки
+          LOG_WARN_VAL("RadioSX1262: очистка IRQ после таймаута ping вернула код=", clearState);
+        }
+        delay(1);                                            // небольшая пауза перед новой попыткой
+        continue;
+      }
+
+      return state;                                          // таймаут на последней попытке
+    }
+
+    return RADIOLIB_ERR_TX_TIMEOUT;                          // защита от выхода из цикла
+  };
+
   do {
     if (!setFrequency(freq_tx)) {                         // не удалось установить TX
       LOG_ERROR("RadioSX1262: не удалось установить TX-частоту перед пингом");
@@ -246,11 +310,13 @@ int16_t RadioSX1262::ping(const uint8_t* data, size_t len,
       break;
     }
 
-    const int state = radio_.transmit(const_cast<uint8_t*>(data), len); // отправляем пакет
+    const int16_t state = transmitWithRecovery(data, len, "ping");
     if (state != RADIOLIB_ERR_NONE) {                     // ошибка передачи
-      lastError_ = state;                                 // фиксируем код ошибки
+      const int16_t errorState = state;                   // сохраняем исходный код таймаута
+      lastError_ = errorState;                            // фиксируем код ошибки
       setFrequency(freq_rx);
       startReceiveWithRetry("ping: возврат в RX после ошибки передачи");
+      lastError_ = errorState;                            // восстанавливаем код ошибки после RX
       result = lastError_;
       break;
     }

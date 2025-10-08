@@ -10,6 +10,8 @@
 class RadioSX1262TestAccessor {
 public:
   static RadioSX1262::PublicSX1262& rawRadio(RadioSX1262& radio) { return radio.radio_; }
+  static bool implicitEnabled(const RadioSX1262& radio) { return radio.implicitHeaderEnabled_; }
+  static size_t implicitLength(const RadioSX1262& radio) { return radio.implicitHeaderLength_; }
 };
 
 int main() {
@@ -36,6 +38,11 @@ int main() {
   // Имитируем сбой передачи и проверяем восстановление режима приёма
   raw.transmitResult = -123; // произвольный код ошибки RadioLib
   const uint8_t payload[1] = {0x42};
+  const size_t expectedTxLength =
+      (RadioSX1262TestAccessor::implicitEnabled(radio) &&
+       RadioSX1262TestAccessor::implicitLength(radio) > 0)
+          ? RadioSX1262TestAccessor::implicitLength(radio)
+          : sizeof(payload);
   int16_t sendState = radio.send(payload, sizeof(payload));
   assert(sendState == raw.transmitResult);
 
@@ -47,7 +54,7 @@ int main() {
   assert(raw.setFrequencyCalls >= 2);
   assert(std::fabs(raw.previousSetFrequency - expectedTx) < 1e-3f);
   assert(raw.transmitCalls == 1);
-  assert(raw.lastTransmitLength == sizeof(payload));
+  assert(raw.lastTransmitLength == expectedTxLength);
 
   // Теперь эмулируем ситуацию, когда RadioLib возвращает таймаут,
   // хотя IRQ TX_DONE установлен — сообщение должно считаться отправленным.
@@ -62,11 +69,29 @@ int main() {
   sendState = radio.send(payload, sizeof(payload));
   assert(sendState == RADIOLIB_ERR_NONE);
   assert(raw.transmitCalls == 1);
-  assert(raw.lastTransmitLength == sizeof(payload));
+  assert(raw.lastTransmitLength == expectedTxLength);
   // После успешной отправки радио возвращается на приём и флаг TX_DONE очищен
   assert((raw.testIrqFlags & RADIOLIB_SX126X_IRQ_TX_DONE) == 0U);
   assert(raw.setFrequencyCalls >= 2);
   assert(raw.startReceiveCalls >= 1);
+
+  // Проверяем повторную попытку при реальном таймауте без флага TX_DONE.
+  raw.transmitSequence = {RADIOLIB_ERR_TX_TIMEOUT, RADIOLIB_ERR_NONE, 0, 0, 0, 0, 0, 0};
+  raw.transmitSequenceLength = 2;
+  raw.transmitSequenceIndex = 0;
+  raw.transmitResult = RADIOLIB_ERR_TX_TIMEOUT;
+  raw.testIrqFlags = RADIOLIB_SX126X_IRQ_TIMEOUT;
+  raw.testClearIrqState = RADIOLIB_ERR_NONE;
+  raw.setFrequencyCalls = 0;
+  raw.startReceiveCalls = 0;
+  raw.transmitCalls = 0;
+  raw.lastTransmitLength = 0;
+
+  sendState = radio.send(payload, sizeof(payload));
+  assert(sendState == RADIOLIB_ERR_NONE);
+  assert(raw.transmitCalls == 2);                 // выполнена повторная попытка
+  assert(raw.lastTransmitLength == expectedTxLength);
+  assert(raw.testIrqFlags == 0U);                 // IRQ были очищены между попытками
 
   std::cout << "OK" << std::endl;
   return 0;

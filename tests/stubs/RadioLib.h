@@ -51,6 +51,9 @@ public:
   int16_t transmit(uint8_t*, size_t len) {
     lastTransmitLength = len;         // сохраняем длину последней передачи
     ++transmitCalls;                  // считаем количество передач
+    if (transmitSequenceIndex < transmitSequenceLength) {
+      return transmitSequence[transmitSequenceIndex++];
+    }
     return transmitResult;
   }
   size_t getPacketLength(bool = true) { return testPacketLength; }
@@ -110,6 +113,9 @@ public:
   size_t transmitCalls = 0;            // количество вызовов transmit()
   size_t lastTransmitLength = 0;       // длина последней переданной полезной нагрузки
   int16_t transmitResult = RADIOLIB_ERR_NONE; // код возврата transmit()
+  std::array<int16_t, 8> transmitSequence{}; // последовательность возвратов transmit()
+  size_t transmitSequenceLength = 0;   // фактическая длина последовательности
+  size_t transmitSequenceIndex = 0;    // текущий индекс в последовательности
   int16_t setFrequencyState = RADIOLIB_ERR_NONE; // код возврата setFrequency()
   int16_t startReceiveState = RADIOLIB_ERR_NONE; // код возврата startReceive()
   int16_t beginState = RADIOLIB_ERR_NONE;        // код возврата begin()
