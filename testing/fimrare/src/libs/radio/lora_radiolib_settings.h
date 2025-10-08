@@ -23,7 +23,7 @@ struct SX1262DriverOptions {
   bool autoLdro = true;               // Автоматический выбор оптимизации для низких скоростей передачи (LDRO).
   bool implicitHeader = true;         // Использовать фиксированный размер пакета (implicit header) вместо стандартного заголовка.
   uint8_t implicitPayloadLength = 8;  // Размер полезной нагрузки при implicit header (байты).
-  bool enableCrc = false;             // Добавлять ли аппаратный CRC в конец LoRa-пакета.
+  bool enableCrc = true;              // Добавлять ли аппаратный CRC в конец LoRa-пакета.
   bool invertIq = false;              // Инверсия фаз (I/Q) для совместимости с определёнными сетями.
   bool publicNetwork = true;          // Использовать стандартное публичное синхрослово LoRa (true) либо приватное (false).
   uint16_t syncWord = 0x34;           // Значение синхрослова LoRa (8 или 16 бит в зависимости от режима).

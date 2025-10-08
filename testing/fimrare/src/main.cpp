@@ -76,7 +76,7 @@ constexpr uint8_t kSingleFrameMarker = 0;         // метка одиночно
 constexpr uint8_t kFinalFrameMarker = 1;          // метка завершающего кадра последовательности
 constexpr uint8_t kFirstChunkMarker = 2;          // минимальный маркер для кусочных пакетов
 constexpr uint8_t kMaxChunkMarker = 253;          // максимальный маркер для кусочных пакетов
-constexpr unsigned long kInterFrameDelayMs = 50;  // пауза между кадрами
+constexpr unsigned long kInterFrameDelayMs = 150;  // пауза между кадрами
 constexpr size_t kLongPacketSize = 124;           // длина длинного пакета с буквами A-Z
 constexpr const char* kIncomingColor = "#5CE16A"; // цвет отображения принятых сообщений
 
