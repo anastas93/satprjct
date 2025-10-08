@@ -75,6 +75,36 @@ int16_t CallPointerGetIrqStatus(Radio&, uint16_t*, long) {
   return RADIOLIB_ERR_NONE;
 }
 
+<<<<<<< ours
+// Универсальное чтение флагов IRQ с учётом доступного варианта API
+template <typename Radio>
+uint32_t ReadIrqFlags(Radio& radio) {
+  if constexpr (HasIrqFlagsApi<Radio>::value) {
+    return radio.getIrqFlags();
+  } else if constexpr (HasZeroArgIrqStatusApi<Radio>::value) {
+    return static_cast<uint32_t>(CallZeroArgGetIrqStatus(radio, 0));
+  } else if constexpr (HasPointerIrqStatusApi<Radio>::value) {
+    uint16_t legacyFlags = 0;
+    int16_t state = CallPointerGetIrqStatus(radio, &legacyFlags, 0);
+    return (state == RADIOLIB_ERR_NONE) ? legacyFlags : 0U;
+  } else {
+    return 0U;
+  }
+}
+
+// Универсальная очистка флагов IRQ
+template <typename Radio>
+int16_t ClearIrqFlags(Radio& radio, uint32_t mask) {
+  if constexpr (HasIrqFlagsApi<Radio>::value) {
+    return radio.clearIrqFlags(mask);
+  } else {
+    (void)mask;
+    return radio.clearIrqStatus();
+  }
+}
+
+=======
+>>>>>>> theirs
 } // namespace radio_sx1262_detail
 
 // Реализация радиоинтерфейса на базе SX1262
@@ -171,6 +201,9 @@ private:
 
     // Универсальный доступ к флагам IRQ с учётом варианта API библиотеки
     uint32_t getIrqFlags() {
+<<<<<<< ours
+      return radio_sx1262_detail::ReadIrqFlags(static_cast<SX1262&>(*this));
+=======
       if constexpr (radio_sx1262_detail::HasIrqFlagsApi<SX1262>::value) {
         return SX1262::getIrqFlags();
       } else if constexpr (radio_sx1262_detail::HasZeroArgIrqStatusApi<SX1262>::value) {
@@ -185,16 +218,21 @@ private:
       } else {
         return 0U;
       }
+>>>>>>> theirs
     }
 
     // Очистка флагов IRQ через доступный механизм
     int16_t clearIrqFlags(uint32_t mask) {
+<<<<<<< ours
+      return radio_sx1262_detail::ClearIrqFlags(static_cast<SX1262&>(*this), mask);
+=======
       if constexpr (radio_sx1262_detail::HasIrqFlagsApi<SX1262>::value) {
         return SX1262::clearIrqFlags(mask);
       } else {
         (void)mask;
-        return SX1262::clearIrqStatus();
+        return this->clearIrqStatus();
       }
+>>>>>>> theirs
     }
 
     // Совместимость с API, ожидающим возвращение статуса без аргументов

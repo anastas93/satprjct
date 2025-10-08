@@ -111,6 +111,31 @@ int16_t CallPointerGetIrqStatus(Radio&, uint16_t*, long) {
   return RADIOLIB_ERR_NONE;
 }
 
+template <typename Radio>
+uint32_t ReadIrqFlags(Radio& radio) {
+  if constexpr (HasIrqFlagsApi<Radio>::value) {
+    return radio.getIrqFlags();
+  } else if constexpr (HasZeroArgIrqStatusApi<Radio>::value) {
+    return static_cast<uint32_t>(CallZeroArgGetIrqStatus(radio, 0));
+  } else if constexpr (HasPointerIrqStatusApi<Radio>::value) {
+    uint16_t legacyFlags = 0;
+    int16_t state = CallPointerGetIrqStatus(radio, &legacyFlags, 0);
+    return (state == RADIOLIB_ERR_NONE) ? legacyFlags : 0U;
+  } else {
+    return 0U;
+  }
+}
+
+template <typename Radio>
+int16_t ClearIrqFlags(Radio& radio, uint32_t mask) {
+  if constexpr (HasIrqFlagsApi<Radio>::value) {
+    return radio.clearIrqFlags(mask);
+  } else {
+    (void)mask;
+    return radio.clearIrqStatus();
+  }
+}
+
 } // namespace radiolib_api_detail
 
 // --- Вспомогательная обёртка для доступа к IRQ-методам SX1262 ---
@@ -121,29 +146,11 @@ class PublicSX1262 : public SX1262 {
   using SX1262::setDioIrqParams;    // открываем установку IRQ-масок
 
   uint32_t getIrqFlags() {
-    if constexpr (radiolib_api_detail::HasIrqFlagsApi<SX1262>::value) {
-      return SX1262::getIrqFlags();
-    } else if constexpr (radiolib_api_detail::HasZeroArgIrqStatusApi<SX1262>::value) {
-      return static_cast<uint32_t>(
-          radiolib_api_detail::CallZeroArgGetIrqStatus(
-              static_cast<SX1262&>(*this), 0));
-    } else if constexpr (radiolib_api_detail::HasPointerIrqStatusApi<SX1262>::value) {
-      uint16_t legacyFlags = 0;
-      int16_t state = radiolib_api_detail::CallPointerGetIrqStatus(
-          static_cast<SX1262&>(*this), &legacyFlags, 0);
-      return (state == RADIOLIB_ERR_NONE) ? legacyFlags : 0U;
-    } else {
-      return 0U;
-    }
+    return radiolib_api_detail::ReadIrqFlags(static_cast<SX1262&>(*this));
   }
 
   int16_t clearIrqFlags(uint32_t mask) {
-    if constexpr (radiolib_api_detail::HasIrqFlagsApi<SX1262>::value) {
-      return SX1262::clearIrqFlags(mask);
-    } else {
-      (void)mask;
-      return SX1262::clearIrqStatus();
-    }
+    return radiolib_api_detail::ClearIrqFlags(static_cast<SX1262&>(*this), mask);
   }
 
   uint16_t getIrqStatus() {
@@ -167,6 +174,16 @@ class PublicSX1262 : public SX1262 {
     }
   }
 };
+
+// --- Совместимость с fallback-шаблонами RadioLib ---
+namespace radiolib_api_detail {
+
+inline int16_t ClearIrqFlags(SX1262& radio, uint32_t mask) {
+  // Переадресовываем вызов на наш расширенный класс, где clearIrqStatus открыт
+  return static_cast<PublicSX1262&>(radio).clearIrqFlags(mask);
+}
+
+} // namespace radiolib_api_detail
 
 // --- Глобальные объекты периферии ---
 SPIClass radioSPI(VSPI);                          // аппаратный SPI-порт, обслуживающий радиомодуль
