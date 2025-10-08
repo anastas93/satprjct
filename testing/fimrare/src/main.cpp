@@ -27,8 +27,8 @@ constexpr uint8_t kDefaultSpreadingFactor = kRadioDefaults.spreadingFactor; // �
 constexpr uint8_t kDefaultCodingRate = kRadioDefaults.codingRateDenom;      // делитель коэффициента кодирования CR
 constexpr int8_t kLowPowerDbm = kRadioDefaults.lowPowerDbm;                 // низкий уровень мощности
 constexpr int8_t kHighPowerDbm = kRadioDefaults.highPowerDbm;               // высокий уровень мощности
-constexpr std::array<float, 10> kSupportedBandwidths = {
-    7.81f, 10.42f, 15.63f, 20.83f, 31.25f, 41.67f, 62.50f, 125.00f, 250.00f, 500.00f}; // допустимые полосы (кГц)
+constexpr std::array<float, 5> kSupportedBandwidths = {
+    7.81f, 10.42f, 15.63f, 20.83f, 31.25f}; // допустимые полосы (кГц), как в основной прошивке
 constexpr std::array<uint8_t, 4> kSupportedCodingRates = {5, 6, 7, 8};       // допустимые делители CR
 constexpr float kBandwidthTolerance = 0.02f;                                 // допуск сравнения полосы в кГц
 } // namespace

@@ -11,7 +11,7 @@ struct SX1262DriverOptions {
                                       // Меньшая полоса повышает чувствительность и увеличивает время передачи.
   uint8_t spreadingFactor = 7;        // Фактор расширения SF (5..12).
                                       // Увеличение повышает устойчивость, но снижает скорость.
-  uint8_t codingRateDenom = 8;        // Делитель коэффициента кодирования CR (5..8).
+  uint8_t codingRateDenom = 5;        // Делитель коэффициента кодирования CR (5..8).
                                       // CR=4/denom, задаёт избыточность и помехоустойчивость.
   int8_t lowPowerDbm = -5;            // Низкий уровень мощности передачи (dBm) для щадящего режима.
   int8_t highPowerDbm = 22;           // Высокий уровень мощности передачи (dBm) для максимальной дальности.
@@ -22,7 +22,7 @@ struct SX1262DriverOptions {
   bool enableRegulatorDCDC = false;   // Принудительный перевод радиочасти в режим DC-DC (если поддерживается аппаратно).
   bool autoLdro = true;               // Автоматический выбор оптимизации для низких скоростей передачи (LDRO).
   bool implicitHeader = true;         // Использовать фиксированный размер пакета (implicit header) вместо стандартного заголовка.
-  uint8_t implicitPayloadLength = 8;  // Размер полезной нагрузки при implicit header (байты).
+  uint8_t implicitPayloadLength = 32; // Размер полезной нагрузки при implicit header (байты).
   bool enableCrc = false;              // Добавлять ли аппаратный CRC в конец LoRa-пакета.
   bool invertIq = false;              // Инверсия фаз (I/Q) для совместимости с определёнными сетями.
   bool publicNetwork = true;          // Использовать стандартное публичное синхрослово LoRa (true) либо приватное (false).
