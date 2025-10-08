@@ -49,6 +49,25 @@ int main() {
   assert(raw.transmitCalls == 1);
   assert(raw.lastTransmitLength == sizeof(payload));
 
+  // Теперь эмулируем ситуацию, когда RadioLib возвращает таймаут,
+  // хотя IRQ TX_DONE установлен — сообщение должно считаться отправленным.
+  raw.transmitResult = RADIOLIB_ERR_TX_TIMEOUT;
+  raw.testIrqFlags = RADIOLIB_SX126X_IRQ_TX_DONE;
+  raw.testClearIrqState = RADIOLIB_ERR_NONE;
+  raw.setFrequencyCalls = 0;
+  raw.startReceiveCalls = 0;
+  raw.transmitCalls = 0;
+  raw.lastTransmitLength = 0;
+
+  sendState = radio.send(payload, sizeof(payload));
+  assert(sendState == RADIOLIB_ERR_NONE);
+  assert(raw.transmitCalls == 1);
+  assert(raw.lastTransmitLength == sizeof(payload));
+  // После успешной отправки радио возвращается на приём и флаг TX_DONE очищен
+  assert((raw.testIrqFlags & RADIOLIB_SX126X_IRQ_TX_DONE) == 0U);
+  assert(raw.setFrequencyCalls >= 2);
+  assert(raw.startReceiveCalls >= 1);
+
   std::cout << "OK" << std::endl;
   return 0;
 }
