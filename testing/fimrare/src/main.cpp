@@ -85,6 +85,9 @@ constexpr unsigned long kInterFrameDelayMs = 150;  // пауза между ка
 constexpr size_t kLongPacketSize = 124;           // длина длинного пакета с буквами A-Z
 constexpr const char* kIncomingColor = "#5CE16A"; // цвет отображения принятых сообщений
 
+static_assert(kImplicitPayloadLength == kFixedFrameSize,
+              "Размер implicit-пакета RadioLib должен совпадать с размером кадра Lotest"); // защитим сборку от расхождения настроек
+
 // --- Структура, описывающая событие в веб-чате ---
 struct ChatEvent {
   unsigned long id = 0;   // уникальный идентификатор сообщения
