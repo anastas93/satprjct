@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "radio_sx1262.h"
+#include "radio_interface.h"
 #include "default_settings.h"
 
 // Вспомогательный класс, открывающий доступ к внутреннему SX1262 для тестов
@@ -92,6 +93,24 @@ int main() {
   assert(raw.transmitCalls == 2);                 // выполнена повторная попытка
   assert(raw.lastTransmitLength == expectedTxLength);
   assert(raw.testIrqFlags == 0U);                 // IRQ были очищены между попытками
+
+  // Проверяем, что после исчерпания повторов RadioLib-таймаут
+  // преобразуется в единый код шины IRadio::ERR_TIMEOUT.
+  raw.transmitSequence = {RADIOLIB_ERR_TX_TIMEOUT, RADIOLIB_ERR_TX_TIMEOUT, 0, 0, 0, 0, 0, 0};
+  raw.transmitSequenceLength = 2;
+  raw.transmitSequenceIndex = 0;
+  raw.transmitResult = RADIOLIB_ERR_TX_TIMEOUT;
+  raw.testIrqFlags = 0;
+  raw.setFrequencyCalls = 0;
+  raw.startReceiveCalls = 0;
+  raw.transmitCalls = 0;
+  raw.lastTransmitLength = 0;
+
+  sendState = radio.send(payload, sizeof(payload));
+  assert(sendState == IRadio::ERR_TIMEOUT);       // внешний код объединён с интерфейсом IRadio
+  assert(raw.transmitCalls == 2);                 // две попытки передачи
+  assert(std::fabs(raw.lastSetFrequency - expectedRx) < 1e-3f);
+  assert(raw.startReceiveCalls >= 1);             // приём восстановлен после сбоя
 
   std::cout << "OK" << std::endl;
   return 0;
