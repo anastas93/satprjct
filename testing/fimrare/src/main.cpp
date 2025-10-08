@@ -1207,9 +1207,17 @@ void processIncomingFrame(const std::vector<uint8_t>& frame) {
 
   if (!state.assemblingMessage) {
     resetReceiveAssembly();
+    if (marker != kFirstChunkMarker) {
+      addEvent(String("Получен фрагмент без начала последовательности: ") + describeFrameMarker(marker));
+      return;
+    }
   } else if (marker != state.expectedChunkMarker) {
     addEvent("Получен неожиданный маркер последовательности, буфер сборки сброшен");
     resetReceiveAssembly();
+    if (marker != kFirstChunkMarker) {
+      addEvent(String("Фрагмент ") + describeFrameMarker(marker) + " проигнорирован до получения нового начала");
+      return;
+    }
   }
 
   appendReceiveChunk(payload, false);
