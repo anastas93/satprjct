@@ -58,12 +58,114 @@ static constexpr float TX_HOME[HOME_BANK_SIZE] = {
 #  define LOTEST_PROJECT_NAME "Lotest"
 #endif
 
-// --- Вспомогательная обёртка для доступа к protected-методам SX1262 ---
+// --- Вспомогательные признаки доступных IRQ-API в RadioLib ---
+namespace radiolib_api_detail {
+
+template <typename T, typename = void>
+struct HasIrqFlagsApi : std::false_type {};
+
+template <typename T>
+struct HasIrqFlagsApi<
+    T,
+    std::void_t<decltype(std::declval<T&>().getIrqFlags()),
+                decltype(std::declval<T&>().clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL))>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct HasZeroArgIrqStatusApi : std::false_type {};
+
+template <typename T>
+struct HasZeroArgIrqStatusApi<
+    T,
+    std::void_t<decltype(std::declval<T&>().getIrqStatus())>> : std::true_type {};
+
+template <typename T, typename = void>
+struct HasPointerIrqStatusApi : std::false_type {};
+
+template <typename T>
+struct HasPointerIrqStatusApi<
+    T,
+    std::void_t<decltype(
+        std::declval<T&>().getIrqStatus(static_cast<uint16_t*>(nullptr)))>>
+    : std::true_type {};
+
+template <typename Radio>
+auto CallZeroArgGetIrqStatus(Radio& radio, int)
+    -> decltype(radio.getIrqStatus()) {
+  return radio.getIrqStatus();
+}
+
+template <typename Radio>
+uint16_t CallZeroArgGetIrqStatus(Radio&, long) {
+  return 0U;
+}
+
+template <typename Radio>
+auto CallPointerGetIrqStatus(Radio& radio, uint16_t* dest, int)
+    -> decltype(radio.getIrqStatus(dest)) {
+  return radio.getIrqStatus(dest);
+}
+
+template <typename Radio>
+int16_t CallPointerGetIrqStatus(Radio&, uint16_t*, long) {
+  return RADIOLIB_ERR_NONE;
+}
+
+} // namespace radiolib_api_detail
+
+// --- Вспомогательная обёртка для доступа к IRQ-методам SX1262 ---
 class PublicSX1262 : public SX1262 {
  public:
   using SX1262::SX1262;             // пробрасываем конструктор базового класса
   using SX1262::clearIrqStatus;     // делаем очистку IRQ-статуса публичной
-  using SX1262::getIrqStatus;       // раскрываем оба варианта чтения IRQ-статуса
+  using SX1262::setDioIrqParams;    // открываем установку IRQ-масок
+
+  uint32_t getIrqFlags() {
+    if constexpr (radiolib_api_detail::HasIrqFlagsApi<SX1262>::value) {
+      return SX1262::getIrqFlags();
+    } else if constexpr (radiolib_api_detail::HasZeroArgIrqStatusApi<SX1262>::value) {
+      return static_cast<uint32_t>(
+          radiolib_api_detail::CallZeroArgGetIrqStatus(
+              static_cast<SX1262&>(*this), 0));
+    } else if constexpr (radiolib_api_detail::HasPointerIrqStatusApi<SX1262>::value) {
+      uint16_t legacyFlags = 0;
+      int16_t state = radiolib_api_detail::CallPointerGetIrqStatus(
+          static_cast<SX1262&>(*this), &legacyFlags, 0);
+      return (state == RADIOLIB_ERR_NONE) ? legacyFlags : 0U;
+    } else {
+      return 0U;
+    }
+  }
+
+  int16_t clearIrqFlags(uint32_t mask) {
+    if constexpr (radiolib_api_detail::HasIrqFlagsApi<SX1262>::value) {
+      return SX1262::clearIrqFlags(mask);
+    } else {
+      (void)mask;
+      return SX1262::clearIrqStatus();
+    }
+  }
+
+  uint16_t getIrqStatus() {
+    if constexpr (radiolib_api_detail::HasZeroArgIrqStatusApi<SX1262>::value) {
+      return radiolib_api_detail::CallZeroArgGetIrqStatus(
+          static_cast<SX1262&>(*this), 0);
+    } else {
+      return static_cast<uint16_t>(getIrqFlags());
+    }
+  }
+
+  int16_t getIrqStatus(uint16_t* dest) {
+    if constexpr (radiolib_api_detail::HasPointerIrqStatusApi<SX1262>::value) {
+      return radiolib_api_detail::CallPointerGetIrqStatus(
+          static_cast<SX1262&>(*this), dest, 0);
+    } else {
+      if (dest) {
+        *dest = static_cast<uint16_t>(getIrqFlags());
+      }
+      return RADIOLIB_ERR_NONE;
+    }
+  }
 };
 
 // --- Глобальные объекты периферии ---
@@ -114,69 +216,6 @@ volatile bool packetReceivedFlag = false;   // устанавливается о
 volatile bool packetProcessingEnabled = true; // защита от повторного входа в обработчик
 volatile bool irqStatusPending = false;     // есть ли необработанные IRQ-флаги SX1262
 
-// --- Совместимость с различными версиями API RadioLib ---
-namespace radiolib_compat {
-
-// Проверяем доступность старого API getIrqFlags()/clearIrqFlags()
-template <typename T, typename = void>
-struct HasIrqFlagsApi : std::false_type {};
-
-template <typename T>
-struct HasIrqFlagsApi<
-    T,
-    std::void_t<decltype(std::declval<T&>().getIrqFlags()),
-                decltype(std::declval<T&>().clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL))>>
-    : std::true_type {};
-
-// Проверяем наличие современного варианта getIrqStatus() без аргументов
-template <typename T, typename = void>
-struct HasZeroArgIrqStatusApi : std::false_type {};
-
-template <typename T>
-struct HasZeroArgIrqStatusApi<
-    T,
-    std::void_t<decltype(std::declval<T&>().getIrqStatus())>> : std::true_type {};
-
-// Проверяем наличие варианта getIrqStatus(uint16_t*)
-template <typename T, typename = void>
-struct HasPointerIrqStatusApi : std::false_type {};
-
-template <typename T>
-struct HasPointerIrqStatusApi<
-    T,
-    std::void_t<decltype(
-        std::declval<T&>().getIrqStatus(static_cast<uint16_t*>(nullptr)))>>
-    : std::true_type {};
-
-// Унифицированное чтение IRQ-флагов SX1262
-template <typename Radio>
-uint32_t readIrqFlags(Radio& radio) {
-  if constexpr (HasIrqFlagsApi<Radio>::value) {
-    return radio.getIrqFlags();                                  // старый API RadioLib
-  } else if constexpr (HasZeroArgIrqStatusApi<Radio>::value) {
-    return static_cast<uint32_t>(radio.getIrqStatus());          // новый API без аргументов
-  } else if constexpr (HasPointerIrqStatusApi<Radio>::value) {
-    uint16_t legacyFlags = 0;
-    const int16_t state = radio.getIrqStatus(&legacyFlags);      // fallback через указатель
-    return (state == RADIOLIB_ERR_NONE) ? legacyFlags : 0U;
-  } else {
-    return 0U;                                                   // неподдерживаемый вариант API
-  }
-}
-
-// Унифицированная очистка IRQ-флагов SX1262
-template <typename Radio>
-int16_t clearIrqFlags(Radio& radio, uint32_t mask) {
-  if constexpr (HasIrqFlagsApi<Radio>::value) {
-    return radio.clearIrqFlags(mask);                            // старый API
-  } else {
-    (void)mask;
-    return radio.clearIrqStatus();                               // современный API без аргументов
-  }
-}
-
-} // namespace radiolib_compat
-
 // --- Вспомогательные функции объявления ---
 void IRAM_ATTR onRadioDio1Rise();
 String formatSx1262IrqFlags(uint32_t flags);
@@ -200,6 +239,7 @@ bool applySpreadingFactor(bool useSf5);
 bool applyBandwidth(float bandwidthKhz);
 bool applyCodingRate(uint8_t codingRateDenom);
 bool ensureReceiveMode();
+bool startReceiveWithRetry(const char* context);
 bool sendPayload(const std::vector<uint8_t>& payload, const String& context);
 bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t index, size_t total);
 std::vector<std::array<uint8_t, kFixedFrameSize>> splitPayloadIntoFrames(const std::vector<uint8_t>& payload);
@@ -353,8 +393,11 @@ void loop() {
 #endif
 
   if (processIrq) {
-    const uint32_t irqFlags = radiolib_compat::readIrqFlags(radio);   // считываем активные флаги независимо от версии API
-    radiolib_compat::clearIrqFlags(radio, RADIOLIB_SX126X_IRQ_ALL);   // сбрасываем регистр IRQ в доступном варианте
+    const uint32_t irqFlags = radio.getIrqFlags();                    // считываем активные флаги SX1262
+    const int16_t clearState = radio.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
+    if (clearState != RADIOLIB_ERR_NONE) {
+      addEvent(String("Очистка IRQ SX1262 вернула ошибку => ") + String(clearState));
+    }
     addEvent(formatSx1262IrqFlags(irqFlags));                         // публикуем расшифровку событий
   }
 
@@ -995,10 +1038,59 @@ bool applyCodingRate(uint8_t codingRateDenom) {
 }
 
 // --- Гарантируем, что радио ожидает приём ---
+bool startReceiveWithRetry(const char* context) {
+  constexpr uint8_t kMaxAttempts = 3; // как в основной прошивке, делаем до трёх попыток запуска приёма
+  const String ctx = (context && context[0] != '\0') ? String(context) : String("без контекста");
+  int16_t lastState = RADIOLIB_ERR_NONE;
+  for (uint8_t attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+    const int16_t stateCode = radio.startReceive();
+    if (stateCode == RADIOLIB_ERR_NONE) {
+      if (attempt > 1) {
+        addEvent(String("startReceive() успешно с ") + String(static_cast<unsigned long>(attempt)) +
+                 "-й попытки (" + ctx + ")");
+      }
+      return true;
+    }
+
+    lastState = stateCode;
+    addEvent(String("startReceive() попытка ") + String(static_cast<unsigned long>(attempt)) + " (" + ctx +
+             ") завершилась ошибкой => " + String(stateCode));
+
+#if defined(RADIOLIB_ERR_CHANNEL_BUSY)
+    const bool channelBusy = (stateCode == RADIOLIB_ERR_CHANNEL_BUSY);
+#elif defined(RADIOLIB_ERR_CHANNEL_BUSY_LBT)
+    const bool channelBusy = (stateCode == RADIOLIB_ERR_CHANNEL_BUSY_LBT);
+#else
+    const bool channelBusy = false;
+#endif
+    if (channelBusy) {
+      const int16_t resetState = radio.reset();
+      if (resetState == RADIOLIB_ERR_NONE) {
+        addEvent(String("Выполнен программный сброс SX1262 после занятого канала (") + ctx + ")");
+      } else {
+        addEvent(String("Сброс SX1262 после занятого канала вернул ошибку => ") + String(resetState));
+      }
+    }
+
+#if defined(ARDUINO)
+    delay(1);
+#else
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
+  }
+
+  addEvent(String("Не удалось запустить приём после ") +
+           String(static_cast<unsigned long>(kMaxAttempts)) + " попыток (" + ctx + ") => " + String(lastState));
+  return false;
+}
+
 bool ensureReceiveMode() {
-  int16_t stateCode = radio.startReceive();
-  if (stateCode != RADIOLIB_ERR_NONE) {
-    logRadioError("startReceive", stateCode);
+  int16_t freqState = radio.setFrequency(state.currentRxFreq);
+  if (freqState != RADIOLIB_ERR_NONE) {
+    logRadioError("setFrequency(ensure RX)", freqState);
+    return false;
+  }
+  if (!startReceiveWithRetry("ensureReceiveMode")) {
     return false;
   }
   return true;
@@ -1046,7 +1138,54 @@ bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t /*i
     return false;
   }
 
-  int16_t result = radio.transmit(const_cast<uint8_t*>(frame.data()), kFixedFrameSize);
+  // Повторяем алгоритм основной прошивки: обрабатываем ложные таймауты и выполняем повторные попытки.
+  auto transmitWithRecovery = [&](const uint8_t* buffer, size_t length, const char* context) -> int16_t {
+    constexpr uint8_t kMaxAttempts = 2;                     // максимум две попытки передачи
+    const String ctx = (context && context[0] != '\0') ? String(context) : String("без контекста");
+    for (uint8_t attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+      int16_t stateCode = radio.transmit(const_cast<uint8_t*>(buffer), length);
+      if (stateCode != RADIOLIB_ERR_TX_TIMEOUT) {            // передача завершилась без таймаута
+        return stateCode;
+      }
+
+      const uint32_t irqFlags = radio.getIrqFlags();                  // читаем IRQ-флаги SX1262
+      if ((irqFlags & RADIOLIB_SX126X_IRQ_TX_DONE) != 0U) {  // TX_DONE установлен — передача завершилась
+        char irqBuf[16];
+        std::snprintf(irqBuf, sizeof(irqBuf), "0x%04lX", static_cast<unsigned long>(irqFlags));
+        const int16_t clearState = radio.clearIrqFlags(RADIOLIB_SX126X_IRQ_TX_DONE);
+        if (clearState != RADIOLIB_ERR_NONE) {
+          addEvent(String("Очистка TX_DONE после таймаута вернула ошибку => ") + String(clearState));
+        }
+        addEvent(String("transmit timeout, но TX_DONE выставлен (IRQ=") + String(irqBuf) + ", " + ctx +
+                 ") — считаем отправку успешной");
+        return RADIOLIB_ERR_NONE;                            // считаем отправку успешной
+      }
+
+      if (attempt < kMaxAttempts) {
+        char irqBuf[16];
+        std::snprintf(irqBuf, sizeof(irqBuf), "0x%04lX", static_cast<unsigned long>(irqFlags));
+        addEvent(String("transmit timeout, повторяем попытку ") + String(static_cast<unsigned long>(attempt + 1)) +
+                 " (IRQ=" + String(irqBuf) + ", " + ctx + ")");
+        const int16_t clearState = radio.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL); // очищаем IRQ перед повтором
+        if (clearState != RADIOLIB_ERR_NONE) {
+          addEvent(String("Очистка IRQ SX1262 перед повтором вернула ошибку => ") + String(clearState));
+        }
+#if defined(ARDUINO)
+        delay(1);                                            // короткая пауза перед новой попыткой
+#else
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
+        continue;
+      }
+
+      addEvent(String("transmit завершился ошибкой => ") + String(stateCode) + " (" + ctx + ")");
+      return stateCode;                                      // исчерпали попытки — возвращаем таймаут
+    }
+
+    return RADIOLIB_ERR_TX_TIMEOUT;                          // защита от выхода из цикла
+  };
+
+  int16_t result = transmitWithRecovery(frame.data(), kFixedFrameSize, "transmitFrame");
   if (result != RADIOLIB_ERR_NONE) {
     logRadioError("transmit", result);
     radio.setFrequency(state.currentRxFreq);
