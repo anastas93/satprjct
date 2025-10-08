@@ -192,13 +192,15 @@ int16_t RadioSX1262::send(const uint8_t* data, size_t len) {
 
   const int16_t state = transmitWithRecovery(payloadPtr, payloadLen, "send");
   if (state != RADIOLIB_ERR_NONE) {          // проверка кода ошибки
-    const int16_t errorState = state;        // сохраняем исходный код сбоя
-    lastError_ = errorState;                 // фиксируем код ошибки для внешнего запроса
-    LOG_ERROR_VAL("RadioSX1262: ошибка передачи, код=", state);
+    const int16_t radiolibError = state;     // сохраняем исходный код RadioLib
+    const bool isTimeout = (radiolibError == RADIOLIB_ERR_TX_TIMEOUT);
+    const int16_t publicError = isTimeout ? ERR_TIMEOUT : radiolibError;
+    lastError_ = radiolibError;              // фиксируем код RadioLib для диагностики
+    LOG_ERROR_VAL("RadioSX1262: ошибка передачи, код=", radiolibError);
     setFrequency(freq_rx);                   // возвращаемся на частоту приёма после сбоя
     startReceiveWithRetry("send: возврат к приёму после ошибки передачи");
-    lastError_ = errorState;                 // восстанавливаем исходный код после перехода в RX
-    return lastError_;
+    lastError_ = radiolibError;              // восстанавливаем исходный код после перехода в RX
+    return publicError;                      // для внешней логики возвращаем унифицированный код
   }
   lastError_ = RADIOLIB_ERR_NONE;            // предыдущая операция прошла успешно
   setFrequency(freq_rx);                     // возвращаем частоту приёма
