@@ -8,6 +8,7 @@
 
 // Константы статусов и флагов IRQ, используемые в прошивке
 #define RADIOLIB_ERR_NONE 0
+#define RADIOLIB_ERR_TX_TIMEOUT -5
 #define RADIOLIB_ERR_CHANNEL_BUSY -16
 #define RADIOLIB_ERR_CHANNEL_BUSY_LBT -17
 #define RADIOLIB_SX126X_IRQ_NONE 0x0000U
@@ -88,7 +89,10 @@ public:
   int16_t setRxBoostedGainMode(bool, bool) { return RADIOLIB_ERR_NONE; }
   void setDio1Action(void (*)(void)) {}
   uint32_t getIrqFlags() { return testIrqFlags; }
-  int16_t clearIrqFlags(uint32_t) { return testClearIrqState; }
+  int16_t clearIrqFlags(uint32_t mask) {
+    testIrqFlags &= ~mask;
+    return testClearIrqState;
+  }
   uint16_t getIrqStatus() { return static_cast<uint16_t>(testIrqFlags); }
   int16_t getIrqStatus(uint16_t* dest) {
     if (dest) {

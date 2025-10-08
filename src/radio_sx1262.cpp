@@ -153,6 +153,20 @@ int16_t RadioSX1262::send(const uint8_t* data, size_t len) {
     return lastError_;
   }
   int state = radio_.transmit(const_cast<uint8_t*>(payloadPtr), payloadLen); // отправляем пакет
+  if (state == RADIOLIB_ERR_TX_TIMEOUT) {
+    const uint32_t irqFlags = radio_.getIrqFlags();
+    if ((irqFlags & RADIOLIB_SX126X_IRQ_TX_DONE) != 0U) {
+      // На части плат SX1262 IRQ "TX_DONE" успевает выставиться, но RadioLib
+      // всё равно возвращает timeout. В этом случае считаем передачу успешной
+      // и вручную очищаем флаг, чтобы не мешал дальнейшей работе.
+      const int16_t clearState = radio_.clearIrqFlags(RADIOLIB_SX126X_IRQ_TX_DONE);
+      if (clearState != RADIOLIB_ERR_NONE) {
+        LOG_WARN_VAL("RadioSX1262: очистка TX_DONE после таймаута вернула код=", clearState);
+      }
+      LOG_WARN("RadioSX1262: transmit вернул timeout, но TX_DONE установлен — считаем передачу успешной");
+      state = RADIOLIB_ERR_NONE;
+    }
+  }
   if (state != RADIOLIB_ERR_NONE) {          // проверка кода ошибки
     lastError_ = state;                      // сохраняем код сбоя
     LOG_ERROR_VAL("RadioSX1262: ошибка передачи, код=", state);
