@@ -1148,7 +1148,8 @@ bool sendPayload(const std::vector<uint8_t>& payload, const String& context) {
 }
 
 // --- Непосредственная передача одного кадра ---
-bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t /*index*/, size_t /*total*/) {
+bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t index, size_t total) {
+  const bool isLastFrame = (index + 1U) >= total; // последний ли это кадр последовательности
   int16_t freqState = radio.setFrequency(state.currentTxFreq);
   if (freqState != RADIOLIB_ERR_NONE) {
     logRadioError("setFrequency(TX)", freqState);
@@ -1208,6 +1209,10 @@ bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t /*i
     radio.setFrequency(state.currentRxFreq);
     ensureReceiveMode();
     return false;
+  }
+
+  if (!isLastFrame) {
+    return true; // промежуточные кадры передаются без немедленного возврата в приём
   }
 
   int16_t backState = radio.setFrequency(state.currentRxFreq);
