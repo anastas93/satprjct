@@ -1156,6 +1156,22 @@ bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t ind
     return false;
   }
 
+  // При пакетной передаче несколько кадров отправляются подряд, пока основной цикл
+  // не успевает очистить IRQ SX1262. Сбрасываем флаги вручную, чтобы TX_DONE от
+  // предыдущего кадра не блокировал следующую передачу.
+#if defined(ARDUINO)
+  noInterrupts();
+#endif
+  packetReceivedFlag = false;          // предотвращаем ложное чтение «принятого» пакета после TX
+  irqStatusPending = false;
+#if defined(ARDUINO)
+  interrupts();
+#endif
+  const int16_t preClearState = radio.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
+  if (preClearState != RADIOLIB_ERR_NONE) {
+    addEvent(String("Очистка IRQ SX1262 перед передачей вернула ошибку => ") + String(preClearState));
+  }
+
   // Повторяем алгоритм основной прошивки: обрабатываем ложные таймауты и выполняем повторные попытки.
   auto transmitWithRecovery = [&](const uint8_t* buffer, size_t length, const char* context) -> int16_t {
     constexpr uint8_t kMaxAttempts = 2;                     // максимум две попытки передачи
