@@ -22,7 +22,6 @@ private:
   PayloadMode mode_;
   size_t custom_ = 0; // произвольный размер, если задан
   bool complete_ = false;
-  size_t expected_chunk_ = 0; // ожидаемый размер части для корректного определения финального блока
   std::vector<uint8_t> data_;
 };
 

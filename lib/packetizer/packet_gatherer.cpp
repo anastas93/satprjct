@@ -1,6 +1,4 @@
 #include "packet_gatherer.h"
-#include <algorithm>
-
 // Конструктор
 PacketGatherer::PacketGatherer(PayloadMode mode, size_t custom)
     : mode_(mode), custom_(custom) {}
@@ -9,7 +7,6 @@ PacketGatherer::PacketGatherer(PayloadMode mode, size_t custom)
 void PacketGatherer::reset() {
   data_.clear();
   complete_ = false;
-  expected_chunk_ = 0;
 }
 
 // Размер полезной нагрузки
@@ -25,18 +22,19 @@ size_t PacketGatherer::payloadSize() const {
 
 // Добавление части
 void PacketGatherer::add(const uint8_t* data, size_t len) {
-  if (!data || len == 0) return;
-  if (data_.empty()) {
-    expected_chunk_ = len;                           // запоминаем фактический размер первой части
-    if (expected_chunk_ == 0) expected_chunk_ = payloadSize();
+  if (!data || len == 0) return;                     // нечего добавлять
+
+  const size_t prev_size = data_.size();
+  data_.reserve(prev_size + len);                    // уменьшаем число реаллокаций при длинных сообщениях
+  data_.insert(data_.end(), data, data + len);       // дописываем фрагмент в общий буфер
+
+  const size_t chunk = payloadSize();
+  if (chunk == 0) {                                  // защитный случай: произвольный размер не задан
+    complete_ = true;
+    return;
   }
-  data_.insert(data_.end(), data, data + len);
-  if (expected_chunk_ == 0) expected_chunk_ = payloadSize();
-  if (len < expected_chunk_) {
-    complete_ = true;                               // последняя часть меньше базовой — значит, сообщение завершено
-  } else {
-    complete_ = false;                              // продолжаем накапливать остальные части
-  }
+
+  complete_ = (len < chunk);                         // если фрагмент меньше базового размера — это финальная часть
 }
 
 // Завершено ли
