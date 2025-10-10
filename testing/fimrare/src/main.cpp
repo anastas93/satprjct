@@ -5,12 +5,14 @@
 #include <RadioLib.h>
 #include <vector>
 #include <array>
+#include <deque>
 #include <cstddef>
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
 #include <chrono>
 #include <cmath>
+#include <numeric>
 #include <type_traits>
 #include <utility>
 #if !defined(ARDUINO)
@@ -18,6 +20,7 @@
 #endif
 
 #include "libs/radio/lora_radiolib_settings.h"     // дефолтные настройки драйвера SX1262
+#include "libs/lotest_protocol.h"                  // протокол Lotest согласно спецификации
 
 namespace {
 constexpr auto kRadioDefaults = LoRaRadioLibSettings::DEFAULT_OPTIONS; // Статический набор настроек RadioLib
@@ -194,15 +197,9 @@ WebServer server(80);                             // встроенный HTTP-�
 constexpr uint8_t kHomeBankSize = static_cast<uint8_t>(frequency_tables::HOME_BANK_SIZE); // число каналов банка HOME
 constexpr size_t kMaxEventHistory = 120;          // ограничение истории событий для веб-чата
 constexpr size_t kFullPacketSize = 245;           // максимальная длина пакета SX1262
-constexpr size_t kFixedFrameSize = 8;             // фиксированная длина кадра LoRa
-constexpr size_t kFramePayloadSize = kFixedFrameSize - 1; // полезная часть кадра без управляющего байта
-constexpr uint8_t kSingleFrameMarker = 0;         // метка одиночного кадра
-constexpr uint8_t kFinalFrameMarker = 1;          // метка завершающего кадра последовательности
-constexpr uint8_t kFirstChunkMarker = 2;          // минимальный маркер для кусочных пакетов
-constexpr uint8_t kMaxChunkMarker = 253;          // максимальный маркер для кусочных пакетов
-constexpr unsigned long kInterFrameDelayMs = 150;  // пауза между кадрами
-constexpr size_t kLongPacketSize = 124;           // длина длинного пакета с буквами A-Z
-constexpr const char* kIncomingColor = "#5CE16A"; // цвет отображения принятых сообщений
+constexpr unsigned long kInterFrameDelayMs = 25;    // задержка между кадрами согласно базовой спецификации
+constexpr size_t kLongPacketSize = 120;             // длина длинного пакета (кратно 5 байтам payload)
+constexpr const char* kIncomingColor = "#5CE16A";  // цвет отображения принятых сообщений
 
 // --- Структура, описывающая событие в веб-чате ---
 struct ChatEvent {
@@ -223,10 +220,20 @@ struct AppState {
   float currentTxFreq = frequency_tables::TX_HOME[0]; // текущая частота передачи
   unsigned long nextEventId = 1;       // счётчик идентификаторов для событий
   std::vector<ChatEvent> events;       // журнал событий для веб-интерфейса
-  std::vector<uint8_t> rxAssembly;     // буфер сборки принятого сообщения из частей
-  bool assemblingMessage = false;      // активен ли режим сборки многочастного сообщения
-  uint8_t expectedChunkMarker = kFirstChunkMarker; // ожидаемый маркер следующего куска
+  Lotest::Config linkConfig;           // активные настройки протокола Lotest
+  uint8_t nextSequence = 0;            // SEQ следующего исходящего кадра
+  std::deque<Lotest::AckBitmap> ackQueue; // очередь принятых ACK для окон ARQ
+  std::vector<uint8_t> rxFileBuffer;   // буфер сборки принимаемого файла
+  bool receivingFile = false;          // ведётся ли сейчас сборка файла
+  uint16_t expectedFileCrc = 0;        // ожидаемый CRC-16 файла (из FIN)
+  size_t expectedFileSize = 0;         // ожидаемый размер файла (из FIN)
+  uint8_t currentWindowBase = 0;       // базовый SEQ текущего окна приёма
+  uint8_t currentWindowCount = 0;      // количество кадров в окне
+  uint16_t currentWindowBitmap = 0;    // битовая карта принятых кадров
+  bool requestParity = false;          // требуется ли HARQ-паритет
 } state;
+
+Lotest::ReedSolomon1511 gRsCodec;             // кодер RS(15, 11) для HARQ
 
 // --- Флаги приёма LoRa ---
 volatile bool packetReceivedFlag = false;   // устанавливается обработчиком DIO1 при приёме
@@ -257,22 +264,27 @@ bool applyBandwidth(float bandwidthKhz);
 bool applyCodingRate(uint8_t codingRateDenom);
 bool ensureReceiveMode();
 bool startReceiveWithRetry(const char* context);
-bool sendPayload(const std::vector<uint8_t>& payload, const String& context);
-bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t index, size_t total);
-std::vector<std::array<uint8_t, kFixedFrameSize>> splitPayloadIntoFrames(const std::vector<uint8_t>& payload);
+bool sendFileWithArq(const std::vector<uint8_t>& payload, const String& context);
+bool transmitFrame(const Lotest::Frame& frame, const String& context);
+std::vector<Lotest::Frame> buildDataFrames(const std::vector<uint8_t>& payload, bool usePayloadCrc8, uint8_t& nextSequence);
+Lotest::Frame buildFinFrame(uint8_t sequence, uint16_t crc, size_t totalSize);
+bool fetchIncomingFrame(std::vector<uint8_t>& buffer);
 void processIncomingFrame(const std::vector<uint8_t>& frame);
-void resetReceiveAssembly();
-void appendReceiveChunk(const std::vector<uint8_t>& chunk, bool finalChunk);
+void handleDataFrame(const Lotest::Frame& frame);
+void handleAckFrame(const Lotest::Frame& frame);
+void handleFinFrame(const Lotest::Frame& frame);
+void handleParityFrame(const Lotest::Frame& frame);
 String formatByteArray(const std::vector<uint8_t>& data);
 String formatTextPayload(const std::vector<uint8_t>& data);
-String describeFrameMarker(uint8_t marker);
 void logReceivedMessage(const std::vector<uint8_t>& payload);
 void logRadioError(const String& context, int16_t code);
 void handleSpreadingFactorToggle();
 void handleBandwidthChange();
 void handleCodingRateChange();
 void waitInterFrameDelay();
-void trimTrailingZeros(std::vector<uint8_t>& buffer);
+void resetRxState();
+bool waitForAck(uint8_t baseSeq, uint8_t count, unsigned long timeoutMs, Lotest::AckBitmap& outAck);
+void sendAckForCurrentWindow(bool force);
 
 // --- Формирование имени Wi-Fi сети ---
 String makeAccessPointSsid() {
@@ -419,24 +431,10 @@ void loop() {
   }
 
   if (packetReceivedFlag) {
-    packetProcessingEnabled = false;
-    packetReceivedFlag = false;
-
-    std::vector<uint8_t> buffer(kImplicitPayloadLength, 0);
-    int16_t stateCode = radio.readData(buffer.data(), buffer.size());
-    if (stateCode == RADIOLIB_ERR_NONE) {
-      size_t actualLength = radio.getPacketLength();
-      if (actualLength > buffer.size()) {
-        actualLength = buffer.size();
-      }
-      buffer.resize(actualLength);
+    std::vector<uint8_t> buffer;
+    if (fetchIncomingFrame(buffer)) {
       processIncomingFrame(buffer);
-    } else {
-      logRadioError("readData", stateCode);
     }
-
-    ensureReceiveMode();
-    packetProcessingEnabled = true;
   }
 }
 
@@ -774,7 +772,7 @@ void handleSendLongPacket() {
   for (size_t i = 0; i < data.size(); ++i) {
     data[i] = static_cast<uint8_t>('A' + (i % 26));
   }
-  if (sendPayload(data, String("Длинный пакет (") + String(static_cast<unsigned long>(data.size())) + " байт)")) {
+  if (sendFileWithArq(data, String("Длинный пакет (") + String(static_cast<unsigned long>(data.size())) + " байт)")) {
     server.send(200, "application/json", "{\"ok\":true}");
   } else {
     server.send(500, "application/json", "{\"error\":\"Отправка не удалась\"}");
@@ -789,7 +787,7 @@ void handleSendRandomPacket() {
   for (size_t i = 0; i < data.size(); ++i) {
     data[i] = (i % 2 == 0) ? evenByte : oddByte;
   }
-  if (sendPayload(data, "Полный пакет с чередованием случайных байт")) {
+  if (sendFileWithArq(data, "Полный пакет с чередованием случайных байт")) {
     server.send(200, "application/json", "{\"ok\":true}");
   } else {
     server.send(500, "application/json", "{\"error\":\"Отправка не удалась\"}");
@@ -809,7 +807,7 @@ void handleSendCustom() {
   }
   std::vector<uint8_t> data(text.length());
   std::memcpy(data.data(), text.c_str(), text.length());
-  if (sendPayload(data, String("Пользовательский пакет (" + String(data.size()) + " байт)"))) {
+  if (sendFileWithArq(data, String("Пользовательский пакет (" + String(data.size()) + " байт)"))) {
     server.send(200, "application/json", "{\"ok\":true}");
   } else {
     server.send(500, "application/json", "{\"error\":\"Отправка не удалась\"}");
@@ -1114,7 +1112,7 @@ bool ensureReceiveMode() {
 }
 
 // --- Отправка подготовленного буфера ---
-bool sendPayload(const std::vector<uint8_t>& payload, const String& context) {
+bool sendFileWithArq(const std::vector<uint8_t>& payload, const String& context) {
   if (payload.empty()) {
     addEvent(context + ": пустой буфер");
     return false;
@@ -1122,47 +1120,139 @@ bool sendPayload(const std::vector<uint8_t>& payload, const String& context) {
 
   addEvent(context + ": " + formatByteArray(payload) + " | \"" + formatTextPayload(payload) + "\"");
 
-  auto frames = splitPayloadIntoFrames(payload);
-  if (frames.empty()) {
-    addEvent("Не удалось подготовить кадры для отправки");
-    return false;
-  }
+  uint8_t nextSeq = state.nextSequence;
+  auto frames = buildDataFrames(payload, state.linkConfig.enablePayloadCrc8, nextSeq);
+  const uint16_t fileCrc = Lotest::crc16(payload.data(), payload.size());
+  frames.push_back(buildFinFrame(nextSeq++, fileCrc, payload.size()));
+
+  state.nextSequence = nextSeq;
 
   if (frames.size() > 1) {
-    addEvent(String("Сообщение разбито на ") + String(static_cast<unsigned long>(frames.size())) + " кадров");
+    addEvent(String("Сообщение разбито на ") + String(static_cast<unsigned long>(frames.size())) + " кадров (включая FIN)");
   }
 
-  for (size_t i = 0; i < frames.size(); ++i) {
-    const auto& frame = frames[i];
-    std::vector<uint8_t> frameVec(frame.begin(), frame.end());
-    addEvent(String("→ Кадр #") + String(static_cast<unsigned long>(i + 1)) + " (" + describeFrameMarker(frame[0]) + "): " + formatByteArray(frameVec));
-    if (!transmitFrame(frame, i, frames.size())) {
-      return false;
+  size_t cursor = 0;
+  while (cursor < frames.size()) {
+    const size_t windowCount = std::min(static_cast<size_t>(Lotest::kArqWindow), frames.size() - cursor);
+    std::vector<uint8_t> order;
+    if (state.linkConfig.enableInterleaving && windowCount > 1) {
+      order = Lotest::buildInterleavingOrder(windowCount, state.linkConfig.interleaveStep);
+    } else {
+      order.resize(windowCount);
+      std::iota(order.begin(), order.end(), 0U);
     }
-    if (i + 1 < frames.size()) {
+
+    addEvent(String("Передаётся окно ARQ: SEQ=") + String(frames[cursor].sequence()) + ", кадров=" +
+             String(static_cast<unsigned long>(windowCount)) + (state.linkConfig.enableInterleaving ? ", включён интерливинг" : ""));
+
+    for (uint8_t relative : order) {
+      const size_t index = cursor + relative;
+      if (!transmitFrame(frames[index], context)) {
+        return false;
+      }
       waitInterFrameDelay();
     }
+
+    if (!ensureReceiveMode()) {
+      return false;
+    }
+
+    bool windowCompleted = false;
+    Lotest::AckBitmap ack{};
+    for (uint8_t attempt = 0; attempt < 3 && !windowCompleted; ++attempt) {
+      if (!waitForAck(frames[cursor].sequence(), static_cast<uint8_t>(windowCount), 1500, ack)) {
+        addEvent(String("ACK не получен для окна SEQ=") + String(frames[cursor].sequence()) + " — попытка " +
+                 String(static_cast<unsigned long>(attempt + 1)));
+        continue;
+      }
+
+      addEvent(String("Получен ACK: base=") + String(ack.baseSeq) + ", count=" +
+               String(static_cast<unsigned long>(ack.count)) + ", bitmap=0x" + String(ack.bitmap, HEX) +
+               (ack.needParity ? ", требуется паритет" : ""));
+
+      uint16_t missingMask = 0;
+      for (uint8_t i = 0; i < windowCount; ++i) {
+        const bool received = (ack.bitmap & (1U << i)) != 0U;
+        if (!received) {
+          missingMask |= static_cast<uint16_t>(1U << i);
+        }
+      }
+
+      if (missingMask == 0) {
+        windowCompleted = true;
+      } else {
+        addEvent(String("Запрошены повторные передачи по BITMAP16=0x") + String(missingMask, HEX));
+        for (uint8_t i = 0; i < windowCount; ++i) {
+          if ((missingMask & (1U << i)) == 0U) {
+            continue;
+          }
+          if (!transmitFrame(frames[cursor + i], "RETX")) {
+            return false;
+          }
+          waitInterFrameDelay();
+        }
+        if (!ensureReceiveMode()) {
+          return false;
+        }
+      }
+
+      if (ack.needParity && state.linkConfig.enableHarq) {
+        addEvent("Получатель запросил HARQ-паритет — генерация пакетов RS(15,11)");
+        std::array<uint8_t, Lotest::kRsDataSymbols> rsData{};
+        size_t collected = 0;
+        for (size_t i = cursor; i < frames.size() && collected < rsData.size(); ++i) {
+          if (frames[i].type() != Lotest::FrameType::Data) {
+            continue;
+          }
+          auto payload = frames[i].payload();
+          const uint8_t len = frames[i].payloadSize();
+          for (uint8_t j = 0; j < len && collected < rsData.size(); ++j) {
+            rsData[collected++] = payload[j];
+          }
+        }
+        while (collected < rsData.size()) {
+          rsData[collected++] = 0;
+        }
+        auto parity = gRsCodec.encode(rsData);
+        for (size_t pi = 0; pi < parity.size(); ++pi) {
+          Lotest::Frame parFrame;
+          parFrame.setType(Lotest::FrameType::Parity);
+          parFrame.setSequence(state.nextSequence++);
+          parFrame.setFlags(0);
+          parFrame.setPayload(&parity[pi], 1);
+          if (!transmitFrame(parFrame, "PAR")) {
+            return false;
+          }
+          waitInterFrameDelay();
+        }
+        ensureReceiveMode();
+        windowCompleted = true;
+      }
+    }
+
+    if (!windowCompleted) {
+      addEvent("Не удалось получить ACK для окна даже после повторов");
+      return false;
+    }
+
+    cursor += windowCount;
   }
 
+  addEvent("Передача завершена, все окна подтверждены");
   return true;
 }
 
-// --- Непосредственная передача одного кадра ---
-bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t index, size_t total) {
-  const bool isLastFrame = (index + 1U) >= total; // последний ли это кадр последовательности
+bool transmitFrame(const Lotest::Frame& frame, const String& context) {
   int16_t freqState = radio.setFrequency(state.currentTxFreq);
   if (freqState != RADIOLIB_ERR_NONE) {
     logRadioError("setFrequency(TX)", freqState);
     return false;
   }
 
-  // При пакетной передаче несколько кадров отправляются подряд, пока основной цикл
-  // не успевает очистить IRQ SX1262. Сбрасываем флаги вручную, чтобы TX_DONE от
-  // предыдущего кадра не блокировал следующую передачу.
 #if defined(ARDUINO)
   noInterrupts();
 #endif
-  packetReceivedFlag = false;          // предотвращаем ложное чтение «принятого» пакета после TX
+  packetReceivedFlag = false;
   irqStatusPending = false;
 #if defined(ARDUINO)
   interrupts();
@@ -1172,107 +1262,312 @@ bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t ind
     addEvent(String("Очистка IRQ SX1262 перед передачей вернула ошибку => ") + String(preClearState));
   }
 
-  // Повторяем алгоритм основной прошивки: обрабатываем ложные таймауты и выполняем повторные попытки.
-  auto transmitWithRecovery = [&](const uint8_t* buffer, size_t length, const char* context) -> int16_t {
-    constexpr uint8_t kMaxAttempts = 2;                     // максимум две попытки передачи
-    const String ctx = (context && context[0] != '\0') ? String(context) : String("без контекста");
+  auto toHex = [](const Lotest::Frame& f) {
+    std::vector<uint8_t> bytes(f.bytes.begin(), f.bytes.end());
+    return formatByteArray(bytes);
+  };
+
+  auto transmitWithRecovery = [&](const uint8_t* buffer, size_t length, const char* ctx) -> int16_t {
+    constexpr uint8_t kMaxAttempts = 2;
+    const String ctxStr = (ctx && ctx[0] != '\0') ? String(ctx) : String("без контекста");
     for (uint8_t attempt = 1; attempt <= kMaxAttempts; ++attempt) {
       int16_t stateCode = radio.transmit(const_cast<uint8_t*>(buffer), length);
-      if (stateCode != RADIOLIB_ERR_TX_TIMEOUT) {            // передача завершилась без таймаута
+      if (stateCode != RADIOLIB_ERR_TX_TIMEOUT) {
         return stateCode;
       }
-
-      const uint32_t irqFlags = radio.getIrqFlags();                  // читаем IRQ-флаги SX1262
-      if ((irqFlags & RADIOLIB_SX126X_IRQ_TX_DONE) != 0U) {  // TX_DONE установлен — передача завершилась
-        char irqBuf[16];
-        std::snprintf(irqBuf, sizeof(irqBuf), "0x%04lX", static_cast<unsigned long>(irqFlags));
+      const uint32_t irqFlags = radio.getIrqFlags();
+      if ((irqFlags & RADIOLIB_SX126X_IRQ_TX_DONE) != 0U) {
+        addEvent(String("TX таймаут, но TX_DONE установлен (кадр ") + toHex(frame) + ", " + ctxStr + ")");
         const int16_t clearState = radio.clearIrqFlags(RADIOLIB_SX126X_IRQ_TX_DONE);
         if (clearState != RADIOLIB_ERR_NONE) {
-          addEvent(String("Очистка TX_DONE после таймаута вернула ошибку => ") + String(clearState));
+          addEvent(String("Не удалось очистить TX_DONE => ") + String(clearState));
         }
-        addEvent(String("transmit timeout, но TX_DONE выставлен (IRQ=") + String(irqBuf) + ", " + ctx +
-                 ") — считаем отправку успешной");
-        return RADIOLIB_ERR_NONE;                            // считаем отправку успешной
+        return RADIOLIB_ERR_NONE;
       }
-
       if (attempt < kMaxAttempts) {
-        char irqBuf[16];
-        std::snprintf(irqBuf, sizeof(irqBuf), "0x%04lX", static_cast<unsigned long>(irqFlags));
-        addEvent(String("transmit timeout, повторяем попытку ") + String(static_cast<unsigned long>(attempt + 1)) +
-                 " (IRQ=" + String(irqBuf) + ", " + ctx + ")");
-        const int16_t clearState = radio.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL); // очищаем IRQ перед повтором
+        const int16_t clearState = radio.clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
         if (clearState != RADIOLIB_ERR_NONE) {
-          addEvent(String("Очистка IRQ SX1262 перед повтором вернула ошибку => ") + String(clearState));
+          addEvent(String("Очистка IRQ перед повтором не удалась => ") + String(clearState));
         }
 #if defined(ARDUINO)
-        delay(1);                                            // короткая пауза перед новой попыткой
+        delay(1);
 #else
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 #endif
         continue;
       }
-
-      addEvent(String("transmit завершился ошибкой => ") + String(stateCode) + " (" + ctx + ")");
-      return stateCode;                                      // исчерпали попытки — возвращаем таймаут
+      addEvent(String("transmit завершился ошибкой => ") + String(stateCode) + " (" + ctxStr + ")");
+      return stateCode;
     }
-
-    return RADIOLIB_ERR_TX_TIMEOUT;                          // защита от выхода из цикла
+    return RADIOLIB_ERR_TX_TIMEOUT;
   };
 
-  int16_t result = transmitWithRecovery(frame.data(), kFixedFrameSize, "transmitFrame");
-  if (result != RADIOLIB_ERR_NONE) {
-    logRadioError("transmit", result);
-    radio.setFrequency(state.currentRxFreq);
+  std::array<uint8_t, Lotest::kFrameSize> raw = frame.bytes;
+  int16_t stateCode = transmitWithRecovery(raw.data(), raw.size(), context.c_str());
+  if (stateCode != RADIOLIB_ERR_NONE) {
+    logRadioError("transmit", stateCode);
     ensureReceiveMode();
     return false;
   }
 
-  if (!isLastFrame) {
-    return true; // промежуточные кадры передаются без немедленного возврата в приём
-  }
-
-  int16_t backState = radio.setFrequency(state.currentRxFreq);
-  if (backState != RADIOLIB_ERR_NONE) {
-    logRadioError("setFrequency(RX restore)", backState);
-    return false;
-  }
-
-  return ensureReceiveMode();
+  addEvent(String("→ Отправлен кадр ") + toHex(frame) + " (" + context + ")");
+  return true;
 }
 
-// --- Разбиение сообщения на кадры по 8 байт ---
-std::vector<std::array<uint8_t, kFixedFrameSize>> splitPayloadIntoFrames(const std::vector<uint8_t>& payload) {
-  std::vector<std::array<uint8_t, kFixedFrameSize>> frames;
+std::vector<Lotest::Frame> buildDataFrames(const std::vector<uint8_t>& payload, bool usePayloadCrc8, uint8_t& nextSequence) {
+  std::vector<Lotest::Frame> frames;
   if (payload.empty()) {
     return frames;
   }
 
-  if (payload.size() <= kFramePayloadSize) {
-    std::array<uint8_t, kFixedFrameSize> frame{};
-    frame[0] = kSingleFrameMarker;
-    std::copy(payload.begin(), payload.end(), frame.begin() + 1);
-    frames.push_back(frame);
-    return frames;
-  }
+  const size_t dataPerFrame = usePayloadCrc8 ? Lotest::kPayloadSize - 1 : Lotest::kPayloadSize;
+  const size_t totalFrames = (payload.size() + dataPerFrame - 1) / dataPerFrame;
+  frames.reserve(totalFrames);
 
   size_t offset = 0;
-  uint8_t marker = kFirstChunkMarker;
   while (offset < payload.size()) {
-    std::array<uint8_t, kFixedFrameSize> frame{};
-    size_t chunk = std::min(kFramePayloadSize, payload.size() - offset);
-    bool last = (offset + chunk) >= payload.size();
-    frame[0] = last ? kFinalFrameMarker : marker;
-    std::copy_n(payload.begin() + offset, chunk, frame.begin() + 1);
+    const size_t remaining = payload.size() - offset;
+    const size_t chunk = std::min(dataPerFrame, remaining);
+    Lotest::Frame frame;
+    frame.setType(Lotest::FrameType::Data);
+    frame.setSequence(nextSequence++);
+    frame.setFlags(0);
+    std::array<uint8_t, Lotest::kPayloadSize> buf{};
+    std::memcpy(buf.data(), payload.data() + offset, chunk);
+    size_t payloadLen = chunk;
+    if (usePayloadCrc8) {
+      const uint8_t crc = Lotest::crc8(buf.data(), chunk, 0x00);
+      buf[chunk] = crc;
+      payloadLen += 1;
+    }
+    frame.setPayload(buf.data(), payloadLen);
+    frame.setFlags(0);
     frames.push_back(frame);
     offset += chunk;
-    if (!last && marker < kMaxChunkMarker) {
-      ++marker;
-    }
   }
 
   return frames;
 }
 
+Lotest::Frame buildFinFrame(uint8_t sequence, uint16_t crc, size_t totalSize) {
+  Lotest::Frame frame;
+  frame.setType(Lotest::FrameType::Fin);
+  frame.setSequence(sequence);
+  frame.setFlags(0);
+  std::array<uint8_t, Lotest::kPayloadSize> payload{};
+  payload[0] = static_cast<uint8_t>(crc & 0xFFU);
+  payload[1] = static_cast<uint8_t>((crc >> 8) & 0xFFU);
+  payload[2] = static_cast<uint8_t>(totalSize & 0xFFU);
+  payload[3] = static_cast<uint8_t>((totalSize >> 8) & 0xFFU);
+  payload[4] = static_cast<uint8_t>((totalSize >> 16) & 0xFFU);
+  frame.setPayload(payload.data(), payload.size());
+  frame.setFlags(0);
+  return frame;
+}
+
+bool fetchIncomingFrame(std::vector<uint8_t>& buffer) {
+  if (!packetReceivedFlag) {
+    return false;
+  }
+
+  packetProcessingEnabled = false;
+  packetReceivedFlag = false;
+
+  std::vector<uint8_t> raw(kImplicitPayloadLength, 0);
+  int16_t stateCode = radio.readData(raw.data(), raw.size());
+  if (stateCode != RADIOLIB_ERR_NONE) {
+    logRadioError("readData", stateCode);
+    packetProcessingEnabled = true;
+    return false;
+  }
+
+  size_t actualLength = radio.getPacketLength();
+  if (actualLength > raw.size()) {
+    actualLength = raw.size();
+  }
+  raw.resize(actualLength);
+  buffer = raw;
+
+  ensureReceiveMode();
+  packetProcessingEnabled = true;
+  return true;
+}
+
+bool waitForAck(uint8_t baseSeq, uint8_t count, unsigned long timeoutMs, Lotest::AckBitmap& outAck) {
+  const unsigned long start = millis();
+  while ((millis() - start) < timeoutMs) {
+    std::vector<uint8_t> frame;
+    if (fetchIncomingFrame(frame)) {
+      processIncomingFrame(frame);
+    }
+    while (!state.ackQueue.empty()) {
+      auto ack = state.ackQueue.front();
+      state.ackQueue.pop_front();
+      if (ack.baseSeq == baseSeq && ack.count == count) {
+        outAck = ack;
+        return true;
+      }
+    }
+#if defined(ARDUINO)
+    delay(1);
+#else
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
+  }
+  return false;
+}
+
+void processIncomingFrame(const std::vector<uint8_t>& frame) {
+  if (frame.size() < Lotest::kFrameSize) {
+    addEvent(String("Принят укороченный кадр (" + String(static_cast<unsigned long>(frame.size())) + " байт)"));
+    return;
+  }
+
+  Lotest::Frame parsed;
+  std::copy_n(frame.begin(), Lotest::kFrameSize, parsed.bytes.begin());
+
+  switch (parsed.type()) {
+    case Lotest::FrameType::Data:
+      handleDataFrame(parsed);
+      break;
+    case Lotest::FrameType::Ack:
+      handleAckFrame(parsed);
+      break;
+    case Lotest::FrameType::Fin:
+      handleFinFrame(parsed);
+      break;
+    case Lotest::FrameType::Parity:
+      handleParityFrame(parsed);
+      break;
+    default:
+      addEvent(String("Неизвестный тип кадра: ") + String(static_cast<unsigned long>(parsed.type())));
+      break;
+  }
+}
+
+void handleDataFrame(const Lotest::Frame& frame) {
+  addEvent(String("DATA кадр SEQ=") + String(frame.sequence()) + ", payload=" +
+           String(static_cast<unsigned long>(frame.payloadSize())) + " байт: " +
+           formatByteArray(std::vector<uint8_t>(frame.bytes.begin(), frame.bytes.end())));
+
+  const auto payload = frame.payload();
+  uint8_t usable = frame.payloadSize();
+  if (usable == 0) {
+    return;
+  }
+
+  if (state.linkConfig.enablePayloadCrc8 && usable > 0) {
+    const uint8_t expected = payload[usable - 1];
+    const uint8_t actual = Lotest::crc8(payload.data(), usable - 1, 0x00);
+    if (expected != actual) {
+      addEvent(String("CRC-8 кадра SEQ=") + String(frame.sequence()) + " не сошёлся — запрашиваем паритет");
+      state.requestParity = true;
+      return;
+    }
+    usable -= 1;
+  }
+
+  state.rxFileBuffer.insert(state.rxFileBuffer.end(), payload.begin(), payload.begin() + usable);
+  state.receivingFile = true;
+
+  if (state.currentWindowCount == 0) {
+    state.currentWindowBase = frame.sequence();
+  }
+  const uint8_t offset = static_cast<uint8_t>(frame.sequence() - state.currentWindowBase);
+  if (offset >= Lotest::kArqWindow) {
+    sendAckForCurrentWindow(true);
+    state.currentWindowBase = frame.sequence();
+    state.currentWindowCount = 0;
+    state.currentWindowBitmap = 0;
+  }
+  state.currentWindowBitmap |= static_cast<uint16_t>(1U << offset);
+  state.currentWindowCount = std::max<uint8_t>(state.currentWindowCount, offset + 1);
+
+  if (state.currentWindowCount >= Lotest::kArqWindow) {
+    sendAckForCurrentWindow(false);
+  }
+}
+
+void handleAckFrame(const Lotest::Frame& frame) {
+  auto ack = Lotest::parseAck(frame);
+  if (!ack.has_value()) {
+    addEvent("Получен ACK, который не удалось разобрать");
+    return;
+  }
+  state.ackQueue.push_back(*ack);
+}
+
+void handleFinFrame(const Lotest::Frame& frame) {
+  const auto payload = frame.payload();
+  if (frame.payloadSize() < Lotest::kPayloadSize) {
+    addEvent("FIN кадр с некорректным размером");
+    state.requestParity = true;
+    sendAckForCurrentWindow(true);
+    return;
+  }
+
+  state.expectedFileCrc = static_cast<uint16_t>(payload[0]) | (static_cast<uint16_t>(payload[1]) << 8);
+  state.expectedFileSize = static_cast<size_t>(payload[2]) |
+                           (static_cast<size_t>(payload[3]) << 8) |
+                           (static_cast<size_t>(payload[4]) << 16);
+
+  if (state.rxFileBuffer.size() > state.expectedFileSize) {
+    state.rxFileBuffer.resize(state.expectedFileSize);
+  }
+
+  if (state.rxFileBuffer.size() == state.expectedFileSize) {
+    const uint16_t actual = Lotest::crc16(state.rxFileBuffer.data(), state.rxFileBuffer.size());
+    if (actual == state.expectedFileCrc) {
+      logReceivedMessage(state.rxFileBuffer);
+      resetRxState();
+    } else {
+      addEvent(String("CRC-16 файла не совпал: ожидалось 0x") + String(state.expectedFileCrc, HEX) +
+               ", получили 0x" + String(actual, HEX));
+      state.requestParity = true;
+    }
+  } else {
+    addEvent(String("FIN получен, но длина файла ") + String(static_cast<unsigned long>(state.rxFileBuffer.size())) +
+             " меньше ожидаемой " + String(static_cast<unsigned long>(state.expectedFileSize)) +
+             " — запрашиваем паритет");
+    state.requestParity = true;
+  }
+
+  sendAckForCurrentWindow(true);
+}
+
+void handleParityFrame(const Lotest::Frame& frame) {
+  addEvent(String("Получен паритетный кадр HARQ SEQ=") + String(frame.sequence()) +
+           ", но реконструкция пока не реализована");
+}
+
+void sendAckForCurrentWindow(bool force) {
+  if (state.currentWindowCount == 0 && !force) {
+    return;
+  }
+
+  Lotest::AckBitmap ack{};
+  ack.baseSeq = state.currentWindowBase;
+  ack.count = state.currentWindowCount;
+  ack.bitmap = state.currentWindowBitmap;
+  ack.needParity = state.requestParity;
+
+  auto ackFrame = Lotest::buildAck(ack);
+  transmitFrame(ackFrame, "ACK");
+  waitInterFrameDelay();
+  ensureReceiveMode();
+
+  state.currentWindowCount = 0;
+  state.currentWindowBitmap = 0;
+  state.requestParity = false;
+}
+
+void resetRxState() {
+  state.rxFileBuffer.clear();
+  state.receivingFile = false;
+  state.expectedFileCrc = 0;
+  state.expectedFileSize = 0;
+  state.requestParity = false;
+}
 // --- Пауза между кадрами ---
 void waitInterFrameDelay() {
 #if defined(ARDUINO)
@@ -1280,13 +1575,6 @@ void waitInterFrameDelay() {
 #else
   std::this_thread::sleep_for(std::chrono::milliseconds(kInterFrameDelayMs));
 #endif
-}
-
-// --- Обрезка завершающих нулей (для последнего кадра) ---
-void trimTrailingZeros(std::vector<uint8_t>& buffer) {
-  while (!buffer.empty() && buffer.back() == 0) {
-    buffer.pop_back();
-  }
 }
 
 // --- Формирование текстового представления полезной нагрузки ---
@@ -1311,94 +1599,10 @@ String formatTextPayload(const std::vector<uint8_t>& data) {
   return out;
 }
 
-// --- Человекочитаемое описание маркера кадра ---
-String describeFrameMarker(uint8_t marker) {
-  if (marker == kSingleFrameMarker) {
-    return F("одиночный");
-  }
-  if (marker == kFinalFrameMarker) {
-    return F("последний");
-  }
-  if (marker >= kFirstChunkMarker && marker <= kMaxChunkMarker) {
-    return String("часть #") + String(static_cast<unsigned long>(marker - 1));
-  }
-  char buf[16];
-  std::snprintf(buf, sizeof(buf), "маркер 0x%02X", static_cast<unsigned>(marker));
-  return String(buf);
-}
-
-// --- Добавление части в буфер сборки ---
-void appendReceiveChunk(const std::vector<uint8_t>& chunk, bool finalChunk) {
-  state.rxAssembly.insert(state.rxAssembly.end(), chunk.begin(), chunk.end());
-  if (finalChunk) {
-    logReceivedMessage(state.rxAssembly);
-    resetReceiveAssembly();
-  } else {
-    state.assemblingMessage = true;
-  }
-}
-
-// --- Сброс состояния сборки ---
-void resetReceiveAssembly() {
-  state.rxAssembly.clear();
-  state.assemblingMessage = false;
-  state.expectedChunkMarker = kFirstChunkMarker;
-}
-
 // --- Логирование принятого сообщения ---
 void logReceivedMessage(const std::vector<uint8_t>& payload) {
-  addEvent(String("Принято сообщение (") + String(static_cast<unsigned long>(payload.size())) + " байт): " + formatByteArray(payload) + " | \"" + formatTextPayload(payload) + "\"", kIncomingColor);
-}
-
-// --- Обработка принятого кадра ---
-void processIncomingFrame(const std::vector<uint8_t>& frame) {
-  if (frame.empty()) {
-    return;
-  }
-
-  const uint8_t marker = frame[0];
-  const bool showFrameInWebLog = (marker == kSingleFrameMarker);  // отображаем только одиночные кадры
-
-  addEvent(String("Принят кадр ") + describeFrameMarker(marker) + ": " + formatByteArray(frame), String(), showFrameInWebLog);
-
-  std::vector<uint8_t> payload;
-  if (frame.size() > 1) {
-    payload.assign(frame.begin() + 1, frame.end());
-  }
-
-  if (marker == kSingleFrameMarker) {
-    trimTrailingZeros(payload);
-    resetReceiveAssembly();
-    appendReceiveChunk(payload, true);
-    return;
-  }
-
-  if (marker == kFinalFrameMarker) {
-    trimTrailingZeros(payload);
-    if (!state.assemblingMessage) {
-      resetReceiveAssembly();
-    }
-    appendReceiveChunk(payload, true);
-    return;
-  }
-
-  if (!state.assemblingMessage) {
-    resetReceiveAssembly();
-    if (marker != kFirstChunkMarker) {
-      addEvent(String("Получен фрагмент без начала последовательности: ") + describeFrameMarker(marker));
-      return;
-    }
-  } else if (marker != state.expectedChunkMarker) {
-    addEvent("Получен неожиданный маркер последовательности, буфер сборки сброшен");
-    resetReceiveAssembly();
-    if (marker != kFirstChunkMarker) {
-      addEvent(String("Фрагмент ") + describeFrameMarker(marker) + " проигнорирован до получения нового начала");
-      return;
-    }
-  }
-
-  appendReceiveChunk(payload, false);
-  state.expectedChunkMarker = (marker < kMaxChunkMarker) ? static_cast<uint8_t>(marker + 1) : kMaxChunkMarker;
+  addEvent(String("Принято сообщение (") + String(static_cast<unsigned long>(payload.size())) + " байт): " +
+           formatByteArray(payload) + " | \"" + formatTextPayload(payload) + "\"", kIncomingColor);
 }
 
 // --- Форматирование массива байт для вывода ---
