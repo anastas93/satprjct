@@ -2564,7 +2564,9 @@ static std::vector<std::pair<std::string, uint64_t>> collectDropStagesSorted(con
   for (const auto& entry : stats.by_stage) {
     entries.emplace_back(entry.first, entry.second);
   }
-  std::sort(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
+  std::sort(entries.begin(), entries.end(),
+            [](const std::pair<std::string, uint64_t>& lhs,
+               const std::pair<std::string, uint64_t>& rhs) {
     if (lhs.second != rhs.second) {
       return lhs.second > rhs.second;
     }
@@ -4211,7 +4213,6 @@ void loop() {
       }
     }
 }
-
 
 
 

@@ -16,9 +16,10 @@ class CaptureRadio : public IRadio {
 public:
   std::vector<uint8_t> last;
   std::vector<std::vector<uint8_t>> history;
-  void send(const uint8_t* data, size_t len) override {
+  int16_t send(const uint8_t* data, size_t len) override {
     last.assign(data, data + len);
     history.emplace_back(last);
+    return 0;
   }
   void setReceiveCallback(RxCallback) override {}
 };

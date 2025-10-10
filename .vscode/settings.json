@@ -1,4 +1,6 @@
 {
     "idf.portWin": "COM10",
-    "chatgpt.openOnStartup": true
+    "chatgpt.openOnStartup": true,
+    "idf.pythonInstallPath": "/usr/bin/python3",
+    "idf.port": "/dev/ttyUSB0"
 }

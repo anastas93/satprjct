@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 #include "message_buffer.h"
-#include "packetizer/packet_splitter.h"
+#include "libs/packetizer/packet_splitter.h"
 
 // Проверка разделения данных на пакеты
 int main() {

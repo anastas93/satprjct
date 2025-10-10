@@ -3,7 +3,7 @@
 #include <vector>
 #include "default_settings.h"
 #include "message_buffer.h"
-#include "packetizer/packet_splitter.h"
+#include "libs/packetizer/packet_splitter.h"
 
 // Проверка, что буфер размещает несколько сообщений по 5000 байт
 int main() {

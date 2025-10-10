@@ -10,8 +10,9 @@
 class CollectRadio : public IRadio {
 public:
   std::vector<std::vector<uint8_t>> sent; // накопленные кадры
-  void send(const uint8_t* data, size_t len) override {
+  int16_t send(const uint8_t* data, size_t len) override {
     sent.emplace_back(data, data + len);  // сохраняем кадр
+    return 0;
   }
   void setReceiveCallback(RxCallback) override {}
 };

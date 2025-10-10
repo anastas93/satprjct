@@ -11,9 +11,10 @@ class LoopbackRadio : public IRadio {
 public:
   RxCallback cb;                                  // сохранённый колбэк
   std::vector<std::vector<uint8_t>> sent;         // список отправленных кадров
-  void send(const uint8_t* data, size_t len) override {
+  int16_t send(const uint8_t* data, size_t len) override {
     sent.emplace_back(data, data + len);
     if (cb) cb(data, len);
+    return 0;
   }
   void setReceiveCallback(RxCallback c) override { cb = c; }
 };

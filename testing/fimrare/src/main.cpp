@@ -922,23 +922,6 @@ bool ensureReceiveMode() {
 }
 
 
-// --- Форматирование массива байт для вывода ---
-String formatByteArray(const std::vector<uint8_t>& data) {
-  String out;
-  out.reserve(data.size() * 5);
-  out += '[';
-  for (size_t i = 0; i < data.size(); ++i) {
-    if (i > 0) {
-      out += ' ';
-    }
-    char buf[5];
-    std::snprintf(buf, sizeof(buf), "0x%02X", data[i]);
-    out += buf;
-  }
-  out += ']';
-  return out;
-}
-
 // --- Вывод кодов ошибок RadioLib в лог ---
 void logRadioError(const String& context, int16_t code) {
   String message = String("RadioLib ошибка ") + context + " => " + String(code);

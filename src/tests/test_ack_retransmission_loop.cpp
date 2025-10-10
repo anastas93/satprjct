@@ -21,11 +21,12 @@ public:
   RxCallback rx_cb;                                            // обработчик входящих кадров
   std::vector<std::vector<uint8_t>> history;                   // накопленные отправленные кадры
 
-  void send(const uint8_t* data, size_t len) override {
+  int16_t send(const uint8_t* data, size_t len) override {
     history.emplace_back(data, data + len);                    // сохраняем кадр для проверки
     if (peer && peer->rx_cb) {
       peer->rx_cb(data, len);                                  // передаём кадр в приёмник напарника
     }
+    return 0;
   }
 
   void setReceiveCallback(RxCallback cb) override {

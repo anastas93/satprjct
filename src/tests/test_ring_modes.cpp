@@ -12,9 +12,10 @@ public:
   RxCallback cb;                                        // сохранённый обработчик приёма
   std::vector<std::vector<uint8_t>> frames;             // накопленные кадры для статистики
 
-  void send(const uint8_t* data, size_t len) override {
+  int16_t send(const uint8_t* data, size_t len) override {
     frames.emplace_back(data, data + len);              // фиксируем отправленный кадр
     if (cb) cb(data, len);                              // немедленно перекидываем пакет в приёмник
+    return 0;
   }
 
   void setReceiveCallback(RxCallback c) override { cb = std::move(c); }

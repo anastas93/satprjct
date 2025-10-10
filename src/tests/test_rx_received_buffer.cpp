@@ -10,8 +10,9 @@
 class LoopbackRadio : public IRadio {
 public:
   RxCallback cb;                                  // сохранённый колбэк приёма
-  void send(const uint8_t* data, size_t len) override {
+  int16_t send(const uint8_t* data, size_t len) override {
     if (cb) cb(data, len);                        // сразу передаём пакет в RxModule
+    return 0;
   }
   void setReceiveCallback(RxCallback callback) override { cb = callback; }
 };
