@@ -12,6 +12,9 @@
 #include <chrono>
 #include <type_traits>
 #include <utility>
+#include <map>
+#include <deque>
+#include <numeric>
 #if !defined(ARDUINO)
 #include <thread>
 #endif
@@ -63,14 +66,37 @@ constexpr uint8_t kHomeBankSize = static_cast<uint8_t>(frequency_tables::HOME_BA
 constexpr size_t kMaxEventHistory = 120;          // ограничение истории событий для веб-чата
 constexpr size_t kFullPacketSize = 245;           // максимальная длина пакета SX1262
 constexpr size_t kFixedFrameSize = 8;             // фиксированная длина кадра LoRa
-constexpr size_t kFramePayloadSize = kFixedFrameSize - 1; // полезная часть кадра без управляющего байта
-constexpr uint8_t kSingleFrameMarker = 0;         // метка одиночного кадра
-constexpr uint8_t kFinalFrameMarker = 1;          // метка завершающего кадра последовательности
-constexpr uint8_t kFirstChunkMarker = 2;          // минимальный маркер для кусочных пакетов
-constexpr uint8_t kMaxChunkMarker = 253;          // максимальный маркер для кусочных пакетов
-constexpr unsigned long kInterFrameDelayMs = 15;  // пауза между кадрами
+constexpr size_t kFramePayloadSize = 5;           // полезная часть кадра согласно спецификации ARQ
+constexpr unsigned long kInterFrameDelayMs = 25;  // пауза между кадрами в базовом режиме
+constexpr size_t kArqWindowSize = 8;              // размер окна подтверждения ACK
+constexpr size_t kBitmapWidth = 16;               // ширина BITMAP16 для запроса переотправки
+constexpr uint16_t kBitmapFullMask = (1U << kBitmapWidth) - 1U; // полный набор битов BITMAP16
+constexpr uint8_t kInterleaverStep = 4;           // шаг интерливера для борьбы с бурстами
+constexpr size_t kHarqDataBlock = 11;             // число DATA-пакетов в HARQ-блоке RS(15,11)
+constexpr size_t kHarqParityCount = 4;            // число PAR-пакетов в HARQ-блоке
 constexpr size_t kLongPacketSize = 124;           // длина длинного пакета с буквами A-Z
 constexpr const char* kIncomingColor = "#5CE16A"; // цвет отображения принятых сообщений
+
+// --- Константы формата кадров Lotest ---
+constexpr uint8_t kFrameTypeMask = 0xC0;          // верхние два бита определяют тип кадра
+constexpr uint8_t kFrameTypeData = 0x00;          // DATA-кадр
+constexpr uint8_t kFrameTypeAck = 0x40;           // ACK-кадр
+constexpr uint8_t kFrameTypeParity = 0x80;        // PAR-кадр (HARQ)
+constexpr uint8_t kFrameTypeFin = 0xC0;           // FIN-кадр с итоговым CRC
+
+constexpr uint8_t kDataFlagAckRequest = 0x01;     // запрашивать ACK после окна
+constexpr uint8_t kDataFlagIsParity = 0x02;       // полезная нагрузка содержит паритетные данные
+constexpr uint8_t kDataFlagLengthShift = 2;       // смещение длины полезной нагрузки
+constexpr uint8_t kDataFlagLengthMask = 0x3C;     // маска длины полезной нагрузки (0..15 байт)
+
+constexpr uint8_t kAckFlagNeedParity = 0x01;      // получателю требуется PAR-передача
+
+constexpr uint8_t kFinFlagHarqUsed = 0x01;        // в ходе передачи использовался HARQ
+
+struct DataBlock {
+  std::array<uint8_t, kFramePayloadSize> bytes{}; // полезная нагрузка DATA-пакета
+  uint8_t dataLength = 0;                         // фактическое число информационных байт
+};
 
 // --- Структура, описывающая событие в веб-чате ---
 struct ChatEvent {
@@ -80,6 +106,38 @@ struct ChatEvent {
 };
 
 // --- Текущее состояние приложения ---
+struct ProtocolConfig {
+  bool interleaving = false;           // включён ли интерливинг
+  bool harq = false;                   // активен ли HARQ (адаптивный FEC)
+  bool phyFec = false;                 // использовать ли фиксированный FEC PHY
+  bool payloadCrc8 = false;            // добавлять ли CRC-8 к каждому DATA-пакету
+};
+
+struct RxWindowState {
+  uint16_t baseSeq = 0;                // база текущего окна подтверждения
+  uint16_t receivedMask = 0;           // биты успешно принятых пакетов
+  uint8_t windowSize = 0;              // фактическое количество пакетов в окне
+  bool active = false;                 // инициализировано ли окно
+};
+
+struct RxMessageState {
+  bool active = false;                 // идёт ли сборка файла
+  uint16_t nextExpectedSeq = 0;        // следующий ожидаемый SEQ
+  std::map<uint16_t, DataBlock> pending; // буфер ожидания
+  std::vector<uint8_t> buffer;         // текущие собранные данные
+  uint16_t declaredLength = 0;         // ожидаемая длина файла из FIN
+  uint16_t declaredCrc = 0;            // ожидаемый CRC-16 из FIN
+  bool finReceived = false;            // получен ли FIN
+};
+
+struct AckNotification {
+  bool hasValue = false;               // получен ли ACK от удалённой стороны
+  uint16_t baseSeq = 0;                // база окна
+  uint16_t missingBitmap = 0;          // биты недостающих пакетов (1 = требуется повтор)
+  bool needParity = false;             // требуется ли PAR-передача
+  uint8_t reportedWindow = 0;          // размер окна, который видел получатель
+};
+
 struct AppState {
   uint8_t channelIndex = 0;            // выбранный канал банка HOME
   bool highPower = false;              // признак использования мощности 22 dBm (иначе -5 dBm)
@@ -88,9 +146,11 @@ struct AppState {
   float currentTxFreq = frequency_tables::TX_HOME[0]; // текущая частота передачи
   unsigned long nextEventId = 1;       // счётчик идентификаторов для событий
   std::vector<ChatEvent> events;       // журнал событий для веб-интерфейса
-  std::vector<uint8_t> rxAssembly;     // буфер сборки принятого сообщения из частей
-  bool assemblingMessage = false;      // активен ли режим сборки многочастного сообщения
-  uint8_t expectedChunkMarker = kFirstChunkMarker; // ожидаемый маркер следующего куска
+  ProtocolConfig protocol;             // параметры протокола Lotest
+  uint16_t nextTxSequence = 0;         // следующий SEQ для передачи DATA
+  RxWindowState rxWindow;              // состояние окна приёма
+  RxMessageState rxMessage;            // состояние сборки сообщения
+  AckNotification pendingAck;          // последнее полученное подтверждение
 } state;
 
 // --- Флаги приёма LoRa ---
@@ -174,6 +234,7 @@ void handleSendLongPacket();
 void handleSendRandomPacket();
 void handleSendCustom();
 void handleNotFound();
+void handleProtocolToggle();
 String buildIndexHtml();
 String buildChannelOptions(uint8_t selected);
 String escapeJson(const String& value);
@@ -181,21 +242,50 @@ String makeAccessPointSsid();
 bool applyRadioChannel(uint8_t newIndex);
 bool applyRadioPower(bool highPower);
 bool applySpreadingFactor(bool useSf5);
+bool applyPhyFec(bool enable);
 bool ensureReceiveMode();
+void processRadioEvents();
 bool sendPayload(const std::vector<uint8_t>& payload, const String& context);
-bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t index, size_t total);
-std::vector<std::array<uint8_t, kFixedFrameSize>> splitPayloadIntoFrames(const std::vector<uint8_t>& payload);
+bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, const String& context);
 void processIncomingFrame(const std::vector<uint8_t>& frame);
-void resetReceiveAssembly();
-void appendReceiveChunk(const std::vector<uint8_t>& chunk, bool finalChunk);
-String formatByteArray(const std::vector<uint8_t>& data);
-String formatTextPayload(const std::vector<uint8_t>& data);
-String describeFrameMarker(uint8_t marker);
+void processIncomingDataFrame(const std::vector<uint8_t>& frame);
+void processIncomingAckFrame(const std::vector<uint8_t>& frame);
+void processIncomingParityFrame(const std::vector<uint8_t>& frame);
+void processIncomingFinFrame(const std::vector<uint8_t>& frame);
+void prepareAck(uint16_t seq, uint8_t windowSize, bool forceSend);
+void sendAck(uint16_t baseSeq, uint16_t missingBitmap, bool needParity, uint8_t windowSize);
+void flushPendingData();
+bool sendDataWindow(const std::vector<DataBlock>& blocks,
+                    size_t offset,
+                    uint16_t baseSeq,
+                    uint8_t windowSize);
+bool waitForAck(uint16_t baseSeq, uint8_t windowSize, uint16_t& missingBitmap, bool& needParity);
+void retransmitMissing(const std::vector<DataBlock>& blocks,
+                       size_t offset,
+                       uint16_t baseSeq,
+                       uint16_t missingBitmap);
+std::vector<DataBlock> splitPayloadIntoBlocks(const std::vector<uint8_t>& payload,
+                                              bool appendCrc8);
+std::array<uint8_t, kFixedFrameSize> buildDataFrame(uint16_t seq,
+                                                    const DataBlock& block,
+                                                    bool ackRequest,
+                                                    bool isParity);
+std::array<uint8_t, kFixedFrameSize> buildAckFrame(uint16_t baseSeq,
+                                                   uint16_t missingBitmap,
+                                                   bool needParity,
+                                                   uint8_t windowSize);
+std::array<uint8_t, kFixedFrameSize> buildFinFrame(uint16_t length,
+                                                   uint16_t crc,
+                                                   bool harqUsed);
+uint16_t crc16Ccitt(const uint8_t* data, size_t length, uint16_t crc = 0xFFFF);
+uint8_t crc8Dallas(const uint8_t* data, size_t length);
+void resetReceiveState();
 void logReceivedMessage(const std::vector<uint8_t>& payload);
 void logRadioError(const String& context, int16_t code);
 void handleSpreadingFactorToggle();
 void waitInterFrameDelay();
-void trimTrailingZeros(std::vector<uint8_t>& buffer);
+String formatByteArray(const std::vector<uint8_t>& data);
+String formatTextPayload(const std::vector<uint8_t>& data);
 
 // --- Формирование имени Wi-Fi сети ---
 String makeAccessPointSsid() {
@@ -309,6 +399,7 @@ void setup() {
   server.on("/api/send/random", HTTP_POST, handleSendRandomPacket);
   server.on("/api/send/custom", HTTP_POST, handleSendCustom);
   server.on("/api/sf", HTTP_POST, handleSpreadingFactorToggle);
+  server.on("/api/protocol", HTTP_POST, handleProtocolToggle);
   server.onNotFound(handleNotFound);
   server.begin();
   addEvent("HTTP-сервер запущен на порту 80");
@@ -317,7 +408,11 @@ void setup() {
 // --- Основной цикл ---
 void loop() {
   server.handleClient();
+  processRadioEvents();
+}
 
+// --- Обработка радиособытий вне основного цикла ---
+void processRadioEvents() {
   bool processIrq = false;                    // требуется ли перенос IRQ-статуса в основной поток
 #if defined(ARDUINO)
   noInterrupts();                              // защищаем флаг от изменения в ISR
@@ -336,26 +431,28 @@ void loop() {
     addEvent(formatSx1262IrqFlags(irqFlags));                         // публикуем расшифровку событий
   }
 
-  if (packetReceivedFlag) {
-    packetProcessingEnabled = false;
-    packetReceivedFlag = false;
-
-    std::vector<uint8_t> buffer(kImplicitPayloadLength, 0);
-    int16_t stateCode = radio.readData(buffer.data(), buffer.size());
-    if (stateCode == RADIOLIB_ERR_NONE) {
-      size_t actualLength = radio.getPacketLength();
-      if (actualLength > buffer.size()) {
-        actualLength = buffer.size();
-      }
-      buffer.resize(actualLength);
-      processIncomingFrame(buffer);
-    } else {
-      logRadioError("readData", stateCode);
-    }
-
-    ensureReceiveMode();
-    packetProcessingEnabled = true;
+  if (!packetReceivedFlag) {
+    return;
   }
+
+  packetProcessingEnabled = false;
+  packetReceivedFlag = false;
+
+  std::vector<uint8_t> buffer(kImplicitPayloadLength, 0);
+  int16_t stateCode = radio.readData(buffer.data(), buffer.size());
+  if (stateCode == RADIOLIB_ERR_NONE) {
+    size_t actualLength = radio.getPacketLength();
+    if (actualLength > buffer.size()) {
+      actualLength = buffer.size();
+    }
+    buffer.resize(actualLength);
+    processIncomingFrame(buffer);
+  } else {
+    logRadioError("readData", stateCode);
+  }
+
+  ensureReceiveMode();
+  packetProcessingEnabled = true;
 }
 
 // --- Обработчик линии DIO1 радиомодуля ---
@@ -539,6 +636,51 @@ void handleSpreadingFactorToggle() {
   }
 }
 
+// --- API: переключение параметров протокола ---
+void handleProtocolToggle() {
+  bool handled = false;
+
+  if (server.hasArg("interleaving")) {
+    bool enabled = server.arg("interleaving") == "1";
+    state.protocol.interleaving = enabled;
+    addEvent(String("Интерливинг ") + (enabled ? "включён" : "выключен"));
+    handled = true;
+  }
+
+  if (server.hasArg("harq")) {
+    bool enabled = server.arg("harq") == "1";
+    state.protocol.harq = enabled;
+    addEvent(String("HARQ ") + (enabled ? "включён" : "выключен"));
+    handled = true;
+  }
+
+  if (server.hasArg("crc8")) {
+    bool enabled = server.arg("crc8") == "1";
+    state.protocol.payloadCrc8 = enabled;
+    addEvent(String("CRC-8 для DATA ") + (enabled ? "включён (payload=4 байта)" : "выключен"));
+    handled = true;
+  }
+
+  if (server.hasArg("phyfec")) {
+    bool enabled = server.arg("phyfec") == "1";
+    if (applyPhyFec(enabled)) {
+      state.protocol.phyFec = enabled;
+      addEvent(String("PHY FEC ") + (enabled ? "включён (CR=4/7)" : "выключен"));
+    } else {
+      server.send(500, "application/json", "{\"error\":\"Не удалось переключить FEC\"}");
+      return;
+    }
+    handled = true;
+  }
+
+  if (!handled) {
+    server.send(400, "application/json", "{\"error\":\"Параметры не переданы\"}");
+    return;
+  }
+
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 // --- API: отправка длинного пакета с буквами A-Z ---
 void handleSendLongPacket() {
   std::vector<uint8_t> data(kLongPacketSize, 0);
@@ -605,6 +747,8 @@ String buildIndexHtml() {
   html += F("button{cursor:pointer;transition:background 0.2s;}");
   html += F("button:hover{background:#3b4860;}");
   html += F("label{display:block;margin-top:8px;}");
+  html += F("fieldset{border:1px solid #2b3648;border-radius:8px;margin-top:12px;padding:12px;}");
+  html += F("legend{padding:0 8px;color:#9fb1d1;}");
   html += F("#log{height:360px;overflow-y:auto;background:#0f1722;border-radius:8px;padding:12px;font-family:monospace;white-space:pre-wrap;}");
   html += F(".message{margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.1);}");
   html += F(".controls button{width:100%;margin-top:8px;}");
@@ -624,6 +768,28 @@ String buildIndexHtml() {
     html += " checked";
   }
   html += "> Фактор расширения SF5 (выкл — SF7)</label>";
+  html += F("<fieldset><legend>Надёжность</legend>");
+  html += "<label><input type=\\\"checkbox\\\" id=\\\"interleaving\\\"";
+  if (state.protocol.interleaving) {
+    html += " checked";
+  }
+  html += "> Интерливинг (шаг 4)</label>";
+  html += "<label><input type=\\\"checkbox\\\" id=\\\"harq\\\"";
+  if (state.protocol.harq) {
+    html += " checked";
+  }
+  html += "> HARQ (адаптивный RS(15,11))</label>";
+  html += "<label><input type=\\\"checkbox\\\" id=\\\"phyfec\\\"";
+  if (state.protocol.phyFec) {
+    html += " checked";
+  }
+  html += "> PHY FEC (LoRa CR=4/7)</label>";
+  html += "<label><input type=\\\"checkbox\\\" id=\\\"crc8\\\"";
+  if (state.protocol.payloadCrc8) {
+    html += " checked";
+  }
+  html += "> CRC-8 на DATA (payload=4 байта)</label>";
+  html += F("</fieldset>");
   html += F("<div class=\"status\" id=\"status\"></div><div class=\"controls\">");
   html += F("<button id=\"sendLong\">Отправить длинный пакет 124 байта</button>");
   html += F("<button id=\"sendRandom\">Отправить полный пакет</button>");
@@ -632,13 +798,18 @@ String buildIndexHtml() {
   html += F("</div></section>");
 
   html += F("<section><h2>Журнал событий</h2><div id=\"log\"></div></section></main><script>");
-  html += F("const logEl=document.getElementById('log');const channelSel=document.getElementById('channel');const powerCb=document.getElementById('power');const sfCb=document.getElementById('sf5');const statusEl=document.getElementById('status');let lastId=0;");
+  html += F("const logEl=document.getElementById('log');const channelSel=document.getElementById('channel');const powerCb=document.getElementById('power');const sfCb=document.getElementById('sf5');const interCb=document.getElementById('interleaving');const harqCb=document.getElementById('harq');const phyFecCb=document.getElementById('phyfec');const crc8Cb=document.getElementById('crc8');const statusEl=document.getElementById('status');let lastId=0;");
   html += F("function appendLog(entry){const div=document.createElement('div');div.className='message';div.textContent=entry.text;if(entry.color){div.style.color=entry.color;}logEl.appendChild(div);logEl.scrollTop=logEl.scrollHeight;}");
   html += F("async function refreshLog(){try{const resp=await fetch(`/api/log?after=${lastId}`);if(!resp.ok)return;const data=await resp.json();data.events.forEach(evt=>{appendLog(evt);lastId=evt.id;});}catch(e){console.error(e);}}");
   html += F("async function postForm(url,body){const resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(body)});if(!resp.ok){const err=await resp.json().catch(()=>({error:'Неизвестная ошибка'}));throw new Error(err.error||'Ошибка');}}");
+  html += F("async function updateProtocol(field,value){const payload={};payload[field]=value?'1':'0';try{await postForm('/api/protocol',payload);statusEl.textContent='Настройки протокола обновлены';refreshLog();}catch(e){statusEl.textContent=e.message;}}");
   html += F("channelSel.addEventListener('change',async()=>{try{await postForm('/api/channel',{channel:channelSel.value});statusEl.textContent='Канал применён';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
   html += F("powerCb.addEventListener('change',async()=>{try{await postForm('/api/power',{high:powerCb.checked?'1':'0'});statusEl.textContent='Мощность обновлена';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
   html += F("sfCb.addEventListener('change',async()=>{try{await postForm('/api/sf',{sf5:sfCb.checked?'1':'0'});statusEl.textContent='Фактор расширения обновлён';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
+  html += F("interCb.addEventListener('change',()=>{updateProtocol('interleaving',interCb.checked);});");
+  html += F("harqCb.addEventListener('change',()=>{updateProtocol('harq',harqCb.checked);});");
+  html += F("phyFecCb.addEventListener('change',()=>{updateProtocol('phyfec',phyFecCb.checked);});");
+  html += F("crc8Cb.addEventListener('change',()=>{updateProtocol('crc8',crc8Cb.checked);});");
   html += F("document.getElementById('sendLong').addEventListener('click',async()=>{try{await postForm('/api/send/long',{});statusEl.textContent='Длинный пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
   html += F("document.getElementById('sendRandom').addEventListener('click',async()=>{try{await postForm('/api/send/random',{});statusEl.textContent='Полный пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
   html += F("document.getElementById('sendCustom').addEventListener('click',async()=>{const input=document.getElementById('custom');const payload=input.value;if(!payload.trim()){statusEl.textContent='Введите сообщение';return;}try{await postForm('/api/send/custom',{payload});statusEl.textContent='Пользовательский пакет отправлен';refreshLog();}catch(e){statusEl.textContent=e.message;}});");
@@ -729,6 +900,17 @@ bool applySpreadingFactor(bool useSf5) {
   return true;
 }
 
+// --- Переключение PHY FEC ---
+bool applyPhyFec(bool enable) {
+  uint8_t targetCr = enable ? 7 : kDefaultCodingRate;
+  int16_t result = radio.setCodingRate(targetCr);
+  if (result != RADIOLIB_ERR_NONE) {
+    logRadioError("setCodingRate", result);
+    return false;
+  }
+  return true;
+}
+
 // --- Гарантируем, что радио ожидает приём ---
 bool ensureReceiveMode() {
   int16_t stateCode = radio.startReceive();
@@ -739,215 +921,6 @@ bool ensureReceiveMode() {
   return true;
 }
 
-// --- Отправка подготовленного буфера ---
-bool sendPayload(const std::vector<uint8_t>& payload, const String& context) {
-  if (payload.empty()) {
-    addEvent(context + ": пустой буфер");
-    return false;
-  }
-
-  addEvent(context + ": " + formatByteArray(payload) + " | \"" + formatTextPayload(payload) + "\"");
-
-  auto frames = splitPayloadIntoFrames(payload);
-  if (frames.empty()) {
-    addEvent("Не удалось подготовить кадры для отправки");
-    return false;
-  }
-
-  if (frames.size() > 1) {
-    addEvent(String("Сообщение разбито на ") + String(static_cast<unsigned long>(frames.size())) + " кадров");
-  }
-
-  for (size_t i = 0; i < frames.size(); ++i) {
-    const auto& frame = frames[i];
-    std::vector<uint8_t> frameVec(frame.begin(), frame.end());
-    addEvent(String("→ Кадр #") + String(static_cast<unsigned long>(i + 1)) + " (" + describeFrameMarker(frame[0]) + "): " + formatByteArray(frameVec));
-    if (!transmitFrame(frame, i, frames.size())) {
-      return false;
-    }
-    if (i + 1 < frames.size()) {
-      waitInterFrameDelay();
-    }
-  }
-
-  return true;
-}
-
-// --- Непосредственная передача одного кадра ---
-bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, size_t /*index*/, size_t /*total*/) {
-  int16_t freqState = radio.setFrequency(state.currentTxFreq);
-  if (freqState != RADIOLIB_ERR_NONE) {
-    logRadioError("setFrequency(TX)", freqState);
-    return false;
-  }
-
-  int16_t result = radio.transmit(const_cast<uint8_t*>(frame.data()), kFixedFrameSize);
-  if (result != RADIOLIB_ERR_NONE) {
-    logRadioError("transmit", result);
-    radio.setFrequency(state.currentRxFreq);
-    ensureReceiveMode();
-    return false;
-  }
-
-  int16_t backState = radio.setFrequency(state.currentRxFreq);
-  if (backState != RADIOLIB_ERR_NONE) {
-    logRadioError("setFrequency(RX restore)", backState);
-    return false;
-  }
-
-  return ensureReceiveMode();
-}
-
-// --- Разбиение сообщения на кадры по 8 байт ---
-std::vector<std::array<uint8_t, kFixedFrameSize>> splitPayloadIntoFrames(const std::vector<uint8_t>& payload) {
-  std::vector<std::array<uint8_t, kFixedFrameSize>> frames;
-  if (payload.empty()) {
-    return frames;
-  }
-
-  if (payload.size() <= kFramePayloadSize) {
-    std::array<uint8_t, kFixedFrameSize> frame{};
-    frame[0] = kSingleFrameMarker;
-    std::copy(payload.begin(), payload.end(), frame.begin() + 1);
-    frames.push_back(frame);
-    return frames;
-  }
-
-  size_t offset = 0;
-  uint8_t marker = kFirstChunkMarker;
-  while (offset < payload.size()) {
-    std::array<uint8_t, kFixedFrameSize> frame{};
-    size_t chunk = std::min(kFramePayloadSize, payload.size() - offset);
-    bool last = (offset + chunk) >= payload.size();
-    frame[0] = last ? kFinalFrameMarker : marker;
-    std::copy_n(payload.begin() + offset, chunk, frame.begin() + 1);
-    frames.push_back(frame);
-    offset += chunk;
-    if (!last && marker < kMaxChunkMarker) {
-      ++marker;
-    }
-  }
-
-  return frames;
-}
-
-// --- Пауза между кадрами ---
-void waitInterFrameDelay() {
-#if defined(ARDUINO)
-  delay(kInterFrameDelayMs);
-#else
-  std::this_thread::sleep_for(std::chrono::milliseconds(kInterFrameDelayMs));
-#endif
-}
-
-// --- Обрезка завершающих нулей (для последнего кадра) ---
-void trimTrailingZeros(std::vector<uint8_t>& buffer) {
-  while (!buffer.empty() && buffer.back() == 0) {
-    buffer.pop_back();
-  }
-}
-
-// --- Формирование текстового представления полезной нагрузки ---
-String formatTextPayload(const std::vector<uint8_t>& data) {
-  String out;
-  out.reserve(data.size() + 8);
-  for (uint8_t byte : data) {
-    if (byte == '\n') {
-      out += "\\n";
-    } else if (byte == '\r') {
-      out += "\\r";
-    } else if (byte == '\t') {
-      out += "\\t";
-    } else if (byte >= 0x20 && byte <= 0x7E) {
-      out += static_cast<char>(byte);
-    } else {
-      char buf[5];
-      std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<unsigned>(byte));
-      out += buf;
-    }
-  }
-  return out;
-}
-
-// --- Человекочитаемое описание маркера кадра ---
-String describeFrameMarker(uint8_t marker) {
-  if (marker == kSingleFrameMarker) {
-    return F("одиночный");
-  }
-  if (marker == kFinalFrameMarker) {
-    return F("последний");
-  }
-  if (marker >= kFirstChunkMarker && marker <= kMaxChunkMarker) {
-    return String("часть #") + String(static_cast<unsigned long>(marker - 1));
-  }
-  char buf[16];
-  std::snprintf(buf, sizeof(buf), "маркер 0x%02X", static_cast<unsigned>(marker));
-  return String(buf);
-}
-
-// --- Добавление части в буфер сборки ---
-void appendReceiveChunk(const std::vector<uint8_t>& chunk, bool finalChunk) {
-  state.rxAssembly.insert(state.rxAssembly.end(), chunk.begin(), chunk.end());
-  if (finalChunk) {
-    logReceivedMessage(state.rxAssembly);
-    resetReceiveAssembly();
-  } else {
-    state.assemblingMessage = true;
-  }
-}
-
-// --- Сброс состояния сборки ---
-void resetReceiveAssembly() {
-  state.rxAssembly.clear();
-  state.assemblingMessage = false;
-  state.expectedChunkMarker = kFirstChunkMarker;
-}
-
-// --- Логирование принятого сообщения ---
-void logReceivedMessage(const std::vector<uint8_t>& payload) {
-  addEvent(String("Принято сообщение (") + String(static_cast<unsigned long>(payload.size())) + " байт): " + formatByteArray(payload) + " | \"" + formatTextPayload(payload) + "\"", kIncomingColor);
-}
-
-// --- Обработка принятого кадра ---
-void processIncomingFrame(const std::vector<uint8_t>& frame) {
-  if (frame.empty()) {
-    return;
-  }
-
-  addEvent(String("Принят кадр ") + describeFrameMarker(frame[0]) + ": " + formatByteArray(frame));
-
-  std::vector<uint8_t> payload;
-  if (frame.size() > 1) {
-    payload.assign(frame.begin() + 1, frame.end());
-  }
-
-  const uint8_t marker = frame[0];
-  if (marker == kSingleFrameMarker) {
-    trimTrailingZeros(payload);
-    resetReceiveAssembly();
-    appendReceiveChunk(payload, true);
-    return;
-  }
-
-  if (marker == kFinalFrameMarker) {
-    trimTrailingZeros(payload);
-    if (!state.assemblingMessage) {
-      resetReceiveAssembly();
-    }
-    appendReceiveChunk(payload, true);
-    return;
-  }
-
-  if (!state.assemblingMessage) {
-    resetReceiveAssembly();
-  } else if (marker != state.expectedChunkMarker) {
-    addEvent("Получен неожиданный маркер последовательности, буфер сборки сброшен");
-    resetReceiveAssembly();
-  }
-
-  appendReceiveChunk(payload, false);
-  state.expectedChunkMarker = (marker < kMaxChunkMarker) ? static_cast<uint8_t>(marker + 1) : kMaxChunkMarker;
-}
 
 // --- Форматирование массива байт для вывода ---
 String formatByteArray(const std::vector<uint8_t>& data) {
@@ -977,4 +950,577 @@ void logRadioError(const String& context, int16_t code) {
       break;
   }
   addEvent(message);
+}
+// --- Отправка подготовленного буфера ---
+bool sendPayload(const std::vector<uint8_t>& payload, const String& context) {
+  if (payload.empty()) {
+    addEvent(context + ": пустой буфер");
+    return false;
+  }
+
+  addEvent(context + ": " + formatByteArray(payload) + " | \"" + formatTextPayload(payload) + "\"");
+
+  const uint16_t crc = crc16Ccitt(payload.data(), payload.size());
+  auto blocks = splitPayloadIntoBlocks(payload, state.protocol.payloadCrc8);
+  if (blocks.empty()) {
+    addEvent("Не удалось подготовить DATA-пакеты для передачи");
+    return false;
+  }
+
+  size_t totalBlocks = blocks.size();
+  size_t offset = 0;
+  uint16_t windowBaseSeq = state.nextTxSequence;
+  bool harqUsed = false;
+
+  while (offset < totalBlocks) {
+    const uint8_t windowSize = static_cast<uint8_t>(std::min(kArqWindowSize, totalBlocks - offset));
+    if (!sendDataWindow(blocks, offset, windowBaseSeq, windowSize)) {
+      return false;
+    }
+
+    uint16_t missingBitmap = 0;
+    bool needParity = false;
+    if (!waitForAck(windowBaseSeq, windowSize, missingBitmap, needParity)) {
+      addEvent("ACK не получен — считаем потерянным всё окно");
+      missingBitmap = static_cast<uint16_t>((1U << windowSize) - 1U);
+    }
+
+    uint8_t retries = 0;
+    while (missingBitmap != 0 && retries < 3) {
+      const uint8_t missingCount = static_cast<uint8_t>(__builtin_popcount(missingBitmap));
+      addEvent(String("Повторная отправка ") + String(static_cast<unsigned long>(missingCount)) +
+               " пакетов по BITMAP16 0x" + String(missingBitmap, 16));
+      retransmitMissing(blocks, offset, windowBaseSeq, missingBitmap);
+      if (!waitForAck(windowBaseSeq, windowSize, missingBitmap, needParity)) {
+        addEvent("ACK после переотправки не пришёл — считаем окно потерянным");
+        missingBitmap = static_cast<uint16_t>((1U << windowSize) - 1U);
+      }
+      ++retries;
+    }
+
+    if (missingBitmap != 0) {
+      addEvent("Не удалось доставить все DATA-пакеты окна — остановка передачи");
+      return false;
+    }
+
+    if (needParity) {
+      if (state.protocol.harq) {
+        harqUsed = true;
+        addEvent("Получен запрос HARQ: генерация PAR пока не реализована (TODO)");
+      } else {
+        addEvent("Получен запрос HARQ, но HARQ отключён");
+      }
+    }
+
+    offset += windowSize;
+    windowBaseSeq = static_cast<uint16_t>(windowBaseSeq + windowSize);
+  }
+
+  state.nextTxSequence = static_cast<uint16_t>(state.nextTxSequence + totalBlocks);
+
+  auto finFrame = buildFinFrame(static_cast<uint16_t>(payload.size()), crc, harqUsed);
+  if (!transmitFrame(finFrame, F("FIN"))) {
+    return false;
+  }
+
+  waitInterFrameDelay();
+  return true;
+}
+
+// --- Передача окна DATA-пакетов ---
+bool sendDataWindow(const std::vector<DataBlock>& blocks,
+                    size_t offset,
+                    uint16_t baseSeq,
+                    uint8_t windowSize) {
+  std::vector<size_t> order(windowSize);
+  std::iota(order.begin(), order.end(), 0U);
+
+  if (state.protocol.interleaving && windowSize > 1) {
+    std::vector<size_t> interleaved;
+    for (size_t start = 0; start < kInterleaverStep && start < windowSize; ++start) {
+      for (size_t pos = start; pos < windowSize; pos += kInterleaverStep) {
+        interleaved.push_back(pos);
+      }
+    }
+    auto it = std::find(interleaved.begin(), interleaved.end(), windowSize - 1);
+    if (it != interleaved.end()) {
+      interleaved.erase(it);
+      interleaved.push_back(windowSize - 1);
+    }
+    order = std::move(interleaved);
+  }
+
+  for (size_t idx : order) {
+    if (idx >= windowSize) {
+      continue;
+    }
+    const size_t blockIndex = offset + idx;
+    if (blockIndex >= blocks.size()) {
+      break;
+    }
+    const bool ackRequest = (idx == windowSize - 1);
+    auto frame = buildDataFrame(static_cast<uint16_t>(baseSeq + idx), blocks[blockIndex], ackRequest, false);
+    if (!transmitFrame(frame, ackRequest ? F("DATA (ACK)") : F("DATA"))) {
+      return false;
+    }
+    waitInterFrameDelay();
+  }
+
+  return true;
+}
+
+// --- Ожидание ACK ---
+bool waitForAck(uint16_t baseSeq, uint8_t windowSize, uint16_t& missingBitmap, bool& needParity) {
+  const unsigned long timeoutMs = 1000;
+  const unsigned long start = millis();
+  while (millis() - start < timeoutMs) {
+    processRadioEvents();
+    if (state.pendingAck.hasValue && state.pendingAck.baseSeq == baseSeq) {
+      missingBitmap = state.pendingAck.missingBitmap;
+      needParity = state.pendingAck.needParity;
+      if (state.pendingAck.reportedWindow != windowSize) {
+        addEvent(String("ACK сообщил окно ") +
+                 String(static_cast<unsigned long>(state.pendingAck.reportedWindow)) +
+                 " вместо ожидаемых " + String(windowSize));
+      }
+      state.pendingAck.hasValue = false;
+      return true;
+    }
+#if defined(ARDUINO)
+    delay(5);
+#else
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+#endif
+  }
+  return false;
+}
+
+// --- Переотправка потерянных пакетов ---
+void retransmitMissing(const std::vector<DataBlock>& blocks,
+                       size_t offset,
+                       uint16_t baseSeq,
+                       uint16_t missingBitmap) {
+  for (uint8_t bit = 0; bit < kBitmapWidth; ++bit) {
+    if ((missingBitmap & (1U << bit)) == 0U) {
+      continue;
+    }
+    const size_t blockIndex = offset + bit;
+    if (blockIndex >= blocks.size()) {
+      continue;
+    }
+    auto frame = buildDataFrame(static_cast<uint16_t>(baseSeq + bit), blocks[blockIndex], (bit == 0), false);
+    transmitFrame(frame, F("DATA retry"));
+    waitInterFrameDelay();
+  }
+}
+
+// --- Непосредственная передача одного кадра ---
+bool transmitFrame(const std::array<uint8_t, kFixedFrameSize>& frame, const String& context) {
+  std::vector<uint8_t> bytes(frame.begin(), frame.end());
+  addEvent(String("→ ") + context + ": " + formatByteArray(bytes));
+
+  int16_t freqState = radio.setFrequency(state.currentTxFreq);
+  if (freqState != RADIOLIB_ERR_NONE) {
+    logRadioError("setFrequency(TX)", freqState);
+    return false;
+  }
+
+  int16_t result = radio.transmit(const_cast<uint8_t*>(frame.data()), kFixedFrameSize);
+  if (result != RADIOLIB_ERR_NONE) {
+    logRadioError("transmit", result);
+    radio.setFrequency(state.currentRxFreq);
+    ensureReceiveMode();
+    return false;
+  }
+
+  int16_t backState = radio.setFrequency(state.currentRxFreq);
+  if (backState != RADIOLIB_ERR_NONE) {
+    logRadioError("setFrequency(RX restore)", backState);
+    return false;
+  }
+
+  return ensureReceiveMode();
+}
+
+// --- Построение DATA-кадра ---
+std::array<uint8_t, kFixedFrameSize> buildDataFrame(uint16_t seq,
+                                                    const DataBlock& block,
+                                                    bool ackRequest,
+                                                    bool isParity) {
+  std::array<uint8_t, kFixedFrameSize> frame{};
+
+  const bool hasCrc = state.protocol.payloadCrc8;
+  uint8_t length = block.dataLength;
+  if (hasCrc && length < kFramePayloadSize) {
+    ++length; // добавляем байт CRC-8
+  }
+  uint8_t flags = static_cast<uint8_t>((length << kDataFlagLengthShift) & kDataFlagLengthMask);
+  if (ackRequest) {
+    flags |= kDataFlagAckRequest;
+  }
+  if (isParity) {
+    flags |= kDataFlagIsParity;
+  }
+
+  frame[0] = static_cast<uint8_t>(kFrameTypeData | flags);
+  frame[1] = static_cast<uint8_t>(seq & 0xFFU);
+  frame[2] = static_cast<uint8_t>((seq >> 8) & 0xFFU);
+  std::copy(block.bytes.begin(), block.bytes.end(), frame.begin() + 3);
+  return frame;
+}
+
+// --- Построение ACK-кадра ---
+std::array<uint8_t, kFixedFrameSize> buildAckFrame(uint16_t baseSeq,
+                                                   uint16_t missingBitmap,
+                                                   bool needParity,
+                                                   uint8_t windowSize) {
+  std::array<uint8_t, kFixedFrameSize> frame{};
+  frame[0] = static_cast<uint8_t>(kFrameTypeAck | (needParity ? kAckFlagNeedParity : 0));
+  frame[1] = static_cast<uint8_t>(baseSeq & 0xFFU);
+  frame[2] = static_cast<uint8_t>((baseSeq >> 8) & 0xFFU);
+  frame[3] = static_cast<uint8_t>(missingBitmap & 0xFFU);
+  frame[4] = static_cast<uint8_t>((missingBitmap >> 8) & 0xFFU);
+  frame[5] = windowSize;
+  return frame;
+}
+
+// --- Построение FIN-кадра ---
+std::array<uint8_t, kFixedFrameSize> buildFinFrame(uint16_t length,
+                                                   uint16_t crc,
+                                                   bool harqUsed) {
+  std::array<uint8_t, kFixedFrameSize> frame{};
+  frame[0] = static_cast<uint8_t>(kFrameTypeFin | (harqUsed ? kFinFlagHarqUsed : 0));
+  frame[1] = static_cast<uint8_t>(length & 0xFFU);
+  frame[2] = static_cast<uint8_t>((length >> 8) & 0xFFU);
+  frame[3] = static_cast<uint8_t>(crc & 0xFFU);
+  frame[4] = static_cast<uint8_t>((crc >> 8) & 0xFFU);
+  return frame;
+}
+
+// --- Разбиение сообщения на DATA-блоки ---
+std::vector<DataBlock> splitPayloadIntoBlocks(const std::vector<uint8_t>& payload,
+                                              bool appendCrc8) {
+  std::vector<DataBlock> blocks;
+  const size_t dataBytesPerBlock = appendCrc8 ? (kFramePayloadSize - 1) : kFramePayloadSize;
+  size_t offset = 0;
+  while (offset < payload.size()) {
+    DataBlock block;
+    const size_t chunk = std::min(dataBytesPerBlock, payload.size() - offset);
+    std::copy_n(payload.begin() + offset, chunk, block.bytes.begin());
+    block.dataLength = static_cast<uint8_t>(chunk);
+    if (appendCrc8) {
+      block.bytes[dataBytesPerBlock] = crc8Dallas(block.bytes.data(), chunk);
+    }
+    blocks.push_back(block);
+    offset += chunk;
+  }
+  return blocks;
+}
+
+// --- CRC-16 CCITT ---
+uint16_t crc16Ccitt(const uint8_t* data, size_t length, uint16_t crc) {
+  for (size_t i = 0; i < length; ++i) {
+    crc ^= static_cast<uint16_t>(data[i]) << 8;
+    for (int bit = 0; bit < 8; ++bit) {
+      if (crc & 0x8000U) {
+        crc = static_cast<uint16_t>((crc << 1) ^ 0x1021U);
+      } else {
+        crc <<= 1;
+      }
+    }
+  }
+  return crc;
+}
+
+// --- CRC-8 Dallas/Maxim ---
+uint8_t crc8Dallas(const uint8_t* data, size_t length) {
+  uint8_t crc = 0;
+  for (size_t i = 0; i < length; ++i) {
+    uint8_t byte = data ? data[i] : 0;
+    crc ^= byte;
+    for (int bit = 0; bit < 8; ++bit) {
+      if (crc & 0x80U) {
+        crc = static_cast<uint8_t>((crc << 1) ^ 0x31U);
+      } else {
+        crc <<= 1;
+      }
+    }
+  }
+  return crc;
+}
+
+// --- Пауза между кадрами ---
+void waitInterFrameDelay() {
+#if defined(ARDUINO)
+  delay(kInterFrameDelayMs);
+#else
+  std::this_thread::sleep_for(std::chrono::milliseconds(kInterFrameDelayMs));
+#endif
+}
+
+// --- Формирование текстового представления полезной нагрузки ---
+String formatTextPayload(const std::vector<uint8_t>& data) {
+  String out;
+  out.reserve(data.size() + 8);
+  for (uint8_t byte : data) {
+    if (byte == '\n') {
+      out += "\\n";
+    } else if (byte == '\r') {
+      out += "\\r";
+    } else if (byte == '\t') {
+      out += "\\t";
+    } else if (byte >= 0x20 && byte <= 0x7E) {
+      out += static_cast<char>(byte);
+    } else {
+      char buf[5];
+      std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<unsigned>(byte));
+      out += buf;
+    }
+  }
+  return out;
+}
+
+// --- Форматирование массива байт для вывода ---
+String formatByteArray(const std::vector<uint8_t>& data) {
+  String out;
+  out.reserve(data.size() * 5);
+  out += '[';
+  for (size_t i = 0; i < data.size(); ++i) {
+    if (i > 0) {
+      out += ' ';
+    }
+    char buf[5];
+    std::snprintf(buf, sizeof(buf), "0x%02X", data[i]);
+    out += buf;
+  }
+  out += ']';
+  return out;
+}
+
+// --- Логирование принятого сообщения ---
+void logReceivedMessage(const std::vector<uint8_t>& payload) {
+  addEvent(String("Принято сообщение (") + String(static_cast<unsigned long>(payload.size())) + " байт): " +
+           formatByteArray(payload) + " | \"" + formatTextPayload(payload) + "\"", kIncomingColor);
+}
+
+// --- Полный сброс состояния приёмника ---
+void resetReceiveState() {
+  state.rxWindow = {};
+  state.rxMessage = {};
+  state.pendingAck = {};
+}
+
+// --- Обработка принятого кадра ---
+void processIncomingFrame(const std::vector<uint8_t>& frame) {
+  if (frame.empty()) {
+    return;
+  }
+
+  addEvent(String("← Кадр: ") + formatByteArray(frame));
+
+  const uint8_t type = frame[0] & kFrameTypeMask;
+  switch (type) {
+    case kFrameTypeData:
+      processIncomingDataFrame(frame);
+      break;
+    case kFrameTypeAck:
+      processIncomingAckFrame(frame);
+      break;
+    case kFrameTypeParity:
+      processIncomingParityFrame(frame);
+      break;
+    case kFrameTypeFin:
+      processIncomingFinFrame(frame);
+      break;
+    default:
+      addEvent("Неизвестный тип кадра");
+      break;
+  }
+}
+
+// --- Обработка DATA-кадра ---
+void processIncomingDataFrame(const std::vector<uint8_t>& frame) {
+  if (frame.size() < 3) {
+    addEvent("Получен усечённый DATA-кадр");
+    return;
+  }
+
+  const uint8_t flags = frame[0] & static_cast<uint8_t>(~kFrameTypeMask);
+  const uint16_t seq = static_cast<uint16_t>(frame[1]) | (static_cast<uint16_t>(frame[2]) << 8);
+  const uint8_t lengthField = static_cast<uint8_t>((flags & kDataFlagLengthMask) >> kDataFlagLengthShift);
+  const bool ackRequest = (flags & kDataFlagAckRequest) != 0;
+  const bool isParity = (flags & kDataFlagIsParity) != 0;
+
+  if (isParity) {
+    processIncomingParityFrame(frame);
+    return;
+  }
+
+  if (!state.rxWindow.active || seq < state.rxWindow.baseSeq ||
+      seq >= static_cast<uint16_t>(state.rxWindow.baseSeq + kBitmapWidth)) {
+    state.rxWindow.active = true;
+    state.rxWindow.baseSeq = static_cast<uint16_t>(seq - (seq % kArqWindowSize));
+    state.rxWindow.receivedMask = 0;
+    state.rxWindow.windowSize = 0;
+  }
+
+  const uint8_t bit = static_cast<uint8_t>(seq - state.rxWindow.baseSeq);
+  if (bit < kBitmapWidth) {
+    state.rxWindow.receivedMask |= static_cast<uint16_t>(1U << bit);
+    state.rxWindow.windowSize = static_cast<uint8_t>(std::max<uint8_t>(state.rxWindow.windowSize, bit + 1));
+  }
+
+  if (!state.rxMessage.active) {
+    state.rxMessage.active = true;
+    state.rxMessage.nextExpectedSeq = seq;
+    state.rxMessage.buffer.clear();
+    state.rxMessage.pending.clear();
+    state.rxMessage.declaredLength = 0;
+    state.rxMessage.declaredCrc = 0;
+    state.rxMessage.finReceived = false;
+  }
+
+  DataBlock block;
+  const size_t payloadAvailable = std::min<size_t>(kFramePayloadSize, frame.size() - 3);
+  std::copy_n(frame.begin() + 3, payloadAvailable, block.bytes.begin());
+  block.dataLength = std::min<uint8_t>(lengthField, kFramePayloadSize);
+
+  if (state.protocol.payloadCrc8 && block.dataLength > 0) {
+    if (block.dataLength == 0) {
+      addEvent("DATA-кадр содержит некорректную длину");
+      return;
+    }
+    if (block.dataLength > 0) {
+      const uint8_t crcOffset = block.dataLength - 1;
+      const uint8_t expected = block.bytes[crcOffset];
+      const uint8_t actualLength = crcOffset;
+      const uint8_t computed = crc8Dallas(block.bytes.data(), actualLength);
+      if (computed != expected) {
+        addEvent("CRC-8 DATA не сошёлся, кадр отброшен");
+        return;
+      }
+      block.dataLength = actualLength;
+    }
+  }
+
+  state.rxMessage.pending[seq] = block;
+  flushPendingData();
+
+  if (ackRequest) {
+    const uint8_t windowCount = static_cast<uint8_t>(std::max<uint8_t>(state.rxWindow.windowSize, bit + 1));
+    prepareAck(seq, windowCount, true);
+  }
+}
+
+// --- Обработка ACK-кадра ---
+void processIncomingAckFrame(const std::vector<uint8_t>& frame) {
+  if (frame.size() < 6) {
+    addEvent("Получен усечённый ACK");
+    return;
+  }
+  AckNotification note;
+  note.hasValue = true;
+  note.baseSeq = static_cast<uint16_t>(frame[1]) | (static_cast<uint16_t>(frame[2]) << 8);
+  note.missingBitmap = static_cast<uint16_t>(frame[3]) | (static_cast<uint16_t>(frame[4]) << 8);
+  note.needParity = (frame[0] & kAckFlagNeedParity) != 0;
+  note.reportedWindow = frame[5];
+  state.pendingAck = note;
+  addEvent(String("Принят ACK: base=") + String(note.baseSeq) +
+           ", missing=0x" + String(note.missingBitmap, 16) +
+           ", window=" + String(note.reportedWindow));
+}
+
+// --- Обработка PAR-кадра (пока заглушка) ---
+void processIncomingParityFrame(const std::vector<uint8_t>& frame) {
+  (void)frame;
+  addEvent("Получен PAR-кадр — HARQ пока не реализован (TODO)");
+}
+
+// --- Обработка FIN-кадра ---
+void processIncomingFinFrame(const std::vector<uint8_t>& frame) {
+  if (frame.size() < 5) {
+    addEvent("Получен усечённый FIN");
+    return;
+  }
+  if (!state.rxMessage.active) {
+    state.rxMessage.active = true;
+    state.rxMessage.nextExpectedSeq = state.rxWindow.baseSeq;
+    state.rxMessage.buffer.clear();
+    state.rxMessage.pending.clear();
+  }
+  uint16_t length = static_cast<uint16_t>(frame[1]) | (static_cast<uint16_t>(frame[2]) << 8);
+  uint16_t crc = static_cast<uint16_t>(frame[3]) | (static_cast<uint16_t>(frame[4]) << 8);
+  state.rxMessage.declaredLength = length;
+  state.rxMessage.declaredCrc = crc;
+  state.rxMessage.finReceived = true;
+  flushPendingData();
+}
+
+// --- Подготовка и отправка ACK ---
+void prepareAck(uint16_t /*seq*/, uint8_t windowSize, bool forceSend) {
+  if (!state.rxWindow.active) {
+    return;
+  }
+  const uint8_t effectiveWindow = std::max<uint8_t>(state.rxWindow.windowSize, windowSize);
+  uint16_t mask = static_cast<uint16_t>((effectiveWindow >= kBitmapWidth) ? kBitmapFullMask
+                                                                         : ((1U << effectiveWindow) - 1U));
+  const uint16_t missing = static_cast<uint16_t>((~state.rxWindow.receivedMask) & mask);
+  const bool needParity = false; // TODO: оценка необходимости HARQ на приёме
+  if (!forceSend && missing == 0) {
+    return;
+  }
+  const uint16_t base = state.rxWindow.baseSeq;
+  sendAck(base, missing, needParity, effectiveWindow);
+  state.rxWindow.baseSeq = static_cast<uint16_t>(base + effectiveWindow);
+  state.rxWindow.receivedMask = 0;
+  state.rxWindow.windowSize = 0;
+}
+
+void sendAck(uint16_t baseSeq, uint16_t missingBitmap, bool needParity, uint8_t windowSize) {
+  auto frame = buildAckFrame(baseSeq, missingBitmap, needParity, windowSize);
+  transmitFrame(frame, F("ACK"));
+}
+
+// --- Сборка последовательных блоков ---
+void flushPendingData() {
+  if (!state.rxMessage.active) {
+    return;
+  }
+
+  bool progressed = true;
+  while (progressed) {
+    progressed = false;
+    auto it = state.rxMessage.pending.find(state.rxMessage.nextExpectedSeq);
+    if (it == state.rxMessage.pending.end()) {
+      break;
+    }
+    const DataBlock& block = it->second;
+    state.rxMessage.buffer.insert(state.rxMessage.buffer.end(),
+                                  block.bytes.begin(),
+                                  block.bytes.begin() + block.dataLength);
+    state.rxMessage.pending.erase(it);
+    state.rxMessage.nextExpectedSeq = static_cast<uint16_t>(state.rxMessage.nextExpectedSeq + 1);
+    progressed = true;
+  }
+
+  if (state.rxMessage.finReceived && state.rxMessage.pending.empty()) {
+    if (state.rxMessage.declaredLength <= state.rxMessage.buffer.size()) {
+      state.rxMessage.buffer.resize(state.rxMessage.declaredLength);
+      const uint16_t crc = crc16Ccitt(state.rxMessage.buffer.data(), state.rxMessage.buffer.size());
+      if (crc == state.rxMessage.declaredCrc) {
+        logReceivedMessage(state.rxMessage.buffer);
+      } else {
+        addEvent("CRC-16 FIN не сошёлся — сообщение отброшено");
+      }
+    } else {
+      addEvent("FIN сообщил длину больше собранной — сообщение отброшено");
+    }
+    state.rxMessage.active = false;
+    state.rxMessage.pending.clear();
+    state.rxMessage.buffer.clear();
+    state.rxMessage.finReceived = false;
+    state.rxWindow.active = false;
+    state.rxWindow.receivedMask = 0;
+    state.rxWindow.windowSize = 0;
+  }
 }
