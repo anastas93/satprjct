@@ -10,6 +10,8 @@
 class RadioSX1262TestAccessor {
 public:
   static RadioSX1262::PublicSX1262& rawRadio(RadioSX1262& radio) { return radio.radio_; }
+  static bool implicitEnabled(const RadioSX1262& radio) { return radio.implicitHeaderEnabled_; }
+  static size_t implicitLength(const RadioSX1262& radio) { return radio.implicitHeaderLength_; }
 };
 
 int main() {
@@ -47,7 +49,11 @@ int main() {
   assert(raw.setFrequencyCalls >= 2);
   assert(std::fabs(raw.previousSetFrequency - expectedTx) < 1e-3f);
   assert(raw.transmitCalls == 1);
-  assert(raw.lastTransmitLength == sizeof(payload));
+  const size_t expectedTxLen = RadioSX1262TestAccessor::implicitEnabled(radio) &&
+                                      RadioSX1262TestAccessor::implicitLength(radio) > 0
+                                  ? RadioSX1262TestAccessor::implicitLength(radio)
+                                  : sizeof(payload);
+  assert(raw.lastTransmitLength == expectedTxLen);
 
   std::cout << "OK" << std::endl;
   return 0;
