@@ -31,6 +31,31 @@ static constexpr uint16_t PILOT_MARKER_CRC = 0x9FD6;                // CRC16(pre
   return FrameHeader::crc16(PILOT_MARKER.data(), PILOT_PREFIX_LEN) == PILOT_MARKER_CRC;
 }();
 
+static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
+  out.clear();
+  if (!data || len == 0) return;
+  out.reserve(len);
+  size_t count = 0;
+  size_t i = 0;
+  while (i < len) {
+    if (count && count % PILOT_INTERVAL == 0) {
+      size_t remaining = len - i;
+      if (remaining >= PILOT_MARKER.size() &&
+          std::equal(PILOT_MARKER.begin(), PILOT_MARKER.begin() + PILOT_PREFIX_LEN, data + i)) {
+        uint16_t crc = static_cast<uint16_t>(data[i + PILOT_PREFIX_LEN]) |
+                       (static_cast<uint16_t>(data[i + PILOT_PREFIX_LEN + 1]) << 8);
+        if (crc == PILOT_MARKER_CRC && FrameHeader::crc16(data + i, PILOT_PREFIX_LEN) == crc) {
+          i += PILOT_MARKER.size();
+          continue;
+        }
+      }
+    }
+    out.push_back(data[i]);
+    ++count;
+    ++i;
+  }
+}
+
 static constexpr uint8_t FRAME_VERSION_AEAD = 2;  // новая версия кадра
 static constexpr size_t TAG_LEN_V1 = 8;           // длина тега в старом формате
 static constexpr size_t TAG_LEN = crypto::chacha20poly1305::TAG_SIZE; // длина тега Poly1305
