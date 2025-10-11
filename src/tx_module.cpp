@@ -142,13 +142,12 @@ void TxModule::resetEncryptOverrideForTests() {
 void TxModule::setPayloadMode(PayloadMode mode) { splitter_.setMode(mode); }
 
 // Помещаем сообщение в очередь согласно классу QoS
-uint16_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos, bool with_prefix) {
+uint16_t TxModule::queue(const uint8_t* data, size_t len, uint8_t qos) {
   if (!data || len == 0) {                        // проверка указателя
     DEBUG_LOG("TxModule: пустой ввод");
     return 0;
   }
   if (qos > 3) qos = 3;                           // ограничение диапазона QoS
-  bool is_ack_marker = protocol::ack::isAckPayload(data, len);
   // Полностью отключаем расширенную обработку: ACK больше не выносим в отдельную очередь,
   // данные сразу же ставим в буфер без модификации. Это сохраняет прямую схему
   // «данные → байты → отправка» и оставляет исходную реализацию закомментированной

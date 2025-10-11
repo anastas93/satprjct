@@ -58,57 +58,6 @@ static bool isPilotMarker(const uint8_t* data, size_t len) {
   return FrameHeader::crc16(data, PILOT_PREFIX_LEN) == crc;
 }
 
-// Удаление пилотов из полезной нагрузки
-static void removePilots(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
-  out.clear();
-  if (!data || len == 0) {               // проверка указателя и длины
-    return;
-  }
-  out.reserve(len);
-  size_t count = 0;
-  size_t i = 0;
-  while (i < len) {
-    if (count && count % PILOT_INTERVAL == 0) {
-      size_t remaining = len - i;
-      if (remaining >= PILOT_MARKER.size() && isPilotMarker(data + i, remaining)) {
-        i += PILOT_MARKER.size();
-        continue; // пропускаем весь маркер
-      }
-    }
-    out.push_back(data[i]);
-    ++count;
-    ++i;
-  }
-}
-
-static constexpr size_t COMPACT_HEADER_SIZE = 7; // версия, frag_cnt и packed
-
-static std::array<uint8_t,COMPACT_HEADER_SIZE> makeCompactHeader(uint8_t version,
-                                                                 uint16_t frag_cnt,
-                                                                 uint32_t packed_meta) {
-  std::array<uint8_t,COMPACT_HEADER_SIZE> compact{};
-  compact[0] = version;
-  compact[1] = static_cast<uint8_t>(frag_cnt >> 8);
-  compact[2] = static_cast<uint8_t>(frag_cnt);
-  compact[3] = static_cast<uint8_t>(packed_meta >> 24);
-  compact[4] = static_cast<uint8_t>(packed_meta >> 16);
-  compact[5] = static_cast<uint8_t>(packed_meta >> 8);
-  compact[6] = static_cast<uint8_t>(packed_meta);
-  return compact;
-}
-
-static std::array<uint8_t,COMPACT_HEADER_SIZE + 2> makeAad(uint8_t version,
-                                                           uint16_t frag_cnt,
-                                                           uint32_t packed_meta,
-                                                           uint16_t msg_id) {
-  auto compact = makeCompactHeader(version, frag_cnt, packed_meta);
-  std::array<uint8_t,COMPACT_HEADER_SIZE + 2> aad{};
-  std::copy(compact.begin(), compact.end(), aad.begin());
-  aad[COMPACT_HEADER_SIZE] = static_cast<uint8_t>(msg_id >> 8);
-  aad[COMPACT_HEADER_SIZE + 1] = static_cast<uint8_t>(msg_id);
-  return aad;
-}
-
 struct RxModule::RxProfilingScope {
   RxModule& owner;                                        // ссылка на модуль для доступа к состоянию
   ProfilingSnapshot snapshot;                             // формируемый снимок

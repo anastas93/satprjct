@@ -105,7 +105,6 @@ bool decode(const uint8_t* in, size_t len, std::vector<uint8_t>& out, int& corre
     if (delta) {
       if (2*L <= (int)i) {
         auto tmp = err_loc;
-        uint8_t inv = gf_exp[255 - gf_log[delta]]; // gf_inv
         for (size_t j=0;j<err_loc.size();j++) err_loc[j] ^= gf_mul(old_loc[j], delta);
         old_loc = tmp;
         L = i + 1 - L;
