@@ -738,7 +738,7 @@ void handleNotFound() {
 String buildIndexHtml() {
   String html;
   html.reserve(8192);
-  html += F("<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"UTF-8\"><title>Lotest</title><style>");
+  html += F("<!DOCTYPE html><html lang='ru'><head><meta charset='UTF-8'><title>Lotest</title><style>");
   html += F("body{font-family:Arial,sans-serif;margin:0;padding:0;background:#10141a;color:#f0f0f0;}");
   html += F("header{background:#1f2a38;padding:16px 24px;font-size:20px;font-weight:bold;}");
   html += F("main{padding:24px;display:flex;gap:24px;flex-wrap:wrap;}");
@@ -755,49 +755,49 @@ String buildIndexHtml() {
   html += F(".status{font-size:14px;color:#9fb1d1;margin-top:8px;}");
   html += F("</style></head><body><header>Lotest — тестирование LoRa + веб</header><main>");
 
-  html += F("<section><h2>Управление радиомодулем</h2><label>Канал банка HOME:</label><select id=\"channel\">");
+  html += F("<section><h2>Управление радиомодулем</h2><label>Канал банка HOME:</label><select id='channel'>");
   html += buildChannelOptions(state.channelIndex);
   html += F("</select>");
-  html += "<label><input type=\\\"checkbox\\\" id=\\\"power\\\"";
+  html += "<label><input type='checkbox' id='power'";
   if (state.highPower) {
     html += " checked";
   }
   html += "> Мощность 22 dBm (выкл — -5 dBm)</label>";
-  html += "<label><input type=\\\"checkbox\\\" id=\\\"sf5\\\"";
+  html += "<label><input type='checkbox' id='sf5'";
   if (state.useSf5) {
     html += " checked";
   }
   html += "> Фактор расширения SF5 (выкл — SF7)</label>";
   html += F("<fieldset><legend>Надёжность</legend>");
-  html += "<label><input type=\\\"checkbox\\\" id=\\\"interleaving\\\"";
+  html += "<label><input type='checkbox' id='interleaving'";
   if (state.protocol.interleaving) {
     html += " checked";
   }
   html += "> Интерливинг (шаг 4)</label>";
-  html += "<label><input type=\\\"checkbox\\\" id=\\\"harq\\\"";
+  html += "<label><input type='checkbox' id='harq'";
   if (state.protocol.harq) {
     html += " checked";
   }
   html += "> HARQ (адаптивный RS(15,11))</label>";
-  html += "<label><input type=\\\"checkbox\\\" id=\\\"phyfec\\\"";
+  html += "<label><input type='checkbox' id='phyfec'";
   if (state.protocol.phyFec) {
     html += " checked";
   }
   html += "> PHY FEC (LoRa CR=4/7)</label>";
-  html += "<label><input type=\\\"checkbox\\\" id=\\\"crc8\\\"";
+  html += "<label><input type='checkbox' id='crc8'";
   if (state.protocol.payloadCrc8) {
     html += " checked";
   }
   html += "> CRC-8 на DATA (payload=4 байта)</label>";
   html += F("</fieldset>");
-  html += F("<div class=\"status\" id=\"status\"></div><div class=\"controls\">");
-  html += F("<button id=\"sendLong\">Отправить длинный пакет 124 байта</button>");
-  html += F("<button id=\"sendRandom\">Отправить полный пакет</button>");
-  html += F("<label>Пользовательский пакет (текст):</label><input type=\"text\" id=\"custom\" placeholder=\"Введите сообщение\">");
-  html += F("<button id=\"sendCustom\">Отправить пользовательский пакет</button>");
+  html += F("<div class='status' id='status'></div><div class='controls'>");
+  html += F("<button id='sendLong'>Отправить длинный пакет 124 байта</button>");
+  html += F("<button id='sendRandom'>Отправить полный пакет</button>");
+  html += F("<label>Пользовательский пакет (текст):</label><input type='text' id='custom' placeholder='Введите сообщение'>");
+  html += F("<button id='sendCustom'>Отправить пользовательский пакет</button>");
   html += F("</div></section>");
 
-  html += F("<section><h2>Журнал событий</h2><div id=\"log\"></div></section></main><script>");
+  html += F("<section><h2>Журнал событий</h2><div id='log'></div></section></main><script>");
   html += F("const logEl=document.getElementById('log');const channelSel=document.getElementById('channel');const powerCb=document.getElementById('power');const sfCb=document.getElementById('sf5');const interCb=document.getElementById('interleaving');const harqCb=document.getElementById('harq');const phyFecCb=document.getElementById('phyfec');const crc8Cb=document.getElementById('crc8');const statusEl=document.getElementById('status');let lastId=0;");
   html += F("function appendLog(entry){const div=document.createElement('div');div.className='message';div.textContent=entry.text;if(entry.color){div.style.color=entry.color;}logEl.appendChild(div);logEl.scrollTop=logEl.scrollHeight;}");
   html += F("async function refreshLog(){try{const resp=await fetch(`/api/log?after=${lastId}`);if(!resp.ok)return;const data=await resp.json();data.events.forEach(evt=>{appendLog(evt);lastId=evt.id;});}catch(e){console.error(e);}}");
@@ -822,7 +822,7 @@ String buildIndexHtml() {
 String buildChannelOptions(uint8_t selected) {
   String html;
   for (uint8_t i = 0; i < kHomeBankSize; ++i) {
-    html += "<option value=\"" + String(i) + "\"";
+    html += "<option value='" + String(i) + "'";
     if (i == selected) {
       html += " selected";
     }
