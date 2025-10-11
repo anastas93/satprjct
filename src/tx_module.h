@@ -20,8 +20,7 @@ public:
   // Смена режима размера полезной нагрузки
   void setPayloadMode(PayloadMode mode);
   // Добавляет сообщение в очередь на отправку с указанием класса QoS (0..3)
-  // with_prefix=false используется в режиме Light pack для отправки чистого текста без служебных тегов
-  uint16_t queue(const uint8_t* data, size_t len, uint8_t qos = 0, bool with_prefix = true);
+  uint16_t queue(const uint8_t* data, size_t len, uint8_t qos = 0);
   // Постановка сообщения без префикса и без дополнительного разбиения на части
   uint16_t queuePlain(const uint8_t* data, size_t len, uint8_t qos = 0);
   // Отправляет первое доступное сообщение (если есть)

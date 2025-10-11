@@ -2345,10 +2345,10 @@ bool enqueueTextMessage(const String& payload, uint32_t& outId, String& err) {
   if (lightPackMode) {                                   // Light pack     
     id = tx.queuePlain(data.data(), data.size());
     if (id == 0) {                                       //    (    )
-      id = tx.queue(data.data(), data.size(), 0, true);  //      
+      id = tx.queue(data.data(), data.size(), 0);        //
     }
   } else {
-    id = tx.queue(data.data(), data.size(), 0, true);
+    id = tx.queue(data.data(), data.size(), 0);
   }
   if (id == 0) {
     err = " ";
