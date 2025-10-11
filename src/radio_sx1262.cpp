@@ -111,31 +111,6 @@ int16_t RadioSX1262::send(const uint8_t* data, size_t len) {
     lastError_ = ERR_INVALID_ARGUMENT;
     return lastError_;
   }
-  if (len > MAX_PACKET_SIZE) {               // проверка аппаратного лимита
-    LOG_ERROR_VAL("RadioSX1262: превышен лимит длины=", len);
-    lastError_ = ERR_INVALID_ARGUMENT;
-    return lastError_;
-  }
-
-  const bool enforceImplicit = implicitHeaderEnabled_ && implicitHeaderLength_ > 0; // требуется ли подгонка длины
-  const uint8_t* payloadPtr = data;          // фактический указатель для передачи
-  size_t payloadLen = len;                   // фактическая длина
-  std::array<uint8_t, MAX_PACKET_SIZE> padded{}; // буфер для дополнения нулями
-  if (enforceImplicit) {
-    if (len > implicitHeaderLength_) {       // защита от переполнения фиксированного кадра
-      LOG_ERROR("RadioSX1262: длина %u превышает фиксированный размер %u байт",
-                static_cast<unsigned>(len),
-                static_cast<unsigned>(implicitHeaderLength_));
-      lastError_ = ERR_INVALID_ARGUMENT;
-      return lastError_;
-    }
-    if (len < implicitHeaderLength_) {       // дополняем до фиксированной длины
-      std::memcpy(padded.data(), data, len);
-      std::fill(padded.begin() + len, padded.begin() + implicitHeaderLength_, 0);
-      payloadPtr = padded.data();
-    }
-    payloadLen = implicitHeaderLength_;      // LoRa в implicit-режиме ждёт ровно заданную длину
-  }
 
   ScopedRadioLock guard(*this);
   const int16_t lockState = guard.acquire(toTicks(LOCK_TIMEOUT_MS));
@@ -145,23 +120,63 @@ int16_t RadioSX1262::send(const uint8_t* data, size_t len) {
     return lastError_;
   }
 
+  const bool enforceImplicit = implicitHeaderEnabled_ && implicitHeaderLength_ > 0; // активен ли фиксированный размер кадра
+  size_t fragmentCapacity = enforceImplicit ? implicitHeaderLength_ : MAX_PACKET_SIZE; // максимум данных за один вызов
+  if (fragmentCapacity == 0) {               // защита от некорректной конфигурации
+    LOG_ERROR("RadioSX1262: нулевая длина implicit header — передача невозможна");
+    lastError_ = ERR_INVALID_ARGUMENT;
+    return lastError_;
+  }
+  if (fragmentCapacity > MAX_PACKET_SIZE) {  // аппарат не поддерживает пакеты больше 245 байт
+    LOG_WARN("RadioSX1262: длина implicit %u превышает лимит, ограничиваем %u",
+             static_cast<unsigned>(fragmentCapacity),
+             static_cast<unsigned>(MAX_PACKET_SIZE));
+    fragmentCapacity = MAX_PACKET_SIZE;
+  }
+
+  const size_t fragmentCount = (len + fragmentCapacity - 1) / fragmentCapacity; // количество LoRa-фрагментов
   float freq_tx = fTX_bank_[static_cast<int>(bank_)][channel_];
   float freq_rx = fRX_bank_[static_cast<int>(bank_)][channel_];
-  DEBUG_LOG_VAL("RadioSX1262: отправка длины=", len);
-  if (!setFrequency(freq_tx)) {              // переключаемся на TX частоту
+  DEBUG_LOG("RadioSX1262: отправка %u байт %zu фрагмент(ов)",
+            static_cast<unsigned>(len), fragmentCount);
+  if (!setFrequency(freq_tx)) {              // переключаемся на TX-частоту
     LOG_ERROR("RadioSX1262: не удалось установить TX-частоту перед передачей");
     return lastError_;
   }
-  int state = radio_.transmit(const_cast<uint8_t*>(payloadPtr), payloadLen); // отправляем пакет
-  if (state != RADIOLIB_ERR_NONE) {          // проверка кода ошибки
-    lastError_ = state;                      // сохраняем код сбоя
-    LOG_ERROR_VAL("RadioSX1262: ошибка передачи, код=", state);
-    setFrequency(freq_rx);                   // возвращаемся на частоту приёма после сбоя
-    startReceiveWithRetry("send: возврат к приёму после ошибки передачи");
-    return lastError_;
+
+  std::array<uint8_t, MAX_PACKET_SIZE> padded{}; // буфер для дополнения последнего фрагмента
+  size_t offset = 0;
+  for (size_t frag = 0; offset < len; ++frag) {
+    const size_t chunk = std::min(fragmentCapacity, len - offset); // фактический объём данных
+    const uint8_t* chunkPtr = data + offset;                       // указатель на исходные данные
+    size_t sendLen = chunk;                                        // длина, которая уйдёт в RadioLib
+
+    if (enforceImplicit) {
+      std::memcpy(padded.data(), chunkPtr, chunk);                 // копируем фактические данные
+      if (chunk < fragmentCapacity) {                              // дополняем остаток нулями
+        std::fill(padded.begin() + chunk, padded.begin() + fragmentCapacity, 0);
+      }
+      chunkPtr = padded.data();
+      sendLen = fragmentCapacity;                                  // передаём ровно фиксированный размер
+    }
+
+    DEBUG_LOG("RadioSX1262: отправляется фрагмент %zu/%zu, длина=%u", frag + 1,
+              fragmentCount, static_cast<unsigned>(sendLen));
+    int state = radio_.transmit(const_cast<uint8_t*>(chunkPtr), sendLen);
+    if (state != RADIOLIB_ERR_NONE) {                              // передача не удалась
+      lastError_ = state;
+      LOG_ERROR_VAL("RadioSX1262: ошибка передачи, код=", state);
+      const int16_t failureCode = lastError_;
+      setFrequency(freq_rx);                                       // попытка вернуть RX-частоту
+      startReceiveWithRetry("send: возврат к приёму после ошибки передачи");
+      lastError_ = failureCode;
+      return lastError_;
+    }
+    offset += chunk;
   }
-  lastError_ = RADIOLIB_ERR_NONE;            // предыдущая операция прошла успешно
-  setFrequency(freq_rx);                     // возвращаем частоту приёма
+
+  lastError_ = RADIOLIB_ERR_NONE;            // вся последовательность прошла успешно
+  setFrequency(freq_rx);                     // возвращаем RX-частоту
   startReceiveWithRetry("send: переход к приёму после передачи");
   DEBUG_LOG("RadioSX1262: запуск приёма после завершения передачи");
   DEBUG_LOG("RadioSX1262: передача завершена");

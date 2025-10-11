@@ -5,6 +5,7 @@
 #include <array>
 #include <algorithm>
 #include <cstring>
+#include <vector>
 
 // Константы статусов и флагов IRQ, используемые в прошивке
 #define RADIOLIB_ERR_NONE 0
@@ -47,9 +48,15 @@ public:
     ++setFrequencyCalls;              // считаем вызовы смены частоты
     return setFrequencyState;
   }
-  int16_t transmit(uint8_t*, size_t len) {
+  int16_t transmit(uint8_t* data, size_t len) {
     lastTransmitLength = len;         // сохраняем длину последней передачи
     ++transmitCalls;                  // считаем количество передач
+    transmitLengthHistory.push_back(len); // запоминаем длину в истории
+    if (data) {
+      transmitPayloadHistory.emplace_back(data, data + len); // копируем отправленные данные
+    } else {
+      transmitPayloadHistory.emplace_back();
+    }
     return transmitResult;
   }
   size_t getPacketLength(bool = true) { return testPacketLength; }
@@ -78,8 +85,25 @@ public:
     return setCRCState;
   }
   int16_t invertIQ(bool) { return invertIqState; }
-  int16_t implicitHeader(size_t) { return implicitHeaderState; }
-  int16_t explicitHeader() { return explicitHeaderState; }
+  int16_t implicitHeader(size_t len) {
+    lastImplicitLength = len;
+    ++implicitHeaderCalls;
+    if (!implicitHeaderResults.empty()) {
+      const int16_t result = implicitHeaderResults.front();
+      implicitHeaderResults.erase(implicitHeaderResults.begin());
+      return result;
+    }
+    return implicitHeaderState;
+  }
+  int16_t explicitHeader() {
+    ++explicitHeaderCalls;
+    if (!explicitHeaderResults.empty()) {
+      const int16_t result = explicitHeaderResults.front();
+      explicitHeaderResults.erase(explicitHeaderResults.begin());
+      return result;
+    }
+    return explicitHeaderState;
+  }
   int16_t reset() { return RADIOLIB_ERR_NONE; }
   int16_t setBandwidth(float) { return RADIOLIB_ERR_NONE; }
   int16_t setSpreadingFactor(int) { return RADIOLIB_ERR_NONE; }
@@ -106,6 +130,8 @@ public:
   size_t transmitCalls = 0;            // количество вызовов transmit()
   size_t lastTransmitLength = 0;       // длина последней переданной полезной нагрузки
   int16_t transmitResult = RADIOLIB_ERR_NONE; // код возврата transmit()
+  std::vector<size_t> transmitLengthHistory;           // история длин переданных пакетов
+  std::vector<std::vector<uint8_t>> transmitPayloadHistory; // история содержимого переданных пакетов
   int16_t setFrequencyState = RADIOLIB_ERR_NONE; // код возврата setFrequency()
   int16_t startReceiveState = RADIOLIB_ERR_NONE; // код возврата startReceive()
   int16_t beginState = RADIOLIB_ERR_NONE;        // код возврата begin()
@@ -115,6 +141,11 @@ public:
   int16_t invertIqState = RADIOLIB_ERR_NONE;          // код возврата invertIQ()
   int16_t implicitHeaderState = RADIOLIB_ERR_NONE;    // код возврата implicitHeader()
   int16_t explicitHeaderState = RADIOLIB_ERR_NONE;    // код возврата explicitHeader()
+  size_t implicitHeaderCalls = 0;                     // число вызовов implicitHeader()
+  size_t explicitHeaderCalls = 0;                     // число вызовов explicitHeader()
+  size_t lastImplicitLength = 0;                      // последняя запрошенная длина implicit
+  std::vector<int16_t> implicitHeaderResults;         // очередь кодов для последовательных вызовов implicitHeader()
+  std::vector<int16_t> explicitHeaderResults;         // очередь кодов для последовательных вызовов explicitHeader()
   uint32_t testIrqFlags = 0;
   int16_t testClearIrqState = RADIOLIB_ERR_NONE;
   size_t testPacketLength = 0;

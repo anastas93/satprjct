@@ -15,7 +15,7 @@ SUPPORT_SRCS := ../src/libs_includes.cpp \
                 ../src/logger.cpp
 SUPPORT_OBJS := $(patsubst ../%.cpp,$(BUILD_DIR)/support/%.o,$(SUPPORT_SRCS))
 TEST_SRCS ?= test_key_transfer.cpp test_radio_irq_logging.cpp test_radio_send_error_recovery.cpp \
-             test_http_image_upload.cpp test_sse_backpressure.cpp test_keytransfer_receive_async.cpp \
+             test_radio_fragmentation.cpp test_http_image_upload.cpp test_sse_backpressure.cpp test_keytransfer_receive_async.cpp \
              test_key_safe_mode.cpp test_rx_serial_dump.cpp test_logger_ring_buffer.cpp \
              test_logger_framing.cpp
 TEST_BINS := $(patsubst %.cpp,$(BUILD_DIR)/%,$(TEST_SRCS))
